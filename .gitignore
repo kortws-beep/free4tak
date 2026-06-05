@@ -1,0 +1,9 @@
+.env
+token*.dat
+*.db
+credentials.json
+token.json
+*.log
+__pycache__/
+*.pyc
+*.bak*
