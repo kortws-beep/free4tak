@@ -236,6 +236,11 @@ def build_features_at(loader: DataLoader,
     if f(last.get("vol_ma20", 0)) > 0:
         vol_tnrt = (f(last["volume"]) / f(last["vol_ma20"])) * 10
 
+    # 1. return 바로 위에 roe 변수 정의
+    roe = 0.0  # 현재 DB에 재무 테이블이 없으므로 임시로 0 설정
+
+    # 2. 아래 dict 안의 "roe": roe 항목 추가        
+
     return {
         # 가격 정보
         "code":            code,
