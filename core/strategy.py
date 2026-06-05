@@ -245,23 +245,45 @@ class Strategy:
             return 0
 
     # ============================================================
-    # 2. 매수 필터 (양봉 조건 등)
+    # 2. 매수 필터 (양봉 조건 + 펀더멘털/장기추세 필터)
     # ============================================================
     def passes_buy_filter(self, data: dict, is_sector_match: bool = False) -> tuple:
         """
         ★ 개선: 강한 추세 + 수급 우호 종목은 양봉 조건 면제
+               + 200일선 추세 필터 및 ROE 펀더멘털 필터 추가
         반환: (통과 여부, 탈락 사유)
         """
         change   = data.get("change_rate", 0)
+        current  = data.get("close", 0)       # 이격도 계산을 위한 현재가
         ma5      = data.get("ma5",  0)
         ma20     = data.get("ma20", 0)
+        ma200    = data.get("ma200", 0)       # 장기 추세선
+        roe      = data.get("roe", 0)         # 자기자본이익률
         foreign  = data.get("foreign_5d", 0)
 
-        # 상한가/과열 제외
+        # 1. 상한가/과열 기본 제외
         if change >= 29.5:
             return False, "상한가 제외"
         if change > 15:
             return False, "과열 제외"
+
+        # ----------------------------------------------------
+        # ★ [신규 추가] 펀더멘털 및 장기 추세 필터 (수수료 방어)
+        # ----------------------------------------------------
+        # (1) ROE 필터: 실적이 뒷받침되지 않는 껍데기 테마주 차단
+        if roe != 0 and roe < 5.0:  
+            return False, f"ROE 미달({roe}%)"
+
+        # (2) 200일 이동평균선 이격도 필터: 역배열 및 단기 과열 차단
+        if ma200 > 0 and current > 0:
+            disparity_200 = (current / ma200) * 100
+            if disparity_200 < 98:
+                # 200일선 아래에 주가가 위치 = 장기 역배열(매물대 저항 심함)
+                return False, f"장기역배열(200일이격 {disparity_200:.1f}%)"
+            if disparity_200 > 140:
+                # 200일선 대비 주가가 너무 높음 = 이미 시세 분출 후 끝물 위험
+                return False, f"단기과열(200일이격 {disparity_200:.1f}%)"
+        # ----------------------------------------------------
 
         # ★ 강한 종목은 음봉/약양봉도 허용 (눌림목 매수 기회 확보)
         is_strong = (
@@ -269,8 +291,9 @@ class Strategy:
             and foreign > 1000        # 외국인 순매수
             and is_sector_match       # 강세 업종 + 테마
         )
+        
         if is_strong:
-            # 강한 종목은 -2% ~ +30% 모두 허용
+            # 강한 종목은 -2% ~ +15% 모두 허용
             if change < -2:
                 return False, "약세종목(-2% 미만)"
         else:
