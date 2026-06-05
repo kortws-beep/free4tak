@@ -1,0 +1,131 @@
+[
+  {
+    "name": "단일 백테스트",
+    "config": {
+      "buy_score_min": 60,
+      "max_positions": 5,
+      "base_buy_amt": 200000,
+      "ai_score_mode": "rule_proxy"
+    },
+    "metrics": {
+      "initial_cash": 5000000,
+      "final_value": 5016442,
+      "total_return": 0.33,
+      "cagr": 34.96,
+      "trade_count": 6,
+      "win_count": 5,
+      "loss_count": 1,
+      "win_rate": 83.33,
+      "avg_profit": 0.77,
+      "avg_win": 1.02,
+      "avg_loss": -0.45,
+      "profit_factor": 11.9,
+      "mdd": -0.14,
+      "sharpe": 6.82,
+      "sortino": 11.96,
+      "calmar": 249.13,
+      "max_consec_loss": 1,
+      "total_pnl_krw": 12104
+    },
+    "trades": [
+      {
+        "code": "272210",
+        "buy_date": "2025-08-04",
+        "buy_price": 57928.95,
+        "qty": 3,
+        "sell_date": "2025-08-04",
+        "sell_price": 57671.15,
+        "sell_reason": "종가매도(-0.40%)",
+        "profit_rate": -0.004450279178200117,
+        "profit_krw": -1110.7762274999695,
+        "fee": 363.444255,
+        "score": 74,
+        "buy_tag": ""
+      },
+      {
+        "code": "006400",
+        "buy_date": "2025-08-06",
+        "buy_price": 212106.0,
+        "qty": 1,
+        "sell_date": "2025-08-05",
+        "sell_price": 213393.25,
+        "sell_reason": "백테스트종료",
+        "profit_rate": 0.006068899512507897,
+        "profit_krw": 871.1331624999875,
+        "fee": 447.9327375,
+        "score": 71,
+        "buy_tag": ""
+      },
+      {
+        "code": "009150",
+        "buy_date": "2025-08-06",
+        "buy_price": 153676.8,
+        "qty": 1,
+        "sell_date": "2025-08-05",
+        "sell_price": 155622.15,
+        "sell_reason": "백테스트종료",
+        "profit_rate": 0.012658709707646217,
+        "profit_krw": 1641.8868075000064,
+        "fee": 326.5147125,
+        "score": 69,
+        "buy_tag": ""
+      },
+      {
+        "code": "005935",
+        "buy_date": "2025-08-06",
+        "buy_price": 56728.35,
+        "qty": 2,
+        "sell_date": "2025-08-05",
+        "sell_price": 57071.450000000004,
+        "sell_reason": "백테스트종료",
+        "profit_rate": 0.006048122323318162,
+        "profit_krw": 463.6213450000214,
+        "fee": 239.59716,
+        "score": 69,
+        "buy_tag": ""
+      },
+      {
+        "code": "010120",
+        "buy_date": "2025-08-06",
+        "buy_price": 64632.299999999996,
+        "qty": 2,
+        "sell_date": "2025-08-05",
+        "sell_price": 65767.1,
+        "sell_reason": "백테스트종료",
+        "profit_rate": 0.017557784575204818,
+        "profit_krw": 2013.108309999996,
+        "fee": 275.88138,
+        "score": 67,
+        "buy_tag": ""
+      },
+      {
+        "code": "298040",
+        "buy_date": "2025-08-06",
+        "buy_price": 1270635.0,
+        "qty": 1,
+        "sell_date": "2025-08-05",
+        "sell_price": 1281359.0,
+        "sell_reason": "백테스트종료",
+        "profit_rate": 0.00843987455091352,
+        "profit_krw": 8225.349950000178,
+        "fee": 2689.2452999999996,
+        "score": 63,
+        "buy_tag": ""
+      }
+    ],
+    "equity": [
+      [
+        "2025-08-01",
+        5005887.0819725
+      ],
+      [
+        "2025-08-04",
+        4998863.155745001
+      ],
+      [
+        "2025-08-05",
+        5016442.184880001
+      ]
+    ]
+  }
+]

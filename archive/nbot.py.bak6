@@ -1,0 +1,1596 @@
+"""
+nbot.py — 영암9 단타봇 메인 (전면 재구성판)
+================================================================
+[이 파일이 하는 일 — 비개발자용 설명]
+
+장중(09:00~15:30)에 종목을 자동으로 사고 파는 단타 자동매매 봇입니다.
+
+▶ 매수 흐름:
+  1. 키움 조건검색식으로 후보 150개 수집
+  2. 룰 점수 계산 → 상위 10개를 Claude AI에 분석 요청
+  3. AI 점수 + 컨센서스 가점 + 업종/테마 가산점
+  4. 기준점 이상이면 매수 (포지션 사이즈는 점수에 비례)
+
+▶ 매도 흐름 (매 30초마다 체크):
+  1. +5% 도달 → 30% 매도 (1차 익절)
+  2. +10% 도달 → 추가 40% 매도 (2차 익절)
+  3. +15% 도달 → 잔량 전부 매도 (3차 익절)
+  4. 트레일링 스탑 / 손절 / 종가매도
+
+[적용된 주요 개선사항]
+[★ 치명적 버그 수정]
+1. today 변수 순서 버그 수정 (휴장일 체크 시 NameError 방지)
+2. buy_tags/buy_context — 부분 매도 시 삭제 안함 (전량 매도 시만)
+3. 매수 직후 self.positions 즉시 업데이트 (체결 사이 매도 누락 방지)
+4. peak_tracker — 매수 직후 즉시 초기화
+
+[★ 손실 방어]
+5. 동적 매수 임계치 — 최근 승률 따라 자동 조정
+6. ATR 기반 손절선 — 변동성 따라 동적
+7. 본절 보호 — 1차 익절 후 본전 깨지면 즉시 매도
+8. 종가매도 -3%까지 확대 — 갭하락 위험 제거
+
+[★ 수익 극대화]
+9. 포지션 사이징 — 점수 높을수록 더 많이 매수
+10. 시간대별 점수 보정 — 후장은 페널티
+11. 약세장에서도 강세 업종은 매수 허용
+12. 강한 종목은 양봉 조건 면제 (눌림목 매수 기회 확보)
+================================================================
+
+[실행]
+  python3 nbot.py
+
+[모듈 의존성]
+  kis_api.py     ← 한투 API (검증됨, 그대로 사용)
+  kiwoom_api.py  ← 키움 API (검증됨, 그대로 사용)
+  notifier.py    ← 디스코드 알림 (재시도 강화)
+  common_utils.py← 공통 헬퍼 (신규)
+  db_manager.py  ← DB 매니저 (WAL/캐시 단축)
+  strategy.py    ← 전략 (본절보호/트레일링 강화)
+  ai_analyzer.py ← AI 분석 (점수 분포 명확)
+  risk_manager.py← 리스크 관리 (포지션 사이징)
+"""
+
+import sys as _sys
+import os as _os
+_BASE = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+for _d in ["core", "intelligence", "interface", "bots", ""]:
+    _p = _os.path.join(_BASE, _d)
+    if _p not in _sys.path:
+        _sys.path.insert(0, _p)
+
+import os
+import time
+import json
+import asyncio
+import datetime
+import sqlite3
+from dotenv import load_dotenv
+
+from common_utils import (
+    now_kst, now_hhmm, now_hms, today_str,
+    is_weekend, safe_int, safe_float,
+    read_state, write_state, update_state,
+    fmt_won, fmt_pct,
+)
+from db_manager   import DBManager
+from notifier     import Notifier
+from kis_api      import KisAPI
+from kiwoom_api   import KiwoomAPI
+from ai_analyzer  import AIAnalyzer
+from strategy     import Strategy
+from risk_manager import RiskManager
+try:
+    from account_sync import sync_positions as _sync_positions
+except ImportError:
+    _sync_positions = None
+    print("⚠️ account_sync 없음 → DB 정합성 체크 비활성")
+try:
+    from account_sync import sync_positions as _sync_positions
+except ImportError:
+    _sync_positions = None
+from nbot_order    import OrderManager
+from nbot_position import PositionManager
+
+load_dotenv()
+
+
+# ============================================================
+# 상수 (튜닝 포인트)
+# ============================================================
+MAX_POSITIONS    = 3         # 최대 보유 종목 수
+LIMIT_PER_STOCK  = 400000    # 종목당 최대 가격 (고가주 회피)
+BUY_1ST_AMT_BASE = 300000    # 1차 매수 기본 금액 (점수에 따라 ±)
+BUY_2ND_AMT      = 100000    # 2차 매수 (눌림목/추격)
+BUY_SCORE_MIN    = 45        # 후보군 최소 점수
+BUY_SCORE_ENTER  = 70        # 매수 진입 기준 점수 (동적 조정됨)
+LOOP_SLEEP       = 30        # 메인 루프 주기 (초)
+POOL_SIZE        = 150       # 분석 풀 크기
+
+# 시간 상수
+EOD_SELL_TIME    = "1515"
+REG_MARKET_START = "0900"
+REG_MARKET_END   = "1530"
+BUY_START_TIME   = "0920"
+SLEEP_INTERVAL   = 60
+
+# 키움 조건검색식 필터
+USE_COND_KEYWORDS = ["단타", "주도주", "당일고가", "090930","성장주","실적호전"]
+
+# 시장 방어
+MARKET_WEAK_THRESH = -1.5   # 코스피 -1.5% 이하 → 약세장
+MARKET_STOP_THRESH = -3.0   # 코스피 -2.5% 이하 → 중단
+MAX_DAILY_LOSS     = 5      # 하루 최대 손절 횟수
+MAX_SAME_SECTOR    = 2      # 같은 업종 동시 보유 최대
+
+# 업종/테마
+SECTOR_CHECK_START = "0910"
+SECTOR_TOP_N       = 3
+SECTOR_MIN_RATE    = 0.5
+# ============================================================
+# sector_monitor 연계 — 실시간 강세 테마 감지
+# ============================================================
+# sector_monitor accel 캐시 (5분)
+# ============================================================
+_accel_cache: dict = {}   # code → (accel, ts)
+_accel_cache_ts: float = 0.0
+
+def get_accel_score(code: str) -> int:
+    """
+    stock_momentum DB에서 종목 체결강도 가속도(accel) 조회.
+    ★ 분석 결과:
+      accel 1~5  → 평균 +16.61% (최적 진입 구간) → +8점
+      accel > 5  → 평균 +11.52% (과열 주의)     → +4점
+      accel < -1 → 감속 경고                     → -5점
+    5분 캐시로 DB 부하 최소화.
+    """
+    global _accel_cache, _accel_cache_ts
+    import time as _t
+
+    # 5분 캐시 갱신
+    if _t.time() - _accel_cache_ts > 300:
+        try:
+            conn = sqlite3.connect(SECTOR_MONITOR_DB, timeout=3)
+            conn.execute("PRAGMA query_only = ON")
+            rows = conn.execute("""
+                SELECT code, accel
+                FROM stock_momentum
+                WHERE ts >= datetime('now', 'localtime', '-10 minutes')
+                  AND accel != 0
+                ORDER BY ts DESC
+            """).fetchall()
+            conn.close()
+            # 종목별 최신 accel만 유지
+            _accel_cache = {}
+            for c, a in rows:
+                if c not in _accel_cache:
+                    _accel_cache[c] = a
+            _accel_cache_ts = _t.time()
+        except Exception as e:
+            print(f"⚠️ accel 조회 오류: {e}")
+            return 0
+
+    accel = _accel_cache.get(code, 0)
+    if accel >= 0.05:
+        return 8    # 가속 구간 (실데이터 기준)
+    elif accel >= 0.02:
+        return 4    # 소폭 가속
+    elif accel < -0.05:
+        return -5   # 감속 경고
+    return 0
+# ============================================================
+SECTOR_MONITOR_DB  = os.path.join(os.path.dirname(os.path.dirname(__file__)), "sector_monitor.db")
+SECTOR_HOT_BONUS   = 8   # 오늘 강세 테마 가산점
+SECTOR_CONT_BONUS  = 5   # 3일 연속 강세 테마 추가 가산점
+SECTOR_ACCEL_BONUS = 10  # 바통터치 급가속 테마 가산점
+_sector_hot_cache  = {}  # {theme_cd: {bonus, nm, ts}}
+_sector_cache_time = 0   # 마지막 캐시 갱신 시각
+
+
+def get_hot_themes(force: bool = False) -> dict:
+    """
+    sector_monitor DB에서 강세 테마 목록 조회 (5분 캐시).
+    반환: {theme_cd: {"bonus": int, "nm": str, "reason": str}}
+    """
+    global _sector_hot_cache, _sector_cache_time
+    import time as _time
+
+    now = _time.time()
+    if not force and now - _sector_cache_time < 300:  # 5분 캐시
+        return _sector_hot_cache
+
+    if not os.path.exists(SECTOR_MONITOR_DB):
+        return {}
+
+    try:
+        conn = sqlite3.connect(SECTOR_MONITOR_DB, timeout=5)
+        conn.execute("PRAGMA query_only = ON")
+        result = {}
+
+        today = datetime.datetime.now().strftime("%Y-%m-%d")
+        now_dt = datetime.datetime.now()
+
+        # ① 오늘 강세 테마 (거래대금 상위 + 평균등락 양수)
+        rows = conn.execute("""
+            SELECT theme_cd, theme_nm,
+                   AVG(flu_rt)  as avg_flu,
+                   SUM(trde_amt) as total_amt
+            FROM sector_flow
+            WHERE substr(ts,1,10) = ?
+              AND flu_rt > 0.5
+            GROUP BY theme_cd
+            ORDER BY total_amt DESC
+            LIMIT 15
+        """, (today,)).fetchall()
+
+        for cd, nm, avg_flu, amt in rows:
+            result[cd] = {
+                "bonus":  SECTOR_HOT_BONUS,
+                "nm":     nm,
+                "reason": f"오늘강세({avg_flu:+.1f}%)",
+            }
+
+        # ② 3일 연속 강세 → 추가 보너스
+        rows2 = conn.execute("""
+            SELECT theme_cd, theme_nm,
+                   COUNT(DISTINCT substr(ts,1,10)) as days,
+                   AVG(flu_rt) as avg_flu
+            FROM sector_flow
+            WHERE flu_rt > 1.0
+            GROUP BY theme_cd
+            HAVING days >= 3
+        """).fetchall()
+
+        for cd, nm, days, avg_flu in rows2:
+            if cd in result:
+                result[cd]["bonus"]  += SECTOR_CONT_BONUS
+                result[cd]["reason"] += f"+연속{days}일"
+            else:
+                result[cd] = {
+                    "bonus":  SECTOR_CONT_BONUS,
+                    "nm":     nm,
+                    "reason": f"연속{days}일강세",
+                }
+
+        # ③ 바통터치 급가속 테마 → 최우선 보너스
+        cutoff = (now_dt - datetime.timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M")
+        rows3 = conn.execute("""
+            SELECT theme_cd, theme_nm,
+                   AVG(flow_rate) as avg_flow
+            FROM sector_flow
+            WHERE ts >= ?
+            GROUP BY theme_cd
+            HAVING avg_flow > 30
+        """, (cutoff,)).fetchall()
+
+        for cd, nm, avg_flow in rows3:
+            if cd in result:
+                result[cd]["bonus"]  += SECTOR_ACCEL_BONUS
+                result[cd]["reason"] += f"+급가속({avg_flow:.0f}%)"
+            else:
+                result[cd] = {
+                    "bonus":  SECTOR_ACCEL_BONUS,
+                    "nm":     nm,
+                    "reason": f"급가속({avg_flow:.0f}%)",
+                }
+
+        conn.close()
+        _sector_hot_cache  = result
+        _sector_cache_time = now
+        if result:
+            print(f"🔥 강세테마 {len(result)}개 감지: "
+                  + ", ".join(f"{v['nm']}(+{v['bonus']})" for v in list(result.values())[:3]))
+        return result
+
+    except Exception as e:
+        print(f"⚠️ sector_monitor 조회 오류: {e}")
+        return {}
+
+
+def get_theme_bonus(code: str, theme_group_map: dict) -> tuple:
+    """
+    종목코드 → 강세 테마 보너스 점수 반환.
+    반환: (bonus_score, reason)
+    """
+    hot = get_hot_themes()
+    if not hot:
+        return 0, ""
+
+    # theme_group_map: {theme_cd: [code, ...]}
+    for theme_cd, codes in theme_group_map.items():
+        if code in codes and theme_cd in hot:
+            info = hot[theme_cd]
+            return info["bonus"], f"강세테마[{info['nm']}]({info['reason']})"
+    return 0, ""
+
+
+SECTOR_CODE_MAP = {
+    "005": "반도체",        "009": "전력전선",
+    "016": "우주방산통신",  "017": "우주방산통신",
+    "021": "제약바이오",    "022": "제약바이오",
+    "024": "화장품건강기기","025": "화장품건강기기",
+    "027": "2차전지",       "034": "원전신재생전력",
+    "036": "조선철강",      "037": "조선철강",
+    "042": "로봇자율주행",  "043": "로봇자율주행",
+}
+
+# 파일 경로
+BOT_STATE_FILE = "bot_state.json"
+
+
+# ============================================================
+# 상태 파일 헬퍼 (common_utils 래핑)
+# ============================================================
+def _read_state() -> dict:
+    return read_state(BOT_STATE_FILE, default={
+        "paused":       False,
+        "score_enter":  BUY_SCORE_ENTER,
+        "pending_cmd":  None,
+        "cmd_result":   None,
+    })
+
+def _update_state(**kwargs):
+    update_state(BOT_STATE_FILE, **kwargs)
+
+def _write_cmd_result(result: str):
+    _update_state(cmd_result=result, pending_cmd=None)
+
+def _write_status(status: dict):
+    state = _read_state()
+    state["last_status"] = status
+    state["last_update"] = now_hms()
+    write_state(BOT_STATE_FILE, state)
+
+
+# ============================================================
+# 메인 봇 클래스
+# ============================================================
+class NBot:
+    """단타봇 본체."""
+
+    def __init__(self):
+        print("🚀 [영암9 LIVE] 단타봇 가동")
+
+        # 모듈 초기화
+        self.db        = DBManager()
+        self.notify    = Notifier(name="nbot")
+        self.api       = KisAPI()
+        self.kiwoom    = KiwoomAPI()
+        self.ai        = AIAnalyzer(self.db)
+        self.strategy  = Strategy()
+        self.risk      = RiskManager(
+            base_buy_amt         = BUY_1ST_AMT_BASE,
+            max_daily_loss_count = MAX_DAILY_LOSS,
+        )
+
+        self.db.init_ai_db()
+        self.db.init_trade_db()
+
+        # ── 거래 상태 ─────────────────────────────────────
+        self.positions    = {}       # {code: {entry_price, qty}}
+        self.score_cache     = {}  # 분析 결과 캐시 {code: (score, data, ts)}
+        self._low_score_skip = {}  # ★ 점수 미달 재분析 금지 {code: ts}
+        self.buy_context  = {}       # 매수 시 컨텍스트 (DB 저장용)
+        self.peak_tracker = {}       # ★ 종목별 고점/단계 추적
+        self._pending_orders = {}   # 미체결 주문 초기화
+        self.buy_tags     = {}       # 매수 태그 (theme_buy 등)
+        self.sold_today   = {}       # 오늘 매도한 종목 (재매수 금지)
+        self.code_name_map = {}
+        self.atr_cache    = {}       # ★ ATR 캐시 (변동성)
+
+        # ── 메모리 캐시 ─────────────────────────────────
+        self._tech_cache = {}
+        self._flow_cache = {}
+
+        # ── 일일 상태 ─────────────────────────────────────
+        self._sold_today_date = today_str()
+        self._holiday_checked = ""
+        self._is_holiday      = False
+        self._is_paused       = False
+
+        # ── 시장 상태 ─────────────────────────────────────
+        self.market_status     = "normal"
+        self.market_rate       = 0.0
+        self.daily_loss_count  = 0
+        self.daily_loss_amount = 0
+        self._last_market_check = 0
+
+        # ── 업종/테마 ─────────────────────────────────────
+        self.active_sectors           = []
+        self.sector_group_map         = {}
+        self.theme_codes              = []
+        self.new_codes_list           = []
+        self.cond_codes               = set()  # ★ 조건검색식 출처 종목
+        self.theme_group_map          = {}
+        self._sector_check_done_today = set()
+
+        if self.kiwoom.enabled:
+            print(f"✅ 키움 연동 | 조건검색 필터: {USE_COND_KEYWORDS}")
+        else:
+            print("⚠️ 키움 API 없음 → 한투 폴백")
+
+        # ── 분리 모듈 초기화 ────────────────────────────────
+        self.order = OrderManager(
+            api             = self.api,
+            db              = self.db,
+            notify_fn       = self._notify,
+            name_fn         = self._name,
+            positions       = self.positions,
+            peak_tracker    = self.peak_tracker,
+            buy_context     = self.buy_context,
+            buy_tags        = self.buy_tags,
+            sold_today      = self.sold_today,
+            pending_orders  = self._pending_orders,
+            bot_state_file  = BOT_STATE_FILE,
+            market_status_fn= lambda: self.market_status,
+        )
+
+        self.pos_mgr = PositionManager(
+            api             = self.api,
+            strategy        = self.strategy,
+            risk            = self.risk,
+            positions       = self.positions,
+            peak_tracker    = self.peak_tracker,
+            buy_tags        = self.buy_tags,
+            code_name_map   = self.code_name_map,
+            order_mgr       = self.order,
+            market_status_fn= lambda: self.market_status,
+            market_rate_fn  = lambda: self.market_rate,
+            is_paused_fn    = lambda: self._is_paused,
+            write_status_fn = _write_status,
+        )
+
+    # ============================================================
+    # 알림 헬퍼
+    # ============================================================
+    def _notify(self, msg: str, critical: bool = False):
+        """디스코드 알림 (critical=True면 5회 재시도)"""
+        self.notify.send(msg, critical=critical)
+
+    def _name(self, code: str) -> str:
+        return self.code_name_map.get(code, code)
+
+    # ============================================================
+    # 시장 상태 업데이트
+    # ============================================================
+    def _update_market_status(self):
+        """코스피/코스닥 등락률을 보고 normal/weak/stop 판정"""
+        idx    = self.api.get_market_index()
+        kospi  = idx.get("kospi", 0.0)
+        kosdaq = idx.get("kosdaq", 0.0)
+
+        if kospi == 0.0 and kosdaq == 0.0:
+            print(f"⚠️ 시장지수 조회 실패 — 기존 유지: {self.market_status}")
+            return
+
+        self.market_rate = kospi
+
+        if kospi <= MARKET_STOP_THRESH:
+            status, emoji = "stop", "🚨"
+        elif kospi <= MARKET_WEAK_THRESH:
+            status, emoji = "weak", "⚠️"
+        else:
+            status, emoji = "normal", "✅"
+
+        if status != self.market_status:
+            self._notify(
+                f"{emoji} 시장상태 변경: {self.market_status} → {status}\n"
+                f"코스피: {kospi:+.2f}% | 코스닥: {kosdaq:+.2f}%",
+                critical=(status == "stop"),
+            )
+
+        self.market_status = status
+        print(f"📊 시장: {status} | 코스피:{kospi:+.2f}% | 코스닥:{kosdaq:+.2f}%")
+
+    # ============================================================
+    # 업종/테마 관심그룹 로딩 (한투 + 키움 테마 API)
+    # ============================================================
+    def _load_watchlist_groups(self):
+        """한투 관심그룹(업종_*/테마/new) + 키움 테마 API"""
+        print("  🏢 관심그룹 로딩...")
+        sector_map = {}
+        theme_list = []
+        new_list   = []
+        hts_id     = os.getenv("KIS_HTS_ID", "")
+
+        if hts_id:
+            groups = self.api.get_watchlist_groups(hts_id)
+            for grp_code, grp_name in groups.items():
+                is_sector = grp_name.startswith("업종")
+                is_theme  = grp_name == "테마" or grp_name.startswith("테마")
+                is_new    = grp_name.lower() in ("new", "신규추천", "신규")
+                if not (is_sector or is_theme or is_new):
+                    continue
+                stocks = self.api.get_watchlist_stocks(grp_code, hts_id, self.code_name_map)
+                codes  = [c for c, _ in stocks]
+                if is_sector:
+                    kw = grp_name.split("_", 1)[1] if "_" in grp_name else grp_name
+                    sector_map[kw] = codes
+                elif is_theme:
+                    theme_list.extend(codes)
+                elif is_new:
+                    new_list.extend(codes)
+                time.sleep(0.1)
+
+        # 키움 테마 API + ★ 군집성 검증 (ka90001 상승종목수 활용)
+        self.theme_group_map = {}
+        try:
+            top_themes = self.kiwoom.get_theme_top(top_n=5)
+            if top_themes:
+                for item in top_themes:
+                    grp_cd   = item.get("thema_grp_cd", "")
+                    grp_nm   = item.get("thema_nm", item.get("thema_grp_nm", "테마"))
+                    if not grp_cd:
+                        continue
+
+                    # ★ ka90001 응답의 군집성 데이터 활용
+                    try:
+                        stk_num     = int(item.get("stk_num", 0) or 0)
+                        rising_num  = int(item.get("rising_stk_num", 0) or 0)
+                        fall_num    = int(item.get("fall_stk_num", 0) or 0)
+                        flu_rt      = float(item.get("flu_rt", 0) or 0)
+                        rising_ratio = rising_num / stk_num if stk_num > 0 else 0
+                    except:
+                        stk_num = rising_num = fall_num = 0
+                        flu_rt = rising_ratio = 0.0
+
+                    stocks = self.kiwoom.get_theme_stocks(grp_cd, self.code_name_map)
+                    codes  = [s[0] if isinstance(s, (list,tuple)) else s for s in stocks]
+
+                    if rising_ratio >= 0.6:
+                        # ✅ 진짜 테마 — 60% 이상 동반 상승
+                        self.theme_group_map[grp_nm] = codes
+                        for c in codes:
+                            if c not in theme_list:
+                                theme_list.append(c)
+                        print(f"✅ [진짜 테마] {grp_nm}: {rising_num}/{stk_num}개 상승({rising_ratio*100:.0f}%) | {flu_rt:+.2f}%")
+                    elif rising_ratio >= 0.3:
+                        # ⚠️ 약한 테마 — 종목 풀에만 추가 (테마 가산점 없음)
+                        for c in codes:
+                            if c not in theme_list:
+                                theme_list.append(c)
+                        print(f"💤 [약한 테마] {grp_nm}: {rising_num}/{stk_num}개 상승({rising_ratio*100:.0f}%)")
+                    else:
+                        # ❌ 개별 이슈 — 제외
+                        print(f"⚠️ [개별 이슈] {grp_nm}: {rising_num}/{stk_num}개 상승({rising_ratio*100:.0f}%) — 제외")
+
+                    time.sleep(0.2)
+        except Exception as e:
+            print(f"⚠️ 키움 테마 API 오류: {e}")
+            self.kiwoom.reset_token()  # ★ 토큰 초기화 → 다음 호출 시 재발급
+
+        self.sector_group_map = sector_map
+        self.theme_codes      = list(dict.fromkeys(theme_list))
+        self.new_codes_list   = list(dict.fromkeys(new_list))
+
+        _update_state(
+            kiwoom_themes={k: v[:5] for k, v in self.theme_group_map.items()},
+            kiwoom_theme_at=now_kst().strftime("%Y-%m-%d %H:%M"),
+        )
+        print(
+            f"✅ 관심그룹 | 업종:{len(sector_map)}그룹 | "
+            f"테마:{len(self.theme_codes)}종목 | new:{len(self.new_codes_list)}종목"
+        )
+
+    def _update_active_sectors(self):
+        """오늘 강세 업종 갱신 (1시간마다)"""
+        print(f"\n🔍 업종 체크...")
+        rates = self.api.get_sector_change_rates(SECTOR_CODE_MAP)
+        active_kws = []
+        if rates:
+            sorted_rates = sorted(rates.items(), key=lambda x: x[1], reverse=True)
+            active_codes = [c for c, r in sorted_rates if r >= SECTOR_MIN_RATE][:SECTOR_TOP_N]
+            active_kws = list(dict.fromkeys([
+                SECTOR_CODE_MAP[c] for c in active_codes if c in SECTOR_CODE_MAP
+            ]))
+            print(f"  📊 강세 업종: {[(c, f'{rates[c]:+.2f}%') for c in active_codes]}")
+
+        # 뉴스 힌트 (네이버 뉴스 API)
+        try:
+            import urllib.parse, re as _re, requests as _req
+            client_id     = os.getenv("NAVER_CLIENT_ID", "")
+            client_secret = os.getenv("NAVER_CLIENT_SECRET", "")
+            if client_id and client_secret:
+                query = urllib.parse.quote("오늘 증시 강세 업종 테마주")
+                url   = f"https://openapi.naver.com/v1/search/news.json?query={query}&display=10&sort=date"
+                items = _req.get(url, headers={
+                    "X-Naver-Client-Id":     client_id,
+                    "X-Naver-Client-Secret": client_secret,
+                }, timeout=5).json().get("items", [])
+                text = " ".join(
+                    _re.sub(r"<[^>]+>", "", i.get("title", "") + " " + i.get("description", ""))
+                    for i in items
+                )
+                for kw in self.sector_group_map:
+                    if kw in text and kw not in active_kws:
+                        active_kws.append(kw)
+                        print(f"  📰 뉴스 힌트: {kw}")
+        except Exception:
+            pass
+
+        matched = [kw for kw in active_kws if kw in self.sector_group_map]
+        prev    = self.active_sectors
+
+        self._load_watchlist_groups()  # 갱신
+        self.active_sectors = matched
+
+        _update_state(
+            active_sectors=matched,
+            sector_updated_at=now_kst().strftime("%Y-%m-%d %H:%M"),
+        )
+
+        if set(matched) != set(prev):
+            added   = [s for s in matched if s not in prev]
+            removed = [s for s in prev   if s not in matched]
+            msg = "🎯 강세 업종 변경!\n"
+            if added:   msg += f"  ✅ 활성: {', '.join(added)}\n"
+            if removed: msg += f"  ❌ 비활성: {', '.join(removed)}\n"
+            msg += f"  현재: {', '.join(matched) or '없음'}"
+            self._notify(msg)
+        else:
+            print(f"  ✅ 활성 업종 유지: {matched or '없음'}")
+
+    def _should_check_sector(self, now_t: str) -> bool:
+        if now_t < SECTOR_CHECK_START:
+            return False
+        now_dt = now_kst()
+        if now_dt.minute != int(SECTOR_CHECK_START[2:]):
+            return False
+        check_key = now_dt.strftime("%Y-%m-%d %H")
+        return check_key not in self._sector_check_done_today
+
+    def _get_sector_theme_codes(self) -> list:
+        """활성 업종+테마+신규추천 종목 합본 (중복 제거)"""
+        codes, seen = [], set()
+        for kw in self.active_sectors:
+            for c in self.sector_group_map.get(kw, []):
+                if c not in seen:
+                    seen.add(c); codes.append(c)
+        for c in self.theme_codes + self.new_codes_list:
+            if c not in seen:
+                seen.add(c); codes.append(c)
+        return codes
+
+    # ============================================================
+    # 종목 풀 조회 (키움 조건검색식 → 한투 폴백)
+    # ============================================================
+    def _get_pool(self) -> list:
+        """매매할 후보 종목 리스트 반환."""
+        if self.kiwoom.enabled:
+            try:
+                loop  = asyncio.new_event_loop()
+                codes = loop.run_until_complete(
+                    self.kiwoom.get_condition_codes(
+                        use_keywords=USE_COND_KEYWORDS,
+                        code_name_map=self.code_name_map,
+                    )
+                )
+                loop.close()
+                if codes:
+                    # ★ 조건검색 출처 종목 저장 (가점용)
+                    self.cond_codes = set(codes)
+                    st = _read_state()
+                    # 관심종목 추가
+                    for wc in st.get("watchlist", []):
+                        if wc not in codes and wc.isdigit():
+                            codes.append(wc)
+                    # 업종/테마 종목 추가
+                    added = 0
+                    for sc in self._get_sector_theme_codes():
+                        if sc not in codes:
+                            codes.append(sc); added += 1
+                    if added:
+                        print(f"  🎯 업종/테마 {added}개 풀 추가")
+                    result = codes[:POOL_SIZE]
+                    print(f"🎯 종목 풀 (키움): {len(result)}개 | 조건검색:{len(self.cond_codes)}개")
+                    return result
+                else:
+                    print("⚠️ 키움 조건검색 없음 → 한투 폴백")
+            except Exception as e:
+                print(f"⚠️ 키움 오류: {e} → 한투 폴백")
+                self.kiwoom.reset_token()  # ★ 토큰 초기화
+
+        # 한투 폴백 (psearch)
+        return self._get_pool_kis_fallback()
+
+    def _get_pool_kis_fallback(self) -> list:
+        """한투 사용자 등록 조건검색 + 거래량 순위 폴백"""
+        import requests as _req
+        hts_id = os.getenv("KIS_HTS_ID", "")
+        seen, codes = set(), []
+        skip = ["KODEX","TIGER","KBSTAR","ARIRANG","HANARO",
+                "KOSEF","TREX","SOL","ACE","PLUS",
+                "인버스","레버리지","ETN","선물","RISE","TIME"]
+
+        for seq in ["0", "1", "2", "3"]:
+            url = f"{self.api.base_url}/uapi/domestic-stock/v1/quotations/psearch-result"
+            headers = {
+                "Content-Type":  "application/json; charset=utf-8",
+                "authorization": f"Bearer {self.api.token}",
+                "appKey":        self.api.appkey,
+                "appSecret":     self.api.secret,
+                "tr_id":         "HHKST03900400",
+                "custtype":      "P",
+            }
+            params = {"user_id": hts_id, "seq": seq}
+            try:
+                res = _req.get(url, headers=headers, params=params, timeout=5).json()
+                if res.get("rt_cd") != "0":
+                    continue
+                for item in res.get("output2", []):
+                    code = item.get("code", "").strip()
+                    name = item.get("name", "").strip()
+                    if not code or code in seen or not code.isdigit():
+                        continue
+                    if any(kw in name for kw in skip):
+                        continue
+                    seen.add(code); codes.append(code)
+                    self.code_name_map[code] = name
+            except Exception as e:
+                print(f"❌ 조건검색 seq={seq} 예외: {e}")
+
+        if len(codes) < 10:
+            codes += self.api.get_volume_rank_codes(seen, self.code_name_map)
+
+        # 관심종목 + 업종/테마 추가
+        st = _read_state()
+        for wc in st.get("watchlist", []):
+            if wc not in seen and wc.isdigit():
+                seen.add(wc); codes.append(wc)
+        for sc in self._get_sector_theme_codes():
+            if sc not in seen:
+                seen.add(sc); codes.append(sc)
+
+        result = codes[:POOL_SIZE]
+        print(f"🎯 종목 풀 (한투): {len(result)}개")
+        return result
+
+    # ============================================================
+    # 매수 / 매도 실행 — OrderManager 위임
+    # ============================================================
+    def _do_buy(self, code: str, price: float, amount: int,
+                is_second: bool = False):
+        """매수 → OrderManager 위임"""
+        self.order.do_buy(code, price, amount, is_second)
+
+    def _do_sell(self, code: str, qty: int, reason: str, sell_price: float):
+        """매도 → OrderManager 위임"""
+        self.order.do_sell(code, qty, reason, sell_price)
+
+    def _do_loss(self):
+        """손절 카운터 → OrderManager 위임"""
+        self.order.do_loss()
+        self.daily_loss_count = self.order.daily_loss_count
+
+
+    # ============================================================
+    # ATR 계산 — PositionManager 위임
+    # ============================================================
+    def _get_atr_rate(self, code: str) -> float:
+        """ATR → PositionManager 위임"""
+        return self.pos_mgr.get_atr_rate(code)
+
+    # ============================================================
+    # 일일 초기화
+    # ============================================================
+    def _daily_reset(self, today: str):
+        """날짜가 바뀌면 모든 일일 상태 초기화"""
+        self.sold_today               = {}
+        self._sold_today_date         = today
+        self.daily_loss_count         = 0
+        self.daily_loss_amount        = 0
+        self.market_status            = "normal"
+        self.active_sectors           = []
+        self._sector_check_done_today = set()
+        self._tech_cache              = {}
+        self._flow_cache              = {}
+        self.buy_tags                 = {}
+        self.atr_cache                = {}
+        self.api._mkt_cache           = {}
+        self._pending_orders          = {}
+
+        # 분리 모듈 캐시 초기화
+        self.order.daily_loss_count  = 0
+        self.order.daily_loss_amount = 0
+        self.pos_mgr.reset_atr_cache()
+        self.pos_mgr._tech_cache = {}
+
+        _update_state(
+            sold_today={},
+            sold_today_date=today,
+            daily_loss=0,
+            loss_date=today,
+        )
+        print("🔄 일일 초기화 완료")
+
+        # 관심그룹 재로딩
+        if self.kiwoom.enabled:
+            try:
+                self._load_watchlist_groups()
+            except Exception as e:
+                print(f"⚠️ 관심그룹 재로딩 오류: {e}")
+
+    # ============================================================
+    # 긴급 명령 처리 — OrderManager 위임
+    # ============================================================
+    def _handle_pending_command(self, st: dict):
+        """디스코드 명령 → OrderManager 위임"""
+        score_enter = st.get("score_enter", BUY_SCORE_ENTER)
+        self.order.handle_pending_command(st, score_enter)
+
+    # ============================================================
+    # 한 종목 분석 (룰 + 필터)
+    # ============================================================
+    def _analyze_one_code(self, code: str, sector_all: set,
+                         now_t: str) -> tuple:
+        """
+        한 종목을 분석해 (data, rule_score) 반환.
+        부적격 종목은 (None, 0) 반환.
+        """
+        # ★ 병렬 API 호출 (시세 + 호가 동시 조회)
+        from concurrent.futures import ThreadPoolExecutor
+        basic = hoga_data = None
+        with ThreadPoolExecutor(max_workers=2) as ex:
+            f_basic = ex.submit(self.api.get_market_data, code)
+            f_hoga  = ex.submit(self.api.get_hoga, code)
+            basic     = f_basic.result()
+            hoga_data = f_hoga.result()
+        if not basic:
+            return None, 0
+        try:
+            data = {
+                "current_price": safe_float(basic.get("stck_prpr",  0)),
+                "change_rate":   safe_float(basic.get("prdy_ctrt",  0)),
+                "trading_value": safe_int(basic.get("acml_tr_pbmn", 0)) // 100_000_000,
+                "volume":        safe_int(basic.get("acml_vol",     0)),
+                "volume_ratio":  safe_float(basic.get("vol_inrt",   0)),
+                "vol_tnrt":      safe_float(basic.get("vol_tnrt",   0)),
+                "hts_avls":      safe_int(basic.get("hts_avls",     0)),
+                "stock_name":    basic.get("hts_kor_isnm", ""),
+                "stck_hgpr":     safe_float(basic.get("stck_hgpr",  0)),
+                "stck_sdpr":     safe_float(basic.get("stck_sdpr",  0)),
+                "vol_rate":      safe_float(basic.get("prdy_vrss_vol_rate", 0)),
+            }
+            data.update(self.api.get_technical_indicators(code, self._tech_cache))
+            data.update(self.api.get_investor_trend(code, self._flow_cache))
+            # ★ KIS 수급이 0이면 키움 수급으로 보완
+            if data.get("foreign_today", 0) == 0 and data.get("foreign_5d", 0) == 0:
+                try:
+                    kiwoom_flow = self.kiwoom.get_investor_trend(code)
+                    if kiwoom_flow:
+                        data["foreign_today"] = kiwoom_flow.get("foreign_today", 0)
+                        data["foreign_5d"]    = kiwoom_flow.get("foreign_5d", 0)
+                except Exception as _ke:
+                    import traceback; traceback.print_exc()
+            # ★ 호가잔량 (병렬 조회 결과 적용)
+            if hoga_data:
+                data["total_ask_rsqn"] = hoga_data.get("total_ask_rsqn", 0)
+                data["total_bid_rsqn"] = hoga_data.get("total_bid_rsqn", 0)
+                data["ask_bid_ratio"]  = hoga_data.get("ask_bid_ratio", 0)
+
+            # 업종/테마 매칭 여부
+            is_sc = code in sector_all
+            data["buy_tag"] = "theme_buy" if is_sc else ""
+
+            # ── 매수 필터 (전략 모듈에 위임) ─────────────────
+            passes, reason = self.strategy.passes_buy_filter(data, is_sector_match=is_sc)
+            if not passes:
+                print(f" → {reason}"); return None, 0
+
+            # 거래량/가격/시총 필터
+            if data["volume"] < 30_000:
+                print(" → 거래량 부족"); return None, 0
+            if data["current_price"] <= 999:
+                print(" → 동전주 제외"); return None, 0
+            mkt_cap = data["hts_avls"]
+            if mkt_cap < 500:
+                print(f" → 소형주 제외 ({mkt_cap:,}억)"); return None, 0
+            if mkt_cap > 50000:
+                print(f" → 대형주 제외 ({mkt_cap:,}억)"); return None, 0
+            if data["trading_value"] < 50:
+                print(" → 거래대금 부족"); return None, 0
+
+            # 고점 대비 -5% 이상 하락 제외 (이미 꺾인 종목)
+            hg  = data["stck_hgpr"]
+            cur = data["current_price"]
+            if hg > 0 and (cur - hg) / hg < -0.05:
+                print(f" → 고점 대비 -5% 이상 하락"); return None, 0
+
+            # 일반 종목 추가 필터 (업종/테마는 면제)
+            if not is_sc:
+                if data["vol_tnrt"] < 2.0:
+                    print(" → 회전율 부족"); return None, 0
+                _vm = 100 if now_t < "1030" else 50
+                if 0 < data["volume_ratio"] < _vm:
+                    print(f" → 거래량증가율 부족"); return None, 0
+                ma5  = data.get("ma5",  0)
+                ma20 = data.get("ma20", 0)
+                if ma5 > 0 and ma20 > 0 and ma5 < ma20:
+                    print(" → MA 역배열"); return None, 0
+                sd = data["stck_sdpr"]
+                if hg > 0 and sd > 0 and (hg - sd) / sd * 100 < 3.0:
+                    print(" → 고가상승 부족"); return None, 0
+                if data["vol_rate"] < 50:
+                    print(" → 거래량비율 부족"); return None, 0
+
+            if data["current_price"] > LIMIT_PER_STOCK:
+                print(" → 고가 제외"); return None, 0
+            
+            # 🚨 [백테스트용 데이터 통역기] 🚨
+            if "current_price" not in data:
+                data["current_price"] = data.get("close", 0)
+                data["change_rate"]   = data.get("change", 0)
+                data["trading_value"] = data.get("value", 0) // 100_000_000
+                # nbot의 단타 조건에 맞게 시총을 작게(예: 5000억) 세팅
+                data["mkt_cap"]       = 5000 
+                data["foreign_5d"]    = 10000 
+                data["institution_5d"]= 10000
+
+            rule_score = self.strategy.get_rule_score(data)
+            print(f" → 룰:{rule_score}점" + (" 🎯" if is_sc else ""))
+            return data, rule_score
+        except Exception as e:
+            print(f" → 오류: {e}")
+            return None, 0
+
+    # ============================================================
+    # 메인 루프
+    # ============================================================
+    def run(self):
+        """봇 실행. 무한 루프로 30초마다 매매 체크."""
+        self._notify(
+            f"🚀 [영암9 LIVE] 단타봇 가동\n"
+            f"⏰ {now_kst().strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"💰 1차:{fmt_won(BUY_1ST_AMT_BASE)} / 최대 {MAX_POSITIONS}종목\n"
+            f"⏳ 매수: {BUY_START_TIME} ~ {EOD_SELL_TIME}\n"
+            f"🔍 조건검색 필터: {USE_COND_KEYWORDS}",
+            critical=True,
+        )
+        self._is_paused = False
+        self._last_market_check = 0
+
+        # ★ 실계좌 ↔ DB 정합성 체크
+        if _sync_positions:
+            try:
+                real = _sync_positions(
+                    self.api,
+                    self.db.trade_hist_db,
+                    self._notify,
+                    bot_type="nbot",
+                )
+                if real:
+                    self.positions.clear()
+                    self.positions.update(real)
+            except Exception as e:
+                print(f"⚠️ DB 정합성 체크 오류: {e}")
+
+        # 초기 관심그룹 로딩
+        if self.kiwoom.enabled:
+            try:
+                self._load_watchlist_groups()
+            except Exception as e:
+                print(f"⚠️ 관심그룹 초기 로딩 오류: {e}")
+
+        while True:
+            try:
+                # ★ 핵심: today를 루프 맨 앞에서 정의 (휴장일 체크 NameError 방지)
+                today   = today_str()
+                now_t   = now_hhmm()
+                now     = now_hms()
+
+                # ── 주말 ─────────────────────────────────────
+                if is_weekend():
+                    print(f"😴 [{now}] 주말 — 장 없음")
+                    time.sleep(SLEEP_INTERVAL)
+                    continue
+
+                # ── 휴장일 체크 (하루 1회) ──────────────────────
+                if self._holiday_checked != today:
+                    self._is_holiday      = not self.api.is_market_open()
+                    self._holiday_checked = today
+                    if self._is_holiday:
+                        self._notify("🎌 오늘은 휴장일 — 봇 대기")
+
+                if self._is_holiday:
+                    print(f"🎌 [{now}] 휴장일 — 대기 중...")
+                    time.sleep(300)
+                    continue
+
+                # ── 정규장 시간 체크 ────────────────────────────
+                is_reg = REG_MARKET_START <= now_t <= REG_MARKET_END
+                if not is_reg:
+                    print(f"😴 [{now}] 장외 대기 중...")
+                    time.sleep(SLEEP_INTERVAL)
+                    continue
+
+                print(f"\n📈 정규장 [{now}]")
+
+                # ── 상태 읽기 ─────────────────────────────────
+                st              = _read_state()
+                prev_paused     = self._is_paused
+                self._is_paused = st.get("paused", False)
+                # !시작 명령 감지 — 재개 시 pending 초기화
+                if prev_paused and not self._is_paused:
+                    self._pending_orders = {}   # 미체결 주문 초기화
+                    print("♻️ !시작: _pending_orders 초기화")
+
+                # ── 일일 초기화 ─────────────────────────────
+                if today != self._sold_today_date:
+                    self._daily_reset(today)
+                else:
+                    # 동일 날짜인데 sold_today가 비어있으면 상태 파일에서 복원
+                    if not self.sold_today:
+                        saved = st.get("sold_today", {})
+                        if saved and st.get("sold_today_date") == today:
+                            self.sold_today = saved
+                            if self.sold_today:
+                                print(f"♻️ sold_today 복원: {list(self.sold_today.keys())}")
+
+                # ── 동적 매수 임계치 ─────────────────────────
+                base_score   = st.get("score_enter", BUY_SCORE_ENTER)
+                score_enter  = self.db.get_dynamic_score_threshold(base_threshold=base_score)
+
+                # ★ KiKi AI 권장 임계치 반영 (오전/오후 구분)
+                # ★ 제한 적용: 기본값 ±5점 이내만 허용
+                # 데이터 충분히 쌓인 후 전면 적용 예정
+                AI_ADJUST_LIMIT = 5   # 최대 조정 폭
+                forecast_date = st.get("forecast_date", "")
+                if forecast_date == today:
+                    base = BUY_SCORE_ENTER
+                    if now_t < "1100":
+                        am_rec = st.get("am_score_recommend", 0)
+                        if am_rec > 0:
+                            # ±5점 이내로 제한
+                            limited = max(base - AI_ADJUST_LIMIT,
+                                         min(base + AI_ADJUST_LIMIT, am_rec))
+                            if limited != score_enter:
+                                print(f"🤖 AI권장 오전임계치: {score_enter}→{limited}점 "
+                                      f"(권장:{am_rec}점, 제한±{AI_ADJUST_LIMIT})")
+                                score_enter = limited
+                                st["score_enter"] = limited
+                                # ★ 파일에도 저장 (다음 루프 재적용 방지)
+                                update_state(BOT_STATE_FILE, score_enter=limited)
+                    else:
+                        pm_rec = st.get("pm_score_recommend", 0)
+                        if pm_rec > 0:
+                            limited = max(base - AI_ADJUST_LIMIT,
+                                         min(base + AI_ADJUST_LIMIT, pm_rec))
+                            if limited != score_enter:
+                                print(f"🤖 AI권장 오후임계치: {score_enter}→{limited}점 "
+                                      f"(권장:{pm_rec}점, 제한±{AI_ADJUST_LIMIT})")
+                                score_enter = limited
+                                st["score_enter"] = limited  # ★ 표시 정확도
+
+                # 손절 카운터 초기화 (디스코드에서 !시작 명령으로 daily_loss=0 보낼 때)
+                if (st.get("daily_loss") == 0 and self.daily_loss_count > 0
+                        and st.get("loss_date") != today):
+                    self.daily_loss_count = 0
+                    print("♻️ 손절카운터 초기화")
+
+                # ── 디스코드 명령 처리 ───────────────────────
+                self._handle_pending_command(st)
+
+                # ── 토큰 갱신 / DB 정리 ──────────────────────
+                self.api.refresh_token_if_needed()
+                self.db.clean_ai_db()
+
+                # ── 계좌 상태 ────────────────────────────────
+                cash           = self.api.get_buyable_cash()
+                new_pos = self.api.get_current_positions()
+                # ★ 수동매도 감지 — 이전 포지션에 있었는데 실계좌에 없으면 sold_today 추가
+                for _code in list(self.positions.keys()):
+                    if _code not in new_pos and _code not in self.sold_today:
+                        self.sold_today[_code] = now_hms()
+                        print(f"🔍 수동매도 감지: {_code} → sold_today 추가")
+                self.positions.clear()
+                self.positions.update(new_pos)
+                # 체결 확인 — positions에 들어온 종목은 pending에서 제거
+                for _code in list(self.positions.keys()):
+                    self._pending_orders.pop(_code, None)
+                # 미체결 주문 취소 (1루프 이상 된 것)
+                for _code, (_orgno, _odno, _qty) in list(self._pending_orders.items()):
+                    if _odno:
+                        print(f"🚫 미체결 취소 시도: {_code} (odno:{_odno})")
+                        self.api.cancel_order(_orgno, _odno, _code, _qty)
+                        self._pending_orders.pop(_code, None)
+                psbl_cash      = self.api.get_psbl_order_cash("005930")
+                if psbl_cash <= 0:
+                    psbl_cash = cash
+                print(f"\n⏰ {now} | 💵 예수금: {cash:,} | 💰 주문가능: {psbl_cash:,}")
+
+                # ── 보유종목 현황 ─────────────────────────────
+                pos_mkt_cache = {}
+                for code in self.positions:
+                    data = self.api.get_market_data(code)
+                    if data:
+                        pos_mkt_cache[code] = data
+                total_profit = self.pos_mgr.print_positions(pos_mkt_cache)
+                # ★ master_positions 현재가 갱신 (대시보드)
+                if _master_upsert:
+                    for _c, _pos in self.positions.items():
+                        _md = pos_mkt_cache.get(_c, {})
+                        _cur = safe_float(_md.get('stck_prpr', 0))
+                        if _cur > 0:
+                            try:
+                                _master_upsert(
+                                    bot_type='nbot', code=_c,
+                                    current_price=_cur,
+                                    qty=_pos.get('qty', 0),
+                                    stage=self.peak_tracker.get(_c,{}).get('stage',0),
+                                )
+                            except Exception: pass
+                print(f"🏭 활성 업종: {self.active_sectors or '없음'}")
+
+                # ── 시장 상태 (5분마다) ──────────────────────
+                if time.time() - self._last_market_check > 300:
+                    self._update_market_status()
+                    self._last_market_check = time.time()
+
+                # ── 업종 체크 (매시 정각) ─────────────────────
+                if self._should_check_sector(now_t):
+                    check_key = now_kst().strftime("%Y-%m-%d %H")
+                    self._sector_check_done_today.add(check_key)
+                    self._update_active_sectors()
+
+                # ── 시장 stop 모드 ─────────────────────────────
+                if self.market_status == "stop":
+                    print(f"🚨 시장 중단 모드 | 코스피:{self.market_rate:+.2f}%")
+                    for code, pos in list(self.positions.items()):
+                        mdata = pos_mkt_cache.get(code) or self.api.get_market_data(code)
+                        if not mdata:
+                            continue
+                        cur   = safe_float(mdata.get("stck_prpr", 0))
+                        entry = pos["entry_price"]
+                        if entry > 0 and cur > 0 and (cur - entry)/entry <= -0.03:
+                            self._notify(f"🚨 긴급손절(약세장) {code}", critical=True)
+                            self._do_sell(code, pos["qty"], "긴급손절(약세장)", cur)
+                            self._do_loss()
+                            self.peak_tracker.pop(code, None)
+
+                    # ★ 테마 방어 매수 — stop 모드에서도 독자 강세 테마 1종목 허용
+                    # 조건: 보유 0개 + 3일연속 강세 + 체결강도 + 등락 > 5%
+                    if len(self.positions) == 0:
+                        try:
+                            hot = get_hot_themes()
+                            # 3일 연속 강세 테마만 (연속강세 포함된 것)
+                            cont_themes = {
+                                cd: info for cd, info in hot.items()
+                                if "연속" in info.get("reason", "")
+                                and info["bonus"] >= SECTOR_HOT_BONUS + SECTOR_CONT_BONUS
+                            }
+                            if cont_themes:
+                                # 해당 테마 종목 중 체결강도 + 등락률 조건 충족 종목 탐색
+                                candidates = []
+                                for theme_cd, info in cont_themes.items():
+                                    codes = self.theme_group_map.get(theme_cd, [])
+                                    for code in codes[:10]:  # 테마당 상위 10종목
+                                        if code in self.positions:
+                                            continue
+                                        try:
+                                            conn_sm = sqlite3.connect(SECTOR_MONITOR_DB, timeout=3)
+                                            _today = now_kst().strftime("%Y-%m-%d")
+                                            row = conn_sm.execute("""
+                                                SELECT AVG(change_rate), AVG(cntg_str)
+                                                FROM stock_momentum
+                                                WHERE code=? AND substr(ts,1,10)=?
+                                            """, (code, _today)).fetchone()
+                                            conn_sm.close()
+                                            if not row or not row[0]:
+                                                continue
+                                            chg, cntg = row
+                                            # 조건: 등락 > 5%, 체결강도 > 1.5
+                                            if chg >= 5.0 and cntg >= 1.5:
+                                                candidates.append((cntg, code, info["nm"], chg))
+                                        except Exception:
+                                            continue
+
+                                if candidates:
+                                    candidates.sort(reverse=True)
+                                    _, best_code, best_nm, best_chg = candidates[0]
+                                    print(f"🔥 테마방어매수 후보: {best_code} [{best_nm}] +{best_chg:.1f}%")
+                                    data, rule_score = self._analyze_one_code(
+                                        best_code, now_t, sector_all=set()
+                                    )
+                                    if data and rule_score >= 60:  # 방어매수는 임계치 완화
+                                        ai_score = self._get_ai_score(best_code, data, rule_score)
+                                        final = (rule_score + ai_score) // 2
+                                        if final >= 60:
+                                            amt = self.risk.calc_buy_amount(
+                                                score=final,
+                                                atr_rate=data.get("atr_rate", 0),
+                                                is_theme=True,
+                                                psbl_cash=self.api.get_psbl_order_cash(
+                                                    best_code, data["current_price"]),
+                                                code=best_code,
+                                            )
+                                            self._do_buy(best_code, data["current_price"],
+                                                        amt, final, "theme_stop_buy")
+                                            self._notify(
+                                                f"🔥 테마방어매수 {best_code}[{best_nm}]\n등락:{best_chg:+.1f}% 점수:{final}점",
+                                                critical=True
+                                            )
+                        except Exception as e:
+                            print(f"⚠️ 테마방어매수 오류: {e}")
+
+                    time.sleep(LOOP_SLEEP)
+                    continue
+
+                # ── 일시중단 모드 ──────────────────────────────
+                if self._is_paused:
+                    print("⏸️ 일시중단 — 매도 체크만")
+                    self._check_sells_only(pos_mkt_cache, now_t)
+                    self._save_status(cash, psbl_cash, total_profit, score_enter,
+                                     pos_mkt_cache, now)
+                    time.sleep(LOOP_SLEEP)
+                    continue
+
+                # ── 종목 풀 ─────────────────────────────────
+                codes = self._get_pool()
+                if not codes:
+                    print("⚠️ 종목 풀 없음, 재시도...")
+                    time.sleep(5)
+                    continue
+
+                # ── 종목 분석 ───────────────────────────────
+                # ★ 슬롯 없으면 신규 분석 스킵 (캐시는 유지)
+                익절중 = sum(
+                    1 for c in self.positions
+                    if self.peak_tracker.get(c, {}).get("stage", 0) >= 1
+                )
+                avail_slots = MAX_POSITIONS - len(self.positions) + 익절중
+                if avail_slots <= 0:
+                    print(f"⛔ 슬롯 없음 ({len(self.positions)}/{MAX_POSITIONS}) — 신규 분석 스킵")
+                else:
+                    self._run_analysis(codes, now_t, score_enter, psbl_cash,
+                                      pos_mkt_cache)
+
+                # ── 매도 체크 ───────────────────────────────
+                self._check_all_sells(pos_mkt_cache, now_t)
+
+                # ── 상태 저장 ───────────────────────────────
+                self._save_status(cash, psbl_cash, total_profit, score_enter,
+                                 pos_mkt_cache, now)
+
+                time.sleep(LOOP_SLEEP)
+
+            except KeyboardInterrupt:
+                perf = self.db.get_recent_performance(limit=20)
+                msg  = (f"🛑 [영암9] 봇 종료\n"
+                        f"⏰ {now_kst().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                if perf:
+                    msg += (f"📊 최근 {perf['total']}건 | "
+                            f"승률:{perf['win_rate']}% | 평균:{perf['avg_profit']:+.2f}%")
+                self._notify(msg, critical=True)
+                break
+            except Exception as e:
+                print(f"🚨 루프 오류: {e}")
+                import traceback; traceback.print_exc()
+                time.sleep(5)
+
+    # ============================================================
+    # 분석 + 매수 실행
+    # ============================================================
+    def _run_analysis(self, codes: list, now_t: str, score_enter: int,
+                      psbl_cash: int, pos_mkt_cache: dict):
+        """후보 종목 분석 → 상위 종목 매수"""
+
+        # ★ 점수 미달 종목 재분析 금지 (30분 유지)
+        now_ts = time.time()
+        self._low_score_skip = {
+            c: ts for c, ts in self._low_score_skip.items()
+            if now_ts - ts < 1800  # 30분
+        }
+        # ★ score_cache 30분 유지 (풀 진입/이탈 무관)
+        self.score_cache = {
+            c: v for c, v in self.score_cache.items()
+            if len(v) < 3 or now_ts - v[2] < 1800
+        }
+        skip_set     = set(self._low_score_skip.keys())
+        new_codes    = [c for c in codes
+                        if c not in self.score_cache and c not in skip_set]
+        cached_codes = [c for c in codes if c in self.score_cache]
+        print(f"\n🔄 분석: 신규 {len(new_codes)}개 | 캐시 {len(cached_codes)}개")
+
+        sector_all = set(self._get_sector_theme_codes())
+
+        # 1) 룰 점수 계산 — ★ 병렬 처리 (ThreadPoolExecutor)
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        rule_candidates = []
+        total = len(new_codes)
+
+        def _analyze_wrapper(args):
+            idx, code = args
+            print(f"🔎 룰분석 {idx+1}/{total}: {code}", end="")
+            return code, self._analyze_one_code(code, sector_all, now_t)
+
+        # 최대 5개 병렬 (KIS API 초당 20건 제한 고려)
+        with ThreadPoolExecutor(max_workers=5) as ex:
+            futures = {ex.submit(_analyze_wrapper, (idx, code)): code
+                       for idx, code in enumerate(new_codes)}
+            for future in as_completed(futures):
+                try:
+                    code, (data, rule_score) = future.result()
+                    if data is not None:
+                        rule_candidates.append((code, rule_score, data))
+                except Exception as e:
+                    print(f"⚠️ 분석 오류: {e}")
+
+        # 2) 상위 10개 AI 분석 + 가산점
+        rule_candidates.sort(key=lambda x: x[1], reverse=True)
+        top_ai = rule_candidates[:10]
+        rest   = rule_candidates[10:]
+
+        print(f"\n🤖 Claude 분석: {len(top_ai)}개")
+        for code, rule_score, data in top_ai:
+            ai_result = self.ai.analyze(code, data, self.active_sectors,
+                                              market_status=self.market_status,
+                                              market_rate=self.market_rate)
+            score     = ai_result["score"]
+            reason    = ai_result["reason"]
+            score, bonus_reason, buy_tag = self.strategy.apply_sector_bonus(
+                code, score, self.active_sectors,
+                self.sector_group_map, self.theme_codes, self.new_codes_list,
+                cond_codes=self.cond_codes,  # ★ 조건검색 가점
+            )
+            if bonus_reason:
+                reason = f"{reason} | {bonus_reason}"
+            if buy_tag:
+                data["buy_tag"] = buy_tag
+            # ★ sector_monitor 실시간 강세 테마 가산점
+            sm_bonus, sm_reason = get_theme_bonus(code, self.theme_group_map)
+            if sm_bonus > 0:
+                score = min(100, score + sm_bonus)
+                reason = f"{reason} | {sm_reason}"
+                data["buy_tag"] = data.get("buy_tag") or "theme_buy"
+            # ★ 체결강도 가속도(accel) 가산점
+            accel_bonus = get_accel_score(code)
+            if accel_bonus != 0:
+                score = min(100, max(0, score + accel_bonus))
+                if accel_bonus > 0:
+                    reason = f"{reason} | accel가속(+{accel_bonus})"
+                else:
+                    reason = f"{reason} | accel감속({accel_bonus})"
+            print(f"   🧠 {code} | 룰:{rule_score}→AI:{score}점 | {reason}")
+            data["ai_reason"] = reason
+            self.score_cache[code] = (score, data, time.time())
+            if score < BUY_SCORE_MIN:
+                self._low_score_skip[code] = time.time()
+
+        # 3) AI 분석 안 한 종목은 룰 점수 + 가산점만
+        for code, rule_score, data in rest:
+            score, bonus_reason, buy_tag = self.strategy.apply_sector_bonus(
+                code, rule_score, self.active_sectors,
+                self.sector_group_map, self.theme_codes, self.new_codes_list,
+                cond_codes=self.cond_codes,  # ★ 조건검색 가점
+            )
+            # ★ sector_monitor 실시간 강세 테마 가산점
+            sm_bonus, sm_reason = get_theme_bonus(code, self.theme_group_map)
+            if sm_bonus > 0:
+                score = min(100, score + sm_bonus)
+                bonus_reason = f"{bonus_reason} | {sm_reason}" if bonus_reason else sm_reason
+                data["buy_tag"] = data.get("buy_tag") or "theme_buy"
+            # ★ 체결강도 가속도(accel) 가산점
+            accel_bonus = get_accel_score(code)
+            if accel_bonus != 0:
+                score = min(100, max(0, score + accel_bonus))
+                accel_str = f"accel가속(+{accel_bonus})" if accel_bonus > 0 else f"accel감속({accel_bonus})"
+                bonus_reason = f"{bonus_reason} | {accel_str}" if bonus_reason else accel_str
+            data["ai_reason"] = (f"룰점수({rule_score})"
+                                + (f" | {bonus_reason}" if bonus_reason else ""))
+            if buy_tag:
+                data["buy_tag"] = buy_tag
+            self.score_cache[code] = (score, data, time.time())
+            if score < BUY_SCORE_MIN:
+                self._low_score_skip[code] = time.time()
+
+        # 4) 캐시 정리 — ★ 30분 유지 (풀에서 빠져도 유지, 타임스탬프로 만료)
+        # 이미 위에서 30분 만료 처리했으므로 여기선 별도 삭제 안함
+
+        # 5) 시간대 보정 적용된 매수 후보
+        candidates = []
+        for code, cache_val in self.score_cache.items():
+            score, data = cache_val[0], cache_val[1]
+            # ★ accel 가산점 먼저 적용 (필터 전)
+            accel_bonus = get_accel_score(code)
+            if accel_bonus != 0:
+                score = min(100, max(0, score + accel_bonus))
+                if accel_bonus > 0:
+                    print(f"   ⚡ accel가속 {code}: +{accel_bonus}점 → {score}점")
+            if score < BUY_SCORE_MIN:
+                continue
+            adjusted_score = score + self.risk.time_score_modifier(now_t)
+            candidates.append((code, adjusted_score, data))
+
+        def sort_key(x):
+            _, score, d = x
+            return (
+                d.get("buy_tag") == "theme_buy",
+                not d.get("ai_reason", "").startswith("룰점수"),
+                score,
+            )
+
+        candidates.sort(key=sort_key, reverse=True)
+        top10 = candidates[:10]
+
+        cached_codes_set = set(cached_codes)
+        print(f"\n🔥 TOP{len(top10)} (후보 {len(candidates)}개 중):")
+        for code, score, d in top10:
+            tag1 = "🎯" if d.get("buy_tag") == "theme_buy" else "  "
+            tag2 = "🤖" if not d.get("ai_reason", "").startswith("룰점수") else "📐"
+            ct   = "📦" if code in cached_codes_set else "🆕"
+            print(f"  {ct}{tag1}{tag2} {code}({self._name(code)}) | "
+                  f"{score}점 | {d.get('ai_reason', '')}")
+
+        # 6) 매수 조건 체크 + 실행
+        self._execute_buys(top10, now_t, score_enter, psbl_cash)
+
+    def _execute_buys(self, top10: list, now_t: str,
+                      score_enter: int, psbl_cash: int):
+        """매수 가능한 종목들 실제 주문"""
+
+        # 슬롯 계산: 1차 익절 후 종목은 매수 슬롯에서 제외
+        익절중 = sum(
+            1 for c in self.positions
+            if self.peak_tracker.get(c, {}).get("stage", 0) >= 1
+        )
+        slots = MAX_POSITIONS - len(self.positions) + 익절중
+        if 익절중:
+            print(f"  ♻️ 익절진행중 {익절중}종목 슬롯 반환 → 가용:{slots}")
+
+        # 매수 가능 시간/시장 상태 체크
+        if now_t < BUY_START_TIME:
+            print(f"⏳ {BUY_START_TIME} 이전 — 매수 대기 중")
+            return
+        if now_t >= EOD_SELL_TIME:
+            print("🔔 종가매도 시간 이후 — 매수 금지")
+            return
+
+        # ★ sbot 교차 보유 방지 — sbot 보유 종목은 nbot 매수 제외
+        try:
+            from common_utils import read_state as _read_state
+            sbot_st  = _read_state("sbot")
+            sbot_pos = set(sbot_st.get("last_status", {}).get("positions_detail", {}).keys())
+        except Exception:
+            sbot_pos = set()
+
+        # 일일 손실 한도 체크
+        should_stop, stop_reason = self.risk.should_stop_trading(
+            self.daily_loss_count,
+        )
+        if should_stop:
+            print(f"🛑 {stop_reason} — 매수 정지")
+            st = _read_state()
+            if not st.get("paused"):
+                self._notify(f"🛑 {stop_reason}\n!시작 으로 재개", critical=True)
+                _update_state(paused=True)
+            return
+
+        if slots <= 0:
+            print("📦 포지션 FULL")
+            return
+
+        # 매수 실행
+        for code, score, data in top10:
+            if slots <= 0:
+                break
+            if code in self.positions or code in self._pending_orders.keys():
+                continue
+            if data["current_price"] <= 0:
+                continue
+            if score < score_enter:
+                continue
+            if code in self.sold_today:
+                print(f"🚫 재매수 금지 {code}")
+                continue
+
+            # 시장 상태 체크 (★ 약세장에서도 강세업종은 허용)
+            is_sector_match = (data.get("buy_tag") == "theme_buy")
+            allow, reason = self.risk.allow_buy_in_market(
+                self.market_status, is_sector_match=is_sector_match,
+            )
+            if not allow:
+                print(f"⚠️ {reason} {code}")
+                continue
+            if reason:  # 약세장이지만 허용된 경우
+                print(f"✅ {reason} {code}")
+
+            # 업종 쏠림 방지
+            sector_of = next(
+                (kw for kw, cds in self.sector_group_map.items() if code in cds),
+                None
+            )
+            if sector_of:
+                same_cnt = sum(
+                    1 for hc in self.positions
+                    if hc in self.sector_group_map.get(sector_of, [])
+                )
+                if same_cnt >= MAX_SAME_SECTOR:
+                    print(f"⚠️ 업종 쏠림 방지 {code} [{sector_of}]")
+                    continue
+
+            buy_tag = data.get("buy_tag", "")
+
+            # ★ 포지션 사이징: 점수에 비례한 매수 금액
+            atr_rate = self._get_atr_rate(code)
+            buy_amount = self.risk.calc_buy_amount(
+                score=score, atr_rate=atr_rate,
+                is_theme=is_sector_match, psbl_cash=psbl_cash,
+                code=code,  # ★ 켈리 공식 — 종목별 성과 반영
+            )
+
+            print(f"🚀 매수 {code} | {score}점 | {fmt_won(buy_amount)}"
+                  f"{f' | 🎯{buy_tag}' if buy_tag else ''}"
+                  f"{f' | ATR{atr_rate*100:.1f}%' if atr_rate else ''}")
+
+            # ★ 1주도 못 사면 패스
+            cur_price = data.get("current_price", 0)
+            if cur_price > 0 and buy_amount < cur_price:
+                print(f"⏭️ {code} 패스 — 예산({buy_amount:,}원) < 주가({cur_price:,}원)")
+                continue
+
+            # 컨텍스트 저장 (DB 기록용)
+            self.buy_context[code] = {
+                "ai_score":   score,
+                "ai_reason":  data.get("ai_reason", ""),
+                "indicators": data,
+                "stock_name": data.get("stock_name", ""),
+                "buy_tag":    buy_tag,
+            }
+
+            # ★ sbot 교차 보유 방지
+            if code in sbot_pos:
+                print(f"⛔ {code} sbot 보유 중 — nbot 매수 제외")
+                continue
+            # 매수 실행
+            self._do_buy(code, data["current_price"], buy_amount)
+            self.buy_tags[code] = buy_tag
+
+            # ★ peak_tracker 즉시 초기화 (매수 직후 매도 체크에서 NPE 방지)
+            self.peak_tracker[code] = {
+                "peak_rate":       0.0,
+                "stage":           0,
+                "remain_qty":      max(int(buy_amount / data["current_price"]), 1),
+                "buy2_done":       False,
+                "buy1_price":      data["current_price"],
+                "effective_entry": data["current_price"],
+            }
+            slots -= 1
+            time.sleep(1)  # API rate limit 회피
+
+    # ============================================================
+    # 매도 체크 — PositionManager 위임
+    # ============================================================
+    def _check_all_sells(self, pos_mkt_cache: dict, now_t: str):
+        """전체 보유 종목 매도 체크 → PositionManager 위임"""
+        # tech_cache 동기화
+        self.pos_mgr._tech_cache = self._tech_cache
+        self.pos_mgr.check_all_sells(pos_mkt_cache, now_t)
+        # 손절 카운터 동기화
+        self.daily_loss_count = self.order.daily_loss_count
+
+    def _check_sells_only(self, pos_mkt_cache: dict, now_t: str):
+        """일시중단 시 매도만 체크 → PositionManager 위임"""
+        self._check_all_sells(pos_mkt_cache, now_t)
+
+    # ============================================================
+    # 상태 저장 — PositionManager 위임
+    # ============================================================
+    def _save_status(self, cash: int, psbl_cash: int, total_profit: float,
+                     score_enter: int, pos_mkt_cache: dict, now: str):
+        """상태 저장 → PositionManager 위임"""
+        self.pos_mgr.save_status(
+            cash=cash, psbl_cash=psbl_cash,
+            total_profit=total_profit, score_enter=score_enter,
+            pos_mkt_cache=pos_mkt_cache, now=now,
+            active_sectors=self.active_sectors,
+            market_rate=self.market_rate,
+            market_status=self.market_status,
+            daily_loss=self.daily_loss_count,
+        )
+
+
+# ============================================================
+# 진입점
+# ============================================================
+if __name__ == "__main__":
+    NBot().run()

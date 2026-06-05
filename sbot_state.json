@@ -1,0 +1,62 @@
+{
+  "paused": false,
+  "score_enter": 80,
+  "pending_cmd": null,
+  "cmd_result": null,
+  "last_status": {
+    "cash": 249998,
+    "total_profit": -72900,
+    "positions": 4,
+    "score_enter": 80,
+    "last_update": "15:30:42",
+    "market_status": "stop",
+    "market_rate": -5.4,
+    "daily_loss": 0,
+    "code_name_map": {},
+    "new_codes": [],
+    "positions_detail": {
+      "005290": {
+        "name": "005290",
+        "entry_price": 56000,
+        "current": 54900,
+        "rate": -1.96,
+        "qty": 18,
+        "buy_tag": ""
+      },
+      "010140": {
+        "name": "010140",
+        "entry_price": 27950,
+        "current": 27750,
+        "rate": -0.72,
+        "qty": 40,
+        "buy_tag": ""
+      },
+      "240810": {
+        "name": "240810",
+        "entry_price": 133800,
+        "current": 132700,
+        "rate": -0.82,
+        "qty": 7,
+        "buy_tag": ""
+      },
+      "327260": {
+        "name": "327260",
+        "entry_price": 79716,
+        "current": 76600,
+        "rate": -3.91,
+        "qty": 12,
+        "buy_tag": ""
+      }
+    }
+  },
+  "last_update": "15:30:42",
+  "sold_today": {
+    "247540": "09:05:28",
+    "007660": "09:13:45",
+    "417840": "09:25:48",
+    "196170": "09:33:05"
+  },
+  "sold_today_date": "2026-06-05",
+  "daily_loss": 4,
+  "loss_date": "2026-06-05"
+}

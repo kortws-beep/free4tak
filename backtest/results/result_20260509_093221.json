@@ -1,0 +1,48 @@
+[
+  {
+    "name": "단일 백테스트",
+    "config": {
+      "buy_score_min": 60,
+      "max_positions": 5,
+      "base_buy_amt": 200000,
+      "ai_score_mode": "rule_proxy"
+    },
+    "metrics": {
+      "initial_cash": 5000000,
+      "final_value": 5000000,
+      "total_return": 0.0,
+      "cagr": 0,
+      "trade_count": 1,
+      "win_count": 1,
+      "loss_count": 0,
+      "win_rate": 100.0,
+      "avg_profit": 3.35,
+      "avg_win": 3.35,
+      "avg_loss": 0,
+      "profit_factor": null,
+      "mdd": 0,
+      "sharpe": 0,
+      "sortino": 0,
+      "calmar": 0,
+      "max_consec_loss": 0,
+      "total_pnl_krw": 5473
+    },
+    "trades": [
+      {
+        "code": "272210",
+        "buy_date": "2025-08-04",
+        "buy_price": 57928.95,
+        "qty": 3,
+        "sell_date": "2025-08-01",
+        "sell_price": 59870.05,
+        "sell_reason": "백테스트종료",
+        "profit_rate": 0.03350828903337633,
+        "profit_krw": 5473.060207500035,
+        "fee": 376.30782000000005,
+        "score": 74,
+        "buy_tag": ""
+      }
+    ],
+    "equity": []
+  }
+]

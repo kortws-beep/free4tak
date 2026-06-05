@@ -1,0 +1,449 @@
+{
+  "summary": {
+    "total_trades": 525,
+    "win_rate": 49.3,
+    "avg_profit": 0.293,
+    "analyzed_at": "2026-05-19T14:06:11"
+  },
+  "attribution": {
+    "change": {
+      "pos_mean": 0.293,
+      "pos_n": 525,
+      "neg_mean": 0.0,
+      "neg_n": 0,
+      "neutral_mean": 0.0,
+      "neutral_n": 0,
+      "effect": 0.293
+    },
+    "value": {
+      "pos_mean": 0.281,
+      "pos_n": 523,
+      "neg_mean": 0.0,
+      "neg_n": 0,
+      "neutral_mean": 3.333,
+      "neutral_n": 2,
+      "effect": 0.281
+    },
+    "vol_ratio": {
+      "pos_mean": 0.486,
+      "pos_n": 311,
+      "neg_mean": 3.534,
+      "neg_n": 3,
+      "neutral_mean": -0.038,
+      "neutral_n": 211,
+      "effect": -3.048
+    },
+    "vol_tnrt": {
+      "pos_mean": 0.768,
+      "pos_n": 157,
+      "neg_mean": 0.0,
+      "neg_n": 0,
+      "neutral_mean": 0.09,
+      "neutral_n": 368,
+      "effect": 0.768
+    },
+    "rsi": {
+      "pos_mean": 0.18,
+      "pos_n": 296,
+      "neg_mean": -0.062,
+      "neg_n": 59,
+      "neutral_mean": 0.613,
+      "neutral_n": 170,
+      "effect": 0.242
+    },
+    "ma": {
+      "pos_mean": 0.156,
+      "pos_n": 432,
+      "neg_mean": 0.928,
+      "neg_n": 93,
+      "neutral_mean": 0.0,
+      "neutral_n": 0,
+      "effect": -0.772
+    },
+    "macd": {
+      "pos_mean": 0.306,
+      "pos_n": 453,
+      "neg_mean": 0.207,
+      "neg_n": 72,
+      "neutral_mean": 0.0,
+      "neutral_n": 0,
+      "effect": 0.099
+    },
+    "bb": {
+      "pos_mean": 0.216,
+      "pos_n": 124,
+      "neg_mean": 0.329,
+      "neg_n": 252,
+      "neutral_mean": 0.295,
+      "neutral_n": 149,
+      "effect": -0.114
+    },
+    "stoch": {
+      "pos_mean": 0.042,
+      "pos_n": 73,
+      "neg_mean": 0.416,
+      "neg_n": 294,
+      "neutral_mean": 0.179,
+      "neutral_n": 158,
+      "effect": -0.374
+    },
+    "candle": {
+      "pos_mean": -3.69,
+      "pos_n": 7,
+      "neg_mean": 9.551,
+      "neg_n": 1,
+      "neutral_mean": 0.329,
+      "neutral_n": 517,
+      "effect": -13.241
+    },
+    "foreign5": {
+      "pos_mean": 0.398,
+      "pos_n": 499,
+      "neg_mean": -1.769,
+      "neg_n": 25,
+      "neutral_mean": -0.86,
+      "neutral_n": 1,
+      "effect": 2.167
+    },
+    "orgn5": {
+      "pos_mean": 0.41,
+      "pos_n": 369,
+      "neg_mean": 0.388,
+      "neg_n": 75,
+      "neutral_mean": -0.327,
+      "neutral_n": 81,
+      "effect": 0.022
+    },
+    "foreign_today": {
+      "pos_mean": 0.252,
+      "pos_n": 514,
+      "neg_mean": 0.624,
+      "neg_n": 9,
+      "neutral_mean": 9.262,
+      "neutral_n": 2,
+      "effect": -0.372
+    },
+    "orgn_today": {
+      "pos_mean": 0.466,
+      "pos_n": 351,
+      "neg_mean": -0.001,
+      "neg_n": 108,
+      "neutral_mean": -0.146,
+      "neutral_n": 66,
+      "effect": 0.467
+    },
+    "foreign_ratio": {
+      "pos_mean": 0.0,
+      "pos_n": 0,
+      "neg_mean": 0.0,
+      "neg_n": 0,
+      "neutral_mean": 0.293,
+      "neutral_n": 525,
+      "effect": 0.0
+    },
+    "prsn": {
+      "pos_mean": 0.259,
+      "pos_n": 496,
+      "neg_mean": 0.989,
+      "neg_n": 26,
+      "neutral_mean": -0.139,
+      "neutral_n": 3,
+      "effect": -0.731
+    },
+    "buy_pressure": {
+      "pos_mean": 0.0,
+      "pos_n": 0,
+      "neg_mean": 0.0,
+      "neg_n": 0,
+      "neutral_mean": 0.293,
+      "neutral_n": 525,
+      "effect": 0.0
+    },
+    "hoga": {
+      "pos_mean": 0.0,
+      "pos_n": 0,
+      "neg_mean": 0.0,
+      "neg_n": 0,
+      "neutral_mean": 0.293,
+      "neutral_n": 525,
+      "effect": 0.0
+    }
+  },
+  "correlation": {
+    "change": 0.0475,
+    "value": -0.0295,
+    "vol_ratio": 0.0553,
+    "vol_tnrt": 0.0508,
+    "rsi": -0.0033,
+    "ma": -0.0434,
+    "macd": 0.0061,
+    "bb": -0.004,
+    "stoch": -0.0185,
+    "candle": -0.104,
+    "foreign5": 0.0773,
+    "orgn5": -0.0065,
+    "foreign_today": -0.0307,
+    "orgn_today": 0.036,
+    "foreign_ratio": 0.0,
+    "prsn": -0.0271,
+    "buy_pressure": 0.0,
+    "hoga": 0.0
+  },
+  "winrate": {
+    "change": {
+      "winrate_on": 49.3,
+      "winrate_off": null,
+      "winrate_lift": null
+    },
+    "value": {
+      "winrate_on": 49.3,
+      "winrate_off": 50.0,
+      "winrate_lift": -0.7
+    },
+    "vol_ratio": {
+      "winrate_on": 51.4,
+      "winrate_off": 46.3,
+      "winrate_lift": 5.2
+    },
+    "vol_tnrt": {
+      "winrate_on": 55.4,
+      "winrate_off": 46.7,
+      "winrate_lift": 8.7
+    },
+    "rsi": {
+      "winrate_on": 49.7,
+      "winrate_off": 48.9,
+      "winrate_lift": 0.8
+    },
+    "ma": {
+      "winrate_on": 47.0,
+      "winrate_off": 60.2,
+      "winrate_lift": -13.2
+    },
+    "macd": {
+      "winrate_on": 48.3,
+      "winrate_off": 55.6,
+      "winrate_lift": -7.2
+    },
+    "bb": {
+      "winrate_on": 53.2,
+      "winrate_off": 48.1,
+      "winrate_lift": 5.1
+    },
+    "stoch": {
+      "winrate_on": 46.6,
+      "winrate_off": 49.8,
+      "winrate_lift": -3.2
+    },
+    "candle": {
+      "winrate_on": 14.3,
+      "winrate_off": 49.8,
+      "winrate_lift": -35.5
+    },
+    "foreign5": {
+      "winrate_on": 49.9,
+      "winrate_off": 38.5,
+      "winrate_lift": 11.4
+    },
+    "orgn5": {
+      "winrate_on": 48.8,
+      "winrate_off": 50.6,
+      "winrate_lift": -1.9
+    },
+    "foreign_today": {
+      "winrate_on": 49.4,
+      "winrate_off": 45.5,
+      "winrate_lift": 4.0
+    },
+    "orgn_today": {
+      "winrate_on": 51.0,
+      "winrate_off": 46.0,
+      "winrate_lift": 5.0
+    },
+    "foreign_ratio": {
+      "winrate_on": null,
+      "winrate_off": 49.3,
+      "winrate_lift": null
+    },
+    "prsn": {
+      "winrate_on": 49.0,
+      "winrate_off": 55.2,
+      "winrate_lift": -6.2
+    },
+    "buy_pressure": {
+      "winrate_on": null,
+      "winrate_off": 49.3,
+      "winrate_lift": null
+    },
+    "hoga": {
+      "winrate_on": null,
+      "winrate_off": 49.3,
+      "winrate_lift": null
+    }
+  },
+  "distribution": {
+    "change": {
+      "mean": 10.5,
+      "std": 4.21,
+      "pos_ratio": 100.0,
+      "neg_ratio": 0.0,
+      "n": 525
+    },
+    "value": {
+      "mean": 9.79,
+      "std": 1.09,
+      "pos_ratio": 99.6,
+      "neg_ratio": 0.0,
+      "n": 525
+    },
+    "vol_ratio": {
+      "mean": 2.43,
+      "std": 2.79,
+      "pos_ratio": 59.2,
+      "neg_ratio": 0.6,
+      "n": 525
+    },
+    "vol_tnrt": {
+      "mean": 0.66,
+      "std": 1.08,
+      "pos_ratio": 29.9,
+      "neg_ratio": 0.0,
+      "n": 525
+    },
+    "rsi": {
+      "mean": 3.39,
+      "std": 5.99,
+      "pos_ratio": 56.4,
+      "neg_ratio": 11.2,
+      "n": 525
+    },
+    "ma": {
+      "mean": 5.24,
+      "std": 4.13,
+      "pos_ratio": 82.3,
+      "neg_ratio": 17.7,
+      "n": 525
+    },
+    "macd": {
+      "mean": 6.08,
+      "std": 4.82,
+      "pos_ratio": 86.3,
+      "neg_ratio": 13.7,
+      "n": 525
+    },
+    "bb": {
+      "mean": -2.79,
+      "std": 4.16,
+      "pos_ratio": 23.6,
+      "neg_ratio": 48.0,
+      "n": 525
+    },
+    "stoch": {
+      "mean": -3.02,
+      "std": 3.48,
+      "pos_ratio": 13.9,
+      "neg_ratio": 56.0,
+      "n": 525
+    },
+    "candle": {
+      "mean": 0.05,
+      "std": 0.49,
+      "pos_ratio": 1.3,
+      "neg_ratio": 0.2,
+      "n": 525
+    },
+    "foreign5": {
+      "mean": 7.29,
+      "std": 2.97,
+      "pos_ratio": 95.0,
+      "neg_ratio": 4.8,
+      "n": 525
+    },
+    "orgn5": {
+      "mean": 3.07,
+      "std": 3.47,
+      "pos_ratio": 70.3,
+      "neg_ratio": 14.3,
+      "n": 525
+    },
+    "foreign_today": {
+      "mean": 7.62,
+      "std": 2.18,
+      "pos_ratio": 97.9,
+      "neg_ratio": 1.7,
+      "n": 525
+    },
+    "orgn_today": {
+      "mean": 2.66,
+      "std": 4.1,
+      "pos_ratio": 66.9,
+      "neg_ratio": 20.6,
+      "n": 525
+    },
+    "foreign_ratio": {
+      "mean": 0.0,
+      "std": 0.0,
+      "pos_ratio": 0.0,
+      "neg_ratio": 0.0,
+      "n": 525
+    },
+    "prsn": {
+      "mean": 3.63,
+      "std": 1.54,
+      "pos_ratio": 94.5,
+      "neg_ratio": 5.0,
+      "n": 525
+    },
+    "buy_pressure": {
+      "mean": 0.0,
+      "std": 0.0,
+      "pos_ratio": 0.0,
+      "neg_ratio": 0.0,
+      "n": 525
+    },
+    "hoga": {
+      "mean": 0.0,
+      "std": 0.0,
+      "pos_ratio": 0.0,
+      "neg_ratio": 0.0,
+      "n": 525
+    }
+  },
+  "recommendations": [
+    {
+      "indicator": "candle",
+      "name": "캔들 패턴",
+      "action": "REMOVE",
+      "reason": "활성 시 평균수익 -13.24%p 낮아짐, 상관 -0.1040",
+      "priority": 13.241
+    },
+    {
+      "indicator": "foreign5",
+      "name": "외국인 5일",
+      "action": "BOOST",
+      "reason": "활성 시 +2.17%p 높음, 상관 +0.0773, 승률 리프트 +11.4%p",
+      "priority": 2.167
+    },
+    {
+      "indicator": "vol_tnrt",
+      "name": "거래량 회전율",
+      "action": "BOOST",
+      "reason": "활성 시 +0.77%p 높음, 상관 +0.0508, 승률 리프트 +8.7%p",
+      "priority": 0.768
+    },
+    {
+      "indicator": "macd",
+      "name": "MACD 히스토그램",
+      "action": "NOISE",
+      "reason": "다수 거래(453건)에서 효과 거의 없음 (effect +0.10%p)",
+      "priority": 0
+    },
+    {
+      "indicator": "orgn5",
+      "name": "기관 5일",
+      "action": "NOISE",
+      "reason": "다수 거래(369건)에서 효과 거의 없음 (effect +0.02%p)",
+      "priority": 0
+    }
+  ]
+}

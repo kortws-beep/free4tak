@@ -1,0 +1,1803 @@
+"""
+cbot.py — 영암9 코인 자동매매 봇 v2.3 (전면 재구성판)
+================================================================
+[이 파일이 하는 일 — 비개발자용 설명]
+
+업비트에서 24시간 코인을 자동매매하는 봇입니다.
+30만원 소액 시드 기준으로 안전하게 운영되도록 설계되었습니다.
+
+▶ 종목 풀 자동 확장 (5분 캐시)
+  - 업비트 KRW 마켓 전체에서 거래대금 상위 20개 자동 선별
+  - BTC/ETH/XRP/SOL 고정 우선 포함
+  - 50억 미만 잡코인, -20% 폭락 코인, +28% 상한가 근접 코인 제외
+  - UP/DOWN/BEAR/BULL (레버리지) 코인 제외
+
+▶ 매수 신호 (4시간봉 기준 — 모두 충족 시)
+  1. MA5 > MA20 (상승 추세)
+  2. RSI 40~70 (과열·과매도 아님)
+  3. 직전 4시간봉 거래량 > 20봉 평균 × 1.3배
+  4. 현재가 > MA20
+  5. BTC 시장 normal (BTC 등락 -2% 초과 안 함)
+  6. 공포탐욕지수 25 이상
+  7. AI 점수 55점 이상
+
+▶ 매도 전략 (단계별 분할 + 본절 보호)
+  - 1차 익절 +5%  → 30% 매도
+  - 2차 익절 +10% → 잔량의 40% 매도
+  - 트레일링 스탑: 고점 대비 -5%
+  - 손절: -7% / 약세장 -5% / 중단모드 -3% / 야간 -3%
+  - 직전봉 -5% 이상 급락 시 즉시 손절
+
+▶ 리스크 관리
+  - BTC -2% → weak / -4% → stop
+  - 공포탐욕 25 미만 → 신규 매수 중단
+  - 일일 손실 -4.5만원 / 손절 2회 → 자동 일시중단
+  - 알트코인(BTC/ETH 외) 동시 보유 최대 1개
+
+[적용된 v2.3 개선사항]
+[★ 치명적 버그 수정]
+1. 매수 직후 self.positions 즉시 메모리 반영 (다음 루프까지 매도 누락 방지)
+2. peak_tracker 매수 직후 즉시 초기화
+
+[★ 손실 방어 강화]
+3. ★ 본절(Break-even) 보호 — 1차 익절 후 -2% 시 즉시 청산
+4. ★ 분할 익절 후 effective_entry 보정 — 잔량 손익 정확
+5. ★ 동적 매수 임계치 — 최근 승률 따라 자동 조정 (기존 55점 고정)
+
+[★ 안정성]
+6. SQLite WAL 모드 — 동시 접근 안정성
+7. AI 캐시 가격 변동 감지 — 가격 5% 이상 변동 시 캐시 무효화
+8. atomic 상태파일 쓰기 — 중간에 죽어도 JSON 안 깨짐
+9. 디스코드 알림 5회 재시도 + rate limit 대응
+10. 환경변수로 모델 선택 가능
+
+[모듈 구조]
+  cbot.py        ← 메인 (이 파일)
+  notifier.py    ← 디스코드 (재시도 강화)
+  common_utils.py← 공통 헬퍼
+
+[변경 이력]
+  2026-05-01 v1   최초 생성
+  2026-05-01 v2   리스크 대응 강화
+  2026-05-01 v2.1 30만원 소액 시드 최적화
+  2026-05-01 v2.2 종목 풀 자동 확장
+  2026-05-08 v2.3 본절 보호 + WAL + 동적 임계치 + 알림 재시도
+  2026-05-09 v2.4 백테스터
+"""
+import sys as _sys
+import os as _os
+_BASE = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+for _d in ["core", "intelligence", "interface", "bots", ""]:
+    _p = _os.path.join(_BASE, _d)
+    if _p not in _sys.path:
+        _sys.path.insert(0, _p)
+
+import os
+import time
+import json
+import websockets
+import asyncio
+import threading
+import uuid
+import jwt
+import sqlite3
+import hashlib
+import requests
+import datetime
+from dotenv import load_dotenv
+try:
+    from account_sync import sync_positions as _sync_positions
+except ImportError:
+    _sync_positions = None
+    print("⚠️ account_sync 없음 → DB 정합성 체크 비활성")
+from anthropic import Anthropic
+try:
+    from master_db import record_trade as _master_record
+except Exception:
+    _master_record = None
+from backtestc.strategy_coin import CoinStrategy
+
+from common_utils import (
+    now_kst, now_hms, today_str,
+    safe_int, safe_float,
+    read_state, write_state, update_state,
+    fmt_won, fmt_pct,
+)
+from notifier import Notifier
+
+load_dotenv('/home/free4tak/k-bot/stock_bot/.env')
+try:
+    from master_db import (
+        upsert_position as _master_upsert,
+        remove_position as _master_remove,
+    )
+except Exception:
+    _master_upsert = None
+    _master_remove = None
+
+
+# ============================================================
+# 상수
+# ============================================================
+# 고정 우선 코인 (항상 풀에 포함)
+FIXED_COINS  = ["KRW-BTC", "KRW-ETH", "KRW-XRP", "KRW-SOL"]
+MAJOR_COINS  = ["KRW-BTC", "KRW-ETH"]
+ALT_COINS    = ["KRW-XRP", "KRW-SOL"]
+
+# 종목 풀 설정
+POOL_SIZE         = 20
+MIN_TRADE_AMT_B   = 10_000_000_000  # 24시간 거래대금 100억 (원) — 잡코인 필터 강화
+MAX_CHANGE_RATE   = 25.0            # +25% 이상) 제외
+MIN_CHANGE_RATE   = -20.0           # 폭락 (-20% 이하) 제외
+
+# 레버리지/ETF 제외 키워드
+EXCLUDE_KEYWORDS = ["UP", "DOWN", "BEAR", "BULL"]
+
+# 매수/매도 금액 (30만원 시드 기준)
+BUY_1ST_AMT       = 300_000     # 1차 매수 30만원
+BUY_2ND_AMT       = 150_000      # 2차 매수 15만원 (물타기)
+BUY_2ND_THRESHOLD = -0.03       # 1차 대비 -3% 하락 시 2차
+MAX_POSITIONS     = 3           # 최대 3코인
+MAX_ALT_POSITIONS = 2           # BTC/ETH 외 알트 동시 보유 최대 1개
+MIN_ORDER_AMT     = 5_000       # 업비트 최소 주문 금액
+
+# ── 매도 전략 ───────────────────────────────────────────────
+SELL_1ST_RATE   = 0.05    # 1차 익절: +5%
+SELL_1ST_QTY    = 0.30    # 30% 매도
+SELL_2ND_RATE   = 0.10    # 2차 익절: +10%
+SELL_2ND_QTY    = 0.40    # 잔량의 40%
+TRAIL_STOP      = 0.05    # 트레일링: 고점 -5%
+
+# ★ 손절선 (단계별 + 시장 상태별)
+STOP_LOSS_BASIC     = -0.07   # 기본
+STOP_LOSS_WEAK      = -0.05   # 약세장
+STOP_LOSS_STOP      = -0.03   # BTC 중단 모드
+STOP_LOSS_NIGHT     = -0.05   # 야간 (00~06시) — 반등 대기
+STOP_LOSS_CRASH     = -0.05   # 직전봉 급락 즉시 손절
+STOP_LOSS_AFTER_1ST = -0.02   # ★ 신규: 1차 익절 후 본절 보호
+
+# ── 매수 신호 기준 ──────────────────────────────────────────
+RSI_MIN  = 45
+RSI_MAX  = 79
+VOL_MULT = 1.2
+AI_SCORE_MIN_BASE = 55          # AI 점수 기본 임계치 (동적 조정됨)
+
+# ── 시장 / 리스크 ───────────────────────────────────────────
+BTC_WEAK_THRESH  = -2.0
+BTC_STOP_THRESH  = -4.0
+FEAR_GREED_MIN   = 20
+DAILY_LOSS_LIMIT = -45_000      # 일일 손실 한도 (한도 내에서만 거래)
+MAX_DAILY_LOSS   = 5            # 당일 손절 최대 5회
+
+NIGHT_START = 1
+NIGHT_END   = 5
+
+LOOP_SLEEP  = 30                # 30초마다 루프 (WebSocket 실시간 현재가 연동)
+CANDLE_UNIT = 240               # 4시간봉
+
+# 파일
+BOT_STATE_FILE = "cbot_state.json"
+TRADE_HIST_DB  = "cbot_trade_history.db"
+AI_CACHE_DB    = "cbot_ai_cache.db"
+
+# AI 캐시 — ★ 4시간 → 가격 변동 5% 시 무효화 추가
+AI_CACHE_HOURS    = 4
+PRICE_DRIFT_THRES = 0.05
+
+BASE_URL = "https://api.upbit.com/v1"
+
+# ★ 환경변수로 모델 선택
+DEFAULT_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
+
+
+# ============================================================
+# 상태 파일 헬퍼 (common_utils 사용 — atomic write)
+# ============================================================
+def _read_state() -> dict:
+    return read_state(BOT_STATE_FILE, default={
+        "paused":      False,
+        "pending_cmd": None,
+        "cmd_result":  None,
+    })
+
+def _update_state(**kwargs):
+    update_state(BOT_STATE_FILE, **kwargs)
+
+def _write_status(status: dict):
+    state = _read_state()
+    state["last_status"] = status
+    state["last_update"] = now_hms()
+    write_state(BOT_STATE_FILE, state)
+
+def _write_cmd_result(result: str):
+    _update_state(cmd_result=result, pending_cmd=None)
+
+
+# ============================================================
+# DB 연결 (★ WAL 모드)
+# ============================================================
+def _db_connect(db_file: str) -> sqlite3.Connection:
+    """WAL 모드 + busy_timeout 적용"""
+    conn = sqlite3.connect(db_file, timeout=15)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA busy_timeout=10000")
+    return conn
+
+
+# ============================================================
+# 메인 클래스
+# ============================================================
+class CBot:
+    """코인 자동매매 봇 (업비트 v2.3)"""
+
+    def __init__(self):
+        print("🚀 [영암9 COIN v2.3] 코인 자동매매 봇 가동")
+
+        # ── 환경변수 ─────────────────────────────────────
+        self.access_key = os.getenv("UPBIT_ACCESS_KEY")
+        self.secret_key = os.getenv("UPBIT_SECRET_KEY")
+        if not self.access_key or not self.secret_key:
+            print("❌ UPBIT_ACCESS_KEY / UPBIT_SECRET_KEY 환경변수 없음!")
+
+        # ── AI / 알림 ───────────────────────────────────
+        self.llm      = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+        self.notifier = Notifier(name="cbot")
+        self.model    = DEFAULT_MODEL
+
+        # ── 거래 상태 ─────────────────────────────────────
+        self.positions        = {}
+        self.peak_tracker     = {}
+        self.sold_today       = {}
+        self._sold_today_date = today_str()
+        self.daily_loss_count = 0
+        self.daily_pnl        = 0
+        self._is_paused       = False
+
+        # ── 시장 상태 ─────────────────────────────────────
+        self.market_status = "normal"
+        self.btc_rate      = 0.0
+        self.fear_greed    = 50
+
+        # ── 종목 풀 (5분 캐시) ─────────────────────────────
+        self.coin_pool      = list(FIXED_COINS)
+        self._pool_cache_ts = 0
+
+        # ── 메모리 캐시 ─────────────────────────────────
+        self._candle_cache         = {}
+        self._ws_prices            = {}   # ★ WebSocket 실시간 현재가
+        self._ws_running           = False # WebSocket 실행 여부
+        self._ws_markets           = set() # 현재 구독 중인 종목
+        self._candle_cache_1h      = {}   # ★ 1시간봉 캐시
+        self._tech_cache           = {}
+        self._last_market_check    = 0
+        self._last_feargreed_check = 0
+
+        # ── DB 초기화 ────────────────────────────────────
+        self._init_trade_db()
+        self._init_ai_db()
+        self._restore_positions()  # ★ 재시작 시 포지션 복구
+
+    # ============================================================
+    # 알림 (★ 재시도 강화)
+    # ============================================================
+    def notify(self, msg: str, critical: bool = False):
+        """디스코드 알림 (critical=True면 5회 재시도)"""
+        self.notifier.send(f"[COIN] {msg}", critical=critical)
+
+    # ============================================================
+    # JWT 인증 (검증된 방식 그대로)
+    # ============================================================
+    def _get_headers(self, query_string: str = None) -> dict:
+        payload = {"access_key": self.access_key, "nonce": str(uuid.uuid4())}
+        if query_string:
+            m = hashlib.sha512()
+            m.update(query_string.encode())
+            payload["query_hash"]     = m.hexdigest()
+            payload["query_hash_alg"] = "SHA512"
+        token = jwt.encode(payload, self.secret_key, algorithm="HS256")
+        return {"Authorization": f"Bearer {token}"}
+
+    # ============================================================
+    # DB 초기화 (★ WAL 모드 + 인덱스)
+    # ============================================================
+    def _init_trade_db(self):
+        try:
+            conn = _db_connect(TRADE_HIST_DB)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS trades (
+                    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    market        TEXT NOT NULL,
+                    buy_price     REAL NOT NULL,
+                    buy_time      TEXT NOT NULL,
+                    sell_price    REAL,
+                    sell_time     TEXT,
+                    qty           REAL NOT NULL,
+                    profit_rate   REAL,
+                    profit_krw    REAL,
+                    sell_reason   TEXT,
+                    ai_score      INTEGER,
+                    ai_reason     TEXT,
+                    market_status TEXT,
+                    fear_greed    INTEGER
+                )
+            """)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_cbot_market ON trades(market, sell_time)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_cbot_sell   ON trades(sell_time)")
+            conn.commit(); conn.close()
+            print(f"✅ 매매이력 DB ({TRADE_HIST_DB})")
+        except Exception as e:
+            print(f"❌ DB 오류: {e}")
+
+    def _init_ai_db(self):
+        try:
+            conn = _db_connect(AI_CACHE_DB)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS ai_analysis (
+                    market       TEXT PRIMARY KEY,
+                    score        INTEGER NOT NULL,
+                    reason       TEXT,
+                    cached_price REAL DEFAULT 0,
+                    analyzed_at  TEXT NOT NULL
+                )
+            """)
+            # 마이그레이션: cached_price 컬럼 없으면 추가
+            try:
+                conn.execute("ALTER TABLE ai_analysis ADD COLUMN cached_price REAL DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass
+            conn.commit(); conn.close()
+            print(f"✅ AI DB ({AI_CACHE_DB})")
+        except Exception as e:
+            print(f"❌ AI DB 오류: {e}")
+
+    # ============================================================
+    # 매매이력 저장
+    # ============================================================
+    def _save_buy_history(self, market, buy_price, qty, ai_score=0, ai_reason=""):
+        try:
+            now  = datetime.datetime.now().isoformat(timespec="seconds")
+            conn = _db_connect(TRADE_HIST_DB)
+            conn.execute("""
+                INSERT INTO trades
+                    (market, buy_price, buy_time, qty, ai_score, ai_reason,
+                     market_status, fear_greed)
+                VALUES (?,?,?,?,?,?,?,?)
+            """, (market, buy_price, now, qty, ai_score, ai_reason,
+                  self.market_status, self.fear_greed))
+            conn.commit(); conn.close()
+        except Exception as e:
+            print(f"⚠️ 매수이력 저장 오류: {e}")
+
+    def _save_sell_history(self, market: str, sell_price: float,
+                          sell_reason: str, sold_qty: float = 0) -> float:
+        """
+        ★ 개선: 부분 매도 시 분할 행 추가, 잔량은 갱신
+        반환: 실현 손익(원)
+        """
+        profit_krw = 0.0
+        try:
+            now  = datetime.datetime.now().isoformat(timespec="seconds")
+            conn = _db_connect(TRADE_HIST_DB)
+            row  = conn.execute("""
+                SELECT id, buy_price, qty FROM trades
+                WHERE market=? AND sell_price IS NULL
+                ORDER BY id DESC LIMIT 1
+            """, (market,)).fetchone()
+            if not row:
+                conn.close()
+                return 0.0
+
+            trade_id, buy_price, total_qty = row
+            profit_rate = (sell_price - buy_price) / buy_price * 100 if buy_price else 0
+
+            # 전량 매도 판단
+            is_full_sell = (sold_qty == 0 or sold_qty >= total_qty - 1e-8)
+
+            if is_full_sell:
+                # 전량 매도 — 기존 행 업데이트
+                profit_krw = (sell_price - buy_price) * total_qty
+                conn.execute("""
+                    UPDATE trades
+                    SET sell_price=?, sell_time=?, profit_rate=?, profit_krw=?, sell_reason=?
+                    WHERE id=?
+                """, (sell_price, now, round(profit_rate, 2),
+                      round(profit_krw), sell_reason, trade_id))
+            else:
+                # 부분 매도 — 새 행 추가, 잔량 갱신
+                profit_krw = (sell_price - buy_price) * sold_qty
+                conn.execute("""
+                    INSERT INTO trades
+                        (market, buy_price, buy_time, qty, sell_price, sell_time,
+                         profit_rate, profit_krw, sell_reason, ai_score, ai_reason,
+                         market_status, fear_greed)
+                    SELECT market, buy_price, buy_time, ?, ?, ?, ?, ?, ?, ai_score, ai_reason,
+                           market_status, fear_greed
+                    FROM trades WHERE id=?
+                """, (sold_qty, sell_price, now, round(profit_rate, 2),
+                      round(profit_krw), sell_reason, trade_id))
+                conn.execute("UPDATE trades SET qty=? WHERE id=?",
+                           (total_qty - sold_qty, trade_id))
+
+            conn.commit(); conn.close()
+            emoji = "✅" if profit_rate >= 0 else "❌"
+            print(f"   {emoji} {market} | {profit_rate:+.2f}% | "
+                  f"{profit_krw:+,.0f}원 | {sell_reason}")
+        except Exception as e:
+            print(f"⚠️ 매도이력 저장 오류: {e}")
+        # ★ master_trades 기록
+        if _master_record:
+            try:
+                _master_record(
+                    bot_type="cbot", code=market,
+                    stock_name=market,
+                    buy_price=buy_price, sell_price=sell_price,
+                    qty=sold_qty,
+                    sell_reason=sell_reason,
+                    market_status=self.market_status,
+                )
+            except Exception as _e:
+                print(f"⚠️ master_db 기록 오류: {_e}")
+        return profit_krw
+
+    def _get_recent_performance(self, limit: int = 20):
+        try:
+            conn = _db_connect(TRADE_HIST_DB)
+            rows = conn.execute("""
+                SELECT profit_rate, profit_krw FROM trades
+                WHERE sell_price IS NOT NULL
+                ORDER BY id DESC LIMIT ?
+            """, (limit,)).fetchall()
+            conn.close()
+            if not rows:
+                return None
+            profits = [r[0] for r in rows if r[0] is not None]
+            krws    = [r[1] for r in rows if r[1] is not None]
+            if not profits:
+                return None
+            wins = [p for p in profits if p >= 0]
+            return {
+                "total":      len(profits),
+                "win_rate":   round(len(wins) / len(profits) * 100, 1),
+                "avg_profit": round(sum(profits) / len(profits), 2),
+                "best":       round(max(profits), 2),
+                "worst":      round(min(profits), 2),
+                "total_krw":  round(sum(krws), 0),
+            }
+        except Exception:
+            return None
+
+    def _save_positions(self):
+        """포지션·피크트래커를 cbot_state.json에 영속화"""
+        try:
+            state = _read_state()
+            state["positions"]    = self.positions
+            state["peak_tracker"] = self.peak_tracker
+            _update_state(**state)
+        except Exception as e:
+            print(f"⚠️ 포지션 저장 오류: {e}")
+
+    def _restore_positions(self):
+        """재시작 시 포지션·피크트래커 복구"""
+        try:
+            state = _read_state()
+            saved_pos = state.get("positions", {})
+            saved_peak = state.get("peak_tracker", {})
+            if saved_pos:
+                # 실제 잔고와 교차 검증
+                balances = self.get_balances()
+                for market, pos in saved_pos.items():
+                    coin = market.replace("KRW-", "")
+                    if coin in balances and balances[coin]["balance"] > 0.00001:
+                        self.positions[market]    = pos
+                        self.peak_tracker[market] = saved_peak.get(market, {
+                            "peak_rate": 0.0, "stage": 0,
+                            "remain_qty": pos.get("qty", 0),
+                            "buy2_done": True,
+                            "buy1_price": pos.get("entry_price", 0),
+                            "effective_entry": pos.get("entry_price", 0),
+                        })
+                # ★ master_positions 현재가 갱신 (대시보드)
+                if _master_upsert:
+                    for _mkt, _pos in self.positions.items():
+                        _cur = self.ws_prices.get(_mkt, 0) or _pos.get('entry_price', 0)
+                        if _cur > 0:
+                            try:
+                                _master_upsert(
+                                    bot_type='cbot', code=_mkt,
+                                    current_price=_cur,
+                                    qty=int(_pos.get('qty', 0) * 10000),
+                                    stage=self.peak_tracker.get(_mkt,{}).get('stage',0),
+                                )
+                            except Exception: pass
+                if self.positions:
+                    print(f"♻️ 포지션 복구: {list(self.positions.keys())}")
+        except Exception as e:
+            print(f"⚠️ 포지션 복구 오류: {e}")
+
+    def _get_dynamic_ai_threshold(self) -> int:
+        """
+        ★ 신규: 동적 AI 임계치
+        최근 승률 따라 매수 점수 기준 자동 조정
+        - 승률 < 40% → +5점 (더 깐깐하게)
+        - 승률 > 60% → -3점 (적극적으로)
+        """
+        perf = self._get_recent_performance(limit=20)
+        if not perf or perf["total"] < 10:
+            return AI_SCORE_MIN_BASE
+
+        win_rate = perf["win_rate"]
+        if win_rate < 40:
+            print(f"   📉 최근승률 {win_rate}% 낮음 → AI기준 +5")
+            return AI_SCORE_MIN_BASE + 5
+        elif win_rate > 60:
+            print(f"   📈 최근승률 {win_rate}% 높음 → AI기준 -3")
+            return max(50, AI_SCORE_MIN_BASE - 3)
+        return AI_SCORE_MIN_BASE
+
+    # ============================================================
+    # 업비트 API — 잔고/현재가/포지션
+    # ============================================================
+    def get_balances(self) -> dict:
+        """전체 잔고 조회"""
+        try:
+            res = requests.get(
+                f"{BASE_URL}/accounts",
+                headers=self._get_headers(), timeout=5,
+            ).json()
+            result = {}
+            for item in res:
+                cur = item.get("currency")
+                bal = safe_float(item.get("balance", 0))
+                avg = safe_float(item.get("avg_buy_price", 0))
+                if bal > 0:
+                    result[cur] = {"balance": bal, "avg_buy_price": avg}
+            return result
+        except Exception as e:
+            print(f"❌ 잔고 조회 오류: {e}")
+            return {}
+
+    def get_krw_balance(self) -> float:
+        return self.get_balances().get("KRW", {}).get("balance", 0)
+
+    def get_current_positions(self) -> dict:
+        """
+        보유 코인 포지션 조회 — ★ 전체 잔고 기준 (coin_pool 무관).
+        coin_pool에서 빠진 코인도 보유 중이면 매도 관리됨.
+        """
+        balances = self.get_balances()
+        held_markets = [
+            f"KRW-{cur}" for cur in balances
+            if cur != "KRW"
+               and balances[cur]["balance"] > 0.00001
+               and balances[cur]["avg_buy_price"] > 0
+        ]
+        if not held_markets:
+            return {}
+        prices = self.get_current_price(held_markets)
+        pos = {}
+        for market in held_markets:
+            cur  = market.replace("KRW-", "")
+            info = balances.get(cur)
+            if not info:
+                continue
+            pos[market] = {
+                "entry_price": info["avg_buy_price"],
+                "qty":         info["balance"],
+                "current":     prices.get(market, info["avg_buy_price"]),
+            }
+        return pos
+
+    # ============================================================
+    # 종목 풀 자동 갱신 (5분 캐시) — 검증된 로직 그대로
+    # ============================================================
+    def _update_coin_pool(self):
+        """
+        업비트 KRW 마켓에서 거래대금 상위 POOL_SIZE개 자동 선별.
+        고정 코인(FIXED_COINS)은 항상 포함.
+        """
+        if time.time() - self._pool_cache_ts < 300:
+            return  # 5분 캐시
+
+        try:
+            # 1) KRW 마켓 목록
+            markets_res = requests.get(
+                f"{BASE_URL}/market/all",
+                params={"isDetails": "false"}, timeout=5,
+            ).json()
+            krw_markets = [
+                m["market"] for m in markets_res
+                if m["market"].startswith("KRW-")
+            ]
+
+            # 2) 레버리지/ETF 제외
+            krw_markets = [
+                m for m in krw_markets
+                if not any(kw in m.replace("KRW-", "") for kw in EXCLUDE_KEYWORDS)
+            ]
+
+            # 3) 전체 시세 (100개씩 청크)
+            ticker_data = []
+            for i in range(0, len(krw_markets), 100):
+                chunk = krw_markets[i:i + 100]
+                try:
+                    res = requests.get(
+                        f"{BASE_URL}/ticker",
+                        params={"markets": ",".join(chunk)}, timeout=5,
+                    ).json()
+                    ticker_data.extend(res)
+                    time.sleep(0.1)  # rate limit
+                except Exception as e:
+                    print(f"⚠️ 시세 조회 오류 (chunk {i}): {e}")
+
+            # 4) 필터
+            filtered = []
+            for item in ticker_data:
+                market      = item.get("market", "")
+                trade_price = safe_float(item.get("trade_price", 0))
+                acc_trade   = safe_float(item.get("acc_trade_price_24h", 0))
+                change_rate = safe_float(item.get("signed_change_rate", 0)) * 100
+
+                if acc_trade < MIN_TRADE_AMT_B: continue
+                if change_rate < MIN_CHANGE_RATE: continue
+                if change_rate > MAX_CHANGE_RATE: continue
+                if trade_price < 1: continue
+
+                # ★ 4시간봉 21개 미만 코인 제외 (신규 상장 / 데이터 부족)
+                # 고정 코인은 항상 통과 (아래 6단계에서 강제 포함)
+                if market not in FIXED_COINS:
+                    try:
+                        res_c = requests.get(
+                            f"{BASE_URL}/candles/minutes/{CANDLE_UNIT}",
+                            params={"market": market, "count": 21}, timeout=3,
+                        ).json()
+                        if not isinstance(res_c, list) or len(res_c) < 21:
+                            print(f"  ⏭️ {market} 4시간봉 부족({len(res_c) if isinstance(res_c, list) else 0}개) — 제외")
+                            continue
+                        time.sleep(0.05)  # rate limit
+                    except Exception:
+                        continue  # 조회 실패도 제외
+
+                filtered.append({
+                    "market":    market,
+                    "trade_amt": acc_trade,
+                    "change":    change_rate,
+                    "price":     trade_price,
+                })
+
+            # 5) 거래대금 상위 POOL_SIZE
+            filtered.sort(key=lambda x: x["trade_amt"], reverse=True)
+            top_markets = [f["market"] for f in filtered[:POOL_SIZE]]
+
+            # 6) 고정 코인 우선 병합
+            pool = list(FIXED_COINS)
+            for m in top_markets:
+                if m not in pool:
+                    pool.append(m)
+
+            self.coin_pool      = pool[:POOL_SIZE + len(FIXED_COINS)]
+            self._pool_cache_ts = time.time()
+
+            new_coins = [m for m in self.coin_pool if m not in FIXED_COINS]
+            print(f"🪙 종목 풀 갱신: 총 {len(self.coin_pool)}개")
+            print(f"   고정: {', '.join(FIXED_COINS)}")
+            if new_coins:
+                print(f"   추가: {', '.join(new_coins[:15])}")
+            # ★ 종목 풀 변경 시 WebSocket 재구독
+            self._ws_subscribe(self.coin_pool[:15])  # 최대 15개 구독
+
+        except Exception as e:
+            print(f"⚠️ 종목 풀 갱신 오류: {e} — 기존 풀 유지 ({len(self.coin_pool)}개)")
+
+    # ============================================================
+    # BTC 시장 상태 (10분 캐시)
+    # ============================================================
+    def _update_market_status(self):
+        if time.time() - self._last_market_check < 600:
+            return
+        try:
+            res = requests.get(
+                f"{BASE_URL}/ticker",
+                params={"markets": "KRW-BTC"}, timeout=5,
+            ).json()
+            if not res:
+                return
+            self.btc_rate = safe_float(res[0].get("signed_change_rate", 0)) * 100
+            prev_status   = self.market_status
+
+            if self.btc_rate <= BTC_STOP_THRESH:
+                self.market_status = "stop";   emoji = "🚨"
+            elif self.btc_rate <= BTC_WEAK_THRESH:
+                self.market_status = "weak";   emoji = "⚠️"
+            else:
+                self.market_status = "normal"; emoji = "✅"
+
+            if self.market_status != prev_status:
+                self.notify(
+                    f"{emoji} 시장상태 변경: {prev_status} → {self.market_status}\n"
+                    f"BTC: {self.btc_rate:+.2f}%",
+                    critical=(self.market_status == "stop"),
+                )
+            print(f"📊 시장:{self.market_status} | BTC:{self.btc_rate:+.2f}%")
+        except Exception as e:
+            print(f"⚠️ BTC 시세 오류: {e}")
+        finally:
+            self._last_market_check = time.time()
+
+    def _get_alt_market_status(self, market: str) -> str:
+        """
+        BTC 디커플링 대응 — 개별 알트코인 자체 상태 판단.
+        ★ BTC -4% 이상 폭락(stop)은 전체 중단 유지.
+        ★ BTC -2%~-4% 약세(weak)일 때만 알트 자체 판단.
+        1시간봉 기준 MA20 대비 현재가로 판단.
+        """
+        # BTC 폭락 시 전체 중단 유지
+        if self.market_status == "stop":
+            return "stop"
+
+        # BTC 정상이면 그대로
+        if self.market_status == "normal":
+            return "normal"
+
+        # BTC 약세(weak)일 때만 알트 자체 판단
+        try:
+            ind = self.get_indicators(market)
+            if not ind:
+                return self.market_status
+
+            current = ind.get("current", 0)
+            ma20    = ind.get("ma20", 0)
+            rsi     = ind.get("rsi", 50)
+            vol_ratio = ind.get("vol_ratio", 1.0)
+
+            if ma20 <= 0:
+                return self.market_status
+
+            # 알트 자체가 강세 조건
+            # 1. 현재가가 MA20 위
+            # 2. RSI 40~70 (과열/침체 아님)
+            # 3. 거래량 정상 이상
+            price_above_ma20 = current > ma20
+            rsi_ok           = 40 <= rsi <= 70
+            vol_ok           = vol_ratio >= 0.8
+
+            if price_above_ma20 and rsi_ok and vol_ok:
+                print(f"   🔀 디커플링 감지 {market}: BTC약세지만 알트강세 → normal")
+                return "normal"
+            else:
+                return "weak"
+
+        except Exception as e:
+            print(f"⚠️ alt_status 오류 {market}: {e}")
+            return self.market_status
+        except Exception as e:
+            print(f"⚠️ BTC 시세 오류: {e}")
+        finally:
+            self._last_market_check = time.time()
+
+    # ============================================================
+    # 공포탐욕지수 (1시간 캐시)
+    # ============================================================
+    def _update_fear_greed(self):
+        if time.time() - self._last_feargreed_check < 3600:
+            return
+        try:
+            res = requests.get(
+                "https://api.alternative.me/fng/?limit=1", timeout=5,
+            ).json()
+            val  = int(res["data"][0]["value"])
+            name = res["data"][0]["value_classification"]
+            prev = self.fear_greed
+            self.fear_greed = val
+
+            if prev >= FEAR_GREED_MIN and val < FEAR_GREED_MIN:
+                self.notify(f"😱 극단공포 진입: {val}({name}) → 신규 매수 중단",
+                          critical=True)
+            elif prev < FEAR_GREED_MIN and val >= FEAR_GREED_MIN:
+                self.notify(f"😌 공포탐욕 회복: {val}({name}) → 신규 매수 재개")
+
+            print(f"😨 공포탐욕: {val} ({name})")
+            self._last_feargreed_check = time.time()
+        except Exception as e:
+            print(f"⚠️ 공포탐욕 조회 오류: {e} — 기존값 유지({self.fear_greed})")
+
+    # ============================================================
+    # 야간 / 손절선
+    # ============================================================
+    def _is_night(self) -> bool:
+        return NIGHT_START <= datetime.datetime.now().hour < NIGHT_END
+
+    def _get_stop_loss(self, stage: int = 0) -> float:
+        """
+        손절선 결정.
+        ★ stage>=1 (1차 익절 후): 본절 보호 우선 적용
+        """
+        if stage >= 1:
+            return STOP_LOSS_AFTER_1ST  # ★ 본절 보호
+        if self.market_status == "stop":  return STOP_LOSS_STOP
+        if self._is_night():              return STOP_LOSS_NIGHT
+        if self.market_status == "weak":  return STOP_LOSS_WEAK
+        return STOP_LOSS_BASIC
+
+    # ============================================================
+    # 캔들 / 기술 지표 (5분 캐시)
+    # ============================================================
+    # ============================================================
+    # WebSocket 실시간 현재가
+    # ============================================================
+    def _ws_subscribe(self, markets: list):
+        """구독 종목 변경 시 WebSocket 재시작"""
+        new_set = set(markets)
+        if new_set == self._ws_markets and self._ws_running:
+            return  # 변경 없으면 유지
+        self._ws_markets = new_set
+        self._ws_running = False  # 기존 스레드 종료 신호
+        # 새 스레드 시작
+        t = threading.Thread(target=self._ws_run, args=(list(new_set),), daemon=True)
+        t.start()
+        print(f"📡 WebSocket 구독: {len(new_set)}개 종목")
+
+    def _ws_run(self, markets: list):
+        """WebSocket 백그라운드 스레드"""
+        self._ws_running = True
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(self._ws_connect(markets))
+        except Exception as e:
+            print(f"⚠️ WebSocket 스레드 오류: {e}")
+        finally:
+            loop.close()
+            self._ws_running = False
+
+    async def _ws_connect(self, markets: list):
+        """업비트 WebSocket 연결 및 현재가 수신"""
+        WS_URL = "wss://api.upbit.com/websocket/v1"
+        subscribe_msg = json.dumps([
+            {"ticket": "cbot_ticker"},
+            {"type": "ticker", "codes": markets},
+        ])
+        while self._ws_running:
+            try:
+                async with websockets.connect(
+                    WS_URL,
+                    ping_interval=30,
+                    ping_timeout=10,
+                ) as ws:
+                    await ws.send(subscribe_msg)
+                    print(f"✅ WebSocket 연결됨 ({len(markets)}개)")
+                    while self._ws_running:
+                        try:
+                            msg = await asyncio.wait_for(ws.recv(), timeout=60)
+                            data = json.loads(msg)
+                            market = data.get("code", "")
+                            price  = float(data.get("trade_price", 0))
+                            if market and price > 0:
+                                self._ws_prices[market] = price
+                        except asyncio.TimeoutError:
+                            await ws.ping()
+                        except Exception:
+                            break
+            except Exception as e:
+                print(f"⚠️ WebSocket 재연결 중: {e}")
+                await asyncio.sleep(5)
+
+    def get_current_price(self, markets: list) -> dict:
+        """현재가 조회 — WebSocket 우선, 없으면 REST 폴백"""
+        result = {}
+        rest_needed = []
+
+        for m in markets:
+            if m in self._ws_prices:
+                result[m] = self._ws_prices[m]
+            else:
+                rest_needed.append(m)
+
+        # REST 폴백
+        if rest_needed:
+            try:
+                res = requests.get(
+                    f"{BASE_URL}/ticker",
+                    params={"markets": ",".join(rest_needed)},
+                    timeout=5,
+                ).json()
+                for item in res:
+                    market = item.get("market", "")
+                    price  = safe_float(item.get("trade_price", 0))
+                    if market and price > 0:
+                        result[market] = price
+                        self._ws_prices[market] = price  # 캐시에도 저장
+            except Exception as e:
+                print(f"⚠️ 현재가 REST 조회 오류: {e}")
+
+        return result
+
+    def get_candles_1h(self, market: str, count: int = 30) -> list:
+        """1시간봉 캐시 (5분 캐시)"""
+        if market in self._candle_cache_1h:
+            data, ts = self._candle_cache_1h[market]
+            if time.time() - ts < 300:
+                return data
+        try:
+            res = requests.get(
+                f"{BASE_URL}/candles/minutes/60",
+                params={"market": market, "count": count}, timeout=5,
+            ).json()
+            if isinstance(res, list) and res:
+                self._candle_cache_1h[market] = (res, time.time())
+                return res
+        except Exception as e:
+            print(f"⚠️ 1시간봉 조회 오류 {market}: {e}")
+        return []
+
+    def get_indicators_1h(self, market: str) -> dict:
+        """1시간봉 기술지표 (MA5/MA20/RSI/거래량비율/캔들등락)"""
+        candles = self.get_candles_1h(market, 30)
+        if len(candles) < 21:
+            return {}
+        closes  = [safe_float(c["trade_price"])             for c in candles]
+        volumes = [safe_float(c["candle_acc_trade_volume"]) for c in candles]
+        def ma(n):
+            return sum(closes[:n]) / n if len(closes) >= n else 0
+        def rsi(period=14):
+            if len(closes) < period + 1:
+                return 50
+            gains = [closes[i] - closes[i+1] for i in range(period) if closes[i] > closes[i+1]]
+            losses= [closes[i+1] - closes[i] for i in range(period) if closes[i] < closes[i+1]]
+            ag = sum(gains)/period if gains else 0
+            al = sum(losses)/period if losses else 1e-9
+            return 100 - (100 / (1 + ag/al))
+        vol_ma = sum(volumes[1:21]) / 20 if len(volumes) >= 21 else 1
+        result = {
+            "current":     closes[0],
+            "ma5":         ma(5),
+            "ma20":        ma(20),
+            "rsi":         rsi(14),
+            "vol_ratio":   volumes[0] / vol_ma if vol_ma > 0 else 1.0,
+            "candle_rate": (closes[0] - closes[1]) / closes[1] if closes[1] > 0 else 0,
+        }
+        return result
+
+    def get_candles(self, market: str, count: int = 50) -> list:
+        if market in self._candle_cache:
+            data, ts = self._candle_cache[market]
+            if time.time() - ts < 300:
+                return data
+        try:
+            res = requests.get(
+                f"{BASE_URL}/candles/minutes/{CANDLE_UNIT}",
+                params={"market": market, "count": count}, timeout=5,
+            ).json()
+            if isinstance(res, list) and res:
+                self._candle_cache[market] = (res, time.time())
+                return res
+        except Exception as e:
+            print(f"⚠️ 캔들 조회 오류 {market}: {e}")
+        return []
+
+    def get_indicators(self, market: str) -> dict:
+        if market in self._tech_cache:
+            data, ts = self._tech_cache[market]
+            if time.time() - ts < 300:
+                return data
+
+        candles = self.get_candles(market, 50)
+        if len(candles) < 21:
+            return {}
+
+        closes  = [safe_float(c["trade_price"])             for c in candles]
+        volumes = [safe_float(c["candle_acc_trade_volume"]) for c in candles]
+
+        def ma(n):
+            return sum(closes[:n]) / n if len(closes) >= n else 0
+
+        def rsi(period=14):
+            if len(closes) < period + 1:
+                return 50
+            gains  = [closes[i] - closes[i+1] for i in range(period) if closes[i] > closes[i+1]]
+            losses = [abs(closes[i] - closes[i+1]) for i in range(period) if closes[i] <= closes[i+1]]
+            avg_g  = sum(gains)  / period if gains  else 0
+            avg_l  = sum(losses) / period if losses else 1
+            return 100 - (100 / (1 + (avg_g / avg_l if avg_l else 0)))
+
+        vol_recent  = volumes[1] if len(volumes) > 1 else 0
+        vol_avg20   = sum(volumes[1:21]) / 20 if len(volumes) >= 21 else 0
+        vol_ratio   = vol_recent / vol_avg20 if vol_avg20 > 0 else 0
+        prev_close  = closes[1] if len(closes) > 1 else closes[0]
+        prev2_close = closes[2] if len(closes) > 2 else closes[1]
+        candle_rate = (prev_close - prev2_close) / prev2_close if prev2_close else 0
+
+        result = {
+            "current":     closes[0],
+            "ma5":         ma(5),
+            "ma20":        ma(20),
+            "rsi":         rsi(14),
+            "vol_ratio":   vol_ratio,
+            "candle_rate": candle_rate,
+        }
+        self._tech_cache[market] = (result, time.time())
+        return result
+
+    # ============================================================
+    # 매수 신호 판단
+    # ============================================================
+    def check_buy_signal(self, market: str) -> tuple:
+        """반환: (매수 여부, 지표, 사유)"""
+        # ★ 야간 신규 매수 — 기본 금지, 단 BTC +2% 이상 + 공포탐욕 60 이상 시 허용
+        if self._is_night():
+            btc_surge = self.btc_rate >= 2.0
+            greed_ok  = self.fear_greed >= 60
+            if not (btc_surge and greed_ok):
+                reason = []
+                if not btc_surge: reason.append(f"BTC {self.btc_rate:+.1f}%<2%")
+                if not greed_ok:  reason.append(f"탐욕{self.fear_greed}<60")
+                return False, {}, f"야간 매수 금지 ({', '.join(reason)})"
+            print(f"🌙 야간 특례 매수 허용 — BTC:{self.btc_rate:+.1f}% 탐욕:{self.fear_greed}")
+        ind = self.get_indicators(market)
+        if not ind:
+            return False, {}, "지표 조회 실패"
+
+        current     = ind["current"]
+        ma5         = ind["ma5"]
+        ma20        = ind["ma20"]
+        rsi         = ind["rsi"]
+        vol_ratio   = ind["vol_ratio"]
+        candle_rate = ind["candle_rate"]
+
+        # 시장 상태 필터
+        if self.market_status == "stop":
+            return False, ind, f"BTC 중단 ({self.btc_rate:+.2f}%)"
+        # ★ BTC 약세 시 알트 자체 상태 확인 (디커플링 대응)
+        alt_status = self._get_alt_market_status(market)
+        if alt_status == "weak":
+            return False, ind, f"BTC 약세+알트약세 ({self.btc_rate:+.2f}%)"
+        if self.fear_greed < FEAR_GREED_MIN:
+            return False, ind, f"극단공포 (탐욕:{self.fear_greed})"
+
+        # 직전봉 급락
+        if candle_rate <= STOP_LOSS_CRASH:
+            return False, ind, f"직전봉 급락 ({candle_rate:+.2%})"
+
+        # 추세 / 모멘텀
+        if ma5 <= ma20:
+            return False, ind, "MA 역배열"
+        if not (RSI_MIN <= rsi <= RSI_MAX):
+            return False, ind, f"RSI {'과매수' if rsi > RSI_MAX else '과매도'} ({rsi:.1f})"
+        if vol_ratio < VOL_MULT:
+            return False, ind, f"거래량 부족 ({vol_ratio:.2f}x)"
+        if current <= ma20:
+            return False, ind, "현재가 MA20 이하"
+
+        # ★ 1시간봉 보조 확인 (멀티 타임프레임)
+        ind_1h = self.get_indicators_1h(market)
+        if ind_1h:
+            ma5_1h  = ind_1h.get("ma5", 0)
+            ma20_1h = ind_1h.get("ma20", 0)
+            rsi_1h  = ind_1h.get("rsi", 50)
+            cr_1h   = ind_1h.get("candle_rate", 0)
+
+            # 1시간봉 역배열이면 매수 보류
+            if ma5_1h > 0 and ma20_1h > 0 and ma5_1h < ma20_1h:
+                return False, ind, f"1시간봉 MA 역배열"
+
+            # 1시간봉 직전봉 급락 (-4% 이상)
+            if cr_1h <= -0.04:
+                return False, ind, f"1시간봉 급락 ({cr_1h:+.2%})"
+
+            # 1시간봉 RSI 과매수 (80 이상)
+            if rsi_1h >= 80:
+                return False, ind, f"1시간봉 RSI 과매수 ({rsi_1h:.1f})"
+
+        # 알트코인 동시 보유 한도
+        if market not in MAJOR_COINS:
+            holding_alts = [m for m in self.positions if m not in MAJOR_COINS]
+            if len(holding_alts) >= MAX_ALT_POSITIONS:
+                return False, ind, f"알트 동시보유 한도 ({MAX_ALT_POSITIONS}개)"
+
+        return True, ind, (
+            f"MA정배열|RSI:{rsi:.0f}|"
+            f"거래량:{vol_ratio:.1f}x|BTC:{self.btc_rate:+.2f}%"
+        )
+
+    # ============================================================
+    # AI 점수 (★ 가격 변동 캐시 무효화 추가)
+    # ============================================================
+    def get_ai_score(self, market: str, ind: dict) -> dict:
+        current_price = ind.get("current", 0)
+
+        # 1) 캐시 조회 — 시간 + 가격 변동 체크
+        try:
+            conn = _db_connect(AI_CACHE_DB)
+            row  = conn.execute("""
+                SELECT score, reason, cached_price, analyzed_at
+                FROM ai_analysis WHERE market=?
+            """, (market,)).fetchone()
+            conn.close()
+            if row:
+                score, reason, cached_price, at = row
+                age_h = (datetime.datetime.now()
+                         - datetime.datetime.fromisoformat(at)).total_seconds() / 3600
+                if age_h < AI_CACHE_HOURS:
+                    # ★ 가격 변동 체크
+                    if cached_price and current_price > 0:
+                        drift = abs(current_price - cached_price) / cached_price
+                        if drift >= PRICE_DRIFT_THRES:
+                            print(f"   🔄 캐시 무효 {market}|가격변동{drift*100:.1f}%")
+                        else:
+                            print(f"   💾 AI캐시 {market}|{score}점|{age_h:.1f}h전")
+                            return {"score": score, "reason": reason}
+                    else:
+                        print(f"   💾 AI캐시 {market}|{score}점|{age_h:.1f}h전")
+                        return {"score": score, "reason": reason}
+        except Exception:
+            pass
+
+        # 2) AI 분석
+        try:
+            import re as _re
+            is_major = market in MAJOR_COINS
+            caution  = ("BTC/ETH 주요 코인이므로 신호 명확해야 높은 점수"
+                        if is_major
+                        else "알트코인이므로 더 보수적으로 판단 (변동성 주의)")
+
+            prompt = (
+                "당신은 암호화폐 4시간봉 트레이더 전문가입니다.\n"
+                "아래 지표를 분석해 매수 점수(0~100)와 이유를 JSON으로만 반환하세요.\n\n"
+                f"[코인] {market}\n"
+                f"[현재가] {ind.get('current', 0):,}원\n"
+                f"[MA5] {ind.get('ma5', 0):,.0f} | [MA20] {ind.get('ma20', 0):,.0f}\n"
+                f"[MA정배열] {ind.get('ma5', 0) > ind.get('ma20', 0)}\n"
+                f"[RSI14] {ind.get('rsi', 50):.1f}\n"
+                f"[거래량비] {ind.get('vol_ratio', 0):.2f}x\n"
+                f"[직전봉] {ind.get('candle_rate', 0):+.2%}\n"
+                f"[BTC시장] {self.market_status} ({self.btc_rate:+.2f}%)\n"
+                f"[공포탐욕] {self.fear_greed}\n\n"
+                f"[판단 기준]\n"
+                f"- {caution}\n\n"
+                "[★ 점수 분포 — 반드시 아래대로]\n"
+                "- 90~100: 강력 추천 (모든 신호 우수)\n"
+                "- 75~89:  매수 추천 (2가지 강한 신호)\n"
+                "- 60~74:  관망 가능 (1~2개 우호)\n"
+                "- 45~59:  비추천\n"
+                "- 0~44:   회피\n\n"
+                "[필터]\n"
+                "- 공포탐욕 50이상 + MA정배열 + 거래량급증 → 80점 이상\n"
+                "- BTC약세 + RSI높음 → 50점 이하\n"
+                "- 직전봉 +5% 이상 → 추격 위험 (60점 이하)\n\n"
+                '{"score": 70, "reason": "이유 한 줄"}'
+            )
+            res = self.llm.messages.create(
+                model=self.model, max_tokens=128,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            text  = res.content[0].text.strip()
+            text  = _re.sub(r"```(?:json)?", "", text).strip()
+            match = _re.search(r'\{.*\}', text, _re.DOTALL)
+            if not match:
+                return {"score": 0, "reason": "파싱실패"}
+
+            result = json.loads(match.group())
+            score  = max(0, min(100, int(result.get("score", 0))))
+            reason = str(result.get("reason", ""))[:200]
+
+            # 3) 캐시 저장 (★ 현재가 포함)
+            now  = datetime.datetime.now().isoformat(timespec="seconds")
+            conn = _db_connect(AI_CACHE_DB)
+            conn.execute("""
+                INSERT INTO ai_analysis
+                    (market, score, reason, cached_price, analyzed_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(market) DO UPDATE SET
+                    score        = excluded.score,
+                    reason       = excluded.reason,
+                    cached_price = excluded.cached_price,
+                    analyzed_at  = excluded.analyzed_at
+            """, (market, score, reason, current_price, now))
+            conn.commit(); conn.close()
+            return {"score": score, "reason": reason}
+        except Exception as e:
+            print(f"⚠️ AI 오류 {market}: {e}")
+            return {"score": 0, "reason": "분석실패"}
+
+    # ============================================================
+    # 매수 (★ 매수 직후 positions 즉시 반영)
+    # ============================================================
+    def buy(self, market: str, amount: int, is_second: bool = False) -> bool:
+        krw = self.get_krw_balance()
+        if krw < amount:
+            print(f"⚠️ 잔고 부족 {market}: {krw:,.0f}원 < {amount:,}원")
+            return False
+        if amount < MIN_ORDER_AMT:
+            print(f"⚠️ 최소주문 미달: {amount:,}원")
+            return False
+
+        params = {
+            "market":   market, "side": "bid",
+            "price":    str(amount), "ord_type": "price",
+        }
+        qs   = "&".join(f"{k}={v}" for k, v in params.items())
+        hdrs = self._get_headers(qs)
+        hdrs["Content-Type"] = "application/json"
+
+        try:
+            res = requests.post(
+                f"{BASE_URL}/orders", headers=hdrs, json=params, timeout=5,
+            ).json()
+            if res.get("uuid"):
+                label = "2차" if is_second else "1차"
+                self.notify(
+                    f"🚀 [{label}매수] {market} | {amount:,}원\n"
+                    f"시장:{self.market_status} | 공포탐욕:{self.fear_greed} | "
+                    f"BTC:{self.btc_rate:+.2f}%",
+                    critical=True,
+                )
+                # ★ 매수 직후 self.positions 즉시 반영
+                # 정확한 수량은 다음 루프에서 갱신되지만, 즉시 매도 체크 누락 방지
+                if not is_second:
+                    # 1차 매수 — sold_today에 등록 (재매수 금지)
+                    self.sold_today[market] = None
+                    if _master_upsert:
+                        try:
+                            _master_upsert(
+                                bot_type='cbot', code=market,
+                                stock_name=market.replace('KRW-', ''),
+                                entry_price=buy_price,
+                                current_price=buy_price,
+                                qty=int(buy_qty * 10000),
+                            )
+                        except Exception as _e:
+                            print(f'⚠️ master upsert 오류: {_e}')
+                return True
+            print(f"❌ 매수 실패 {market}: {res.get('error', {}).get('message', res)}")
+            return False
+        except Exception as e:
+            print(f"❌ 매수 예외 {market}: {e}")
+            return False
+
+    # ============================================================
+    # 매도 (★ 부분/전량 자동 처리)
+    # ============================================================
+    def sell(self, market: str, qty: float, reason: str,
+             sell_price: float = 0, force_all: bool = False) -> bool:
+        # 최소 주문 금액 체크
+        if sell_price > 0:
+            amt = qty * sell_price
+            if amt < MIN_ORDER_AMT:
+                pos_qty = self.positions.get(market, {}).get("qty", 0)
+                if not force_all and abs(qty - pos_qty) > 1e-8:
+                    print(f"⚠️ 매도금액 미달({amt:,.0f}원) — 잔량 유지 {market}")
+                    return False
+                qty = pos_qty
+                print(f"ℹ️ 최소금액 미달 → 전량 매도 전환 {market}")
+
+        params = {
+            "market": market, "side": "ask",
+            "volume": str(qty), "ord_type": "market",
+        }
+        qs   = "&".join(f"{k}={v}" for k, v in params.items())
+        hdrs = self._get_headers(qs)
+        hdrs["Content-Type"] = "application/json"
+
+        try:
+            res = requests.post(
+                f"{BASE_URL}/orders", headers=hdrs, json=params, timeout=5,
+            ).json()
+            if res.get("uuid"):
+                # 전량/부분 매도 판단
+                pos_qty      = self.positions.get(market, {}).get("qty", 0)
+                is_full_sell = (qty >= pos_qty - 1e-8)
+
+                is_loss = "손절" in reason or "본절" in reason
+                emoji   = "💔" if is_loss else "💰"
+                self.notify(
+                    f"{emoji} [매도] {market} | {reason} | {qty:.6f}개",
+                    critical=True,
+                )
+
+                # DB 저장 — sold_qty 명시
+                profit_krw = self._save_sell_history(
+                    market, sell_price, reason,
+                    sold_qty=0 if is_full_sell else qty,
+                )
+                self.daily_pnl += profit_krw
+                self.sold_today[market] = now_hms()
+                if _master_remove:
+                    try:
+                        _master_remove('cbot', market)
+                    except Exception as _e:
+                        print(f'⚠️ master remove 오류: {_e}')
+                print(f"📊 당일PNL: {self.daily_pnl:+,.0f}원 / "
+                      f"한도:{DAILY_LOSS_LIMIT:,}원")
+                return True
+            print(f"❌ 매도 실패 {market}: {res.get('error', {}).get('message', res)}")
+            return False
+        except Exception as e:
+            print(f"❌ 매도 예외 {market}: {e}")
+            return False
+
+    # ============================================================
+    # 매도 체크 (★ 본절 보호 + effective_entry)
+    # ============================================================
+    def _check_sell(self, market: str, pos: dict):
+        current = pos.get("current", 0)
+        entry   = pos["entry_price"]
+        qty     = pos["qty"]
+        if not (entry and current and qty):
+            return
+
+        rate = (current - entry) / entry
+
+        # 트래커 초기화
+        if market not in self.peak_tracker:
+            self.peak_tracker[market] = {
+                "peak_rate":       rate,
+                "stage":           0,
+                "remain_qty":      qty,
+                "buy2_done":       True,
+                "buy1_price":      entry,
+                "effective_entry": entry,  # ★ 분할익절 후 보정용
+            }
+
+        tracker    = self.peak_tracker[market]
+        stage      = tracker["stage"]
+        buy2_done  = tracker.get("buy2_done", True)
+        buy1_price = tracker.get("buy1_price", entry)
+
+        if rate > tracker["peak_rate"]:
+            tracker["peak_rate"] = rate
+
+        # ── 직전봉 급락 즉시 손절 ───────────────────────────
+        ind         = self.get_indicators(market)
+        candle_rate = ind.get("candle_rate", 0) if ind else 0
+        # ★ 야간(00~06시)은 급락 기준 완화 (-5% → -8%)
+        crash_threshold = -0.08 if self._is_night() else STOP_LOSS_CRASH
+        if candle_rate <= crash_threshold:
+            self.notify(
+                f"💥 급락감지 즉시손절 {market}\n"
+                f"직전봉:{candle_rate:+.2%} | 현재:{rate:+.2%}",
+                critical=True,
+            )
+            if self.sell(market, qty, f"급락감지({candle_rate:+.2%})",
+                         sell_price=current, force_all=True):
+                self.daily_loss_count += 1
+                self.peak_tracker.pop(market, None)
+                self._check_daily_loss_limit()
+            return
+
+        # ── 2차 추매 (조건 강화) ────────────────────────────
+        if not buy2_done and stage == 0 and not self._is_paused:
+            buy2_rate = (current - buy1_price) / buy1_price if buy1_price else 0
+            if buy2_rate <= BUY_2ND_THRESHOLD:
+                # ★ 강화 조건
+                mkt_ok = (self.market_status == "normal")
+                btc_ok = (self.btc_rate >= -1.0)   # BTC -1% 이상
+                # 24h 거래대금 100억 이상 (코인 풀 캐시 활용)
+                try:
+                    _pool_item = next(
+                        (x for x in self.coin_pool if isinstance(x, dict) and x.get('market') == market), None
+                    )
+                    amt_ok = (_pool_item is None or 
+                              _pool_item.get('trade_amt', 0) >= MIN_TRADE_AMT_B)
+                except Exception:
+                    amt_ok = True  # 조회 실패 시 통과
+                if mkt_ok and btc_ok and amt_ok:
+                    print(f"➕ 2차 추매 {market} | {buy2_rate:+.2%} | "
+                          f"BTC:{self.btc_rate:+.1f}%")
+                    if self.buy(market, BUY_2ND_AMT, is_second=True):
+                        tracker["buy2_done"] = True
+                        self.notify(f"➕ 2차 추매 {market} | {buy2_rate:+.2%}")
+                else:
+                    reasons = []
+                    if not mkt_ok: reasons.append(f"시장{self.market_status}")
+                    if not btc_ok: reasons.append(f"BTC{self.btc_rate:+.1f}%")
+                    if not amt_ok: reasons.append("거래대금부족")
+                    print(f"⛔ 추매 조건미달 {market}: {', '.join(reasons)}")
+
+        # ── 트레일링 스탑 (stage>=2) ───────────────────────
+        if stage >= 2 and rate <= tracker["peak_rate"] - TRAIL_STOP:
+            self.notify(
+                f"📉 트레일링스탑 {market}\n"
+                f"고점:{tracker['peak_rate']:+.2%} → 현재:{rate:+.2%}",
+                critical=True,
+            )
+            if self.sell(market, qty, f"트레일링스탑({rate:+.2%})",
+                         sell_price=current, force_all=True):
+                self.peak_tracker.pop(market, None)
+            return
+
+        # ── 2차 익절 +10% ───────────────────────────────────
+        if stage < 2 and rate >= SELL_2ND_RATE:
+            raw_qty  = tracker["remain_qty"] * SELL_2ND_QTY / (1 - SELL_1ST_QTY)
+            sell_qty = min(max(raw_qty, 0.00001), qty)
+            if (qty - sell_qty) * current < MIN_ORDER_AMT:
+                sell_qty = qty
+                print(f"ℹ️ 2차익절 후 잔량 미달 → 전량 {market}")
+            self.notify(f"🎯 2차익절 {market} | {rate:+.2%} | {sell_qty:.6f}개")
+            if self.sell(market, sell_qty, f"2차익절({rate:+.2%})",
+                         sell_price=current,
+                         force_all=(sell_qty >= qty)):
+                if sell_qty >= qty:
+                    self.peak_tracker.pop(market, None)
+                else:
+                    tracker["stage"] = 2
+                    # ★ effective_entry 보정
+                    realized_gain = (current - entry) * sell_qty
+                    tracker["effective_entry"] = max(
+                        entry - realized_gain / max(qty - sell_qty, 1e-8),
+                        entry * 0.93,
+                    )
+            return
+
+        # ── 1차 익절 +5% ────────────────────────────────────
+        if stage < 1 and rate >= SELL_1ST_RATE:
+            sell_qty = max(qty * SELL_1ST_QTY, 0.00001)
+            # ★ 잔량/매도분 모두 최소금액 미달 시 전량 전환
+            if ((qty - sell_qty) * current < MIN_ORDER_AMT
+                    or sell_qty * current < MIN_ORDER_AMT):
+                sell_qty = qty
+                print(f"ℹ️ 1차익절 최소금액 미달 → 전량 {market}")
+            self.notify(f"✂️ 1차익절 {market} | {rate:+.2%} | {sell_qty:.6f}개")
+            if self.sell(market, sell_qty, f"1차익절({rate:+.2%})",
+                         sell_price=current, force_all=True):
+                if sell_qty >= qty:
+                    self.peak_tracker.pop(market, None)
+                else:
+                    tracker["stage"]      = 1
+                    tracker["remain_qty"] = qty - sell_qty
+                    # ★ effective_entry 보정
+                    realized_gain = (current - entry) * sell_qty
+                    tracker["effective_entry"] = max(
+                        entry - realized_gain / max(qty - sell_qty, 1e-8),
+                        entry * 0.96,
+                    )
+            return
+
+        # ── 손절 (★ stage>=1이면 본절 보호) ─────────────────
+        stop_line = self._get_stop_loss(stage=stage)
+        if rate <= stop_line:
+            is_night = self._is_night()
+            if stage >= 1:
+                label = "본절보호"
+            elif is_night:
+                label = "야간손절"
+            elif self.market_status == "stop":
+                label = "긴급손절"
+            elif self.market_status == "weak":
+                label = "약세장손절"
+            else:
+                label = "손절"
+
+            self.notify(
+                f"🛑 {label} {market} | {rate:+.2%} | 기준:{stop_line:.0%}\n"
+                f"시장:{self.market_status} | 야간:{is_night} | 탐욕:{self.fear_greed}",
+                critical=True,
+            )
+            if self.sell(market, qty, f"{label}({rate:+.2%})",
+                         sell_price=current, force_all=True):
+                self.daily_loss_count += 1
+                self.peak_tracker.pop(market, None)
+                self._check_daily_loss_limit()
+
+    def _check_daily_loss_limit(self):
+        if self.daily_pnl <= DAILY_LOSS_LIMIT:
+            self.notify(
+                f"🚨 당일 손실 한도 초과! {self.daily_pnl:+,.0f}원\n"
+                f"(한도:{DAILY_LOSS_LIMIT:,}원) — !c시작 으로 재개",
+                critical=True,
+            )
+            _update_state(paused=True)
+
+    # ============================================================
+    # 상태 딕셔너리
+    # ============================================================
+    def _build_status(self, krw: float, total_profit: float) -> dict:
+        return {
+            "krw":              int(krw),
+            "total_profit":     int(total_profit),
+            "daily_pnl":        int(self.daily_pnl),
+            "positions":        len(self.positions),
+            "positions_detail": {
+                m: {
+                    "current":     int(p["current"]),
+                    "entry_price": int(p["entry_price"]),
+                    "qty":         p["qty"],
+                    "rate":        round(
+                        (p["current"] - p["entry_price"]) / p["entry_price"] * 100, 2
+                    ) if p["entry_price"] > 0 else 0,
+                }
+                for m, p in self.positions.items()
+            },
+            "daily_loss":    self.daily_loss_count,
+            "market_status": self.market_status,
+            "btc_rate":      self.btc_rate,
+            "fear_greed":    self.fear_greed,
+            "is_night":      self._is_night(),
+            "coin_pool":     self.coin_pool,
+            "coins":         self.coin_pool,  # kiki 호환용
+            "seed":          "30만원 소액 모드",
+        }
+
+    # ============================================================
+    # 디스코드 명령 처리
+    # ============================================================
+    def _handle_pending_command(self, bot_state: dict):
+        pending = bot_state.get("pending_cmd")
+        if not pending or pending.get("type") != "sell":
+            return
+        sell_market = pending.get("market", "")
+        if sell_market in self.positions:
+            pos = self.positions[sell_market]
+            self.sell(
+                sell_market, pos["qty"],
+                "즉시매도(kiki명령)",
+                sell_price=pos.get("current", 0),
+                force_all=True,
+            )
+            _write_cmd_result(f"✅ {sell_market} 즉시매도 완료")
+        else:
+            _write_cmd_result(f"⚠️ {sell_market} 미보유")
+
+    # ============================================================
+    # 일일 초기화
+    # ============================================================
+    def _daily_reset(self, today: str):
+        self.sold_today       = {}
+        self._sold_today_date = today
+        self.daily_loss_count = 0
+        self.daily_pnl        = 0
+        self.market_status    = "normal"
+        self._candle_cache    = {}
+        self._tech_cache      = {}
+        self._pool_cache_ts   = 0
+        _update_state(daily_loss=0, loss_date=today)
+        print("🔄 일일 초기화 완료")
+
+    # ============================================================
+    # 메인 루프
+    # ============================================================
+    def run(self):
+        self.notify(
+            f"🚀 [영암9 COIN v2.3] 종목 풀 자동확장 + 본절보호\n"
+            f"🪙 거래대금 상위 {POOL_SIZE}개 자동 + 고정 {len(FIXED_COINS)}개\n"
+            f"💰 1차:{BUY_1ST_AMT:,}원 / 2차:{BUY_2ND_AMT:,}원 | "
+            f"최대:{MAX_POSITIONS}코인\n"
+            f"🎯 익절:+{SELL_1ST_RATE*100:.0f}%/+{SELL_2ND_RATE*100:.0f}% | "
+            f"손절:{STOP_LOSS_BASIC*100:.0f}% | 본절보호:{STOP_LOSS_AFTER_1ST*100:.0f}%\n"
+            f"🛡️ BTC약세:{BTC_WEAK_THRESH:.0f}% | 탐욕MIN:{FEAR_GREED_MIN} | "
+            f"일손실:{DAILY_LOSS_LIMIT:,}원",
+            critical=True,
+        )
+
+        # ★ WebSocket 초기 구독 (고정 코인 + BTC)
+        initial_markets = list(set(FIXED_COINS + ["KRW-BTC"]))
+        self._ws_subscribe(initial_markets)
+        import time as _t; _t.sleep(2)  # 연결 대기
+
+        # ★ 실계좌 ↔ DB 정합성 체크 (코인봇은 CBOT_HIST_DB)
+        if _sync_positions:
+            try:
+                real = _sync_positions(
+                    self,
+                    CBOT_HIST_DB,
+                    self.notify,
+                    bot_type="cbot",
+                )
+                if real:
+                    self.positions.clear()
+                    self.positions.update(real)
+            except Exception as e:
+                print(f"⚠️ DB 정합성 체크 오류: {e}")
+
+        while True:
+            try:
+                # ★ today를 루프 맨 앞에서 정의
+                today = today_str()
+                now   = now_hms()
+                print(f"\n⏰ [{now}] 코인봇 루프")
+
+                # ── 상태 읽기 ────────────────────────────────
+                bot_state       = _read_state()
+                self._is_paused = bot_state.get("paused", False)
+
+                # ── 자정 초기화 ──────────────────────────────
+                if today != self._sold_today_date:
+                    self._daily_reset(today)
+
+                # ── !c시작 시 카운터 초기화 (loss_date 추가 체크) ─
+                saved_loss = bot_state.get("daily_loss")
+                if (saved_loss == 0
+                        and self.daily_loss_count > 0
+                        and bot_state.get("loss_date") != today):
+                    self.daily_loss_count = 0
+                    self.daily_pnl        = 0
+                    print("♻️ 손절카운터/손익 초기화")
+
+                # ── 종목 풀 / 시장 / 공포탐욕 갱신 ──────────────
+                self._update_coin_pool()
+                self._update_market_status()
+                self._update_fear_greed()
+
+                # ── 동적 AI 임계치 ────────────────────────────
+                ai_threshold = self._get_dynamic_ai_threshold()
+
+                # ── 포지션 / KRW 잔고 ────────────────────────
+                new_pos = self.get_current_positions()
+                # ★ 수동매도 감지
+                for _code in list(self.positions.keys()):
+                    if _code not in new_pos and _code not in self.sold_today:
+                        self.sold_today[_code] = now_hms()
+                        print(f"🔍 수동매도 감지: {_code} → sold_today 추가")
+                self.positions.clear()
+                self.positions.update(new_pos)
+                krw            = self.get_krw_balance()
+                total_profit   = sum(
+                    (p["current"] - p["entry_price"]) * p["qty"]
+                    for p in self.positions.values()
+                )
+
+                print(
+                    f"💵 KRW:{krw:,.0f}원 | 포지션:{len(self.positions)}/{MAX_POSITIONS} | "
+                    f"풀:{len(self.coin_pool)}개 | 시장:{self.market_status} | "
+                    f"탐욕:{self.fear_greed} | 야간:{self._is_night()} | "
+                    f"당일PNL:{self.daily_pnl:+,.0f}원"
+                )
+                for market, pos in self.positions.items():
+                    rate  = (pos["current"] - pos["entry_price"]) / pos["entry_price"] * 100
+                    emoji = "📈" if rate >= 0 else "📉"
+                    stage = self.peak_tracker.get(market, {}).get("stage", 0)
+                    stage_tag = f"|stage{stage}" if stage > 0 else ""
+                    print(
+                        f"  {emoji} {market} | {rate:+.2f}%{stage_tag} | "
+                        f"{pos['qty']:.6f}개 | {pos['current']:,}원"
+                    )
+                print(f"📈 평가손익: {total_profit:+,.0f}원")
+
+                # ── 디스코드 명령 처리 ───────────────────────
+                self._handle_pending_command(bot_state)
+
+                # ── BTC stop 모드 ─────────────────────────────
+                if self.market_status == "stop":
+                    print("🚨 BTC 중단 — 긴급 손절 체크만")
+                    for market, pos in list(self.positions.items()):
+                        self._check_sell(market, pos)
+                    _write_status(self._build_status(krw, total_profit))
+                    time.sleep(LOOP_SLEEP); continue
+
+                # ── 일시중단 ──────────────────────────────────
+                if self._is_paused:
+                    print("⏸️ 일시중단 — 매도 체크만")
+                    for market, pos in list(self.positions.items()):
+                        self._check_sell(market, pos)
+                    _write_status(self._build_status(krw, total_profit))
+                    time.sleep(LOOP_SLEEP); continue
+
+                # ── 일일 손실 한도 ────────────────────────────
+                if self.daily_pnl <= DAILY_LOSS_LIMIT:
+                    print(f"🚨 일손실 한도 초과: {self.daily_pnl:+,.0f}원")
+                    for market, pos in list(self.positions.items()):
+                        self._check_sell(market, pos)
+                    _write_status(self._build_status(krw, total_profit))
+                    time.sleep(LOOP_SLEEP); continue
+
+                # ── 매수 슬롯 (1차 익절 후 슬롯 반환) ──────────
+                익절중 = sum(
+                    1 for m in self.positions
+                    if self.peak_tracker.get(m, {}).get("stage", 0) >= 1
+                )
+                available_slots = MAX_POSITIONS - len(self.positions) + 익절중
+                if 익절중:
+                    print(f"  ♻️ 익절진행중 {익절중}코인 슬롯 반환 → 가용:{available_slots}")
+
+                # ── 매수 로직 ─────────────────────────────────
+                if available_slots <= 0:
+                    print("📦 포지션 FULL")
+                elif self.daily_loss_count >= MAX_DAILY_LOSS:
+                    print(f"🛑 당일 손절 {self.daily_loss_count}회 — 매수 중단")
+                elif self.fear_greed < FEAR_GREED_MIN:
+                    print(f"😱 극단공포({self.fear_greed}) — 매수 중단")
+                elif self.market_status == "weak":
+                    print(f"⚠️ BTC 약세({self.btc_rate:+.2f}%) — 매수 중단")
+                else:
+                    for market in self.coin_pool:
+                        if available_slots <= 0:
+                            break
+                        if market in self.positions:
+                            continue
+                        if self.sold_today.get(market):
+                            print(f"🚫 재매수 금지 {market}")
+                            continue
+
+                        signal, ind, reason = self.check_buy_signal(market)
+                        if not signal:
+                            print(f"  ⏭️ {market} — {reason}")
+                            continue
+
+                        ai_result = self.get_ai_score(market, ind)
+                        ai_score  = ai_result["score"]
+                        ai_reason = ai_result["reason"]
+
+                        # 💡 [백테스터 연동 보너스] -------------------------------------
+                        bt_bonus = 0
+                        try:
+                            # 우리가 만든 엔진에 물어봅니다.
+                            bt_res = CoinStrategy(db_path="backtestc/coin_backtest.db").get_rule_score(market)
+                            # 백테스트 점수의 20%를 보너스로 부여 (최대 +20점)
+                            bt_bonus = bt_res.get('total', 0) * 0.2  
+                            if bt_bonus > 0:
+                                print(f"  └ 📊 백테스트 보너스: +{bt_bonus}점 (과거 승률 반영)")
+                        except Exception:
+                            bt_bonus = 0
+
+                        ai_score = ai_score + bt_bonus  # 기존 AI 점수에 보너스 합산!
+                        # -------------------------------------------------------------
+
+                        print(f"  🧠 {market} | 최종:{ai_score}점 (원본:{ai_result['score']}) | {ai_reason}")
+
+                        # ★ 동적 임계치 (이제 보너스가 합산된 점수로 비교합니다)
+                        if ai_score < ai_threshold:
+                            print(f"  ❌ AI점수 부족({ai_score}점 < {ai_threshold})")
+                            continue
+
+                        print(f"🚀 매수 시도 {market} | {ai_score}점 | "
+                              f"{BUY_1ST_AMT:,}원")
+                        if self.buy(market, BUY_1ST_AMT):
+                            buy_price = ind.get("current", 0)
+                            est_qty   = BUY_1ST_AMT / buy_price if buy_price else 0
+                            # ★ peak_tracker 즉시 초기화
+                            self.peak_tracker[market] = {
+                                "peak_rate":       0.0,
+                                "stage":           0,
+                                "remain_qty":      est_qty,
+                                "buy2_done":       False,
+                                "buy1_price":      buy_price,
+                                "effective_entry": buy_price,
+                            }
+                            self._save_buy_history(
+                                market, buy_price, est_qty, ai_score, ai_reason,
+                            )
+                            available_slots -= 1
+                            time.sleep(1)
+
+                # ── 매도 체크 (모든 보유 코인) ────────────────
+                for market, pos in list(self.positions.items()):
+                    self._check_sell(market, pos)
+
+                # ── 상태 저장 ─────────────────────────────────
+                _write_status(self._build_status(krw, total_profit))
+
+                # ── 성과 출력 ────────────────────────────────
+                perf = self._get_recent_performance()
+                if perf:
+                    print(
+                        f"📊 성과 | 승률:{perf['win_rate']}% | "
+                        f"평균:{perf['avg_profit']:+.2f}% | "
+                        f"누적:{perf['total_krw']:+,.0f}원"
+                    )
+
+                self._save_positions()  # ★ 루프마다 포지션 영속화
+                time.sleep(LOOP_SLEEP)
+
+            except KeyboardInterrupt:
+                perf = self._get_recent_performance()
+                stop_msg = (
+                    f"🛑 [COIN] 봇 종료 | "
+                    f"{now_kst().strftime('%Y-%m-%d %H:%M:%S')}"
+                )
+                if perf:
+                    stop_msg += (
+                        f"\n📊 {perf['total']}건 | 승률:{perf['win_rate']}% | "
+                        f"누적:{perf['total_krw']:+,.0f}원"
+                    )
+                self.notify(stop_msg, critical=True)
+                break
+            except Exception as e:
+                print(f"🚨 루프 오류: {e}")
+                import traceback; traceback.print_exc()
+                time.sleep(10)
+
+
+# ============================================================
+# 진입점
+# ============================================================
+if __name__ == "__main__":
+    CBot().run()

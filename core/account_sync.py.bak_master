@@ -1,0 +1,122 @@
+"""
+account_sync.py — 실계좌 ↔ DB 정합성 자동 체크/정리
+================================================================
+[하는 일]
+봇 시작 시 실계좌와 DB 미매도 레코드를 비교해서:
+1. 실계좌에 없는 DB 레코드 → 자동 삭제 (이미 매도된 것)
+2. DB에 없는 실계좌 종목   → 경고 알림 (수동 매수된 것)
+3. 수량 불일치             → 수량 보정
+
+[사용법]
+from account_sync import sync_positions
+synced = sync_positions(api, db_path, notify_fn, bot_type="nbot")
+"""
+import sqlite3
+import os
+from typing import Callable
+
+
+def sync_positions(
+    api,
+    db_path: str,
+    notify_fn: Callable,
+    bot_type: str = "nbot",
+) -> dict:
+    """
+    실계좌 ↔ DB 정합성 체크 및 자동 정리.
+    반환: 정리된 실계좌 포지션 dict
+    """
+    print(f"🔍 [{bot_type}] 실계좌 ↔ DB 정합성 체크 중...")
+
+    # 1. 실계좌 조회
+    try:
+        real_pos = api.get_current_positions()
+    except Exception as e:
+        print(f"⚠️ 실계좌 조회 실패: {e}")
+        return {}
+
+    print(f"   실계좌: {len(real_pos)}종목 — {list(real_pos.keys())}")
+
+    # 2. DB 미매도 레코드 조회
+    db_pos = {}
+    try:
+        conn = sqlite3.connect(db_path, timeout=10)
+        rows = conn.execute("""
+            SELECT id, code, buy_price, qty
+            FROM trades
+            WHERE sell_price IS NULL
+            ORDER BY buy_time
+        """).fetchall()
+        conn.close()
+        for row_id, code, buy_price, qty in rows:
+            if code not in db_pos:
+                db_pos[code] = []
+            db_pos[code].append((row_id, buy_price, qty))
+    except Exception as e:
+        print(f"⚠️ DB 조회 실패: {e}")
+        return real_pos
+
+    print(f"   DB 미매도: {len(db_pos)}종목 — {list(db_pos.keys())}")
+
+    # 3. 실계좌에 없는 DB 레코드 삭제
+    ghost_codes = [c for c in db_pos if c not in real_pos]
+    if ghost_codes:
+        try:
+            conn = sqlite3.connect(db_path, timeout=10)
+            for code in ghost_codes:
+                ids = [str(r[0]) for r in db_pos[code]]
+                conn.execute(
+                    f"DELETE FROM trades WHERE id IN ({','.join(ids)})"
+                )
+                print(f"   🗑️ DB 정리: {code} ({len(ids)}건) — 실계좌에 없음")
+            conn.commit()
+            conn.close()
+            notify_fn(
+                f"🔧 [{bot_type}] DB 정합성 정리\n"
+                f"실계좌에 없는 미매도 레코드 삭제: {', '.join(ghost_codes)}",
+                critical=False,
+            )
+        except Exception as e:
+            print(f"⚠️ DB 정리 실패: {e}")
+
+    # 4. 실계좌에 있는데 DB에 없는 종목 → 경고
+    missing_codes = [c for c in real_pos if c not in db_pos]
+    if missing_codes:
+        print(f"   ⚠️ DB 누락 종목: {missing_codes} (수동매수 또는 기록 누락)")
+        notify_fn(
+            f"⚠️ [{bot_type}] DB 누락 종목 발견\n"
+            f"{', '.join(missing_codes)} — 수동매수 또는 기록 누락\n"
+            f"매도 체크는 정상 작동하나 복기/성과에서 누락될 수 있어요",
+            critical=False,
+        )
+
+    # 5. 수량 불일치 체크
+    for code in real_pos:
+        if code not in db_pos:
+            continue
+        real_qty = real_pos[code].get("qty", 0)
+        db_qty   = sum(r[2] for r in db_pos[code])
+        if real_qty != db_qty:
+            print(f"   ⚠️ 수량 불일치 {code}: 실계좌={real_qty} DB={db_qty}")
+            # 수량 보정 (가장 최근 레코드 수량을 실계좌 기준으로)
+            try:
+                conn = sqlite3.connect(db_path, timeout=10)
+                last_id = db_pos[code][-1][0]
+                # 오래된 레코드 삭제 후 최신 레코드 수량 보정
+                if len(db_pos[code]) > 1:
+                    old_ids = [str(r[0]) for r in db_pos[code][:-1]]
+                    conn.execute(
+                        f"DELETE FROM trades WHERE id IN ({','.join(old_ids)})"
+                    )
+                conn.execute(
+                    "UPDATE trades SET qty=? WHERE id=?",
+                    (real_qty, last_id)
+                )
+                conn.commit()
+                conn.close()
+                print(f"   ✅ 수량 보정: {code} {db_qty}주 → {real_qty}주")
+            except Exception as e:
+                print(f"⚠️ 수량 보정 실패: {e}")
+
+    print(f"✅ [{bot_type}] DB 정합성 체크 완료")
+    return real_pos

@@ -1,0 +1,48 @@
+{
+  "paused": false,
+  "pending_cmd": null,
+  "cmd_result": "⚠️ KRW-ETH 미보유",
+  "last_status": {
+    "krw": 291330,
+    "total_profit": 265,
+    "daily_pnl": 0,
+    "positions": 1,
+    "positions_detail": {
+      "KRW-MINA": {
+        "current": 94,
+        "entry_price": 91,
+        "qty": 80.59210528,
+        "rate": 3.62
+      }
+    },
+    "daily_loss": 0,
+    "market_status": "normal",
+    "btc_rate": -1.26136992,
+    "fear_greed": 47,
+    "is_night": false,
+    "coin_pool": [
+      "KRW-BTC",
+      "KRW-ETH",
+      "KRW-XRP",
+      "KRW-SOL",
+      "KRW-B3",
+      "KRW-USDT",
+      "KRW-ORCA",
+      "KRW-ONDO",
+      "KRW-BIO",
+      "KRW-DOGE",
+      "KRW-VIRTUAL",
+      "KRW-FLOCK",
+      "KRW-CFG",
+      "KRW-CPOOL",
+      "KRW-SONIC",
+      "KRW-STX",
+      "KRW-ICP",
+      "KRW-SUI",
+      "KRW-WIF",
+      "KRW-CHIP"
+    ],
+    "seed": "30만원 소액 모드"
+  },
+  "last_update": "06:21:24"
+}

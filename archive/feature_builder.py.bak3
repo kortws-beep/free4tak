@@ -1,0 +1,313 @@
+"""
+feature_builder.py — OHLCV → strategy.py 입력 dict 변환
+================================================================
+[역할]
+strategy.py의 get_rule_score()는 다음 필드를 요구합니다:
+  change_rate, trading_value, volume_ratio, vol_tnrt,
+  rsi, ma5, ma20, ma60,
+  foreign_5d, institution_5d,
+  foreign_today, orgn_today, prsn_today,
+  foreign_ratio, orgn_ratio, buy_pressure,
+  macd_hist, bb_pct, bb_width, stoch_k, candle_pattern
+
+이 모듈은 daily_ohlcv + daily_flow 데이터에서 시점 t의 매수 결정에 쓸
+모든 지표를 계산해줍니다.
+
+[★ Look-ahead Bias 방지]
+시점 t의 매수 결정에는 t-1까지의 데이터로 계산한 지표 + t의 시가만 사용.
+   - MA, RSI, MACD: t-1 종가까지 사용
+   - 외국인/기관 5일/당일: t-1까지 (t는 장 중이라 모름)
+   - change_rate: 시가 매수 가정 시 (t-1 종가→t 시가) 갭 + 0 (당일 이후 변동 모름)
+
+[실시간 운영과의 차이]
+실전에선 장중에 결정 → change_rate=장중 등락, foreign_today=실시간 누적.
+백테스트에선 그날 종가에 결정한다고 가정하면 chage_rate가 미래 정보가 됨.
+→ 본 백테스터는 "다음 거래일 시가에 매수" 모델로 단순화.
+"""
+import sqlite3
+import math
+import pandas as pd
+import numpy as np
+from typing import Optional
+
+
+# ============================================================
+# 캐시 (한 번 로드한 종목 데이터는 메모리에 유지)
+# ============================================================
+class DataLoader:
+    """SQLite에서 종목 데이터를 로드하고 메모리 캐시"""
+
+    def __init__(self, db_path: str):
+        self.db_path = db_path
+        self._ohlcv_cache: dict = {}   # code → DataFrame
+        self._flow_cache:  dict = {}   # code → DataFrame
+
+    def load_ohlcv(self, code: str) -> pd.DataFrame:
+        if code in self._ohlcv_cache:
+            return self._ohlcv_cache[code]
+        conn = sqlite3.connect(self.db_path, timeout=10)
+        df = pd.read_sql(
+            "SELECT date, open, high, low, close, volume, value, change "
+            "FROM daily_ohlcv WHERE code = ? ORDER BY date",
+            conn, params=(code,))
+        conn.close()
+        if not df.empty:
+            df["date"] = pd.to_datetime(df["date"], format='mixed')
+            df = df.set_index("date").sort_index()
+        self._ohlcv_cache[code] = df
+        return df
+
+    def load_flow(self, code: str) -> pd.DataFrame:
+        if code in self._flow_cache:
+            return self._flow_cache[code]
+        conn = sqlite3.connect(self.db_path, timeout=10)
+        df = pd.read_sql(
+            "SELECT date, foreign_qty, orgn_qty, prsn_qty "
+            "FROM daily_flow WHERE code = ? ORDER BY date",
+            conn, params=(code,))
+        conn.close()
+        if not df.empty:
+            df["date"] = pd.to_datetime(df["date"], format="mixed")
+            df = df.set_index("date").sort_index()
+        self._flow_cache[code] = df
+        return df
+
+    def all_codes(self) -> list:
+        conn = sqlite3.connect(self.db_path, timeout=10)
+        rows = conn.execute(
+            "SELECT DISTINCT code FROM daily_ohlcv").fetchall()
+        conn.close()
+        return [r[0] for r in rows]
+
+
+# ============================================================
+# 기술 지표 계산 (벡터화)
+# ============================================================
+def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    OHLCV 데이터프레임에 모든 기술지표를 컬럼으로 추가.
+    벡터화로 전체 시계열 한 번에 계산 → 빠름.
+
+    추가되는 컬럼:
+      ma5, ma20, ma60, ma10
+      rsi, macd_hist, bb_upper, bb_lower, bb_pct, bb_width
+      stoch_k, atr14, candle_pattern
+      vol_ma20, volume_ratio
+    """
+    if df.empty or len(df) < 5:
+        return df.copy()
+
+    out = df.copy()
+    close = out["close"]
+    high  = out["high"]
+    low   = out["low"]
+    vol   = out["volume"]
+
+    # ── 이동평균 ─────────────────────────────────
+    out["ma5"]  = close.rolling(5,  min_periods=5).mean()
+    out["ma10"] = close.rolling(10, min_periods=10).mean()
+    out["ma20"] = close.rolling(20, min_periods=20).mean()
+    out["ma60"] = close.rolling(60, min_periods=60).mean()
+
+    # ── RSI(14) ──────────────────────────────────
+    delta = close.diff()
+    gain  = delta.clip(lower=0).rolling(14, min_periods=14).mean()
+    loss  = (-delta.clip(upper=0)).rolling(14, min_periods=14).mean()
+    rs    = gain / loss.replace(0, np.nan)
+    out["rsi"] = 100 - (100 / (1 + rs))
+    out["rsi"] = out["rsi"].fillna(50)
+
+    # ── MACD (12, 26, 9) ─────────────────────────
+    ema12 = close.ewm(span=12, adjust=False).mean()
+    ema26 = close.ewm(span=26, adjust=False).mean()
+    macd  = ema12 - ema26
+    sig   = macd.ewm(span=9, adjust=False).mean()
+    out["macd_hist"] = macd - sig
+
+    # ── Bollinger Bands (20, 2σ) ─────────────────
+    mid   = close.rolling(20, min_periods=20).mean()
+    std   = close.rolling(20, min_periods=20).std()
+    upper = mid + 2 * std
+    lower = mid - 2 * std
+    out["bb_upper"] = upper
+    out["bb_lower"] = lower
+    # bb_pct: 0=하단, 1=상단
+    band_range = (upper - lower).replace(0, np.nan)
+    out["bb_pct"]   = ((close - lower) / band_range).fillna(0.5).clip(0, 1)
+    # bb_width: (upper-lower)/mid (밴드 폭 비율)
+    out["bb_width"] = ((upper - lower) / mid.replace(0, np.nan)).fillna(0)
+
+    # ── Stochastic K (14) ────────────────────────
+    ll = low.rolling(14, min_periods=14).min()
+    hh = high.rolling(14, min_periods=14).max()
+    rng = (hh - ll).replace(0, np.nan)
+    out["stoch_k"] = ((close - ll) / rng * 100).fillna(50)
+
+    # ── ATR(14) ──────────────────────────────────
+    prev_close = close.shift(1)
+    tr1 = high - low
+    tr2 = (high - prev_close).abs()
+    tr3 = (low  - prev_close).abs()
+    tr  = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+    out["atr14"] = tr.rolling(14, min_periods=14).mean()
+
+    # ── 거래량 비율 (20일 평균 대비) ─────────────
+    vol_ma20 = vol.rolling(20, min_periods=20).mean()
+    out["vol_ma20"]     = vol_ma20
+    out["volume_ratio"] = (vol / vol_ma20.replace(0, np.nan) * 100).fillna(100)
+
+    # ── 캔들 패턴 (간이) ─────────────────────────
+    # 망치형: 하단꼬리 길고 몸통 작음 + 직전 하락
+    # 역망치형: 상단꼬리 길고 몸통 작음 + 직전 상승
+    body       = (close - out["open"]).abs()
+    upper_wick = high - np.maximum(close, out["open"])
+    lower_wick = np.minimum(close, out["open"]) - low
+    is_hammer  = (lower_wick > body * 2) & (upper_wick < body) & \
+                 (close.shift(1) < close.shift(2))
+    is_inverted = (upper_wick > body * 2) & (lower_wick < body) & \
+                  (close.shift(1) > close.shift(2))
+    out["candle_pattern"] = 0
+    out.loc[is_hammer,   "candle_pattern"] = 1
+    out.loc[is_inverted, "candle_pattern"] = -1
+
+    return out
+
+
+# ============================================================
+# 시점 t에서의 strategy.py 입력 dict 빌드
+# ============================================================
+def build_features_at(loader: DataLoader,
+                      code: str,
+                      decision_date: pd.Timestamp) -> Optional[dict]:
+    """
+    decision_date 시점에 매수 결정을 한다고 가정.
+    → 사용 가능 정보: decision_date "이전" 거래일까지의 종가/지표
+
+    [반환]
+    strategy.py.get_rule_score()와 passes_buy_filter()에 그대로
+    넘길 수 있는 dict. 데이터 부족 시 None.
+    """
+    df = loader.load_ohlcv(code)
+    if df.empty:
+        return None
+
+    # 지표 계산 (캐시 효과: 같은 종목 반복 호출해도 OK)
+    if "ma20" not in df.columns:
+        df = compute_indicators(df)
+        loader._ohlcv_cache[code] = df  # 캐시에 갱신본 저장
+
+    # decision_date 이전 데이터만 사용
+    prev = df[df.index < decision_date]
+    if len(prev) < 60:   # ma60 계산에 필요
+        return None
+    last = prev.iloc[-1]
+
+    # NaN 안전화
+    def f(val, default=0):
+        try:
+            v = float(val)
+            return default if (math.isnan(v) or math.isinf(v)) else v
+        except (TypeError, ValueError):
+            return default
+
+    # ── 수급 ──────────────────────────────────────
+    flow_df = loader.load_flow(code)
+    foreign_5d = orgn_5d = 0
+    foreign_today = orgn_today = prsn_today = 0
+    if not flow_df.empty:
+        flow_prev = flow_df[flow_df.index < decision_date]
+        if not flow_prev.empty:
+            recent5 = flow_prev.tail(5)
+            foreign_5d = int(recent5["foreign_qty"].sum())
+            orgn_5d    = int(recent5["orgn_qty"].sum())
+            # "today"는 백테스트 맥락에서 직전일 = 가장 최근 신호
+            last_flow = flow_prev.iloc[-1]
+            foreign_today = int(last_flow["foreign_qty"])
+            orgn_today    = int(last_flow["orgn_qty"])
+            prsn_today    = int(last_flow["prsn_qty"])
+
+    # ── 거래대금 (억 단위) — strategy.py 가정 ────
+    trading_value_eok = f(last["value"]) / 1e8
+
+    # ── 거래량 회전율 (간이: 최근거래량/20일평균) ─
+    vol_tnrt = 0
+    if f(last.get("vol_ma20", 0)) > 0:
+        vol_tnrt = (f(last["volume"]) / f(last["vol_ma20"])) * 10
+
+    return {
+        # 가격 정보
+        "code":            code,
+        "current_price":   f(last["close"]),
+        "open_price":      f(last["open"]),
+        "high_price":      f(last["high"]),
+        "low_price":       f(last["low"]),
+        # 등락률 (당일 마감 기준 — 다음날 시가매수 모델)
+        "change_rate":     f(last["change"]),
+        # 거래
+        "trading_value":   trading_value_eok,
+        "volume_ratio":    f(last.get("volume_ratio", 100)),
+        "vol_tnrt":        vol_tnrt,
+        # 추세
+        "rsi":             f(last.get("rsi", 50), 50),
+        "ma5":             f(last.get("ma5", 0)),
+        "ma10":            f(last.get("ma10", 0)),
+        "ma20":            f(last.get("ma20", 0)),
+        "ma60":            f(last.get("ma60", 0)),
+        # 수급
+        "foreign_5d":      foreign_5d,
+        "institution_5d":  orgn_5d,
+        "foreign_today":   foreign_today,
+        "orgn_today":      orgn_today,
+        "prsn_today":      prsn_today,
+        # 백테스트 한계: 실시간 외국인 비율/매수압력은 일봉으로 추정 불가
+        "foreign_ratio":   50,    # 중립 가정
+        "orgn_ratio":      50,
+        "buy_pressure":    0,
+        # 기술지표
+        "macd_hist":       f(last.get("macd_hist", 0)),
+        "bb_pct":          f(last.get("bb_pct", 0.5), 0.5),
+        "bb_width":        f(last.get("bb_width", 0)),
+        "stoch_k":         f(last.get("stoch_k", 50), 50),
+        "candle_pattern":  int(f(last.get("candle_pattern", 0))),
+        # 변동성 (risk_manager용)
+        "atr14":           f(last.get("atr14", 0)),
+        "atr_rate":        f(last.get("atr14", 0)) / max(f(last["close"]), 1),
+    }
+
+
+# ============================================================
+# 매도용: 시점 t의 가격 정보 (KIS API 응답 형식)
+# ============================================================
+def get_market_data_at(loader: DataLoader,
+                        code: str,
+                        date: pd.Timestamp,
+                        price_type: str = "close") -> Optional[dict]:
+    """
+    매도 체크용 가격 정보. strategy.py.check_sell()이 요구하는
+    한투 API 응답 형식 (stck_prpr=현재가) 으로 반환.
+
+    price_type:
+      'close': 종가 (보수적, 갭 전 마지막 가격)
+      'open':  시가 (다음날 시가매도 시뮬용)
+      'high':  고가 (장중 익절 시뮬용 — look-ahead 주의)
+      'low':   저가 (장중 손절 시뮬용 — look-ahead 주의)
+    """
+    df = loader.load_ohlcv(code)
+    if df.empty or date not in df.index:
+        return None
+    row = df.loc[date]
+    if hasattr(row, 'iloc'):   # 중복 날짜 → DataFrame 반환 방어
+        row = row.iloc[-1]
+    price_map = {
+        "close": float(row["close"]),
+        "open":  float(row["open"]),
+        "high":  float(row["high"]),
+        "low":   float(row["low"]),
+    }
+    return {
+        "stck_prpr":   str(int(price_map.get(price_type, price_map["close"]))),
+        "stck_oprc":   str(int(price_map["open"])),
+        "stck_hgpr":   str(int(price_map["high"])),
+        "stck_lwpr":   str(int(price_map["low"])),
+        "prdy_ctrt":   str(float(row["change"])),
+    }

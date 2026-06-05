@@ -1,0 +1,812 @@
+"""
+assistant.py — 영암9 AI 비서 디스코드 봇
+==========================================
+사용자의 자연어 메시지를 Claude Sonnet이 해석하여
+kis10_realtrade.py 매매봇에 명령을 전달하고 결과를 디스코드로 응답.
+
+[지원 명령어]
+  !상태          : 현재 포지션/손익/캐시 현황
+  !점수기준 70   : BUY_SCORE_ENTER 실시간 변경
+  !매도 005930   : 특정 종목 즉시 매도
+  !분석 010820   : 특정 종목 AI 분석 결과 조회
+  !정지 / !시작  : 매매 일시 중단/재개
+  !브리핑        : 즉시 모닝 브리핑
+  !성과          : 최근 매매 이력 통계
+  !도움말        : 명령어 목록
+
+[환경변수 (.env)]
+  DISCORD_BOT_TOKEN   : 디스코드 봇 토큰
+  DISCORD_CHANNEL_ID  : 명령 수신 채널 ID
+  ANTHROPIC_API_KEY   : Claude API 키
+  KMA_API_KEY         : 기상청 API 키 (날씨 조회)
+  NAVER_CLIENT_ID     : 네이버 검색 API 클라이언트 ID (선택)
+  NAVER_CLIENT_SECRET : 네이버 검색 API 시크릿 (선택)
+
+[실행]
+  pip install discord.py
+  python3 assistant.py   (kis10_realtrade.py 와 별도로 실행)
+"""
+
+import os
+import json
+import sqlite3
+import asyncio
+import datetime
+import urllib.parse
+import xml.etree.ElementTree as ET
+
+try:
+    import pytz
+    KST = pytz.timezone("Asia/Seoul")
+    def now_kst():
+        return datetime.datetime.now(KST)
+except ImportError:
+    def now_kst():
+        return (
+            datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+            + datetime.timedelta(hours=9)
+        )
+
+import requests
+import discord
+from discord.ext import commands
+from anthropic import Anthropic
+from dotenv import load_dotenv
+
+load_dotenv()
+
+
+# ============================================================
+# 설정
+# ============================================================
+BOT_TOKEN      = os.getenv("DISCORD_BOT_TOKEN")
+CHANNEL_ID     = int(os.getenv("DISCORD_CHANNEL_ID", "0"))
+TRADE_HIST_DB  = "trade_history.db"
+AI_CACHE_DB    = "ai_cache.db"
+BOT_STATE_FILE = "bot_state.json"   # kis10_realtrade.py와 공유하는 상태 파일
+
+
+# ============================================================
+# 봇 상태 파일 헬퍼 (kis10_realtrade.py ↔ assistant.py 공유)
+#
+# 파일 구조:
+# {
+#   "paused":      false,       ← 매매 일시 중단 여부
+#   "score_enter": 55,          ← 현재 매수 기준 점수
+#   "pending_cmd": null,        ← 대기 명령 {"type": "sell", "code": "005930"}
+#   "cmd_result":  null,        ← 명령 처리 결과 문자열
+#   "last_status": {...}        ← 매매봇이 주기적으로 기록하는 상태
+# }
+# ============================================================
+
+def read_state() -> dict:
+    """bot_state.json을 읽어 반환한다. 파일이 없으면 기본값 반환."""
+    try:
+        if os.path.exists(BOT_STATE_FILE):
+            with open(BOT_STATE_FILE, "r") as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {
+        "paused":      False,
+        "score_enter": 55,
+        "pending_cmd": None,
+        "cmd_result":  None,
+        "last_status": None,
+    }
+
+
+def write_state(state: dict):
+    """bot_state.json에 상태를 저장한다."""
+    try:
+        with open(BOT_STATE_FILE, "w") as f:
+            json.dump(state, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"⚠️ 상태 파일 저장 오류: {e}")
+
+
+def update_state(**kwargs):
+    """bot_state.json을 부분 업데이트한다."""
+    state = read_state()
+    state.update(kwargs)
+    write_state(state)
+
+
+# ============================================================
+# DB 조회 헬퍼
+# ============================================================
+
+def get_recent_performance(limit: int = 20) -> list:
+    """trade_history.db에서 최근 N건의 완료된 매매 이력을 조회한다."""
+    try:
+        conn = sqlite3.connect(TRADE_HIST_DB)
+        rows = conn.execute("""
+            SELECT profit_rate, sell_reason, ai_score, code,
+                   buy_price, sell_price, buy_time, sell_time
+            FROM trades
+            WHERE sell_price IS NOT NULL
+            ORDER BY id DESC LIMIT ?
+        """, (limit,)).fetchall()
+        conn.close()
+        return rows
+    except Exception:
+        return []
+
+
+def get_open_positions_from_db() -> list:
+    """trade_history.db에서 미매도 포지션을 조회한다."""
+    try:
+        conn = sqlite3.connect(TRADE_HIST_DB)
+        rows = conn.execute("""
+            SELECT code, buy_price, qty, ai_score, buy_time
+            FROM trades
+            WHERE sell_price IS NULL
+            ORDER BY buy_time DESC
+        """).fetchall()
+        conn.close()
+        return rows
+    except Exception:
+        return []
+
+
+def get_ai_cache_info() -> tuple:
+    """ai_cache.db에서 최근 20건의 분석 결과와 전체 캐시 수를 반환한다."""
+    try:
+        conn = sqlite3.connect(AI_CACHE_DB)
+        rows = conn.execute("""
+            SELECT code, score, reason, analyzed_at
+            FROM ai_analysis
+            ORDER BY analyzed_at DESC LIMIT 20
+        """).fetchall()
+        total = conn.execute("SELECT COUNT(*) FROM ai_analysis").fetchone()[0]
+        conn.close()
+        return rows, total
+    except Exception:
+        return [], 0
+
+
+# ============================================================
+# AI 비서 (Claude Sonnet 기반)
+# ============================================================
+
+class AIAssistant:
+    """키키 — 검색·봇 제어·대화를 모두 처리하는 Claude Sonnet 기반 AI 비서."""
+
+    # 기상청 격자 좌표 (지역명: (nx, ny))
+    LOCATIONS = {
+        "도포면": (57, 74),
+        "영암":   (58, 74),
+        "목포":   (50, 67),
+        "나주":   (56, 77),
+        "해남":   (54, 65),
+        "광주":   (60, 74),
+        "강진":   (56, 68),
+        "무안":   (52, 71),
+        "운남면": (52, 70),
+    }
+
+    # 기상청 코드 매핑
+    PTY_CODE = {"0": "없음", "1": "비", "2": "비/눈", "3": "눈", "4": "소나기"}
+    SKY_CODE = {"1": "맑음", "3": "구름많음", "4": "흐림"}
+
+    # 구어체 → 검색어 자동 변환 사전
+    SEARCH_SHORTCUTS = {
+        "미국장":  "미국 증시 나스닥 다우 오늘",
+        "미국 장": "미국 증시 나스닥 다우 오늘",
+        "나스닥":  "나스닥 오늘 시황",
+        "트럼프":  "트럼프 발언 뉴스 오늘",
+        "중동":    "중동 상황 뉴스 오늘",
+        "환율":    "원달러 환율 오늘",
+        "코스피":  "코스피 오늘 시황",
+        "코스닥":  "코스닥 오늘 시황",
+        "유가":    "국제유가 WTI 오늘",
+        "금값":    "금 시세 오늘",
+        "반도체":  "반도체 뉴스 오늘",
+        "기아":    "기아 타이거즈 경기 결과",
+        "삼성":    "삼성전자 뉴스 오늘",
+        "선물":    "코스피 선물 오늘",
+    }
+
+    def __init__(self):
+        self.llm     = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+        self.history = []
+
+    # ----------------------------------------------------------
+    # 날씨 조회 (기상청 초단기실황 API)
+    # ----------------------------------------------------------
+
+    def _get_weather_kma(self, nx: int, ny: int) -> str:
+        """기상청 초단기실황 API로 특정 격자 좌표의 날씨를 조회한다."""
+        try:
+            auth_key = os.getenv("KMA_API_KEY", "")
+            if not auth_key:
+                return "기상청 API 키 없음"
+
+            target = datetime.datetime.now() - datetime.timedelta(minutes=45)
+            url    = "https://apihub.kma.go.kr/api/typ02/openApi/VilageFcstInfoService_2.0/getUltraSrtNcst"
+            params = {
+                "pageNo": "1", "numOfRows": "1000", "dataType": "JSON",
+                "base_date": target.strftime("%Y%m%d"),
+                "base_time": target.strftime("%H00"),
+                "nx": nx, "ny": ny, "authKey": auth_key,
+            }
+            items = (
+                requests.get(url, params=params, timeout=5)
+                .json()
+                .get("response", {})
+                .get("body", {})
+                .get("items", {})
+                .get("item", [])
+            )
+            data     = {item["category"]: item["obsrValue"] for item in items}
+            pty      = self.PTY_CODE.get(data.get("PTY", "0"), "없음")
+            weather  = "비" if pty != "없음" else "맑음"
+            return (
+                f"{weather} / {data.get('T1H', '?')}°C"
+                f" / 습도:{data.get('REH', '?')}%"
+                f" / 풍속:{data.get('WSD', '?')}m/s"
+            )
+        except Exception as e:
+            return f"날씨 오류: {e}"
+
+    def _get_weather(self, location: str = "도포면") -> str:
+        """지역명으로 날씨를 조회한다."""
+        coords = self.LOCATIONS.get(location)
+        if not coords:
+            return f"{location} 좌표 없음"
+        return self._get_weather_kma(*coords)
+
+    def _get_weather_region(self) -> str:
+        """주요 지역 5곳의 날씨를 조회해 한 문자열로 반환한다."""
+        regions = ["도포면", "목포", "영암", "나주", "해남"]
+        return "\n".join(f"  {name}: {self._get_weather(name)}" for name in regions)
+
+    # ----------------------------------------------------------
+    # 뉴스 검색
+    # ----------------------------------------------------------
+
+    def _web_search(self, query: str) -> str:
+        """네이버 뉴스 API로 검색. API 키 없으면 Google News RSS로 폴백."""
+        import re
+        client_id     = os.getenv("NAVER_CLIENT_ID", "")
+        client_secret = os.getenv("NAVER_CLIENT_SECRET", "")
+
+        # 네이버 API 키 없을 때 → Google News RSS 폴백
+        if not client_id or not client_secret:
+            try:
+                encoded = urllib.parse.quote(query)
+                url     = f"https://news.google.com/rss/search?q={encoded}&hl=ko&gl=KR&ceid=KR:ko"
+                res     = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=5)
+                root    = ET.fromstring(res.content)
+                results = []
+                for item in root.findall(".//item")[:5]:
+                    title = item.findtext("title", "").strip()
+                    desc  = re.sub(r"<[^>]+>", "", item.findtext("description", "")).strip()[:80]
+                    if title:
+                        results.append(f"- {title} ({desc})")
+                return "\n".join(results) if results else "검색 결과 없음"
+            except Exception as e:
+                return f"검색 실패: {e}"
+
+        # 네이버 뉴스 검색 API
+        try:
+            encoded = urllib.parse.quote(query)
+            url     = f"https://openapi.naver.com/v1/search/news.json?query={encoded}&display=5&sort=date"
+            headers = {
+                "X-Naver-Client-Id":     client_id,
+                "X-Naver-Client-Secret": client_secret,
+            }
+            items = requests.get(url, headers=headers, timeout=5).json().get("items", [])
+            if not items:
+                return "검색 결과 없음"
+            results = []
+            for item in items:
+                title = re.sub(r"<[^>]+>", "", item.get("title", "")).strip()
+                desc  = re.sub(r"<[^>]+>", "", item.get("description", "")).strip()[:80]
+                date  = item.get("pubDate", "")[:16]
+                if title:
+                    results.append(f"- {title} ({desc}) [{date}]")
+            return "\n".join(results)
+        except Exception as e:
+            print(f"네이버 검색 오류: {e}")
+            return "검색 실패"
+
+    # ----------------------------------------------------------
+    # 메인 해석 (Claude Sonnet)
+    # ----------------------------------------------------------
+
+    def interpret(self, user_msg: str, current_state: dict) -> str:
+        """사용자 메시지를 해석해 응답 또는 CMD: 형식의 봇 제어 명령을 반환한다."""
+        now = now_kst().strftime("%Y-%m-%d %H:%M")
+
+        # 날씨 질문 감지 → 기상청 API 직접 조회
+        weather_keywords = ["날씨", "기온", "온도", "비", "눈", "맑", "흐림"]
+        if any(kw in user_msg for kw in weather_keywords):
+            detected_loc = next(
+                (loc for loc in self.LOCATIONS if loc in user_msg), None
+            )
+            weather_hint = "\n[날씨 정보]\n" + (
+                f"  {detected_loc}: {self._get_weather(detected_loc)}"
+                if detected_loc else self._get_weather_region()
+            )
+        else:
+            weather_hint = ""
+
+        # 검색 키워드 힌트
+        search_hint = weather_hint
+        for k, v in self.SEARCH_SHORTCUTS.items():
+            if k in user_msg:
+                search_hint += f"\n[검색 힌트] '{k}' → search_news('{v}') 로 검색하세요"
+                break
+
+        system = f"""너의 이름은 키키야. 자유롭게 뭐든 답해주는 만능 AI 비서야.
+오늘: {now}
+봇 상태: {'일시중단' if current_state.get('paused') else '실행중'} / 기준점수: {current_state.get('score_enter', 70)}점
+{search_hint}
+
+[규칙]
+- 뭐든 물어보면 무조건 답해줘. 역할 제한 없어.
+- 최신 정보가 필요하면 반드시 search_news 툴로 검색해줘.
+- 한국어로 3줄 이내 간결하게 답해줘.
+- 봇 제어 요청이면 CMD: 형식으로 답해.
+
+[봇 제어 형식]
+CMD:!상태 / CMD:!점수기준 숫자 / CMD:!매도 종목코드 / CMD:!분석 종목코드
+CMD:!정지 / CMD:!시작 / CMD:!성과 / CMD:!도움말"""
+
+        tools = [{
+            "name": "search_news",
+            "description": "최신 뉴스 검색. 시장/종목/정치/스포츠 등 모든 최신 정보에 사용.",
+            "input_schema": {
+                "type": "object",
+                "properties": {"query": {"type": "string", "description": "검색 키워드"}},
+                "required": ["query"],
+            },
+        }]
+
+        self.history.append({"role": "user", "content": user_msg})
+        messages = self.history[-10:]
+        res      = self.llm.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=500,
+            system=system,
+            tools=tools,
+            messages=messages,
+        )
+
+        # 툴 호출 루프 (최대 3회)
+        for i in range(3):
+            if res.stop_reason != "tool_use":
+                break
+            tool_results = []
+            for block in res.content:
+                if block.type == "tool_use" and block.name == "search_news":
+                    query  = block.input.get("query", user_msg)
+                    print(f"🔍 키키 검색: {query}")
+                    result = self._web_search(query)
+                    print(f"📰 결과: {result[:100]}")
+                    tool_results.append({
+                        "type":        "tool_result",
+                        "tool_use_id": block.id,
+                        "content":     result,
+                    })
+            messages = messages + [
+                {"role": "assistant", "content": res.content},
+                {"role": "user",      "content": tool_results},
+            ]
+            res = self.llm.messages.create(
+                model="claude-sonnet-4-6",
+                max_tokens=500,
+                system=system,
+                tools=tools,
+                messages=messages,
+            )
+            print(f"검색 {i+2}차 stop_reason: {res.stop_reason}")
+
+        reply = "".join(b.text for b in res.content if hasattr(b, "text")).strip()
+        self.history.append({"role": "assistant", "content": reply})
+        return reply or "응답을 생성하지 못했어요."
+
+
+# ============================================================
+# 디스코드 봇 설정
+# ============================================================
+
+intents = discord.Intents.default()
+intents.message_content = True
+
+bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
+ai  = AIAssistant()
+
+
+# ============================================================
+# 유틸리티
+# ============================================================
+
+async def send_long(ctx, text: str, max_len: int = 1900):
+    """1900자를 초과하는 메시지를 분할해서 전송한다."""
+    for i in range(0, len(text), max_len):
+        await ctx.send(text[i:i + max_len])
+
+
+async def execute_command(ctx, cmd: str):
+    """!명령어 문자열을 파싱해 해당 핸들러를 호출한다."""
+    cmd = cmd.strip()
+
+    if cmd == "!상태":
+        await cmd_status(ctx)
+    elif cmd.startswith("!점수기준"):
+        parts = cmd.split()
+        if len(parts) == 2 and parts[1].isdigit():
+            await cmd_score(ctx, int(parts[1]))
+        else:
+            await ctx.send("❌ 사용법: !점수기준 70")
+    elif cmd.startswith("!매도"):
+        parts = cmd.split()
+        if len(parts) == 2:
+            await cmd_sell(ctx, parts[1])
+        else:
+            await ctx.send("❌ 사용법: !매도 005930")
+    elif cmd.startswith("!분석"):
+        parts = cmd.split()
+        if len(parts) == 2:
+            await cmd_analyze(ctx, parts[1])
+        else:
+            await ctx.send("❌ 사용법: !분석 005930")
+    elif cmd == "!정지":
+        await cmd_pause(ctx, True)
+    elif cmd == "!시작":
+        await cmd_pause(ctx, False)
+    elif cmd == "!브리핑":
+        await cmd_briefing(ctx)
+    elif cmd == "!성과":
+        await cmd_performance(ctx)
+    elif cmd == "!도움말":
+        await cmd_help(ctx)
+    else:
+        await ctx.send(f"⚠️ 알 수 없는 명령어: {cmd}\n`!도움말` 로 목록 확인")
+
+
+# ============================================================
+# 명령어 핸들러
+# ============================================================
+
+async def cmd_status(ctx):
+    """현재 포지션/예수금/손익 현황을 출력한다."""
+    state    = read_state()
+    status   = state.get("last_status", {})
+    pos_rows = get_open_positions_from_db()
+    now      = now_kst().strftime("%H:%M:%S")
+    paused   = "⏸️ 일시중단" if state.get("paused") else "▶️ 실행중"
+
+    msg = (
+        f"📊 **영암9 현황** [{now}]\n"
+        f"상태: {paused}\n"
+        f"매수기준: {state.get('score_enter', 70)}점\n"
+    )
+    if status:
+        msg += (
+            f"💵 예수금: {status.get('cash', 0):,}원\n"
+            f"💰 주문가능: {status.get('psbl_cash', 0):,}원\n"
+            f"📈 총손익: {status.get('total_profit', 0):+,}원\n"
+        )
+    if pos_rows:
+        msg += "\n**📦 보유종목 (DB 기준)**\n"
+        for code, bp, qty, ais, bt in pos_rows:
+            msg += f"  {code} | 매수가:{bp:,}원 | {qty}주 | AI:{ais}점\n"
+    else:
+        msg += "\n보유종목 없음\n"
+
+    await send_long(ctx, msg)
+
+
+async def cmd_score(ctx, score: int):
+    """매수 기준 점수를 변경한다."""
+    if not 0 <= score <= 100:
+        await ctx.send("❌ 점수는 0~100 사이여야 해요")
+        return
+    update_state(score_enter=score)
+    await ctx.send(f"✅ 매수 기준 점수 변경: **{score}점**\n(다음 루프부터 적용)")
+
+
+async def cmd_sell(ctx, code: str):
+    """특정 종목 즉시 매도 명령을 전달한다. 종목명 입력 시 코드로 자동 변환."""
+    # 종목명 입력 시 코드로 변환
+    if not code.isdigit():
+        state         = read_state()
+        code_name_map = state.get("last_status", {}).get("code_name_map", {})
+        found = next(
+            (c for c, name in code_name_map.items() if code in name or name in code),
+            None
+        )
+        if found:
+            await ctx.send(f"🔍 종목명 '{code}' → 코드 **{found}** 로 변환")
+            code = found
+        else:
+            try:
+                conn = sqlite3.connect(TRADE_HIST_DB)
+                row  = conn.execute("""
+                    SELECT code FROM trades
+                    WHERE sell_price IS NULL AND stock_name LIKE ?
+                    ORDER BY id DESC LIMIT 1
+                """, (f"%{code}%",)).fetchone()
+                conn.close()
+                if row:
+                    await ctx.send(f"🔍 종목명 '{code}' → 코드 **{row[0]}** 로 변환")
+                    code = row[0]
+                else:
+                    await ctx.send(f"❌ '{code}' 종목을 찾을 수 없어요\n직접 코드로 입력: !매도 005935")
+                    return
+            except Exception as e:
+                await ctx.send(f"❌ 종목 검색 오류: {e}")
+                return
+
+    update_state(pending_cmd={"type": "sell", "code": code})
+    await ctx.send(f"📤 매도 명령 전달: **{code}**\n(다음 루프에서 실행)")
+
+    # 최대 60초 대기 후 결과 확인
+    for _ in range(12):
+        await asyncio.sleep(5)
+        state  = read_state()
+        result = state.get("cmd_result")
+        if result:
+            update_state(cmd_result=None)
+            await ctx.send(f"✅ 결과: {result}")
+            return
+
+    await ctx.send("⚠️ 응답 없음 — kis10_realtrade.py 실행 중인지 확인하세요")
+
+
+async def cmd_analyze(ctx, code: str):
+    """AI 캐시 DB에서 종목 분석 결과를 조회해 출력한다."""
+    await ctx.send(f"🔍 {code} 분석 중...")
+    try:
+        conn = sqlite3.connect(AI_CACHE_DB)
+        row  = conn.execute(
+            "SELECT score, reason, analyzed_at FROM ai_analysis WHERE code = ?",
+            (code,)
+        ).fetchone()
+        conn.close()
+        if row:
+            score, reason, at = row
+            await ctx.send(
+                f"🧠 **{code} AI 분석 결과**\n"
+                f"점수: {score}점\n"
+                f"이유: {reason}\n"
+                f"분석시각: {at}"
+            )
+        else:
+            await ctx.send(f"ℹ️ {code} 분석 기록 없음\n(장중에 종목 풀에 포함되면 자동 분석)")
+    except Exception as e:
+        await ctx.send(f"❌ 조회 오류: {e}")
+
+
+async def cmd_pause(ctx, pause: bool):
+    """매매를 일시 중단하거나 재개한다."""
+    update_state(paused=pause)
+    if pause:
+        await ctx.send("⏸️ **매매 일시 중단**\n분석은 계속되나 매수/매도 실행 안 됨")
+    else:
+        await ctx.send("▶️ **매매 재개**\n정상 운영 중")
+
+
+async def cmd_performance(ctx):
+    """최근 매매 성과 통계를 출력한다."""
+    rows = get_recent_performance(limit=20)
+    if not rows:
+        await ctx.send("📊 매매 이력 없음")
+        return
+
+    profits  = [r[0] for r in rows]
+    wins     = [p for p in profits if p >= 0]
+    win_rate = round(len(wins) / len(profits) * 100, 1)
+    avg      = round(sum(profits) / len(profits), 2)
+
+    msg = (
+        f"📊 **최근 {len(profits)}건 성과**\n"
+        f"승률: {win_rate}% | 평균: {avg:+.2f}%\n"
+        f"최고: {max(profits):+.2f}% | 최저: {min(profits):+.2f}%\n\n"
+        f"**최근 5건**\n"
+    )
+    for pr, sr, ais, code, bp, sp, bt, st in rows[:5]:
+        msg += f"  {code} | {pr:+.2f}% | {sr} | AI:{ais}점\n"
+
+    await send_long(ctx, msg)
+
+
+async def cmd_briefing(ctx):
+    """즉시 모닝 브리핑을 생성해 전송한다."""
+    await ctx.send("🌅 **브리핑 준비 중...**")
+    await _send_briefing(ctx)
+
+
+async def cmd_help(ctx):
+    """명령어 목록을 출력한다."""
+    msg = """📖 **영암9 AI 비서 명령어**
+
+**직접 명령어:**
+  `!상태`          — 현재 포지션/손익 확인
+  `!점수기준 70`   — 매수 기준 점수 변경
+  `!매도 005930`   — 특정 종목 즉시 매도
+  `!분석 010820`   — 특정 종목 AI 분석
+  `!정지`          — 매매 일시 중단
+  `!시작`          — 매매 재개
+  `!브리핑`        — 즉시 모닝 브리핑
+  `!성과`          — 최근 매매 통계
+  `!도움말`        — 이 메시지
+
+**자연어로도 가능해요:**
+  "오늘 장 별로니까 기준 높여줘"
+  "삼성전자 팔아줘"
+  "지금 얼마 벌었어?"
+  "잠깐 멈춰줘"
+"""
+    await ctx.send(msg)
+
+
+# ============================================================
+# 브리핑 공통 로직
+# ============================================================
+
+async def _send_briefing(target):
+    """모닝 브리핑을 생성해 target(ctx 또는 채널)으로 전송한다."""
+    now    = now_kst()
+    state  = read_state()
+    status = state.get("last_status", {})
+
+    searches = [
+        ("🇺🇸 미국장",   "미국 증시 나스닥 다우 어제 결과"),
+        ("💱 환율",      "원달러 환율 오늘"),
+        ("🌤️ 날씨",     None),
+        ("🌍 해외뉴스",  "트럼프 중동 뉴스 오늘"),
+        ("📈 코스피선물", "코스피 선물 오늘 전망"),
+    ]
+
+    msg = f"🌅 **[영암9 모닝 브리핑] {now.strftime('%m/%d %H:%M')}**\n"
+    msg += "━━━━━━━━━━━━━━━━━━━━\n"
+
+    for label, query in searches:
+        if query is None:
+            first = "\n" + ai._get_weather_region()
+        else:
+            result = ai._web_search(query)
+            first  = (
+                result.split("\n")[0].replace("- ", "")[:80]
+                if result != "검색 결과 없음" else "정보 없음"
+            )
+        msg += f"{label}: {first}\n"
+
+    msg += "━━━━━━━━━━━━━━━━━━━━\n"
+    msg += f"🤖 봇: {'⏸️ 일시중단' if state.get('paused') else '▶️ 실행중'} | 기준: {state.get('score_enter', 70)}점\n"
+    if status:
+        msg += f"💰 주문가능: {status.get('psbl_cash', 0):,}원 | 손익: {status.get('total_profit', 0):+,}원\n"
+    msg += "📌 오늘도 좋은 장 되세요! 💪"
+
+    if hasattr(target, "send"):
+        await send_long(target, msg)
+
+
+# ============================================================
+# 디스코드 이벤트 핸들러
+# ============================================================
+
+@bot.event
+async def on_ready():
+    """봇 준비 완료 시 백그라운드 태스크 시작 및 온라인 알림 전송."""
+    print(f"✅ AI 비서 봇 온라인: {bot.user}")
+    asyncio.ensure_future(status_listener())
+    asyncio.ensure_future(morning_briefing())
+    ch = bot.get_channel(CHANNEL_ID)
+    if ch:
+        await ch.send(
+            f"🤖 **영암9 AI 비서 온라인**\n"
+            f"⏰ {now_kst().strftime('%Y-%m-%d %H:%M:%S')}\n"
+            "`!도움말` 로 명령어 확인"
+        )
+
+
+@bot.event
+async def on_message(message):
+    """메시지를 수신해 !명령어 또는 자연어로 분기 처리한다."""
+    if message.author == bot.user:
+        return
+
+    print(f"📨 수신 | 채널:{message.channel.id} | {message.content[:30]}")
+
+    # CHANNEL_ID=0 이면 모든 채널 허용
+    if CHANNEL_ID and message.channel.id != CHANNEL_ID:
+        return
+
+    content = message.content.strip()
+    ctx     = await bot.get_context(message)
+
+    if content.startswith("!"):
+        await execute_command(ctx, content)
+    elif content:
+        async with message.channel.typing():
+            state = read_state()
+            reply = ai.interpret(content, state)
+            if reply.startswith("CMD:"):
+                cmd = reply[4:].strip()
+                await message.channel.send(f"🤖 AI 비서: `{cmd}` 실행할게요!")
+                await execute_command(ctx, cmd)
+            else:
+                await message.channel.send(f"🤖 {reply}")
+
+
+# ============================================================
+# 백그라운드 태스크
+# ============================================================
+
+async def morning_briefing():
+    """평일 08:00에 자동 모닝 브리핑을 전송한다."""
+    last_briefing_date = None
+
+    while True:
+        await asyncio.sleep(30)
+        try:
+            now      = now_kst()
+            today    = now.strftime("%Y-%m-%d")
+            now_hhmm = now.strftime("%H%M")
+
+            # 주말 제외 / 08:00~08:05 / 오늘 아직 미전송
+            if now.weekday() >= 5:
+                continue
+            if not ("0800" <= now_hhmm <= "0805"):
+                continue
+            if last_briefing_date == today:
+                continue
+
+            last_briefing_date = today
+            ch = bot.get_channel(CHANNEL_ID)
+            if ch:
+                await ch.send("🌅 **모닝 브리핑 준비 중...**")
+                await _send_briefing(ch)
+                print(f"✅ 모닝 브리핑 전송 완료 {today}")
+
+        except Exception as e:
+            print(f"⚠️ 브리핑 오류: {e}")
+
+
+async def status_listener():
+    """10초마다 bot_state.json을 읽어 손익 변동 시 디스코드에 알림을 전송한다."""
+    last_profit = None
+
+    while True:
+        await asyncio.sleep(10)
+        try:
+            state  = read_state()
+            status = state.get("last_status")
+            if not status:
+                continue
+
+            profit = status.get("total_profit", 0)
+            if last_profit is not None and abs(profit - last_profit) > 5000:
+                ch = bot.get_channel(CHANNEL_ID)
+                if ch:
+                    diff = profit - last_profit
+                    await ch.send(
+                        f"💹 손익 변동: {last_profit:+,}원 → {profit:+,}원 ({diff:+,}원)"
+                    )
+            last_profit = profit
+
+        except Exception:
+            pass
+
+
+# ============================================================
+# 진입점
+# ============================================================
+
+if __name__ == "__main__":
+    if not BOT_TOKEN:
+        print("❌ DISCORD_BOT_TOKEN 환경변수가 없어요!")
+        print("   .env 파일에 추가: DISCORD_BOT_TOKEN=your_token_here")
+        exit(1)
+    if not CHANNEL_ID:
+        print("❌ DISCORD_CHANNEL_ID 환경변수가 없어요!")
+        print("   .env 파일에 추가: DISCORD_CHANNEL_ID=your_channel_id")
+        exit(1)
+
+    print("🤖 영암9 AI 비서 시작...")
+    bot.run(BOT_TOKEN)

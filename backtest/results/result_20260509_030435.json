@@ -1,0 +1,17 @@
+[
+  {
+    "name": "단일 백테스트",
+    "config": {
+      "buy_score_min": 0,
+      "max_positions": 5,
+      "base_buy_amt": 200000,
+      "ai_score_mode": "rule_proxy"
+    },
+    "metrics": {
+      "trade_count": 0,
+      "note": "no trades"
+    },
+    "trades": [],
+    "equity": []
+  }
+]
