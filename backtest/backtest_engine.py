@@ -134,6 +134,7 @@ class BacktestConfig:
     sell_1st_qty_pct: float = 0.3   # 1차 익절 수량 비율
     sell_2nd_qty_pct: float = 0.4   # 2차 익절 수량 비율
     trail_mode:       str   = "normal"  # full=트레일링 전량
+    time_stop_days:   int   = 0         # ★ 시간 청산 기준일수
     crash_only:       bool  = False  # True=코스피 -3% 이하 날만
     rebound_buy:      bool  = False  # True=반등 2회 후 매수 허용
     rebound_thresh:   float = 1.0    # 반등 임계값(%)
@@ -168,6 +169,7 @@ class BacktestEngine:
         _st.SELL_1ST_RATE  = config.sell_1st_rate
         _st.SELL_2ND_RATE  = config.sell_2nd_rate
         _st.SELL_3RD_RATE  = config.sell_3rd_rate
+        _st.TIME_STOP_DAYS = getattr(config, "time_stop_days", 0)  # ★ 시간 청산일 주입
         # get_dynamic_sell_rates도 override
         _orig_rates = _st.get_dynamic_sell_rates
         _cfg = config
