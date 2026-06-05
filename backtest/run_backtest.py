@@ -35,6 +35,14 @@ def get_scenarios(base: BacktestConfig) -> list:
             "config": {**base.__dict__, "buy_score_min": 60, "max_positions": 5},
         },
         {
+            "name": "시간청산 3일 적용",
+            "config": {**base.__dict__, "buy_score_min": 60, "max_positions": 5, "time_stop_days": 3},
+        },
+        {
+            "name": "시간청산 5일 적용",
+            "config": {**base.__dict__, "buy_score_min": 60, "max_positions": 5, "time_stop_days": 5},
+        },
+        {
             "name": "보수적(임계치70,max=5)",
             "config": {**base.__dict__, "buy_score_min": 70, "max_positions": 5},
         },

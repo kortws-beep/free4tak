@@ -44,6 +44,7 @@ TRAIL_STOP_AFTER_2ND = 0.02   # 2차 후: 2%
 STOP_LOSS_BASIC      = -0.10  # 기본 손절: -10% (★ 백테스트 최적)
 STOP_LOSS_AFTER_1ST  = -0.02  # ★ 1차 익절 후 본절 보호: 진입가 대비 -2%
 STOP_LOSS_WEAK       = -0.03  # 약세장 손절: -3% (더 빠르게)
+TIME_STOP_DAYS       = 0      # ★ 시간 청산 기준 (엔진에서 자동 설정됨)
 
 def get_dynamic_sell_rates(market_status: str, market_rate: float = 0.0) -> tuple:
     """시장 상황에 따른 동적 익절/손절 비율 반환"""
@@ -517,6 +518,14 @@ class Strategy:
                 entry * 0.97,
             )
             return "1차익절"
+
+        # ----------------------------------------------------------
+        # ★ ⑥-2 시간 청산 (Time Stop)
+        # ----------------------------------------------------------
+        tracker["holding_days"] = tracker.get("holding_days", 0) + 1
+        if TIME_STOP_DAYS > 0 and tracker["holding_days"] >= TIME_STOP_DAYS and stage < 1:
+            on_sell(code, qty, f"시간청산({tracker['holding_days']}일)", current)
+            return "시간청산"
 
         # ----------------------------------------------------------
         # ⑦ 손절 — ★ 개선: 단계별 + ATR 동적 조정
