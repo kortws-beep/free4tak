@@ -1,0 +1,108 @@
+{
+  "paused": false,
+  "pending_cmd": null,
+  "cmd_result": "✅ KRW-WLD 즉시매도 완료",
+  "last_status": {
+    "krw": 592632,
+    "total_profit": 7934,
+    "daily_pnl": 0,
+    "positions": 2,
+    "positions_detail": {
+      "KRW-USDT": {
+        "current": 1519,
+        "entry_price": 1477,
+        "qty": 203.11442112,
+        "rate": 2.84
+      },
+      "KRW-SAHARA": {
+        "current": 50,
+        "entry_price": 50,
+        "qty": 5964.21471172,
+        "rate": -0.2
+      }
+    },
+    "daily_loss": 0,
+    "market_status": "weak",
+    "btc_rate": -3.3076455900000004,
+    "fear_greed": 12,
+    "is_night": true,
+    "coin_pool": [
+      "KRW-BTC",
+      "KRW-ETH",
+      "KRW-XRP",
+      "KRW-SOL",
+      "KRW-WLD",
+      "KRW-USDT",
+      "KRW-NEAR",
+      "KRW-XLM",
+      "KRW-ONDO",
+      "KRW-ADA",
+      "KRW-DOGE",
+      "KRW-SUI",
+      "KRW-LA",
+      "KRW-SAHARA",
+      "KRW-VIRTUAL",
+      "KRW-ENA",
+      "KRW-AERGO",
+      "KRW-XPL",
+      "KRW-TRAC",
+      "KRW-SLX"
+    ],
+    "coins": [
+      "KRW-BTC",
+      "KRW-ETH",
+      "KRW-XRP",
+      "KRW-SOL",
+      "KRW-WLD",
+      "KRW-USDT",
+      "KRW-NEAR",
+      "KRW-XLM",
+      "KRW-ONDO",
+      "KRW-ADA",
+      "KRW-DOGE",
+      "KRW-SUI",
+      "KRW-LA",
+      "KRW-SAHARA",
+      "KRW-VIRTUAL",
+      "KRW-ENA",
+      "KRW-AERGO",
+      "KRW-XPL",
+      "KRW-TRAC",
+      "KRW-SLX"
+    ],
+    "seed": "30만원 소액 모드"
+  },
+  "last_update": "02:55:53",
+  "daily_loss": 0,
+  "loss_date": "2026-06-06",
+  "positions": {
+    "KRW-USDT": {
+      "entry_price": 1477.0,
+      "qty": 203.11442112,
+      "current": 1519.0
+    },
+    "KRW-SAHARA": {
+      "entry_price": 50.3,
+      "qty": 5964.21471172,
+      "current": 50.2
+    }
+  },
+  "peak_tracker": {
+    "KRW-USDT": {
+      "peak_rate": 0.03249830737982397,
+      "stage": 0,
+      "remain_qty": 203.1144211238998,
+      "buy2_done": false,
+      "buy1_price": 1477.0,
+      "effective_entry": 1477.0
+    },
+    "KRW-SAHARA": {
+      "peak_rate": 0.039761431411530816,
+      "stage": 0,
+      "remain_qty": 5964.214711729623,
+      "buy2_done": false,
+      "buy1_price": 50.3,
+      "effective_entry": 50.3
+    }
+  }
+}

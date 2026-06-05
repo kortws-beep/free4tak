@@ -1,0 +1,112 @@
+"""
+master_db.py — 영암9 통합 거래 이력 관리
+모든 봇의 매매를 단일 DB에 기록
+"""
+import os
+import sqlite3
+import datetime
+
+_BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+MASTER_DB = os.path.join(_BASE, "master_trades.db")
+
+
+def record_trade(bot_type: str, code: str, buy_price: float,
+                 sell_price: float, qty: float, sell_reason: str,
+                 stock_name: str = "", buy_time: str = "",
+                 sell_time: str = "", ai_score: int = None,
+                 ai_reason: str = "", foreign_5d: float = 0,
+                 institution_5d: float = 0, market_status: str = "normal",
+                 buy_tag: str = "", hold_days: int = 0) -> bool:
+    """매매 완료 시 master_trades에 기록"""
+    try:
+        profit_rate = ((sell_price - buy_price) / buy_price * 100
+                       if buy_price else 0)
+        profit_krw  = (sell_price - buy_price) * qty
+
+        if not sell_time:
+            sell_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        conn = sqlite3.connect(MASTER_DB, timeout=10)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("""
+            INSERT INTO master_trades
+                (bot_type, code, stock_name, buy_price, buy_time,
+                 sell_price, sell_time, qty, profit_rate, profit_krw,
+                 sell_reason, ai_score, ai_reason,
+                 foreign_5d, institution_5d, market_status, buy_tag, hold_days)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """, (bot_type, code, stock_name, buy_price, buy_time,
+              sell_price, sell_time, qty, round(profit_rate, 2),
+              round(profit_krw, 0), sell_reason, ai_score, ai_reason,
+              foreign_5d, institution_5d, market_status, buy_tag, hold_days))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"⚠️ master_db 기록 오류: {e}")
+        return False
+
+
+def get_today_summary() -> dict:
+    """오늘 전체 봇 통합 손익"""
+    try:
+        today = datetime.date.today().strftime("%Y-%m-%d")
+        conn  = sqlite3.connect(MASTER_DB, timeout=5)
+        conn.execute("PRAGMA query_only=ON")
+        rows = conn.execute("""
+            SELECT bot_type, SUM(profit_krw), COUNT(*),
+                   SUM(CASE WHEN profit_rate >= 0 THEN 1 ELSE 0 END)
+            FROM master_trades
+            WHERE date(sell_time) = ?
+            GROUP BY bot_type
+        """, (today,)).fetchall()
+        conn.close()
+        result = {}
+        for bot, pnl, cnt, wins in rows:
+            result[bot] = {
+                "pnl":      int(pnl or 0),
+                "count":    cnt,
+                "win_rate": round(wins / cnt * 100, 1) if cnt else 0,
+            }
+        return result
+    except Exception as e:
+        print(f"⚠️ master_db 조회 오류: {e}")
+        return {}
+
+
+def get_performance(days: int = 30, bot_type: str = None) -> dict:
+    """기간별 성과 조회"""
+    try:
+        since = (datetime.date.today() -
+                 datetime.timedelta(days=days)).strftime("%Y-%m-%d")
+        conn  = sqlite3.connect(MASTER_DB, timeout=5)
+        conn.execute("PRAGMA query_only=ON")
+
+        where = "WHERE date(sell_time) >= ?"
+        params = [since]
+        if bot_type:
+            where += " AND bot_type = ?"
+            params.append(bot_type)
+
+        row = conn.execute(f"""
+            SELECT COUNT(*), SUM(profit_krw),
+                   AVG(profit_rate),
+                   SUM(CASE WHEN profit_rate >= 0 THEN 1 ELSE 0 END),
+                   MIN(profit_rate), MAX(profit_rate)
+            FROM master_trades {where}
+        """, params).fetchone()
+        conn.close()
+
+        cnt, total_krw, avg_rate, wins, worst, best = row
+        cnt = cnt or 0
+        return {
+            "total":     cnt,
+            "total_krw": int(total_krw or 0),
+            "avg_rate":  round(avg_rate or 0, 2),
+            "win_rate":  round((wins or 0) / cnt * 100, 1) if cnt else 0,
+            "best":      round(best or 0, 2),
+            "worst":     round(worst or 0, 2),
+        }
+    except Exception as e:
+        print(f"⚠️ master_db 성과 조회 오류: {e}")
+        return {}

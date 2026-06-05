@@ -1,0 +1,607 @@
+"""
+master_db.py — 영암9 통합 거래 이력 관리 (v2 — 전면 개선)
+================================================================
+[v2 변경사항]
+  1. master_trades  — 분할매도 포함 전체 기록 (is_partial 컬럼 추가)
+  2. master_positions — 보유중 포지션 실시간 (신규)
+  3. master_risk    — 리스크 상태 실시간 (신규)
+
+[테이블 구조]
+  master_trades    : 체결 완료 거래 기록 (전량 + 분할매도 모두)
+  master_positions : 현재 보유중 포지션 (봇 루프마다 갱신)
+  master_risk      : 합산 리스크 상태 (손실한도/긴급중단)
+
+[사용법]
+  from master_db import record_trade, upsert_position, remove_position
+  from master_db import update_risk, get_risk_state
+  from master_db import get_today_summary, get_all_positions
+
+[봇별 호출 시점]
+  nbot/sbot : 매수 시 → upsert_position()
+              매도 시 → record_trade() + remove_position() or upsert_position()
+  cbot      : 동일
+  리스크매니저 : update_risk() 주기적 갱신
+  대시보드   : get_all_positions(), get_today_summary(), get_risk_state()
+  키키      : get_today_summary(), get_all_positions()
+================================================================
+"""
+import os
+import sqlite3
+import datetime
+
+_BASE     = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+MASTER_DB = os.path.join(_BASE, "master_trades.db")
+
+
+# ============================================================
+# DB 초기화 (테이블 + 마이그레이션)
+# ============================================================
+def init_db(db_path: str = MASTER_DB):
+    """
+    DB 초기화 — 앱 시작 시 1회 호출.
+    기존 테이블 있으면 마이그레이션만 수행 (데이터 보존).
+    """
+    conn = sqlite3.connect(db_path, timeout=10)
+    conn.execute("PRAGMA journal_mode=WAL")
+
+    # ── master_trades (기존 + 신규 컬럼) ──────────────────────
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS master_trades (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            bot_type       TEXT    NOT NULL,          -- nbot/sbot/cbot
+            code           TEXT    NOT NULL,           -- 종목코드
+            stock_name     TEXT    DEFAULT '',
+            buy_price      REAL    NOT NULL,
+            buy_time       TEXT    DEFAULT '',
+            sell_price     REAL    NOT NULL,
+            sell_time      TEXT    DEFAULT '',
+            qty            REAL    NOT NULL,
+            profit_rate    REAL    DEFAULT 0,          -- %
+            profit_krw     REAL    DEFAULT 0,          -- 원
+            sell_reason    TEXT    DEFAULT '',
+            ai_score       INTEGER,
+            ai_reason      TEXT    DEFAULT '',
+            foreign_5d     REAL    DEFAULT 0,
+            institution_5d REAL    DEFAULT 0,
+            market_status  TEXT    DEFAULT 'normal',
+            buy_tag        TEXT    DEFAULT '',
+            hold_days      INTEGER DEFAULT 0,
+            is_partial     INTEGER DEFAULT 0           -- ★ 신규: 1=분할매도
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_mt_sell   ON master_trades(sell_time)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_mt_bot    ON master_trades(bot_type, sell_time)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_mt_code   ON master_trades(code)")
+
+    # 마이그레이션: is_partial 컬럼 없으면 추가
+    try:
+        conn.execute("ALTER TABLE master_trades ADD COLUMN is_partial INTEGER DEFAULT 0")
+        print("✅ master_trades: is_partial 컬럼 추가")
+    except sqlite3.OperationalError:
+        pass
+
+    # ── master_positions (보유중 포지션 실시간) ───────────────
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS master_positions (
+            bot_type       TEXT    NOT NULL,
+            code           TEXT    NOT NULL,
+            stock_name     TEXT    DEFAULT '',
+            entry_price    REAL    DEFAULT 0,
+            current_price  REAL    DEFAULT 0,
+            qty            INTEGER DEFAULT 0,
+            buy_time       TEXT    DEFAULT '',
+            profit_rate    REAL    DEFAULT 0,   -- 실시간 갱신
+            profit_krw     REAL    DEFAULT 0,
+            buy_tag        TEXT    DEFAULT '',
+            ai_score       INTEGER DEFAULT 0,
+            stage          INTEGER DEFAULT 0,   -- 익절 단계 (0/1/2)
+            updated_at     TEXT    DEFAULT '',
+            PRIMARY KEY (bot_type, code)
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_mp_bot  ON master_positions(bot_type)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_mp_code ON master_positions(code)")
+
+    # ── master_risk (리스크 상태) ─────────────────────────────
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS master_risk (
+            id              INTEGER PRIMARY KEY DEFAULT 1,
+            date            TEXT    DEFAULT '',
+            total_loss_krw  REAL    DEFAULT 0,   -- 당일 합산 실현손실
+            nbot_loss_krw   REAL    DEFAULT 0,
+            sbot_loss_krw   REAL    DEFAULT 0,
+            cbot_loss_krw   REAL    DEFAULT 0,
+            total_profit_krw REAL   DEFAULT 0,   -- 당일 합산 실현이익
+            risk_level      TEXT    DEFAULT 'normal',  -- normal/warning/danger
+            paused_all      INTEGER DEFAULT 0,   -- 전봇 긴급중단 플래그
+            daily_loss_limit REAL   DEFAULT 50000, -- 일일 손실 한도(원)
+            updated_at      TEXT    DEFAULT ''
+        )
+    """)
+    # 초기 레코드 (없으면 삽입)
+    conn.execute("""
+        INSERT OR IGNORE INTO master_risk (id, date)
+        VALUES (1, ?)
+    """, (datetime.date.today().strftime("%Y-%m-%d"),))
+
+    conn.commit()
+    conn.close()
+    print(f"✅ master_db 초기화 완료: {db_path}")
+
+
+# ============================================================
+# master_trades — 거래 기록 (분할매도 포함)
+# ============================================================
+def record_trade(
+    bot_type: str,
+    code: str,
+    buy_price: float,
+    sell_price: float,
+    qty: float,
+    sell_reason: str,
+    stock_name: str      = "",
+    buy_time: str        = "",
+    sell_time: str       = "",
+    ai_score: int        = None,
+    ai_reason: str       = "",
+    foreign_5d: float    = 0,
+    institution_5d: float = 0,
+    market_status: str   = "normal",
+    buy_tag: str         = "",
+    hold_days: int       = 0,
+    is_partial: bool     = False,   # ★ 신규: 분할매도 여부
+    db_path: str         = MASTER_DB,
+) -> bool:
+    """
+    매매 완료 시 master_trades에 기록.
+    분할매도 시 is_partial=True 로 호출.
+    전량매도 시 is_partial=False (기본값).
+    """
+    try:
+        profit_rate = ((sell_price - buy_price) / buy_price * 100
+                       if buy_price else 0)
+        profit_krw  = (sell_price - buy_price) * qty
+
+        if not sell_time:
+            sell_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        conn = sqlite3.connect(db_path, timeout=10)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("""
+            INSERT INTO master_trades
+                (bot_type, code, stock_name, buy_price, buy_time,
+                 sell_price, sell_time, qty, profit_rate, profit_krw,
+                 sell_reason, ai_score, ai_reason,
+                 foreign_5d, institution_5d, market_status,
+                 buy_tag, hold_days, is_partial)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """, (
+            bot_type, code, stock_name, buy_price, buy_time,
+            sell_price, sell_time, qty,
+            round(profit_rate, 2), round(profit_krw, 0),
+            sell_reason, ai_score, ai_reason,
+            foreign_5d, institution_5d, market_status,
+            buy_tag, hold_days, 1 if is_partial else 0,
+        ))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"⚠️ master_db record_trade 오류: {e}")
+        return False
+
+
+# ============================================================
+# master_positions — 보유중 포지션 실시간 관리
+# ============================================================
+def upsert_position(
+    bot_type: str,
+    code: str,
+    stock_name: str    = "",
+    entry_price: float = 0,
+    current_price: float = 0,
+    qty: int           = 0,
+    buy_time: str      = "",
+    buy_tag: str       = "",
+    ai_score: int      = 0,
+    stage: int         = 0,
+    db_path: str       = MASTER_DB,
+) -> bool:
+    """
+    포지션 추가 or 갱신 (매수 시, 루프마다 현재가 갱신).
+    current_price=0 이면 entry_price 유지 (매수 직후 호출 시).
+    """
+    try:
+        now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        profit_rate = 0.0
+        profit_krw  = 0.0
+        if entry_price > 0 and current_price > 0 and qty > 0:
+            profit_rate = (current_price - entry_price) / entry_price * 100
+            profit_krw  = (current_price - entry_price) * qty
+
+        conn = sqlite3.connect(db_path, timeout=10)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("""
+            INSERT INTO master_positions
+                (bot_type, code, stock_name, entry_price, current_price,
+                 qty, buy_time, profit_rate, profit_krw,
+                 buy_tag, ai_score, stage, updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(bot_type, code) DO UPDATE SET
+                stock_name    = excluded.stock_name,
+                current_price = CASE WHEN excluded.current_price > 0
+                                THEN excluded.current_price
+                                ELSE current_price END,
+                qty           = excluded.qty,
+                profit_rate   = excluded.profit_rate,
+                profit_krw    = excluded.profit_krw,
+                stage         = excluded.stage,
+                updated_at    = excluded.updated_at
+        """, (
+            bot_type, code, stock_name, entry_price,
+            current_price if current_price > 0 else entry_price,
+            qty, buy_time,
+            round(profit_rate, 2), round(profit_krw, 0),
+            buy_tag, ai_score, stage, now,
+        ))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"⚠️ master_db upsert_position 오류: {e}")
+        return False
+
+
+def remove_position(
+    bot_type: str,
+    code: str,
+    db_path: str = MASTER_DB,
+) -> bool:
+    """전량매도 시 포지션 삭제"""
+    try:
+        conn = sqlite3.connect(db_path, timeout=10)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute(
+            "DELETE FROM master_positions WHERE bot_type=? AND code=?",
+            (bot_type, code),
+        )
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"⚠️ master_db remove_position 오류: {e}")
+        return False
+
+
+def get_all_positions(db_path: str = MASTER_DB) -> list:
+    """
+    전체 보유중 포지션 조회.
+    대시보드 / 리스크매니저 / 키키 에서 사용.
+    반환: [{"bot_type","code","stock_name","entry_price","current_price",
+             "qty","profit_rate","profit_krw","buy_tag","stage",...}, ...]
+    """
+    try:
+        conn = sqlite3.connect(db_path, timeout=5)
+        conn.execute("PRAGMA query_only=ON")
+        rows = conn.execute("""
+            SELECT bot_type, code, stock_name, entry_price, current_price,
+                   qty, buy_time, profit_rate, profit_krw,
+                   buy_tag, ai_score, stage, updated_at
+            FROM master_positions
+            ORDER BY bot_type, buy_time
+        """).fetchall()
+        conn.close()
+        cols = ["bot_type","code","stock_name","entry_price","current_price",
+                "qty","buy_time","profit_rate","profit_krw",
+                "buy_tag","ai_score","stage","updated_at"]
+        return [dict(zip(cols, r)) for r in rows]
+    except Exception as e:
+        print(f"⚠️ master_db get_all_positions 오류: {e}")
+        return []
+
+
+def sync_positions_from_state(db_path: str = MASTER_DB):
+    """
+    봇 state.json에서 포지션을 읽어 master_positions 동기화.
+    봇 재시작 후 또는 대시보드 초기 로드 시 호출.
+    """
+    try:
+        import sys, os as _os
+        _iface = _os.path.join(_BASE, "interface")
+        _core  = _os.path.join(_BASE, "core")
+        for _p in [_iface, _core]:
+            if _p not in sys.path:
+                sys.path.insert(0, _p)
+        from common_utils import read_state
+
+        bot_state_map = {
+            "nbot": ("bot_state.json",  "positions_detail"),
+            "sbot": ("sbot_state.json", "positions_detail"),
+            "cbot": ("cbot_state.json", "positions_detail"),
+        }
+        synced = 0
+        for bot_type, (fname, pos_key) in bot_state_map.items():
+            try:
+                st  = read_state(fname, default={})
+                pos = st.get("last_status", {}).get(pos_key, {})
+                for code, pdata in pos.items():
+                    upsert_position(
+                        bot_type    = bot_type,
+                        code        = code,
+                        stock_name  = pdata.get("name", ""),
+                        entry_price = pdata.get("entry_price", 0),
+                        current_price = pdata.get("current", 0),
+                        qty         = pdata.get("qty", 0),
+                        buy_tag     = pdata.get("buy_tag", ""),
+                        db_path     = db_path,
+                    )
+                    synced += 1
+            except Exception as _e:
+                print(f"⚠️ {bot_type} 포지션 동기화 오류: {_e}")
+
+        # state에 없는 포지션 정리 (재시작 후 빈 state)
+        # → 안전을 위해 자동 삭제 안 함 (수동 확인 필요)
+        print(f"✅ master_positions 동기화: {synced}개")
+    except Exception as e:
+        print(f"⚠️ sync_positions_from_state 오류: {e}")
+
+
+# ============================================================
+# master_risk — 리스크 상태 관리
+# ============================================================
+def update_risk(db_path: str = MASTER_DB) -> dict:
+    """
+    오늘 실현손익 집계 → 리스크 레벨 자동 산출 → DB 갱신.
+    리스크매니저에서 주기적으로 호출 (30초~1분).
+    반환: 현재 리스크 상태 dict
+    """
+    try:
+        today = datetime.date.today().strftime("%Y-%m-%d")
+        conn  = sqlite3.connect(db_path, timeout=10)
+        conn.execute("PRAGMA journal_mode=WAL")
+
+        # 오늘 실현손익 집계 (봇별)
+        rows = conn.execute("""
+            SELECT bot_type,
+                   SUM(CASE WHEN profit_krw < 0 THEN profit_krw ELSE 0 END),
+                   SUM(CASE WHEN profit_krw > 0 THEN profit_krw ELSE 0 END)
+            FROM master_trades
+            WHERE date(sell_time) = ?
+            GROUP BY bot_type
+        """, (today,)).fetchall()
+
+        loss_map   = {"nbot": 0, "sbot": 0, "cbot": 0}
+        profit_map = {"nbot": 0, "sbot": 0, "cbot": 0}
+        for bot, loss, profit in rows:
+            if bot in loss_map:
+                loss_map[bot]   = abs(loss or 0)
+                profit_map[bot] = profit or 0
+
+        total_loss   = sum(loss_map.values())
+        total_profit = sum(profit_map.values())
+
+        # 한도 조회
+        row = conn.execute(
+            "SELECT daily_loss_limit, paused_all FROM master_risk WHERE id=1"
+        ).fetchone()
+        limit     = row[0] if row else 50000
+        paused    = row[1] if row else 0
+
+        # 리스크 레벨 산출
+        if paused:
+            risk_level = "danger"
+        elif total_loss >= limit:
+            risk_level = "danger"
+        elif total_loss >= limit * 0.7:
+            risk_level = "warning"
+        else:
+            risk_level = "normal"
+
+        # 날짜 바뀌면 손실 초기화 (자정 리셋)
+        existing = conn.execute(
+            "SELECT date FROM master_risk WHERE id=1"
+        ).fetchone()
+        if existing and existing[0] != today:
+            paused = 0  # 날짜 바뀌면 긴급중단 해제
+
+        conn.execute("""
+            UPDATE master_risk SET
+                date             = ?,
+                nbot_loss_krw    = ?,
+                sbot_loss_krw    = ?,
+                cbot_loss_krw    = ?,
+                total_loss_krw   = ?,
+                total_profit_krw = ?,
+                risk_level       = ?,
+                paused_all       = ?,
+                updated_at       = ?
+            WHERE id = 1
+        """, (
+            today,
+            loss_map["nbot"], loss_map["sbot"], loss_map["cbot"],
+            total_loss, total_profit,
+            risk_level, paused,
+            datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        ))
+        conn.commit()
+
+        state = {
+            "date":            today,
+            "total_loss_krw":  total_loss,
+            "total_profit_krw": total_profit,
+            "nbot_loss_krw":   loss_map["nbot"],
+            "sbot_loss_krw":   loss_map["sbot"],
+            "cbot_loss_krw":   loss_map["cbot"],
+            "risk_level":      risk_level,
+            "paused_all":      bool(paused),
+            "daily_loss_limit": limit,
+        }
+        conn.close()
+        return state
+    except Exception as e:
+        print(f"⚠️ master_db update_risk 오류: {e}")
+        return {}
+
+
+def get_risk_state(db_path: str = MASTER_DB) -> dict:
+    """현재 리스크 상태 조회 (읽기 전용)"""
+    try:
+        conn = sqlite3.connect(db_path, timeout=5)
+        conn.execute("PRAGMA query_only=ON")
+        row = conn.execute("""
+            SELECT date, total_loss_krw, total_profit_krw,
+                   nbot_loss_krw, sbot_loss_krw, cbot_loss_krw,
+                   risk_level, paused_all, daily_loss_limit
+            FROM master_risk WHERE id=1
+        """).fetchone()
+        conn.close()
+        if not row:
+            return {}
+        return {
+            "date":             row[0],
+            "total_loss_krw":   row[1],
+            "total_profit_krw": row[2],
+            "nbot_loss_krw":    row[3],
+            "sbot_loss_krw":    row[4],
+            "cbot_loss_krw":    row[5],
+            "risk_level":       row[6],
+            "paused_all":       bool(row[7]),
+            "daily_loss_limit": row[8],
+        }
+    except Exception as e:
+        print(f"⚠️ master_db get_risk_state 오류: {e}")
+        return {}
+
+
+def set_pause_all(paused: bool, db_path: str = MASTER_DB) -> bool:
+    """
+    전봇 긴급중단 ON/OFF.
+    리스크매니저 또는 대시보드에서 호출.
+    각 봇은 루프마다 get_risk_state()['paused_all'] 확인.
+    """
+    try:
+        conn = sqlite3.connect(db_path, timeout=10)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("""
+            UPDATE master_risk SET
+                paused_all = ?,
+                risk_level = ?,
+                updated_at = ?
+            WHERE id = 1
+        """, (
+            1 if paused else 0,
+            "danger" if paused else "normal",
+            datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        ))
+        conn.commit()
+        conn.close()
+        print(f"{'🚨 전봇 긴급중단 ON' if paused else '✅ 전봇 긴급중단 해제'}")
+        return True
+    except Exception as e:
+        print(f"⚠️ master_db set_pause_all 오류: {e}")
+        return False
+
+
+def set_daily_loss_limit(limit: int, db_path: str = MASTER_DB) -> bool:
+    """일일 손실 한도 설정 (대시보드 UI에서 호출)"""
+    try:
+        conn = sqlite3.connect(db_path, timeout=10)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute(
+            "UPDATE master_risk SET daily_loss_limit=? WHERE id=1",
+            (limit,)
+        )
+        conn.commit()
+        conn.close()
+        print(f"✅ 일일 손실 한도 설정: {limit:,}원")
+        return True
+    except Exception as e:
+        print(f"⚠️ set_daily_loss_limit 오류: {e}")
+        return False
+
+
+# ============================================================
+# 조회 함수 (기존 호환 유지)
+# ============================================================
+def get_today_summary(db_path: str = MASTER_DB) -> dict:
+    """
+    오늘 전체 봇 통합 손익.
+    기존과 동일한 인터페이스 유지 (kiki 등에서 사용).
+    """
+    try:
+        today = datetime.date.today().strftime("%Y-%m-%d")
+        conn  = sqlite3.connect(db_path, timeout=5)
+        conn.execute("PRAGMA query_only=ON")
+        rows = conn.execute("""
+            SELECT bot_type,
+                   SUM(profit_krw), COUNT(*),
+                   SUM(CASE WHEN profit_rate >= 0 THEN 1 ELSE 0 END)
+            FROM master_trades
+            WHERE date(sell_time) = ?
+            GROUP BY bot_type
+        """, (today,)).fetchall()
+        conn.close()
+        result = {}
+        for bot, pnl, cnt, wins in rows:
+            result[bot] = {
+                "pnl":      int(pnl or 0),
+                "count":    cnt,
+                "win_rate": round(wins / cnt * 100, 1) if cnt else 0,
+            }
+        return result
+    except Exception as e:
+        print(f"⚠️ master_db get_today_summary 오류: {e}")
+        return {}
+
+
+def get_performance(days: int = 30, bot_type: str = None,
+                    db_path: str = MASTER_DB) -> dict:
+    """기간별 성과 조회 (기존 호환)"""
+    try:
+        since = (datetime.date.today() -
+                 datetime.timedelta(days=days)).strftime("%Y-%m-%d")
+        conn  = sqlite3.connect(db_path, timeout=5)
+        conn.execute("PRAGMA query_only=ON")
+
+        where  = "WHERE date(sell_time) >= ? AND is_partial = 0"
+        params = [since]
+        if bot_type:
+            where += " AND bot_type = ?"
+            params.append(bot_type)
+
+        row = conn.execute(f"""
+            SELECT COUNT(*), SUM(profit_krw),
+                   AVG(profit_rate),
+                   SUM(CASE WHEN profit_rate >= 0 THEN 1 ELSE 0 END),
+                   MIN(profit_rate), MAX(profit_rate)
+            FROM master_trades {where}
+        """, params).fetchone()
+        conn.close()
+
+        cnt, total_krw, avg_rate, wins, worst, best = row
+        cnt = cnt or 0
+        return {
+            "total":     cnt,
+            "total_krw": int(total_krw or 0),
+            "avg_rate":  round(avg_rate or 0, 2),
+            "win_rate":  round((wins or 0) / cnt * 100, 1) if cnt else 0,
+            "best":      round(best or 0, 2),
+            "worst":     round(worst or 0, 2),
+        }
+    except Exception as e:
+        print(f"⚠️ master_db get_performance 오류: {e}")
+        return {}
+
+
+# ============================================================
+# 앱 시작 시 자동 초기화
+# ============================================================
+def _auto_init():
+    """import 시 DB 없으면 자동 생성"""
+    if not os.path.exists(MASTER_DB):
+        init_db()
+    else:
+        # 기존 DB에 신규 테이블/컬럼 마이그레이션
+        init_db()
+
+_auto_init()

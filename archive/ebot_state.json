@@ -1,0 +1,24 @@
+{
+  "paused": false,
+  "pending_cmd": null,
+  "cmd_result": null,
+  "last_status": {
+    "positions": 0,
+    "bought_today": false,
+    "sold_today": false,
+    "today_profit": 0,
+    "last_update": "16:39:01",
+    "code_name_map": {
+      "007610": "선도전기",
+      "014910": "성문전자",
+      "125020": "티씨머티리얼즈",
+      "142210": "유니트론텍",
+      "232680": "라온로보틱스",
+      "304840": "피플바이오",
+      "383930": "디티앤씨알오",
+      "425040": "티이엠씨"
+    },
+    "positions_detail": {}
+  },
+  "last_update": "16:39:01"
+}

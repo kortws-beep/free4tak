@@ -1,0 +1,62 @@
+[
+  {
+    "name": "기본(임계치60)",
+    "config": {
+      "buy_score_min": 60,
+      "max_positions": 5,
+      "base_buy_amt": 200000,
+      "ai_score_mode": "rule_proxy"
+    },
+    "metrics": {
+      "trade_count": 0,
+      "note": "no trades"
+    },
+    "trades": [],
+    "equity": []
+  },
+  {
+    "name": "보수적(임계치70)",
+    "config": {
+      "buy_score_min": 70,
+      "max_positions": 5,
+      "base_buy_amt": 200000,
+      "ai_score_mode": "rule_proxy"
+    },
+    "metrics": {
+      "trade_count": 0,
+      "note": "no trades"
+    },
+    "trades": [],
+    "equity": []
+  },
+  {
+    "name": "공격적(임계치55)",
+    "config": {
+      "buy_score_min": 55,
+      "max_positions": 5,
+      "base_buy_amt": 200000,
+      "ai_score_mode": "rule_proxy"
+    },
+    "metrics": {
+      "trade_count": 0,
+      "note": "no trades"
+    },
+    "trades": [],
+    "equity": []
+  },
+  {
+    "name": "포지션多(max=8)",
+    "config": {
+      "buy_score_min": 60,
+      "max_positions": 8,
+      "base_buy_amt": 200000,
+      "ai_score_mode": "rule_proxy"
+    },
+    "metrics": {
+      "trade_count": 0,
+      "note": "no trades"
+    },
+    "trades": [],
+    "equity": []
+  }
+]

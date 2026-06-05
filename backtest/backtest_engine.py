@@ -1,0 +1,648 @@
+"""
+backtest_engine.py — 백테스트 시뮬레이션 엔진
+================================================================
+[역할]
+- 과거 데이터를 시간순으로 재생
+- 각 날짜에 strategy.py / risk_manager.py로 매수/매도 결정
+- 가상 체결 (수수료/슬리피지 반영)
+- 모든 거래 기록 → metrics.py로 분석
+
+[모델링 가정]
+1. 매수 시점: T일 종가 기준 신호 → T+1일 "시가"에 매수
+   (실시간 운영의 '장중 매수'를 보수적으로 모사)
+2. 매도 시점: 보유 중 매일 고가/저가 기준 익절/손절 체크
+   - 익절선 도달: 그날 고가가 목표가 이상이면 목표가에 체결
+   - 손절선 도달: 그날 저가가 손절가 이하면 손절가에 체결
+   - 갭 발생: 시가가 손절선 아래면 시가 손절 (현실적)
+3. 수수료: 매수 0.015% + 매도 0.015% + 거래세 0.18% (KOSPI 26.04 기준)
+   ※ 코스닥은 0.18%, 코스피는 0.15% — 보수적으로 0.18% 통일
+4. 슬리피지: 양방향 0.05% (체결가가 불리한 쪽으로 0.05%)
+
+[핵심 원칙]
+- 기존 strategy.py / risk_manager.py 그대로 재사용
+- 콜백(on_buy/on_sell)만 가상 체결로 교체
+- look-ahead bias 방지: 매수 결정엔 T-1까지 데이터만
+"""
+import os
+import sys
+import sqlite3
+import datetime
+from typing import Optional, Callable
+from dataclasses import dataclass, field, asdict
+
+import pandas as pd
+
+# 프로젝트 루트를 path에 추가 (strategy.py / risk_manager.py 임포트)
+# 우선순위:
+#   1. 환경변수 K_BOT_ROOT
+#   2. 부모 디렉토리 (/path/to/k-bot/stock_bot)
+#   3. /mnt/project (Claude 환경)
+_candidates = [
+    os.environ.get("K_BOT_ROOT"),
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "..")),
+    "/mnt/project",
+]
+for _root in _candidates:
+    if _root and (os.path.exists(os.path.join(_root, "strategy.py")) or os.path.exists(os.path.join(_root, "core", "strategy.py"))):
+        if os.path.exists(os.path.join(_root, "core", "strategy.py")):
+            _root = os.path.join(_root, "core")
+        if _root not in sys.path:
+            sys.path.insert(0, _root)
+        PROJECT_ROOT = _root
+        break
+else:
+    raise ImportError(
+        "strategy.py 위치를 찾을 수 없음 — "
+        "K_BOT_ROOT 환경변수로 프로젝트 루트 지정 필요"
+    )
+
+from strategy     import Strategy
+from risk_manager import RiskManager
+
+from feature_builder import DataLoader, build_features_at, get_market_data_at
+
+
+# ============================================================
+# 거래 기록
+# ============================================================
+@dataclass
+class Trade:
+    code: str
+    buy_date:  str
+    buy_price: float
+    qty:       int
+    sell_date: str = ""
+    sell_price: float = 0.0
+    sell_reason: str = ""
+    profit_rate: float = 0.0    # (sell-buy)/buy
+    profit_krw:  float = 0.0    # 수수료/세금 차감 후 순익
+    fee:         float = 0.0
+    score:       int   = 0      # 매수 시점 룰+AI 점수
+    buy_tag:     str   = ""
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+# ============================================================
+# 백테스트 설정 (시나리오 파라미터)
+# ============================================================
+@dataclass
+class BacktestConfig:
+    # 자본
+    initial_cash:    int = 5_000_000
+    base_buy_amt:    int = 200_000      # 단타봇 기본
+    max_positions:   int = 5
+    # 매수 임계치
+    buy_score_min:   int = 60           # 매수 진입 점수
+    # 거래비용
+    fee_rate:        float = 0.00015    # 0.015%
+    tax_rate:        float = 0.0018     # 0.18% (매도시만)
+    slippage:        float = 0.0005     # 0.05%
+    # 기간
+    start_date:      str = "2024-01-01"
+    end_date:        str = "2025-12-31"
+    # 종목 풀
+    codes:           list = field(default_factory=list)
+    # 시장상태 (동적 — market_meta DB에서 날짜별로 로드)
+    market_status:   str = "normal"  # 기본값, 실행 시 동적 변경
+    # 활성 업종/테마 (백테스트에선 비활성화 가능)
+    active_sectors:  list = field(default_factory=list)
+    sector_group_map: dict = field(default_factory=dict)
+    theme_codes:     list = field(default_factory=list)
+    new_codes:       list = field(default_factory=list)
+    cond_codes:      set  = field(default_factory=set)
+    # AI 점수 (백테스트엔 AI 호출 어려움 → 가정값)
+    # 'fixed': 고정값 / 'rule_proxy': 룰점수와 동일 / 'random': 랜덤
+    ai_score_mode:   str = "rule_proxy"
+    # 리스크 관리
+    max_daily_loss:  int = 5            # 하루 최대 손절 횟수 (실전과 동일)
+    ai_score_fixed:  int = 60
+    # 익절/손절 설정 (시나리오 비교용)
+    sell_1st_rate:   float = 0.05   # 1차 익절
+    sell_2nd_rate:   float = 0.10   # 2차 익절
+    sell_3rd_rate:   float = 0.15   # 3차 익절
+    trail_1st:       float = 0.025  # 1차 후 트레일링
+    trail_2nd:       float = 0.020  # 2차 후 트레일링
+    # 추가 시나리오 파라미터
+    buy_start_time:      str   = "0920"   # 매수 시작 시간
+    sector_bonus:        int   = 10       # 업종 활성 가산점
+    cond_bonus:          int   = 8        # 조건검색 가산점
+    accel_bonus_max:     int   = 8        # accel 최대 가산점
+    max_daily_loss_amt:  int   = 0        # 일일 손실 금액 한도 (0=미사용)
+    stop_loss_rate:  float = -0.05       # ★ 손절선 (-0.05 = -5%)
+    sell_1st_qty_pct: float = 0.3   # 1차 익절 수량 비율
+    sell_2nd_qty_pct: float = 0.4   # 2차 익절 수량 비율
+    trail_mode:       str   = "normal"  # full=트레일링 전량
+    crash_only:       bool  = False  # True=코스피 -3% 이하 날만
+    rebound_buy:      bool  = False  # True=반등 2회 후 매수 허용
+    rebound_thresh:   float = 1.0    # 반등 임계값(%)
+    # 디버그
+    verbose:         bool = False
+
+
+# ============================================================
+# 엔진
+# ============================================================
+class BacktestEngine:
+    """
+    [상태]
+    cash:       현재 현금
+    positions:  {code: {entry_price, qty, buy_date, score, buy_tag}}
+    trades:     [Trade] — 종료된 거래만 (체결 완료)
+    open_trades: {code: Trade} — 진행 중인 거래
+    daily_pnl:  {date: 누적수익}
+    """
+
+    def __init__(self, config: BacktestConfig, db_path: str):
+        self.config       = config
+        self.db_path      = db_path
+        self.loader       = DataLoader(db_path)
+        self._market_meta = self._load_market_meta(db_path)  # ★ KOSPI 일별 시장상태
+        self.strategy     = Strategy()
+        # ★ config 값으로 익절/트레일링 상수 override (매 인스턴스마다 재설정)
+        import strategy as _st
+        import importlib
+        importlib.reload(_st)  # 매번 원본 상수로 리셋
+        _st.BUY_START_TIME = config.buy_start_time
+        _st.SELL_1ST_RATE  = config.sell_1st_rate
+        _st.SELL_2ND_RATE  = config.sell_2nd_rate
+        _st.SELL_3RD_RATE  = config.sell_3rd_rate
+        # get_dynamic_sell_rates도 override
+        _orig_rates = _st.get_dynamic_sell_rates
+        _cfg = config
+        def _patched_rates(market_status, market_rate=0.0):
+            r1, r2, r3, sl = _orig_rates(market_status, market_rate)
+            # ★ stop_loss_rate config 주입 (손절선 시나리오 비교용)
+            _sl = getattr(_cfg, "stop_loss_rate", sl)
+            return (_cfg.sell_1st_rate, _cfg.sell_2nd_rate,
+                    _cfg.sell_3rd_rate, _sl)
+        _st.get_dynamic_sell_rates = _patched_rates
+        # ★ STOP_LOSS_BASIC도 override
+        _st.STOP_LOSS_BASIC = getattr(config, "stop_loss_rate", -0.05)
+        self.risk_manager = RiskManager(
+            base_buy_amt=config.base_buy_amt,
+            max_daily_loss_pct=0.03,
+            max_daily_loss_count=getattr(config, "max_daily_loss", 5),
+        )
+
+        # 상태
+        self.cash         = config.initial_cash
+        self.positions    = {}        # code → {entry_price, qty, ...}
+        self.open_trades  = {}        # code → Trade
+        self.trades       = []        # 완료된 거래
+        self.peak_tracker = {}        # strategy.check_sell이 갱신
+        self.buy_tags     = {}
+        self.daily_loss_count = 0
+        self.daily_loss_amt   = 0
+        self.daily_pnl    = {}        # date → cumulative pnl
+        self.equity_curve = []        # [(date, total_value), ...]
+
+    # ============================================================
+    # 가상 체결
+    # ============================================================
+    def _simulate_buy(self, code: str, price: float,
+                       qty: int, date: str,
+                       score: int = 0, buy_tag: str = "") -> bool:
+        """수수료/슬리피지 반영한 가상 매수"""
+        # 슬리피지: 매수는 불리한 쪽 = 더 비싸게
+        fill_price = price * (1 + self.config.slippage)
+        cost = fill_price * qty
+        fee  = cost * self.config.fee_rate
+        total = cost + fee
+
+        if total > self.cash:
+            return False  # 현금 부족
+
+        self.cash -= total
+        self.positions[code] = {
+            "entry_price": fill_price,
+            "qty":         qty,
+            "buy_date":    date,
+            "score":       score,
+            "buy_tag":     buy_tag,
+        }
+        self.buy_tags[code] = buy_tag
+
+        # 거래 기록 시작
+        self.open_trades[code] = Trade(
+            code=code, buy_date=date,
+            buy_price=fill_price, qty=qty,
+            score=score, buy_tag=buy_tag,
+            fee=fee,
+        )
+        if self.config.verbose:
+            print(f"   🟢 매수 {code} {qty}주 @ {fill_price:,.0f} = {total:,.0f}")
+        return True
+
+    def _simulate_sell(self, code: str, qty: int,
+                        price: float, reason: str, date: str):
+        """수수료/세금 반영한 가상 매도"""
+        if code not in self.positions:
+            return
+
+        # 슬리피지: 매도는 불리한 쪽 = 더 싸게
+        fill_price = price * (1 - self.config.slippage)
+        revenue = fill_price * qty
+        fee     = revenue * self.config.fee_rate
+        tax     = revenue * self.config.tax_rate
+        net     = revenue - fee - tax
+
+        self.cash += net
+
+        pos = self.positions[code]
+        entry = pos["entry_price"]
+        pos_qty = pos["qty"]
+
+        # 부분 매도 처리
+        sold_cost = entry * qty
+        profit_krw = net - sold_cost
+        profit_rate = (fill_price - entry) / entry
+
+        # 거래 기록 갱신
+        ot = self.open_trades.get(code)
+        if ot:
+            # 부분 매도면 추가 기록
+            ot.sell_date    = date
+            ot.sell_price   = fill_price
+            ot.sell_reason  = reason
+            ot.profit_rate  = profit_rate
+            ot.profit_krw  += profit_krw  # 누적 (부분매도 합계)
+            ot.fee         += fee + tax
+
+        # 보유 수량 갱신
+        if qty >= pos_qty:
+            # 전량 매도
+            self.trades.append(ot)
+            del self.open_trades[code]
+            del self.positions[code]
+            self.peak_tracker.pop(code, None)
+            self.buy_tags.pop(code, None)
+        else:
+            # 부분 매도 — qty 차감, 트레이드는 계속 열린 상태
+            pos["qty"] -= qty
+            # ★ 버그수정: 부분 매도 시 peak_tracker 잔량 동기화
+            if code in self.peak_tracker:
+                self.peak_tracker[code]["remain_qty"] = pos["qty"]
+            # ※ 부분 매도 후에도 ot는 open_trades에 남아 다음 매도까지 추적
+
+        if self.config.verbose:
+            print(f"   🔴 매도 {code} {qty}주 @ {fill_price:,.0f} "
+                  f"({profit_rate:+.2%}) | {reason}")
+
+        # 손절 카운트
+        if profit_rate < 0 and qty >= pos_qty:
+            self.daily_loss_count += 1
+            self.daily_loss_amt   += profit_krw
+
+    def _on_loss(self):
+        """strategy.check_sell의 on_loss 콜백"""
+        # _simulate_sell에서 이미 카운트하므로 여기선 패스
+        pass
+
+    # ============================================================
+    # 한 날짜 시뮬레이션
+    # ============================================================
+    def _replay_day(self, date: pd.Timestamp):
+        """
+        하루치 시뮬레이션:
+        ① 보유 종목 매도 체크 (시가→고가→저가→종가 순서로 체크)
+        ② 신규 매수 후보 평가 → 매수
+        """
+        date_str = date.strftime("%Y-%m-%d")
+        # ★ 날짜별 시장상태 동적 로드
+        day_market_rate, day_market_status = self._get_market_status_at(date)
+        if day_market_status != "normal":
+            print(f"  📊 [{date_str}] 시장:{day_market_status} | KOSPI:{day_market_rate:+.2f}%")
+        # 일일 손실 카운트 리셋 (날짜 바뀜)
+        self.daily_loss_count = 0
+        self.daily_loss_amt   = 0
+
+        # ★ crash_only: 코스피 -3% 이하 날만 시뮬레이션
+        if self.config.crash_only and day_market_rate > -3.0:
+            self._record_equity(date)
+            return
+
+        # ★ rebound_buy: stop 모드에서 반등 2회 확인 후 매수 허용
+        if self.config.rebound_buy and day_market_status == "stop":
+            # 반등 추적 (날짜별)
+            if not hasattr(self, '_rebound_low'):
+                self._rebound_low = day_market_rate
+                self._rebound_count = 0
+            if day_market_rate < self._rebound_low:
+                self._rebound_low = day_market_rate
+                self._rebound_count = 0
+            rebound = day_market_rate - self._rebound_low
+            if rebound >= self.config.rebound_thresh:
+                self._rebound_count += 1
+            else:
+                self._rebound_count = 0
+            # 2번 연속 반등 확인 시 매수 허용 (stop → normal로 임시 변경)
+            if self._rebound_count >= 2:
+                print(f"  🔄 [{date_str}] 반등 감지({self._rebound_count}회) — 매수 허용!")
+                day_market_status = "normal"
+            else:
+                # 손절만 체크하고 매수 스킵
+                print(f"  📉 [{date_str}] stop 모드 반등 대기({self._rebound_count}/2회)")
+
+        # ── ① 매도 체크 ──────────────────────────────
+        # 보유 종목별로 strategy.check_sell 호출
+        # 시간 흐름 모사: 시가 → 장중 → 종가
+        # 단순화: 그날 OHLC 4개 시점에 각각 check_sell 호출
+        held_codes = list(self.positions.keys())
+        for code in held_codes:
+            if code not in self.positions:
+                continue  # 이전 매도로 사라짐
+            pos = self.positions[code]
+
+            # ATR (손절선 동적 조정용)
+            df = self.loader.load_ohlcv(code)
+            atr_rate = 0
+            if not df.empty and "atr14" in df.columns and date in df.index:
+                _row = df.loc[date]
+                if hasattr(_row, "columns"): _row = _row.iloc[-1]
+                try:
+                    atr14 = float(_row["atr14"])
+                    if atr14 > 0 and pos["entry_price"] > 0:
+                        atr_rate = atr14 / pos["entry_price"]
+                except Exception:
+                    pass
+                if atr14 > 0 and pos["entry_price"] > 0:
+                    atr_rate = atr14 / pos["entry_price"]
+
+            ma10 = 0
+            if not df.empty and "ma10" in df.columns and date in df.index:
+                _row = df.loc[date]
+                if hasattr(_row, "columns"): _row = _row.iloc[-1]
+                try:
+                    ma10 = float(_row["ma10"])
+                except Exception:
+                    ma10 = 0
+
+            # 4개 시점에 매도 체크 (시간 순서대로)
+            # 보수적: 손절은 저가에서, 익절은 고가에서 체결되도록
+            for px_type, now_t in [
+                ("open",  "0900"),
+                ("low",   "1000"),   # 장중 저점에서 손절 체크
+                ("high",  "1200"),   # 장중 고점에서 익절 체크
+                ("close", "1525"),   # 종가매도
+            ]:
+                if code not in self.positions:
+                    break  # 이미 매도됨
+                market_data = get_market_data_at(
+                    self.loader, code, date, price_type=px_type)
+                if not market_data:
+                    continue
+
+                # 매수 콜백은 백테스트에선 비활성화 (2차 매수)
+                # → 켈리/포지션관리 일관성을 위해 일단 끔
+                def _no_buy(c, p, amt): pass
+
+                self.strategy.check_sell(
+                    code=code,
+                    pos=pos,
+                    now_t=now_t,
+                    market_data=market_data,
+                    market_status=day_market_status,
+                        market_rate=day_market_rate,
+                    peak_tracker=self.peak_tracker,
+                    buy_tags=self.buy_tags,
+                    is_paused=False,
+                    on_buy=_no_buy,
+                    on_sell=lambda c, q, r, p: self._simulate_sell(
+                        c, q, p, r, date_str),
+                    on_loss=self._on_loss,
+                    ma10=ma10,
+                    atr_rate=atr_rate,
+                )
+
+        # ★ stop 모드면 매수 차단
+        if day_market_status == "stop":
+            self._record_equity(date)
+            return
+
+        # ── ② 매수 후보 평가 ─────────────────────────
+        # 일일 손실 한도 체크
+        stop, _ = self.risk_manager.should_stop_trading(
+            self.daily_loss_count, self.daily_loss_amt)
+        if stop:
+            self._record_equity(date)
+            return
+
+        # 매수 가능 슬롯 체크
+        if len(self.positions) >= self.config.max_positions:
+            self._record_equity(date)
+            return
+
+        # 종목별 점수 계산 → 정렬
+        candidates = []
+        for code in self.config.codes:
+            if code in self.positions:
+                continue
+            features = build_features_at(self.loader, code, date)
+            if not features:
+                continue
+
+            # 매수 필터
+            is_sector = code in self.config.cond_codes  # 간이 매핑
+            ok, _ = self.strategy.passes_buy_filter(features, is_sector)
+            if not ok:
+                continue
+
+            # 룰 점수
+            rule_score = self.strategy.get_rule_score(features)
+
+            # AI 점수 (백테스트 가정)
+            if self.config.ai_score_mode == "fixed":
+                ai_score = self.config.ai_score_fixed
+            elif self.config.ai_score_mode == "rule_proxy":
+                ai_score = rule_score
+            elif self.config.ai_score_mode == "cache":
+                # ★ 실제 ai_cache.db에서 당일 AI 점수 조회
+                ai_score = self._get_cached_ai_score(
+                    code, date, features.get("current_price", 0))
+                if ai_score is None:
+                    ai_score = rule_score  # 캐시 없으면 룰점수 사용
+            else:
+                ai_score = 60
+
+            base_score = (rule_score + ai_score) // 2
+
+            # 업종/테마 가산점
+            final_score, _, buy_tag = self.strategy.apply_sector_bonus(
+                code, base_score,
+                self.config.active_sectors,
+                self.config.sector_group_map,
+                self.config.theme_codes,
+                self.config.new_codes,
+                self.config.cond_codes,
+            )
+
+            if final_score >= self.config.buy_score_min:
+                candidates.append((final_score, code, features, buy_tag))
+
+        # 점수 높은 순으로 매수
+        candidates.sort(reverse=True)
+        for score, code, features, buy_tag in candidates:
+            if len(self.positions) >= self.config.max_positions:
+                break
+            # 다음 거래일 시가 매수 (look-ahead bias 방지)
+            df = self.loader.load_ohlcv(code)
+            future = df[df.index > date]
+            if future.empty:
+                continue
+            buy_date  = future.index[0]
+            buy_price = float(future.iloc[0]["open"])
+            if buy_price <= 0:
+                continue
+
+            # 포지션 사이징
+            amt = self.risk_manager.calc_buy_amount(
+                score=score,
+                atr_rate=features.get("atr_rate", 0),
+                is_theme=bool(buy_tag),
+                psbl_cash=int(self.cash),
+                code=code,
+                # 백테스트는 자체 DB 사용 안 함 (켈리는 데이터 부족 시 1.0)
+                db_path="__no_kelly__",
+            )
+            qty = max(1, int(amt / buy_price))
+            if qty * buy_price > self.cash:
+                continue
+
+            self._simulate_buy(
+                code=code, price=buy_price, qty=qty,
+                date=buy_date.strftime("%Y-%m-%d"),
+                score=score, buy_tag=buy_tag,
+            )
+
+        self._record_equity(date)
+
+
+    def _load_market_meta(self, db_path: str) -> dict:
+        """market_meta DB에서 KOSPI 일별 시장상태 로드"""
+        import sqlite3
+        result = {}
+        try:
+            conn = sqlite3.connect(db_path, timeout=5)
+            rows = conn.execute(
+                "SELECT date, kospi, market_status FROM market_meta"
+            ).fetchall()
+            for date, kospi, status in rows:
+                result[date] = {"kospi": kospi, "status": status}
+            conn.close()
+            print(f"✅ market_meta 로드: {len(result)}일치")
+        except Exception as e:
+            print(f"⚠️ market_meta 로드 실패: {e}")
+        return result
+
+    def _get_market_status_at(self, date) -> tuple:
+        """특정 날짜의 시장상태 반환 (kospi_rate, status)"""
+        date_str = date.strftime("%Y-%m-%d")
+        meta = self._market_meta.get(date_str, {})
+        return meta.get("kospi", 0.0), meta.get("status", "normal")
+
+    def _get_cached_ai_score(self, code: str, date,
+                              current_price: float = 0):
+        """ai_cache.db에서 당일 AI 점수 조회"""
+        import sqlite3, os
+        ai_db = os.path.normpath(
+            os.path.join(os.path.dirname(self.db_path), "..", "ai_cache.db"))
+        if not os.path.exists(ai_db):
+            return None
+        try:
+            conn = sqlite3.connect(ai_db, timeout=5)
+            date_str = date.strftime("%Y-%m-%d")
+            row = conn.execute("""
+                SELECT score, cached_price FROM ai_analysis
+                WHERE code = ? AND analyzed_at LIKE ?
+                ORDER BY analyzed_at DESC LIMIT 1
+            """, (code, f"{date_str}%")).fetchone()
+            conn.close()
+            if not row:
+                return None
+            score, cached_price = row
+            if cached_price and current_price > 0:
+                drift = abs(current_price - cached_price) / cached_price
+                if drift > 0.10:
+                    return None
+            return int(score)
+        except Exception:
+            return None
+
+    def _record_equity(self, date: pd.Timestamp):
+        """일별 자산 가치 기록 (MDD/equity curve용)"""
+        market_value = 0
+        for code, pos in self.positions.items():
+            df = self.loader.load_ohlcv(code)
+            if not df.empty and date in df.index:
+                _row = df.loc[date]
+                if hasattr(_row, "columns"): _row = _row.iloc[-1]
+                market_value += float(_row["close"]) * pos["qty"]
+            else:
+                market_value += pos["entry_price"] * pos["qty"]
+        total = self.cash + market_value
+        self.equity_curve.append((date.strftime("%Y-%m-%d"), total))
+
+    # ============================================================
+    # 메인 실행
+    # ============================================================
+    def run(self):
+        """전체 백테스트 실행"""
+        # 거래일 추출 (어떤 종목이라도 거래된 날짜)
+        all_dates = set()
+        for code in self.config.codes:
+            df = self.loader.load_ohlcv(code)
+            if not df.empty:
+                all_dates.update(df.index)
+        # 기간 필터
+        start = pd.to_datetime(self.config.start_date)
+        end   = pd.to_datetime(self.config.end_date)
+        dates = sorted(d for d in all_dates if start <= d <= end)
+
+        if not dates:
+            print("⚠️ 거래일 없음 — 데이터 수집부터 다시 확인 필요")
+            return
+
+        print(f"🚀 백테스트 시작: {self.config.start_date} ~ "
+              f"{self.config.end_date} | 거래일 {len(dates)}일 | "
+              f"종목 {len(self.config.codes)}개")
+
+        for i, date in enumerate(dates, 1):
+            try:
+                self._replay_day(date)
+            except Exception as e:
+                print(f"⚠️ {date.strftime('%Y-%m-%d')} 처리 오류: {e}")
+                if self.config.verbose:
+                    import traceback
+                    traceback.print_exc()
+            if i % 50 == 0:
+                print(f"   진행 {i}/{len(dates)} | "
+                      f"보유 {len(self.positions)}개 | "
+                      f"현금 {self.cash:,.0f} | "
+                      f"완료거래 {len(self.trades)}건")
+
+        # 잔여 포지션 강제 청산 (마지막 날 종가)
+        last_date = dates[-1]
+        last_str  = last_date.strftime("%Y-%m-%d")
+        for code in list(self.positions.keys()):
+            df = self.loader.load_ohlcv(code)
+            if not df.empty and last_date in df.index:
+                _row = df.loc[last_date]
+                if hasattr(_row, "columns"): _row = _row.iloc[-1]
+                self._simulate_sell(
+                    code, self.positions[code]["qty"],
+                    float(_row["close"]),
+                    "백테스트종료", last_str)
+
+        print(f"\n✅ 백테스트 종료 — 거래 {len(self.trades)}건, "
+              f"최종 현금 {self.cash:,.0f}원")
+
+    # ============================================================
+    # 결과 추출
+    # ============================================================
+    def get_trades(self) -> list:
+        return [t.to_dict() for t in self.trades]
+
+    def get_equity_curve(self) -> list:
+        return self.equity_curve
