@@ -109,6 +109,7 @@ def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
     out["ma10"] = close.rolling(10, min_periods=10).mean()
     out["ma20"] = close.rolling(20, min_periods=20).mean()
     out["ma60"] = close.rolling(60, min_periods=60).mean()
+    out["ma200"] = close.rolling(200, min_periods=200).mean()
 
     # ── RSI(14) ──────────────────────────────────
     delta = close.diff()
@@ -254,6 +255,8 @@ def build_features_at(loader: DataLoader,
         "ma10":            f(last.get("ma10", 0)),
         "ma20":            f(last.get("ma20", 0)),
         "ma60":            f(last.get("ma60", 0)),
+        "ma200":           f(last.get("ma200", 0)),
+        "roe":             roe,
         # 수급
         "foreign_5d":      foreign_5d,
         "institution_5d":  orgn_5d,
