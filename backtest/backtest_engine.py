@@ -468,6 +468,10 @@ class BacktestEngine:
                     code, date, features.get("current_price", 0))
                 if ai_score is None:
                     ai_score = rule_score  # 캐시 없으면 룰점수 사용
+            elif self.config.ai_score_mode == "random":
+                # ★ 무작위 진입 검증 — 매수 타점 완전 랜덤
+                import random as _rnd
+                ai_score = _rnd.randint(40, 80)
             else:
                 ai_score = 60
 

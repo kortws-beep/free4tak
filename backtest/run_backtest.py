@@ -105,6 +105,69 @@ def get_scenarios(base: BacktestConfig) -> list:
                        "sell_1st_rate": 0.03, "sell_2nd_rate": 0.06, "sell_3rd_rate": 0.10},
         },
 
+        # ★ 무작위 진입 검증
+        {
+            "name": "랜덤진입(현재손절-10%)",
+            "config": {**base.__dict__, "buy_score_min": 40, "max_positions": 5,
+                       "ai_score_mode": "random", "stop_loss_rate": -0.10},
+        },
+        {
+            "name": "랜덤진입+시간청산5일",
+            "config": {**base.__dict__, "buy_score_min": 40, "max_positions": 5,
+                       "ai_score_mode": "random", "stop_loss_rate": -0.10,
+                       "time_stop_days": 5},
+        },
+        {
+            "name": "랜덤진입+타이트손절(-5%)",
+            "config": {**base.__dict__, "buy_score_min": 40, "max_positions": 5,
+                       "ai_score_mode": "random", "stop_loss_rate": -0.05},
+        },
+
+        # ★ 무작위 진입 검증 — 리스크 관리 방어력 순수 테스트
+        {
+            "name": "랜덤진입(현재손절)",
+            "config": {**base.__dict__,
+                       "buy_score_min": 40,   # 임계치 낮춰 최대한 많이 진입
+                       "max_positions": 5,
+                       "ai_score_mode": "random",
+                       "stop_loss_rate": -0.10},
+        },
+        {
+            "name": "랜덤진입+시간청산5일",
+            "config": {**base.__dict__,
+                       "buy_score_min": 40,
+                       "max_positions": 5,
+                       "ai_score_mode": "random",
+                       "stop_loss_rate": -0.10,
+                       "time_stop_days": 5},
+        },
+        {
+            "name": "랜덤진입+타이트손절(-5%)",
+            "config": {**base.__dict__,
+                       "buy_score_min": 40,
+                       "max_positions": 5,
+                       "ai_score_mode": "random",
+                       "stop_loss_rate": -0.05},
+        },
+
+        # ★ 무작위 진입 검증 — 리스크 관리 방어력 순수 테스트
+        {
+            "name": "랜덤진입(손절-10%)",
+            "config": {**base.__dict__, "buy_score_min": 40, "max_positions": 5,
+                       "ai_score_mode": "random", "stop_loss_rate": -0.10},
+        },
+        {
+            "name": "랜덤진입+시간청산5일",
+            "config": {**base.__dict__, "buy_score_min": 40, "max_positions": 5,
+                       "ai_score_mode": "random", "stop_loss_rate": -0.10,
+                       "time_stop_days": 5},
+        },
+        {
+            "name": "랜덤진입+타이트손절(-5%)",
+            "config": {**base.__dict__, "buy_score_min": 40, "max_positions": 5,
+                       "ai_score_mode": "random", "stop_loss_rate": -0.05},
+        },
+
         # ★ 하락장 시나리오
         {
             "name": "하락장만(코스피-3%이하)+현재설정",

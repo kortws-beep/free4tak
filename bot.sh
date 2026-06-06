@@ -118,8 +118,17 @@ case "$1" in
     done
     ;;
 
+  git|push)
+    cd ~/k-bot/stock_bot
+    MSG="${2:-$(date '+%Y-%m-%d %H:%M') 업데이트}"
+    echo "📦 GitHub 업로드: $MSG"
+    git add .
+    git commit -m "$MSG" 2>/dev/null || echo "변경사항 없음"
+    git push
+    echo "✅ 완료"
+    ;;
   *)
-    echo "사용법: $0 {start|stop|restart|status|log [bot]|today [bot]|enable|disable}"
+    echo "사용법: $0 {start|stop|restart|status|log [bot]|today [bot]|enable|disable|git [msg]|push}"
     echo ""
     echo "  start         — 전체 봇 시작"
     echo "  stop          — 전체 봇 정지"
@@ -131,3 +140,4 @@ case "$1" in
     echo "  disable       — 부팅 자동시작 해제"
     ;;
 esac
+
