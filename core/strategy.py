@@ -272,7 +272,7 @@ class Strategy:
         leading_sectors = data.get("today_leading_sectors", "")
         stock_theme = data.get("theme", "") # 종목의 테마 정보 (없으면 빈 문자열)
 
-        if market_status in ["weak", "stop"] and leading_sectors:
+        if market_status in ["weak", "stop"] and leading_sectors and leading_sectors != "데이터없음" and stock_theme:
             is_leading = False
             # LLM이 뽑아준 '반도체, 화학, 철강'을 쪼개서 하나씩 비교
             for keyword in leading_sectors.split(','):
