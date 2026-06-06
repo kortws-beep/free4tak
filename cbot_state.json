@@ -4,26 +4,26 @@
   "cmd_result": "✅ KRW-WLD 즉시매도 완료",
   "last_status": {
     "krw": 592632,
-    "total_profit": 18086,
+    "total_profit": 10536,
     "daily_pnl": 0,
     "positions": 2,
     "positions_detail": {
       "KRW-USDT": {
-        "current": 1522,
+        "current": 1523,
         "entry_price": 1477,
         "qty": 203.11442112,
-        "rate": 3.05
+        "rate": 3.11
       },
       "KRW-SAHARA": {
-        "current": 51,
+        "current": 50,
         "entry_price": 50,
         "qty": 5964.21471172,
-        "rate": 2.98
+        "rate": 0.4
       }
     },
     "daily_loss": 0,
     "market_status": "normal",
-    "btc_rate": 0.36989247,
+    "btc_rate": -0.58602151,
     "fear_greed": 12,
     "is_night": false,
     "coin_pool": [
@@ -40,12 +40,12 @@
       "KRW-ADA",
       "KRW-SUI",
       "KRW-LA",
-      "KRW-SAHARA",
       "KRW-XPL",
+      "KRW-SAHARA",
       "KRW-ENA",
-      "KRW-AERGO",
-      "KRW-VIRTUAL",
       "KRW-SLX",
+      "KRW-VIRTUAL",
+      "KRW-AERGO",
       "KRW-BCH"
     ],
     "coins": [
@@ -62,29 +62,29 @@
       "KRW-ADA",
       "KRW-SUI",
       "KRW-LA",
-      "KRW-SAHARA",
       "KRW-XPL",
+      "KRW-SAHARA",
       "KRW-ENA",
-      "KRW-AERGO",
-      "KRW-VIRTUAL",
       "KRW-SLX",
+      "KRW-VIRTUAL",
+      "KRW-AERGO",
       "KRW-BCH"
     ],
     "seed": "30만원 소액 모드"
   },
-  "last_update": "10:12:39",
+  "last_update": "12:59:24",
   "daily_loss": 0,
   "loss_date": "2026-06-06",
   "positions": {
     "KRW-USDT": {
       "entry_price": 1477.0,
       "qty": 203.11442112,
-      "current": 1522.0
+      "current": 1523.0
     },
     "KRW-SAHARA": {
       "entry_price": 50.3,
       "qty": 5964.21471172,
-      "current": 51.8
+      "current": 50.5
     }
   },
   "peak_tracker": {
