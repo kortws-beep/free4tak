@@ -160,6 +160,17 @@ class BacktestEngine:
         self.db_path      = db_path
         self.loader       = DataLoader(db_path)
         self._market_meta = self._load_market_meta(db_path)  # ★ KOSPI 일별 시장상태
+        self.leading_sectors = {}
+        try:
+            import sqlite3
+            with sqlite3.connect(db_path) as conn:
+                query = "SELECT date, sectors FROM daily_leading_sectors"
+                for row in conn.execute(query).fetchall():
+                    self.leading_sectors[row[0]] = row[1]
+            print(f"✅ 주도 섹터 DB 로드 완료 (총 {len(self.leading_sectors)}일치)")
+        except Exception as e:
+            print(f"⚠️ 주도 섹터 DB 로드 실패 (섹터 필터링 무시됨): {e}")
+        # ▲ ================================================= ▲
         self.strategy     = Strategy()
         # ★ config 값으로 익절/트레일링 상수 override (매 인스턴스마다 재설정)
         import strategy as _st
@@ -453,6 +464,27 @@ class BacktestEngine:
             ok, _ = self.strategy.passes_buy_filter(features, is_sector)
             if not ok:
                 continue
+            # 1. 먼저 features 딕셔너리에 필터링에 필요한 정보를 꽉 채워 넣습니다.
+            features["market_status"] = day_market_status
+            features["today_leading_sectors"] = getattr(self, "leading_sectors", {}).get(date_str, "")
+            
+            # 종목 테마 매핑 (테마 정보가 딕셔너리일 경우만 안전하게 처리)
+            stock_theme = ""
+            if hasattr(self.config, "theme_codes") and isinstance(self.config.theme_codes, dict):
+                for t_name, codes_in_theme in self.config.theme_codes.items():
+                    if code in codes_in_theme:
+                        stock_theme += t_name + ","
+            features["theme"] = stock_theme
+
+            # 2. 이제 꽉 채운 features를 넘겨서 최종 통과 여부를 묻습니다.
+            is_sector = code in self.config.cond_codes  
+            ok, reason = self.strategy.passes_buy_filter(features, is_sector)
+            
+            # 3. 통과 못 했으면 미련 없이 continue!
+            if not ok:
+                # 로그가 너무 많이 찍힐 것 같으면 아래 print 줄은 지우셔도 됩니다.
+                # print(f"  🚫 [{code}] 필터 탈락: {reason}")
+                continue   
 
             # 룰 점수
             rule_score = self.strategy.get_rule_score(features)
@@ -619,6 +651,13 @@ class BacktestEngine:
 
         for i, date in enumerate(dates, 1):
             try:
+                # ▼▼▼ [여기에 아래 3줄을 추가해 주세요] ▼▼▼
+                # 1. 날짜 객체를 'YYYY-MM-DD' 문자열로 변환
+                date_str = date.strftime("%Y-%m-%d")
+                # 2. 메모리에 로드된 주도 섹터 딕셔너리에서 해당 날짜의 키워드를 가져와 config에 주입
+                self.config.today_leading_sectors = getattr(self, "leading_sectors", {}).get(date_str, "")
+                # ▲▲▲=====================================▲▲▲
+                
                 self._replay_day(date)
             except Exception as e:
                 print(f"⚠️ {date.strftime('%Y-%m-%d')} 처리 오류: {e}")

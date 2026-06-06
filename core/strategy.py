@@ -267,6 +267,25 @@ class Strategy:
         if change > 15:
             return False, "과열 제외"
 
+        # ▼▼▼ [추가할 코드: 하락장 주도 섹터 하드 필터링] ▼▼▼
+        market_status = data.get("market_status", "normal")
+        leading_sectors = data.get("today_leading_sectors", "")
+        stock_theme = data.get("theme", "") # 종목의 테마 정보 (없으면 빈 문자열)
+
+        if market_status in ["weak", "stop"] and leading_sectors:
+            is_leading = False
+            # LLM이 뽑아준 '반도체, 화학, 철강'을 쪼개서 하나씩 비교
+            for keyword in leading_sectors.split(','):
+                keyword = keyword.strip()
+                if keyword and keyword in stock_theme:
+                    is_leading = True
+                    break
+            
+            # 시장이 꺾였는데 주도 섹터도 아니다? 차트가 아무리 예뻐도 강제 탈락!
+            if not is_leading:
+                return False, f"하락장 비주도섹터 강제탈락 (요구:{leading_sectors})"
+        # ▲▲▲===================================================▲▲▲    
+
         # ----------------------------------------------------
         # ★ [신규 추가] 펀더멘털 및 장기 추세 필터 (수수료 방어)
         # ----------------------------------------------------
