@@ -44,7 +44,7 @@ TRAIL_STOP_AFTER_2ND = 0.02   # 2차 후: 2%
 STOP_LOSS_BASIC      = -0.10  # 기본 손절: -10% (★ 백테스트 최적)
 STOP_LOSS_AFTER_1ST  = -0.02  # ★ 1차 익절 후 본절 보호: 진입가 대비 -2%
 STOP_LOSS_WEAK       = -0.03  # 약세장 손절: -3% (더 빠르게)
-TIME_STOP_DAYS       = 0      # ★ 시간 청산 기준 (엔진에서 자동 설정됨)
+TIME_STOP_DAYS       = 5      # ★ 시간 청산 기준 (5영업일 내 1차 익절 미달 시 청산)
 
 def get_dynamic_sell_rates(market_status: str, market_rate: float = 0.0) -> tuple:
     """시장 상황에 따른 동적 익절/손절 비율 반환"""
@@ -543,14 +543,25 @@ class Strategy:
             return "1차익절"
 
         # ----------------------------------------------------------
-        # ★ ⑥-2 시간 청산 (Time Stop)
         # ----------------------------------------------------------
-        tracker["holding_days"] = tracker.get("holding_days", 0) + 1
-        if TIME_STOP_DAYS > 0 and tracker["holding_days"] >= TIME_STOP_DAYS and stage < 1:
-            on_sell(code, qty, f"시간청산({tracker['holding_days']}일)", current)
-            return "시간청산"
-
+        # ★ ⑥-2 시간 청산 (Time Stop) — buy_date 기준 보유일 계산
         # ----------------------------------------------------------
+        if TIME_STOP_DAYS > 0 and stage < 1:
+            import datetime as _dt
+            _buy_date = pos.get("buy_date", "")
+            if _buy_date:
+                try:
+                    _bd = _dt.date.fromisoformat(str(_buy_date)[:10])
+                    _sim = _dt.date.fromisoformat(str(pos.get("sim_date", _dt.date.today().isoformat()))[:10])
+                    _holding = (_sim - _bd).days
+                except Exception:
+                    _holding = tracker.get("holding_days", 0)
+            else:
+                _holding = tracker.get("holding_days", 0) + 1
+                tracker["holding_days"] = _holding
+            if _holding >= TIME_STOP_DAYS:
+                on_sell(code, qty, f"시간청산({_holding}일)", current)
+                return "시간청산"
         # ⑦ 손절 — ★ 개선: 단계별 + ATR 동적 조정
         # ----------------------------------------------------------
         if stage >= 1:
