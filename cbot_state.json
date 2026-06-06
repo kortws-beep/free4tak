@@ -4,26 +4,26 @@
   "cmd_result": "✅ KRW-WLD 즉시매도 완료",
   "last_status": {
     "krw": 592632,
-    "total_profit": 10536,
+    "total_profit": 5345,
     "daily_pnl": 0,
     "positions": 2,
     "positions_detail": {
       "KRW-USDT": {
-        "current": 1523,
+        "current": 1518,
         "entry_price": 1477,
         "qty": 203.11442112,
-        "rate": 3.11
+        "rate": 2.78
       },
       "KRW-SAHARA": {
-        "current": 50,
+        "current": 49,
         "entry_price": 50,
         "qty": 5964.21471172,
-        "rate": 0.4
+        "rate": -0.99
       }
     },
     "daily_loss": 0,
     "market_status": "normal",
-    "btc_rate": -0.58602151,
+    "btc_rate": -0.07419355000000001,
     "fear_greed": 12,
     "is_night": false,
     "coin_pool": [
@@ -31,60 +31,60 @@
       "KRW-ETH",
       "KRW-XRP",
       "KRW-SOL",
-      "KRW-WLD",
       "KRW-USDT",
       "KRW-XLM",
-      "KRW-NEAR",
       "KRW-ONDO",
       "KRW-DOGE",
+      "KRW-NEAR",
       "KRW-ADA",
-      "KRW-SUI",
       "KRW-LA",
+      "KRW-SUI",
       "KRW-XPL",
-      "KRW-SAHARA",
-      "KRW-ENA",
       "KRW-SLX",
+      "KRW-ENA",
+      "KRW-SAHARA",
+      "KRW-BCH",
+      "KRW-ARDR",
       "KRW-VIRTUAL",
-      "KRW-AERGO",
-      "KRW-BCH"
+      "KRW-MOVE"
     ],
     "coins": [
       "KRW-BTC",
       "KRW-ETH",
       "KRW-XRP",
       "KRW-SOL",
-      "KRW-WLD",
       "KRW-USDT",
       "KRW-XLM",
-      "KRW-NEAR",
       "KRW-ONDO",
       "KRW-DOGE",
+      "KRW-NEAR",
       "KRW-ADA",
-      "KRW-SUI",
       "KRW-LA",
+      "KRW-SUI",
       "KRW-XPL",
-      "KRW-SAHARA",
-      "KRW-ENA",
       "KRW-SLX",
+      "KRW-ENA",
+      "KRW-SAHARA",
+      "KRW-BCH",
+      "KRW-ARDR",
       "KRW-VIRTUAL",
-      "KRW-AERGO",
-      "KRW-BCH"
+      "KRW-MOVE"
     ],
     "seed": "30만원 소액 모드"
   },
-  "last_update": "12:59:24",
+  "last_update": "18:34:34",
   "daily_loss": 0,
   "loss_date": "2026-06-06",
   "positions": {
     "KRW-USDT": {
       "entry_price": 1477.0,
       "qty": 203.11442112,
-      "current": 1523.0
+      "current": 1518.0
     },
     "KRW-SAHARA": {
       "entry_price": 50.3,
       "qty": 5964.21471172,
-      "current": 50.5
+      "current": 49.8
     }
   },
   "peak_tracker": {
