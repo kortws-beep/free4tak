@@ -7,3 +7,5 @@ token.json
 __pycache__/
 *.pyc
 *.bak*
+backtest/results/*.json
+backtest/data/*.db
