@@ -352,6 +352,9 @@ class BacktestEngine:
         # 시간 흐름 모사: 시가 → 장중 → 종가
         # 단순화: 그날 OHLC 4개 시점에 각각 check_sell 호출
         held_codes = list(self.positions.keys())
+        # ★ 시간청산용 시뮬레이션 날짜 주입
+        for _c in self.positions:
+            self.positions[_c]["sim_date"] = date.strftime("%Y-%m-%d")
         for code in held_codes:
             if code not in self.positions:
                 continue  # 이전 매도로 사라짐
