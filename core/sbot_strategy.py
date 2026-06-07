@@ -140,6 +140,11 @@ class SwingStrategy:
         ma20     = data.get("ma20", 0)
         foreign  = data.get("foreign_5d", 0)
 
+        # ★ VI(변동성완화장치) 발동 종목 제외 (51=VI발동, 2분 단일가매매)
+        vi_code = data.get("iscd_stat_cls_code", "55")
+        if vi_code == "51":
+            return False, "VI 발동 중 (단일가매매 — 체결 불가)"
+
         if change >= 29.5:
             return False, "상한가 제외"
 

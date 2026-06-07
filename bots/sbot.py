@@ -677,6 +677,8 @@ class SBot:
                 "mkt_cap":       safe_int(basic.get("hts_avls",     0)),
                 "stock_name":    basic.get("hts_kor_isnm", ""),
                 "stck_hgpr":     safe_float(basic.get("stck_hgpr",  0)),
+                # ★ VI 발동 상태 코드 (51=VI발동, 55=정상)
+                "iscd_stat_cls_code": basic.get("iscd_stat_cls_code", "55"),
             }
             data.update(self.api.get_technical_indicators(code, self._tech_cache))
             data.update(self.api.get_investor_trend(code, self._flow_cache))
