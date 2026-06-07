@@ -1310,13 +1310,26 @@ class SBot:
                         self._save_status(cash, total_profit, score_enter, now, pos_mkt_cache)
                         time.sleep(LOOP_SLEEP); continue
                 # ★ 미체결 주문 취소 (1루프 이상 경과)
+                # 1) 체결 완료된 종목 pending에서 먼저 제거
+                for _code in list(self.positions.keys()):
+                    self._pending_orders.pop(_code, None)
+                # 2) 남은 pending = 미체결 → 취소
                 for _code, (_orgno, _odno, _qty) in list(self._pending_orders.items()):
-                    if _code in self.positions:
-                        self._pending_orders.pop(_code, None)
-                    elif _odno:
-                        print(f"🚫 [SWING] 미체결 취소: {_code} (odno:{_odno})")
-                        self.api.cancel_order(_orgno, _odno, _code, _qty)
-                        self._pending_orders.pop(_code, None)
+                    if _odno:
+                        print(f"🚫 [SWING] 미체결 취소: {_code}({self._name(_code)}) odno:{_odno}")
+                        ok = self.api.cancel_order(_orgno, _odno, _code, _qty)
+                        if ok:
+                            self.notify(
+                                f"🚫 [SWING] 미체결 취소\n"
+                                f"종목: {_code}({self._name(_code)})\n"
+                                f"사유: 1루프 내 미체결 → 자금 반환"
+                            )
+                        # ★ 재매수 방지 — sold_today 등록
+                        self.sold_today[_code] = now_hms()
+                        # ★ 잔재 정리
+                        self.buy_context.pop(_code, None)
+                        self.peak_tracker.pop(_code, None)
+                    self._pending_orders.pop(_code, None)
 
                 # ── 일시중단 ──────────────────────────────
                 if self._is_paused:
