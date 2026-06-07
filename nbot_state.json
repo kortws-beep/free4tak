@@ -1,15 +1,17 @@
 {
   "telegram_event": {
     "keywords": [
-      "수주"
+      "엔비디아",
+      "AI"
     ],
     "themes": [
-      "조선",
-      "방산",
-      "건설"
+      "HBM",
+      "클라우드",
+      "반도체",
+      "AI"
     ],
     "score": 15,
-    "text": "HD현대중공업, 초대형 가스운반선 2척 수주 - 이비엔(EBN)뉴스센터\nhttps://www.ebn.co.kr/news/articleView.html?idxno=1711546",
-    "time": "08:16:24"
+    "text": "[속보]SK하이닉스 \"엔비디아와 글로벌 AI 팩토리 구축 위한 차세대 메모리 공동 개발\"\nhttps://naver.me/IGsqIrc0",
+    "time": "08:22:34"
   }
 }

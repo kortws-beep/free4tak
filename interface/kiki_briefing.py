@@ -332,21 +332,20 @@ def _get_us_events(today_date: str) -> str:
                      - timedelta(days=1)).strftime("%Y-%m-%d")
 
         # 연준 발언 결과 + 경제지표 결과 + 실적 결과
+        # ★ Finnhub에서 어제 실제 발표 종목만 동적으로 쿼리 생성 (NVDA 하드코딩 제거)
         queries = [
-            f"NVDA 엔비디아 실적 발표 결과 어닝콜 젠슨황 {yesterday}",
-            f"미국 경제지표 발표 결과 고용 CPI {yesterday}",
+            f"미국 경제지표 발표 결과 고용 CPI 연준 {yesterday}",
         ]
 
-        # Finnhub에서 어제 실적 발표 종목 확인 → 결과 검색
         finnhub_yesterday = _get_finnhub_events(days_ahead=1)
         earnings = finnhub_yesterday.get("earnings", [])
-        # 어제 발표된 것 (amc = 장마감후)
         if earnings:
+            # 어제 발표된 종목만 검색 (최대 5개)
             syms = " ".join(e["symbol"] for e in earnings[:5])
             queries.append(f"{syms} 실적 발표 결과 어닝콜 EPS {yesterday}")
-            # NVDA 별도 강조 검색
-            if any(e["symbol"] == "NVDA" for e in earnings):
-                queries.append(f"NVDA 엔비디아 실적 발표 젠슨황 어닝콜 {yesterday}")
+        else:
+            # 실적 발표 없으면 어젯밤 나스닥/반도체 동향만 검색
+            queries.append(f"나스닥 반도체 주요 이슈 {yesterday}")
 
         all_results = []
         for q in queries:
