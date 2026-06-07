@@ -1,18 +1,15 @@
 {
   "telegram_event": {
     "keywords": [
-      "젠슨황",
-      "AI"
+      "수주"
     ],
     "themes": [
-      "서버",
-      "AI",
-      "클라우드",
-      "반도체",
-      "전력"
+      "조선",
+      "방산",
+      "건설"
     ],
-    "score": 20,
-    "text": "\"한국은 AI투자의 위대한 미래\"…피지컬 AI 동맹 만드는 젠슨황\nhttps://naver.me/xAfhMZ0d",
-    "time": "10:34:22"
+    "score": 15,
+    "text": "HD현대중공업, 초대형 가스운반선 2척 수주 - 이비엔(EBN)뉴스센터\nhttps://www.ebn.co.kr/news/articleView.html?idxno=1711546",
+    "time": "08:16:24"
   }
 }
