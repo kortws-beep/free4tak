@@ -125,7 +125,7 @@ MAJOR_COINS  = ["KRW-BTC", "KRW-ETH"]
 ALT_COINS    = ["KRW-XRP", "KRW-SOL"]
 
 # 종목 풀 설정
-POOL_SIZE         = 20
+POOL_SIZE         = 30    # 20→30, 회복장 대비 후보군 확대
 MIN_TRADE_AMT_B   = 10_000_000_000  # 24시간 거래대금 100억 (원) — 잡코인 필터 강화
 MAX_CHANGE_RATE   = 25.0            # +25% 이상) 제외
 MIN_CHANGE_RATE   = -20.0           # 폭락 (-20% 이하) 제외
@@ -682,9 +682,9 @@ class CBot:
             print(f"🪙 종목 풀 갱신: 총 {len(self.coin_pool)}개")
             print(f"   고정: {', '.join(FIXED_COINS)}")
             if new_coins:
-                print(f"   추가: {', '.join(new_coins[:15])}")
+                print(f"   추가: {', '.join(new_coins[:25])}")
             # ★ 종목 풀 변경 시 WebSocket 재구독
-            self._ws_subscribe(self.coin_pool[:15])  # 최대 15개 구독
+            self._ws_subscribe(self.coin_pool[:25])  # 최대 25개 구독
 
         except Exception as e:
             print(f"⚠️ 종목 풀 갱신 오류: {e} — 기존 풀 유지 ({len(self.coin_pool)}개)")
