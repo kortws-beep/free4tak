@@ -154,10 +154,10 @@ STOP_LOSS_WEAK      = -0.05   # 약세장
 STOP_LOSS_STOP      = -0.03   # BTC 중단 모드
 STOP_LOSS_NIGHT     = -0.05   # 야간 (00~06시) — 반등 대기
 STOP_LOSS_CRASH     = -0.05   # 직전봉 급락 즉시 손절
-STOP_LOSS_AFTER_1ST = -0.02   # ★ 신규: 1차 익절 후 본절 보호
+STOP_LOSS_AFTER_1ST = -0.03   # ★ 1차 익절 후 본절 보호 (-2%→-3%, 코인 노이즈 대응)
 
 # ── 매수 신호 기준 ──────────────────────────────────────────
-RSI_MIN  = 45
+RSI_MIN  = 40    # 45→40, 눌림목 진입 허용
 RSI_MAX  = 79
 VOL_MULT = 1.2
 AI_SCORE_MIN_BASE = 55          # AI 점수 기본 임계치 (동적 조정됨)
@@ -1023,14 +1023,14 @@ class CBot:
     # ============================================================
     def check_buy_signal(self, market: str) -> tuple:
         """반환: (매수 여부, 지표, 사유)"""
-        # ★ 야간 신규 매수 — 기본 금지, 단 BTC +2% 이상 + 공포탐욕 60 이상 시 허용
+        # ★ 야간 신규 매수 — 기본 금지, 단 BTC +1% 이상 OR 공포탐욕 50 이상 시 허용
         if self._is_night():
-            btc_surge = self.btc_rate >= 2.0
-            greed_ok  = self.fear_greed >= 60
-            if not (btc_surge and greed_ok):
+            btc_surge = self.btc_rate >= 1.0
+            greed_ok  = self.fear_greed >= 50
+            if not (btc_surge or greed_ok):
                 reason = []
-                if not btc_surge: reason.append(f"BTC {self.btc_rate:+.1f}%<2%")
-                if not greed_ok:  reason.append(f"탐욕{self.fear_greed}<60")
+                if not btc_surge: reason.append(f"BTC {self.btc_rate:+.1f}%<1%")
+                if not greed_ok:  reason.append(f"탐욕{self.fear_greed}<50")
                 return False, {}, f"야간 매수 금지 ({', '.join(reason)})"
             print(f"🌙 야간 특례 매수 허용 — BTC:{self.btc_rate:+.1f}% 탐욕:{self.fear_greed}")
         ind = self.get_indicators(market)
