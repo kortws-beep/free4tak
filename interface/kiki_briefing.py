@@ -260,48 +260,75 @@ def _claude_call(llm, **kwargs):
 
 def _get_global_market() -> dict:
     """
-    Yahoo Finance에서 미국 주요 지수 직접 조회.
+    미국 주요 지수 조회 — 웹서치 기반 (Yahoo Finance 차단 대응).
     반환: {
-        'sox':  {'name': '필라델피아 반도체', 'price': 11302.52, 'rate': -2.47, 'date': '05/18'},
-        'ndx':  {...},
-        'spx':  {...},
-        'dji':  {...},
+        'sox':  {'name': '필라델피아 반도체', 'price': 11302.52, 'rate': -2.47, 'date': '06/08'},
+        'ndx':  {...}, 'spx':  {...}, 'dji':  {...},
     }
     """
-    import requests as _req
     import datetime as _dt
+    import re as _re
 
-    symbols = {
-        'sox': ('^SOX',  '필라델피아 반도체'),
-        'ndx': ('^IXIC', '나스닥'),
-        'spx': ('^GSPC', 'S&P500'),
-        'dji': ('^DJI',  '다우'),
-    }
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-    result  = {}
+    today = _dt.datetime.now().strftime("%Y-%m-%d")
+    result = {}
 
-    for key, (sym, name) in symbols.items():
-        try:
-            url = (f'https://query1.finance.yahoo.com/v8/finance/chart/{sym}'
-                   f'?interval=1d&range=5d')
-            res   = _req.get(url, headers=headers, timeout=10).json()
-            chart = res['chart']['result'][0]
-            closes = chart['indicators']['quote'][0]['close']
-            timestamps = chart['timestamp']
-            valid = [(t, c) for t, c in zip(timestamps, closes) if c is not None]
-            if len(valid) >= 2:
-                prev_t, prev_c = valid[-2]
-                last_t, last_c = valid[-1]
-                rate = (last_c - prev_c) / prev_c * 100
-                date = _dt.datetime.utcfromtimestamp(last_t).strftime('%m/%d')
+    try:
+        _ai = _get_ai()
+        if not _ai:
+            return result
+
+        # 웹서치로 미국 주요 지수 현재가 조회
+        query = f"나스닥 필라델피아반도체 S&P500 다우 지수 어제 종가 {today}"
+        raw = _ai._web_search_korea(query)
+        if not raw or raw == "검색 결과 없음":
+            raw = _ai._web_search_global(f"NASDAQ SOX SP500 DJI index closing price {today}")
+
+        if not raw:
+            return result
+
+        # Claude로 수치 추출
+        llm = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+        prompt_text = (
+            f"다음 검색결과에서 미국 지수 최신 종가와 등락률을 추출해줘.\n"
+            f"오늘: {today}\n없는 값은 0으로.\n"
+            f"반드시 아래 형식으로만 답해 (다른 말 하지 마):\n"
+            f"SOX|가격|등락률\nNASDAQ|가격|등락률\nSP500|가격|등락률\nDOW|가격|등락률\n\n"
+            f"검색결과:\n{raw[:600]}"
+        )
+        res = _claude_call(llm,
+            model=DEFAULT_MODEL, max_tokens=200,
+            messages=[{"role": "user", "content": prompt_text}],
+        )
+        parsed = res.content[0].text.strip()
+        key_map = {
+            'SOX':    ('sox', '필라델피아 반도체'),
+            'NASDAQ': ('ndx', '나스닥'),
+            'SP500':  ('spx', 'S&P500'),
+            'DOW':    ('dji', '다우'),
+        }
+        today_mmdd = _dt.datetime.now().strftime("%m/%d")
+        for line in parsed.splitlines():
+            parts = line.strip().split("|")
+            if len(parts) != 3:
+                continue
+            sym_key, price_s, rate_s = parts
+            sym_key = sym_key.strip().upper()
+            if sym_key not in key_map:
+                continue
+            try:
+                price = float(price_s.replace(",", "").strip())
+                rate  = float(rate_s.replace("%", "").replace("+", "").strip())
+                key, name = key_map[sym_key]
                 result[key] = {
                     'name':  name,
-                    'price': round(last_c, 2),
-                    'rate':  round(rate, 2),
-                    'date':  date,
+                    'price': price,
+                    'rate':  rate,
+                    'date':  today_mmdd,
                 }
-        except Exception as e:
-            result[key] = {'name': name, 'price': 0, 'rate': 0, 'date': '?'}
+            except Exception:
+                continue
+    except Exception as e:
+        print(f"⚠️ 글로벌 지수 웹서치 오류: {e}")
 
     return result
 
