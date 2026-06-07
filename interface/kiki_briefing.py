@@ -279,7 +279,16 @@ def _get_global_market() -> dict:
 
         import datetime as _dt2
         today_mmdd = _dt.datetime.now().strftime("%m/%d")
-        yesterday  = (_dt.datetime.now() - _dt.timedelta(days=1)).strftime("%Y-%m-%d")
+        # ★ 주말 처리 — 월요일이면 금요일(2일 전) 종가, 평일이면 전날
+        _today_dt = _dt.datetime.now()
+        if _today_dt.weekday() == 0:   # 월요일
+            _us_days_back = 3
+        elif _today_dt.weekday() == 6: # 일요일 (혹시 실행 시)
+            _us_days_back = 2
+        else:
+            _us_days_back = 1
+        yesterday = (_today_dt - _dt.timedelta(days=_us_days_back)).strftime("%Y-%m-%d")
+        print(f"  📅 미국 지수 기준일: {yesterday} (오늘 weekday={_today_dt.weekday()})")
 
         # ★ 지수별 개별 웹서치 — 한 번에 묶으면 파싱 누락됨
         queries = {
@@ -291,36 +300,63 @@ def _get_global_market() -> dict:
 
         llm = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
+        # 지수별 합리적 가격 범위 (이 범위 벗어나면 파싱 오류로 간주)
+        price_range = {
+            'sox': (8000,  25000),   # 필라델피아반도체
+            'ndx': (15000, 25000),   # 나스닥
+            'spx': (4000,  9000),    # S&P500 (현재 ~7000)
+            'dji': (38000, 50000),   # 다우 (현재 ~44000)
+        }
+        # 등락률 합리적 범위: 하루 ±7% 이내
+        MAX_DAILY_RATE = 7.0
+
         for key, (query, rkey, name) in queries.items():
             try:
                 raw = _ai._web_search_korea(query)
                 if not raw or raw == "검색 결과 없음":
+                    print(f"  ⚠️ {name} 검색 결과 없음")
                     continue
 
+                pmin, pmax = price_range.get(rkey, (0, 999999))
                 prompt_text = (
-                    f"검색결과에서 {name} 지수의 어제({yesterday}) 종가와 등락률만 추출해줘.\n"
-                    f"반드시 아래 형식으로만 답해 (숫자만, 다른 말 금지):\n"
+                    f"검색결과에서 {name} 지수의 {yesterday} 종가와 등락률만 추출해줘.\n"
+                    f"- 가격 범위: {pmin:,}~{pmax:,} 사이여야 함\n"
+                    f"- 등락률: ±7% 이내여야 함\n"
+                    f"- 범위 벗어나면 NONE 출력\n"
+                    f"- 반드시 아래 형식으로만 (다른 말 금지):\n"
                     f"가격|등락률\n"
-                    f"예시: 13500.25|+2.34\n\n"
-                    f"검색결과:\n{raw[:500]}"
+                    f"예시: 13500.25|+2.34 또는 NONE\n\n"
+                    f"검색결과:\n{raw[:600]}"
                 )
                 res = _claude_call(llm,
-                    model=DEFAULT_MODEL, max_tokens=30,
+                    model=DEFAULT_MODEL, max_tokens=20,
                     messages=[{"role": "user", "content": prompt_text}],
                 )
                 parsed = res.content[0].text.strip()
+                if parsed == "NONE" or "|" not in parsed:
+                    print(f"  ⚠️ {name} 파싱 실패: {parsed}")
+                    continue
+
                 parts = parsed.split("|")
-                if len(parts) == 2:
-                    price = float(parts[0].replace(",", "").strip())
-                    rate  = float(parts[1].replace("%", "").replace("+", "").strip())
-                    if price > 0:
-                        result[rkey] = {
-                            'name':  name,
-                            'price': price,
-                            'rate':  rate,
-                            'date':  today_mmdd,
-                        }
-                        print(f"  ✅ {name}: {price:,.2f} ({rate:+.2f}%)")
+                price = float(parts[0].replace(",", "").strip())
+                rate  = float(parts[1].replace("%", "").replace("+", "").strip())
+
+                # 2중 검증
+                if not (pmin <= price <= pmax):
+                    print(f"  ⚠️ {name} 가격 범위 초과: {price:,.0f} (허용:{pmin:,}~{pmax:,})")
+                    continue
+                if abs(rate) > MAX_DAILY_RATE:
+                    print(f"  ⚠️ {name} 등락률 이상: {rate:+.2f}% (허용:±{MAX_DAILY_RATE}%)")
+                    continue
+
+                result[rkey] = {
+                    'name':  name,
+                    'price': price,
+                    'rate':  rate,
+                    'date':  today_mmdd,
+                }
+                print(f"  ✅ {name}: {price:,.2f} ({rate:+.2f}%)")
+
             except Exception as e:
                 print(f"  ⚠️ {name} 조회 오류: {e}")
                 continue
