@@ -1185,75 +1185,124 @@ async def auto_briefing():
     last_morning_date = None
     last_evening_date = None
 
+    # ★ 정확한 시간 대기 방식 — tasks.loop 스타일 (시간 윈도우 놓침 방지)
+    def _next_target(hour: int, minute: int = 0) -> float:
+        """다음 HH:MM KST까지 남은 초 계산"""
+        now_dt  = now_kst()
+        target  = now_dt.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        if now_dt >= target:
+            target += datetime.timedelta(days=1)
+        return (target - now_dt).total_seconds()
+
     # ★ 시작 시 오늘 08:00~09:00 사이면 모닝 브리핑 즉시 전송 (재시작으로 놓친 경우 대비)
     _now = now_kst()
     if _now.weekday() < 5 and "0800" <= _now.strftime("%H%M") <= "0900":
         try:
             _ch = bot.get_channel(CHANNEL_ID)
             if _ch:
-                import asyncio as _ac
-                _loop = _ac.get_event_loop()
-                _msg  = await _loop.run_in_executor(None, _build_briefing_msg)
+                _msg = await asyncio.get_event_loop().run_in_executor(None, _build_briefing_msg)
                 await send_long(_ch, _msg)
                 last_morning_date = _now.strftime("%Y-%m-%d")
                 print("✅ 재시작 후 모닝 브리핑 즉시 전송")
         except Exception as _e:
             print(f"⚠️ 재시작 브리핑 오류: {_e}")
 
-    while True:
-        await asyncio.sleep(30)
-        try:
-            now      = now_kst()
-            today    = now.strftime("%Y-%m-%d")
-            now_hhmm_str = now.strftime("%H%M")
+    # ★ 관심종목 만료 체크 전용 루프 (30초마다, 브리핑과 분리)
+    async def _watchlist_expire_loop():
+        while True:
+            await asyncio.sleep(30)
+            try:
+                now   = now_kst()
+                today = now.strftime("%Y-%m-%d")
+                if now.weekday() >= 5:
+                    continue
+                ch = bot.get_channel(CHANNEL_ID)
+                if not ch:
+                    continue
+                for bot_name in ("nbot", "sbot"):
+                    state     = read_state(bot_name)
+                    watchlist = state.get("watchlist", [])
+                    wl_expire = state.get("watchlist_expire", {})
+                    wl_source = state.get("watchlist_source", {})
+                    expired   = [
+                        c for c in watchlist
+                        if wl_source.get(c, "manual") == "manual"
+                        and wl_expire.get(c, "9999-12-31") < today
+                    ]
+                    if expired:
+                        for c in expired:
+                            watchlist.remove(c)
+                            wl_expire.pop(c, None)
+                        update_state(bot_name,
+                                    watchlist=watchlist,
+                                    watchlist_expire=wl_expire)
+                        await ch.send(f"🗑️ 관심종목 만료 제거: {', '.join(expired)}")
+            except Exception as e:
+                print(f"⚠️ 관심종목 만료 체크 오류: {e}")
 
+    asyncio.ensure_future(_watchlist_expire_loop())
+
+    # ── ★ 정확한 시간 트리거 루프 ────────────────────────
+    while True:
+        try:
+            now   = now_kst()
+            today = now.strftime("%Y-%m-%d")
+
+            # 평일만
             if now.weekday() >= 5:
+                # 다음 월요일 08:00까지 대기
+                days_until_mon = (7 - now.weekday()) % 7 or 7
+                target = (now + datetime.timedelta(days=days_until_mon)).replace(
+                    hour=8, minute=0, second=0, microsecond=0)
+                wait = (target - now).total_seconds()
+                print(f"🗓️ 주말 — 다음 월요일 08:00까지 {wait/3600:.1f}h 대기")
+                await asyncio.sleep(max(wait, 60))
                 continue
 
             ch = bot.get_channel(CHANNEL_ID)
-            if not ch:
-                continue
-
-            # ── 수동 추가 관심종목 만료 체크 ───────────────
-            for bot_name in ("nbot", "sbot"):
-                state     = read_state(bot_name)
-                watchlist = state.get("watchlist", [])
-                wl_expire = state.get("watchlist_expire", {})
-                wl_source = state.get("watchlist_source", {})
-                expired   = [
-                    c for c in watchlist
-                    if wl_source.get(c, "manual") == "manual"
-                    and wl_expire.get(c, "9999-12-31") < today
-                ]
-                if expired:
-                    for c in expired:
-                        watchlist.remove(c)
-                        wl_expire.pop(c, None)
-                    update_state(bot_name,
-                                watchlist=watchlist,
-                                watchlist_expire=wl_expire)
-                    await ch.send(f"🗑️ 관심종목 만료 제거: {', '.join(expired)}")
 
             # ── 08:00 모닝 브리핑 ─────────────────────────
-            if "0800" <= now_hhmm_str <= "0830" and last_morning_date != today:  # ★ 30분으로 확대
-                last_morning_date = today
-                await ch.send("🌅 **모닝 브리핑 준비 중...**")
-                loop = asyncio.get_event_loop()
-                msg  = await loop.run_in_executor(None, _build_briefing_msg)
-                await send_long(ch, msg)
-                print(f"✅ 모닝 브리핑 전송 {today}")
+            if last_morning_date != today:
+                wait = _next_target(8, 0)
+                if wait > 3600:   # 1시간 이상 남음 → 대기
+                    await asyncio.sleep(min(wait - 60, 1800))
+                    continue
+                # 08:00 도달 — 정확히 대기
+                await asyncio.sleep(max(wait, 0))
+                now = now_kst()
+                if now.weekday() < 5 and ch:
+                    last_morning_date = today
+                    await ch.send("🌅 **모닝 브리핑 준비 중...**")
+                    msg = await asyncio.get_event_loop().run_in_executor(
+                        None, _build_briefing_msg)
+                    await send_long(ch, msg)
+                    print(f"✅ 모닝 브리핑 전송 {today}")
 
             # ── 20:00 저녁 브리핑 ─────────────────────────
-            if "2000" <= now_hhmm_str <= "2005" and last_evening_date != today:
-                last_evening_date = today
-                await ch.send("🌆 **저녁 브리핑 준비 중...**")
-                loop = asyncio.get_event_loop()
-                msg  = await loop.run_in_executor(None, _build_evening_briefing_msg)
-                await send_long(ch, msg)
-                print(f"✅ 저녁 브리핑 전송 {today}")
+            if last_evening_date != today:
+                wait = _next_target(20, 0)
+                if wait > 3600:
+                    await asyncio.sleep(min(wait - 60, 1800))
+                    continue
+                await asyncio.sleep(max(wait, 0))
+                now = now_kst()
+                if now.weekday() < 5 and ch:
+                    last_evening_date = today
+                    await ch.send("🌆 **저녁 브리핑 준비 중...**")
+                    msg = await asyncio.get_event_loop().run_in_executor(
+                        None, _build_evening_briefing_msg)
+                    await send_long(ch, msg)
+                    print(f"✅ 저녁 브리핑 전송 {today}")
+
+            # 두 브리핑 모두 전송 완료 → 내일 08:00까지 대기
+            if last_morning_date == today and last_evening_date == today:
+                wait = _next_target(8, 0)
+                print(f"📌 오늘 브리핑 완료 — 내일 08:00까지 {wait/3600:.1f}h 대기")
+                await asyncio.sleep(max(wait, 60))
 
         except Exception as e:
             print(f"⚠️ 브리핑 오류: {e}")
+            await asyncio.sleep(60)
 
 
 async def status_listener():
