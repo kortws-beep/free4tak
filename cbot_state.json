@@ -4,7 +4,7 @@
   "cmd_result": "✅ KRW-WLD 즉시매도 완료",
   "last_status": {
     "krw": 292482,
-    "total_profit": 7164,
+    "total_profit": 7761,
     "daily_pnl": 0,
     "positions": 3,
     "positions_detail": {
@@ -24,12 +24,12 @@
         "current": 50,
         "entry_price": 50,
         "qty": 5964.21471172,
-        "rate": 0.0
+        "rate": 0.2
       }
     },
     "daily_loss": 0,
     "market_status": "normal",
-    "btc_rate": 0.82433016,
+    "btc_rate": 0.7324978400000001,
     "fear_greed": 12,
     "is_night": false,
     "coin_pool": [
@@ -94,7 +94,7 @@
     ],
     "seed": "30만원 소액 모드"
   },
-  "last_update": "10:52:21",
+  "last_update": "10:55:25",
   "daily_loss": 0,
   "loss_date": "2026-06-07",
   "positions": {
@@ -111,7 +111,7 @@
     "KRW-SAHARA": {
       "entry_price": 50.3,
       "qty": 5964.21471172,
-      "current": 50.3
+      "current": 50.4
     }
   },
   "peak_tracker": {
