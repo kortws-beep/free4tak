@@ -227,6 +227,21 @@ class Strategy:
             if   candle_pat == 1:  score += 4   # 망치형
             elif candle_pat == -1: score -= 4   # 역망치형
 
+            # ── ★ 갭상승 눌림목 (+0~12) ──────────────────────
+            # 갭상승 후 시가 이하로 눌렸다가 재상승 초입 포착
+            stck_oprc = data.get("stck_oprc", 0)
+            prdy_clpr = data.get("prdy_clpr", 0)
+            cur_p     = data.get("current_price", 0)
+            if stck_oprc > 0 and prdy_clpr > 0 and cur_p > 0:
+                gap_rt  = (stck_oprc - prdy_clpr) / prdy_clpr   # 갭상승률
+                pull_rt = (cur_p - stck_oprc) / stck_oprc       # 시가 대비 눌림
+                if gap_rt >= 0.05 and -0.03 <= pull_rt <= 0.0:
+                    score += 12   # 갭상승 +5% 이상 + 시가 근처 눌림 → 최고 타점
+                    print(f"   🎯 갭상승눌림목 +12점 (갭:{gap_rt:+.1%} 눌림:{pull_rt:+.1%})")
+                elif gap_rt >= 0.03 and -0.02 <= pull_rt <= 0.01:
+                    score += 8    # 갭상승 +3% 이상 + 약한 눌림
+                    print(f"   🎯 갭상승눌림목 +8점 (갭:{gap_rt:+.1%} 눌림:{pull_rt:+.1%})")
+
             # ── ★ 호가잔량 비율 (매도/매수) — 눌린 스프링 포착 ──
             # 매도잔량 >> 매수잔량 = 가격 눌려있음 = 소화 시 급등 타점
             ask_rsqn = data.get("total_ask_rsqn", 0)
@@ -264,7 +279,20 @@ class Strategy:
         # 1. 상한가/과열 기본 제외
         if change >= 29.5:
             return False, "상한가 제외"
-        if change > 15:
+
+        # ★ 갭상승 눌림목 판별 — 과열 제외 면제
+        stck_oprc  = data.get("stck_oprc", 0)   # 시가
+        prdy_clpr  = data.get("prdy_clpr", 0)   # 전일종가
+        current    = data.get("current_price", 0)
+        is_gap_pullback = False
+        if stck_oprc > 0 and prdy_clpr > 0 and current > 0:
+            gap_rate     = (stck_oprc - prdy_clpr) / prdy_clpr  # 갭상승률
+            pullback_rate = (current - stck_oprc) / stck_oprc   # 시가 대비 현재가
+            if gap_rate >= 0.03 and pullback_rate <= 0.0:
+                # 갭상승 +3% 이상 + 시가 이하로 눌린 상태
+                is_gap_pullback = True
+
+        if not is_gap_pullback and change > 15:
             return False, "과열 제외"
 
         # ▼▼▼ [추가할 코드: 하락장 주도 섹터 하드 필터링] ▼▼▼

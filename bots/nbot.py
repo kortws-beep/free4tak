@@ -940,6 +940,9 @@ class NBot:
                 "stck_hgpr":     safe_float(basic.get("stck_hgpr",  0)),
                 "stck_sdpr":     safe_float(basic.get("stck_sdpr",  0)),
                 "vol_rate":      safe_float(basic.get("prdy_vrss_vol_rate", 0)),
+                # ★ 갭상승 눌림목용 — 시가/전일종가
+                "stck_oprc":     safe_float(basic.get("stck_oprc",  0)),   # 시가
+                "prdy_clpr":     safe_float(basic.get("prdy_clpr",  0)),   # 전일종가
             }
             data.update(self.api.get_technical_indicators(code, self._tech_cache))
             data.update(self.api.get_investor_trend(code, self._flow_cache))
