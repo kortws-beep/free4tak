@@ -302,6 +302,78 @@ class KisAPI:
                 print(f"⚠️ 지수 조회 오류 {key}: {e}")
         return result
 
+    def get_overseas_index(self) -> dict:
+        """
+        ★ KIS API 해외 주요 지수 조회 (HHDFS76200200)
+        나스닥, S&P500, 다우, 필라델피아반도체 종가/등락률 반환.
+        반환: {
+            'ndx': {'name':'나스닥',           'price':25709.43, 'rate':-4.18},
+            'spx': {'name':'S&P500',           'price':7383.74,  'rate':-2.64},
+            'dji': {'name':'다우',             'price':50866.78, 'rate':-1.35},
+            'sox': {'name':'필라델피아 반도체', 'price':12220.76, 'rate':-10.26},
+        }
+        """
+        import datetime as _dt
+
+        url     = f"{self.base_url}/uapi/overseas-price/v1/quotations/inquire-daily-chartprice"
+        headers = {
+            "authorization": f"Bearer {self.token}",
+            "appkey":   self.appkey,
+            "appsecret": self.secret,
+            "tr_id":    "HHDFS76200200",
+        }
+
+        # 월요일이면 금요일(3일 전), 그 외 전날
+        _now = _dt.datetime.now()
+        if _now.weekday() == 0:
+            _days = 3
+        elif _now.weekday() == 6:
+            _days = 2
+        else:
+            _days = 1
+        _base_dt  = _now - _dt.timedelta(days=_days)
+        base_date = _base_dt.strftime("%Y%m%d")
+        base_mmdd = _base_dt.strftime("%m/%d")
+
+        # 심볼 → (키, 이름, 거래소코드)
+        symbols = {
+            "NDX":  ("ndx", "나스닥",            "NAS"),
+            "SPX":  ("spx", "S&P500",            "NYS"),
+            ".DJI": ("dji", "다우",              "NYS"),
+            "SOX":  ("sox", "필라델피아 반도체",  "NAS"),
+        }
+
+        result = {}
+        for sym, (key, name, excd) in symbols.items():
+            try:
+                params = {
+                    "FID_COND_MRKT_DIV_CODE": "N",
+                    "FID_INPUT_ISCD":          sym,
+                    "FID_INPUT_DATE_1":        base_date,
+                    "FID_INPUT_DATE_2":        base_date,
+                    "FID_PERIOD_DIV_CODE":     "D",
+                }
+                res  = requests.get(url, headers=headers, params=params, timeout=8).json()
+                out  = res.get("output2", [{}])
+                if not out:
+                    continue
+                row   = out[0]
+                price = float(row.get("ovrs_nmix_prpr", 0) or 0)
+                rate  = float(row.get("ovrs_nmix_prdy_ctrt", 0) or 0)
+                if price > 0:
+                    result[key] = {
+                        "name":  name,
+                        "price": price,
+                        "rate":  rate,
+                        "date":  base_mmdd,
+                    }
+                    print(f"  ✅ {name}: {price:,.2f} ({rate:+.2f}%) [{base_mmdd}]")
+                time.sleep(0.1)
+            except Exception as e:
+                print(f"  ⚠️ {name} 조회 오류: {e}")
+
+        return result
+
     def get_sector_change_rates(self, sector_code_map: dict) -> dict:
         result  = {}
         url     = f"{self.base_url}/uapi/domestic-stock/v1/quotations/inquire-index-price"

@@ -260,99 +260,19 @@ def _claude_call(llm, **kwargs):
 
 def _get_global_market() -> dict:
     """
-    미국 주요 지수 조회 — Claude API web_search 툴 사용.
-    반환: {
-        'sox':  {'name': '필라델피아 반도체', 'price': 12220.76, 'rate': -10.26, 'date': '06/05'},
-        'ndx':  {...}, 'spx': {...}, 'dji': {...},
-    }
+    미국 주요 지수 조회 — KIS API get_overseas_index 사용.
+    반환: {'sox': {...}, 'ndx': {...}, 'spx': {...}, 'dji': {...}}
     """
-    import datetime as _dt
-    import re as _re
-
-    result = {}
     try:
-        api_key = os.getenv("ANTHROPIC_API_KEY", "")
-        if not api_key:
-            print("⚠️ ANTHROPIC_API_KEY 없음")
+        from kis_api import KisAPI as _KisAPI
+        _api = _KisAPI()
+        result = _api.get_overseas_index()
+        if result:
             return result
-
-        from anthropic import Anthropic as _Anthropic
-        _client = _Anthropic(api_key=api_key)
-
-        # 월요일이면 금요일(3일 전), 그 외 전날
-        _now = _dt.datetime.now()
-        if _now.weekday() == 0:
-            _days_back = 3
-        elif _now.weekday() == 6:
-            _days_back = 2
-        else:
-            _days_back = 1
-        _us_dt    = _now - _dt.timedelta(days=_days_back)
-        yesterday = _us_dt.strftime("%Y-%m-%d")
-        yesterday_mmdd = _us_dt.strftime("%m/%d")
-
-        print(f"  📅 미국 지수 기준일: {yesterday}")
-
-        # Claude web_search 툴로 직접 조회
-        res = _client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=200,
-            tools=[{"type": "web_search_20250305", "name": "web_search"}],
-            messages=[{"role": "user", "content": (
-                f"{yesterday} 미국 증시 마감 종가를 정확히 알려줘. "
-                f"나스닥종합, S&P500, 다우존스, 필라델피아반도체(SOX) "
-                f"4개 지수의 종가와 전일대비 등락률을 아래 형식으로만 답해 (다른 말 금지):\n"
-                f"나스닥|종가|등락률\n"
-                f"S&P500|종가|등락률\n"
-                f"다우|종가|등락률\n"
-                f"SOX|종가|등락률\n"
-                f"예시: 나스닥|25709.43|-4.18"
-            )}],
-        )
-
-        parsed = ""
-        for block in res.content:
-            if hasattr(block, "type") and block.type == "text":
-                parsed = block.text.strip()
-                break
-
-        print(f"  📊 지수 파싱:\n{parsed}")
-
-        # 지수별 허용 범위
-        idx_map = {
-            "나스닥": ("ndx", "나스닥",            15000, 30000),
-            "S&P500": ("spx", "S&P500",             4000,  10000),
-            "다우":   ("dji", "다우",               35000, 60000),
-            "SOX":    ("sox", "필라델피아 반도체",   5000,  30000),
-        }
-        for line in parsed.splitlines():
-            parts = [p.strip() for p in line.split("|")]
-            if len(parts) != 3:
-                continue
-            label, price_s, rate_s = parts
-            label = label.strip()
-            if label not in idx_map:
-                continue
-            rkey, name, pmin, pmax = idx_map[label]
-            try:
-                price = float(price_s.replace(",", ""))
-                rate  = float(rate_s.replace("%", "").replace("+", ""))
-                if not (pmin <= price <= pmax):
-                    print(f"  ⚠️ {name} 범위 초과: {price:,.0f}")
-                    continue
-                if abs(rate) > 15.0:
-                    print(f"  ⚠️ {name} 등락률 이상: {rate:+.2f}%")
-                    continue
-                result[rkey] = {'name': name, 'price': price, 'rate': rate, 'date': yesterday_mmdd}
-                print(f"  ✅ {name}: {price:,.2f} ({rate:+.2f}%) [{yesterday_mmdd}]")
-            except Exception as e:
-                print(f"  ⚠️ {name} 파싱 오류: {e}")
-
+        print("⚠️ KIS 해외지수 결과 없음")
     except Exception as e:
-        print(f"⚠️ 글로벌 지수 조회 오류: {e}")
-
-    return result
-
+        print(f"⚠️ KIS 해외지수 오류: {e}")
+    return {}
 
 def _format_global_market(market: dict) -> str:
     """글로벌 시장 데이터를 브리핑용 문자열로 포맷"""
