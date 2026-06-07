@@ -276,6 +276,12 @@ class Strategy:
         roe      = data.get("roe", 0)         # 자기자본이익률
         foreign  = data.get("foreign_5d", 0)
 
+        # 0. ★ VI(변동성완화장치) 발동 종목 제외
+        # iscd_stat_cls_code: 51=VI발동(2분 단일가), 55=정상
+        vi_code = data.get("iscd_stat_cls_code", "55")
+        if vi_code == "51":
+            return False, f"VI 발동 중 (단일가매매 — 체결 불가)"
+
         # 1. 상한가/과열 기본 제외
         if change >= 29.5:
             return False, "상한가 제외"

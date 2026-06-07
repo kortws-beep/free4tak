@@ -943,6 +943,8 @@ class NBot:
                 # ★ 갭상승 눌림목용 — 시가/전일종가
                 "stck_oprc":     safe_float(basic.get("stck_oprc",  0)),   # 시가
                 "prdy_clpr":     safe_float(basic.get("prdy_clpr",  0)),   # 전일종가
+                # ★ VI 발동 상태 코드 (51=VI발동, 55=정상)
+                "iscd_stat_cls_code": basic.get("iscd_stat_cls_code", "55"),
             }
             data.update(self.api.get_technical_indicators(code, self._tech_cache))
             data.update(self.api.get_investor_trend(code, self._flow_cache))
