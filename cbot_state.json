@@ -4,7 +4,7 @@
   "cmd_result": "✅ KRW-WLD 즉시매도 완료",
   "last_status": {
     "krw": 368933,
-    "total_profit": 6237,
+    "total_profit": 6416,
     "daily_pnl": 0,
     "positions": 3,
     "positions_detail": {
@@ -24,7 +24,7 @@
         "current": 55,
         "entry_price": 50,
         "qty": 1789.26441353,
-        "rate": 10.93
+        "rate": 11.13
       }
     },
     "daily_loss": 0,
@@ -39,8 +39,8 @@
       "KRW-SOL",
       "KRW-WLD",
       "KRW-XLM",
-      "KRW-JTO",
       "KRW-USDT",
+      "KRW-JTO",
       "KRW-ONDO",
       "KRW-NEAR",
       "KRW-DOGE",
@@ -66,8 +66,8 @@
       "KRW-SOL",
       "KRW-WLD",
       "KRW-XLM",
-      "KRW-JTO",
       "KRW-USDT",
+      "KRW-JTO",
       "KRW-ONDO",
       "KRW-NEAR",
       "KRW-DOGE",
@@ -88,7 +88,7 @@
     ],
     "seed": "30만원 소액 모드"
   },
-  "last_update": "08:42:12",
+  "last_update": "08:45:18",
   "daily_loss": 0,
   "loss_date": "2026-06-08",
   "positions": {
@@ -105,7 +105,7 @@
     "KRW-SAHARA": {
       "entry_price": 50.3,
       "qty": 1789.26441353,
-      "current": 55.8
+      "current": 55.9
     }
   },
   "peak_tracker": {

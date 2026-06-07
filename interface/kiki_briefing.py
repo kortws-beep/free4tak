@@ -293,10 +293,10 @@ def _get_global_market() -> dict:
 
         # ★ 지수별 개별 웹서치 — 한 번에 묶으면 파싱 누락됨
         queries = {
-            'sox': (f"필라델피아 반도체지수 SOX {yesterday} 종가", "sox", "필라델피아 반도체",  8000, 25000),
-            'ndx': (f"나스닥 NASDAQ 지수 {yesterday} 종가 시황", "ndx", "나스닥",             15000, 25000),
-            'spx': (f"S&P500 지수 {yesterday} 종가 시황",         "spx", "S&P500",            4000,  9000),
-            'dji': (f"다우존스 DOW 지수 {yesterday} 종가 시황",   "dji", "다우",              38000, 55000),
+            'sox': (f"필라델피아 반도체지수 SOX {yesterday} 종가", "sox", "필라델피아 반도체",  5000, 30000),
+            'ndx': (f"나스닥 NASDAQ 지수 {yesterday} 종가 시황", "ndx", "나스닥",             15000, 30000),
+            'spx': (f"S&P500 지수 {yesterday} 종가 시황",         "spx", "S&P500",            4000, 10000),
+            'dji': (f"다우존스 DOW 지수 {yesterday} 종가 시황",   "dji", "다우",              35000, 60000),
         }
 
         llm = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
