@@ -260,112 +260,96 @@ def _claude_call(llm, **kwargs):
 
 def _get_global_market() -> dict:
     """
-    미국 주요 지수 조회 — 웹서치 기반 (Yahoo Finance 차단 대응).
+    미국 주요 지수 조회 — Claude API web_search 툴 사용.
     반환: {
-        'sox':  {'name': '필라델피아 반도체', 'price': 11302.52, 'rate': -2.47, 'date': '06/08'},
-        'ndx':  {...}, 'spx':  {...}, 'dji':  {...},
+        'sox':  {'name': '필라델피아 반도체', 'price': 12220.76, 'rate': -10.26, 'date': '06/05'},
+        'ndx':  {...}, 'spx': {...}, 'dji': {...},
     }
     """
     import datetime as _dt
     import re as _re
 
-    today = _dt.datetime.now().strftime("%Y-%m-%d")
     result = {}
-
     try:
-        _ai = _get_ai()
-        if not _ai:
+        api_key = os.getenv("ANTHROPIC_API_KEY", "")
+        if not api_key:
+            print("⚠️ ANTHROPIC_API_KEY 없음")
             return result
 
-        import datetime as _dt2
-        _today_dt = _dt.datetime.now()
-        # ★ 주말 처리 — 월요일이면 금요일(3일 전) 종가, 평일이면 전날
-        if _today_dt.weekday() == 0:   # 월요일
-            _us_days_back = 3
-        elif _today_dt.weekday() == 6: # 일요일
-            _us_days_back = 2
+        from anthropic import Anthropic as _Anthropic
+        _client = _Anthropic(api_key=api_key)
+
+        # 월요일이면 금요일(3일 전), 그 외 전날
+        _now = _dt.datetime.now()
+        if _now.weekday() == 0:
+            _days_back = 3
+        elif _now.weekday() == 6:
+            _days_back = 2
         else:
-            _us_days_back = 1
-        _us_date_dt = _today_dt - _dt.timedelta(days=_us_days_back)
-        yesterday     = _us_date_dt.strftime("%Y-%m-%d")
-        yesterday_mmdd = _us_date_dt.strftime("%m/%d")   # ★ 표시용 날짜도 기준일로
-        print(f"  📅 미국 지수 기준일: {yesterday} (weekday={_today_dt.weekday()})")
+            _days_back = 1
+        _us_dt    = _now - _dt.timedelta(days=_days_back)
+        yesterday = _us_dt.strftime("%Y-%m-%d")
+        yesterday_mmdd = _us_dt.strftime("%m/%d")
 
-        # ★ 지수별 개별 웹서치 — 한 번에 묶으면 파싱 누락됨
-        queries = {
-            'sox': (f"필라델피아 반도체지수 SOX {yesterday} 종가", "sox", "필라델피아 반도체",  5000, 30000),
-            'ndx': (f"나스닥 NASDAQ 지수 {yesterday} 종가 시황", "ndx", "나스닥",             15000, 30000),
-            'spx': (f"S&P500 지수 {yesterday} 종가 시황",         "spx", "S&P500",            4000, 10000),
-            'dji': (f"다우존스 DOW 지수 {yesterday} 종가 시황",   "dji", "다우",              35000, 60000),
-        }
+        print(f"  📅 미국 지수 기준일: {yesterday}")
 
-        llm = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-
-        import re as _re
-
-        # ★ 통합 1회 웹서치 — 4개 지수 한번에
-        combined_query = f"나스닥 S&P500 다우 필라델피아반도체 SOX 종가 {yesterday}"
-        raw_all = _ai._web_search_korea(combined_query)
-        if not raw_all or raw_all == "검색 결과 없음":
-            raw_all = ""
-
-        # 지수별 개별 보완 검색 (통합에서 누락된 경우 대비)
-        raw_ndx = _ai._web_search_korea(f"나스닥 NASDAQ 종합지수 종가 {yesterday}")
-        raw_sox = _ai._web_search_korea(f"필라델피아반도체 SOX 지수 종가 {yesterday}")
-        raw_all = raw_all + "\n" + (raw_ndx or "") + "\n" + (raw_sox or "")
-
-        if not raw_all.strip():
-            print("  ⚠️ 미국 지수 검색 결과 없음")
-            return result
-
-        # ★ Claude API 1회 호출로 4개 지수 모두 추출
-        prompt_text = (
-            f"다음 검색결과에서 {yesterday} 기준 미국 지수 종가와 등락률을 추출해줘.\n"
-            f"각 지수의 실제 수치를 아래 형식으로만 출력 (없으면 해당 줄 생략):\n"
-            f"나스닥: 가격,등락률%\n"
-            f"S&P500: 가격,등락률%\n"
-            f"다우: 가격,등락률%\n"
-            f"SOX: 가격,등락률%\n\n"
-            f"주의: 가격/등락률은 숫자만(콤마/% 포함 가능), 추측하지 말것\n\n"
-            f"검색결과:\n{raw_all[:1200]}"
+        # Claude web_search 툴로 직접 조회
+        res = _client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=200,
+            tools=[{"type": "web_search_20250305", "name": "web_search"}],
+            messages=[{"role": "user", "content": (
+                f"{yesterday} 미국 증시 마감 종가를 정확히 알려줘. "
+                f"나스닥종합, S&P500, 다우존스, 필라델피아반도체(SOX) "
+                f"4개 지수의 종가와 전일대비 등락률을 아래 형식으로만 답해 (다른 말 금지):\n"
+                f"나스닥|종가|등락률\n"
+                f"S&P500|종가|등락률\n"
+                f"다우|종가|등락률\n"
+                f"SOX|종가|등락률\n"
+                f"예시: 나스닥|25709.43|-4.18"
+            )}],
         )
-        res = _claude_call(llm,
-            model=DEFAULT_MODEL, max_tokens=80,
-            messages=[{"role": "user", "content": prompt_text}],
-        )
-        parsed = res.content[0].text.strip()
-        print(f"  📊 지수 파싱 결과:\n{parsed}")
 
-        # 정규식으로 추출
+        parsed = ""
+        for block in res.content:
+            if hasattr(block, "type") and block.type == "text":
+                parsed = block.text.strip()
+                break
+
+        print(f"  📊 지수 파싱:\n{parsed}")
+
+        # 지수별 허용 범위
         idx_map = {
-            "나스닥": ("ndx", "나스닥",           15000, 30000),
-            "S&P500": ("spx", "S&P500",            4000,  10000),
-            "다우":   ("dji", "다우",              35000, 60000),
-            "SOX":    ("sox", "필라델피아 반도체",  5000,  30000),
+            "나스닥": ("ndx", "나스닥",            15000, 30000),
+            "S&P500": ("spx", "S&P500",             4000,  10000),
+            "다우":   ("dji", "다우",               35000, 60000),
+            "SOX":    ("sox", "필라델피아 반도체",   5000,  30000),
         }
-        for label, (rkey, name, pmin, pmax) in idx_map.items():
+        for line in parsed.splitlines():
+            parts = [p.strip() for p in line.split("|")]
+            if len(parts) != 3:
+                continue
+            label, price_s, rate_s = parts
+            label = label.strip()
+            if label not in idx_map:
+                continue
+            rkey, name, pmin, pmax = idx_map[label]
             try:
-                # "나스닥: 25,709.43,-4.18%" 형태 파싱
-                pat = rf"{label}[:\s]+([0-9,\.]+)[,\s]+([+-]?[0-9\.]+)%?"
-                m = _re.search(pat, parsed)
-                if not m:
-                    print(f"  ⚠️ {name} 정규식 미매칭")
-                    continue
-                price = float(m.group(1).replace(",", ""))
-                rate  = float(m.group(2))
+                price = float(price_s.replace(",", ""))
+                rate  = float(rate_s.replace("%", "").replace("+", ""))
                 if not (pmin <= price <= pmax):
                     print(f"  ⚠️ {name} 범위 초과: {price:,.0f}")
                     continue
-                if abs(rate) > 15.0:   # 15% 이상은 확실한 오류
+                if abs(rate) > 15.0:
                     print(f"  ⚠️ {name} 등락률 이상: {rate:+.2f}%")
                     continue
                 result[rkey] = {'name': name, 'price': price, 'rate': rate, 'date': yesterday_mmdd}
                 print(f"  ✅ {name}: {price:,.2f} ({rate:+.2f}%) [{yesterday_mmdd}]")
             except Exception as e:
-                print(f"  ⚠️ {name} 처리 오류: {e}")
+                print(f"  ⚠️ {name} 파싱 오류: {e}")
 
     except Exception as e:
-        print(f"⚠️ 글로벌 지수 웹서치 오류: {e}")
+        print(f"⚠️ 글로벌 지수 조회 오류: {e}")
 
     return result
 
