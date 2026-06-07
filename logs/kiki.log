@@ -2677,3 +2677,20 @@ aiohttp.client_exceptions.ClientConnectorDNSError: Cannot connect to host discor
 2026-06-
   ✅ S&P500: 7,383.74 (-2.64%) [06/05]
   ✅ 다우: 50,866.78 (-1.35%) [06/05]
+♻️ 대화 히스토리 복원: 12개
+🤖 영암9 AI 비서 (키키) 시작...
+📈 단타봇 | 📊 스윙봇 | 🪙 코인봇 연동
+🦊 Lv1 능동 알림: 위험/주의/인사이트/일일리뷰
+🏭 HTS 관심그룹 자동 동기화: 09:00 / 11:00 / 14:00
+🌅 모닝 브리핑: 08:00 | 🌆 저녁 브리핑: 20:00
+[2026-06-08 08:49:45] [INFO    ] discord.client: logging in using static token
+[2026-06-08 08:49:47] [INFO    ] discord.gateway: Shard ID None has connected to Gateway (Session ID: b59f7ea9465e1737add2527f432dc7e8).
+✅ AI 비서 봇 온라인: KiKi#3353
+✅ kiki_monitor 초기화 완료
+  📅 미국 지수 기준일: 2026-06-05 (weekday=0)
+  📊 지수 파싱 결과:
+나스닥: 25,709.43,-4.18%
+  ✅ 나스닥: 25,709.43 (-4.18%) [06/05]
+  ⚠️ S&P500 정규식 미매칭
+  ⚠️ 다우 정규식 미매칭
+  ⚠️ 필라델피아 반도체 정규식 미매칭
