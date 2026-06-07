@@ -4,15 +4,15 @@
   "cmd_result": "✅ KRW-WLD 즉시매도 완료",
   "last_status": {
     "krw": 292482,
-    "total_profit": 8954,
+    "total_profit": 9753,
     "daily_pnl": 0,
     "positions": 3,
     "positions_detail": {
       "KRW-USDT": {
-        "current": 1518,
+        "current": 1519,
         "entry_price": 1477,
         "qty": 203.11442112,
-        "rate": 2.78
+        "rate": 2.84
       },
       "KRW-SOON": {
         "current": 257,
@@ -24,12 +24,12 @@
         "current": 50,
         "entry_price": 50,
         "qty": 5964.21471172,
-        "rate": 0.6
+        "rate": 0.8
       }
     },
     "daily_loss": 0,
     "market_status": "normal",
-    "btc_rate": 0.7324978400000001,
+    "btc_rate": 0.83513397,
     "fear_greed": 12,
     "is_night": false,
     "coin_pool": [
@@ -44,8 +44,8 @@
       "KRW-DOGE",
       "KRW-NEAR",
       "KRW-SUI",
-      "KRW-ADA",
       "KRW-BCH",
+      "KRW-ADA",
       "KRW-ARDR",
       "KRW-SLX",
       "KRW-ENA",
@@ -57,9 +57,9 @@
       "KRW-VIRTUAL",
       "KRW-SAHARA",
       "KRW-MIRA",
-      "KRW-AERGO",
       "KRW-INJ",
       "KRW-PIEVERSE",
+      "KRW-AERGO",
       "KRW-SOON"
     ],
     "coins": [
@@ -74,8 +74,8 @@
       "KRW-DOGE",
       "KRW-NEAR",
       "KRW-SUI",
-      "KRW-ADA",
       "KRW-BCH",
+      "KRW-ADA",
       "KRW-ARDR",
       "KRW-SLX",
       "KRW-ENA",
@@ -87,21 +87,21 @@
       "KRW-VIRTUAL",
       "KRW-SAHARA",
       "KRW-MIRA",
-      "KRW-AERGO",
       "KRW-INJ",
       "KRW-PIEVERSE",
+      "KRW-AERGO",
       "KRW-SOON"
     ],
     "seed": "30만원 소액 모드"
   },
-  "last_update": "10:58:30",
+  "last_update": "11:09:11",
   "daily_loss": 0,
   "loss_date": "2026-06-07",
   "positions": {
     "KRW-USDT": {
       "entry_price": 1477.0,
       "qty": 203.11442112,
-      "current": 1518.0
+      "current": 1519.0
     },
     "KRW-SOON": {
       "entry_price": 258.0,
@@ -111,7 +111,7 @@
     "KRW-SAHARA": {
       "entry_price": 50.3,
       "qty": 5964.21471172,
-      "current": 50.6
+      "current": 50.7
     }
   },
   "peak_tracker": {

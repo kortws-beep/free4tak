@@ -97,6 +97,11 @@ try:
 except ImportError:
     def _get_expert_bonus(code): return 0, ""
     print("⚠️ mbngold_crawler 없음 → 전문가 추천 가산점 비활성")
+try:
+    from telegram_monitor import get_stock_event_bonus as _get_disclosure_bonus
+except ImportError:
+    def _get_disclosure_bonus(code, bot_type="nbot"): return 0, ""
+    print("⚠️ telegram_monitor 없음 → 공시 가산점 비활성")
 from nbot_order    import OrderManager
 from nbot_position import PositionManager
 
@@ -1533,6 +1538,11 @@ class NBot:
             if ex_bonus > 0:
                 score = min(100, score + ex_bonus)
                 reason = f"{reason} | {ex_reason}"
+            # ★ 공시 이벤트 가산점 (KIND 채널 실시간)
+            disc_bonus, disc_reason = _get_disclosure_bonus(code, bot_type="nbot")
+            if disc_bonus != 0:
+                score = max(0, min(100, score + disc_bonus))
+                reason = f"{reason} | {disc_reason}"
             print(f"   🧠 {code} | 룰:{rule_score}→AI:{score}점 | {reason}")
             data["ai_reason"] = reason
             self.score_cache[code] = (score, data, time.time())
@@ -1563,6 +1573,11 @@ class NBot:
             if ex_bonus > 0:
                 score = min(100, score + ex_bonus)
                 bonus_reason = f"{bonus_reason} | {ex_reason}" if bonus_reason else ex_reason
+            # ★ 공시 이벤트 가산점 (KIND 채널 실시간)
+            disc_bonus, disc_reason = _get_disclosure_bonus(code, bot_type="nbot")
+            if disc_bonus != 0:
+                score = max(0, min(100, score + disc_bonus))
+                bonus_reason = f"{bonus_reason} | {disc_reason}" if bonus_reason else disc_reason
             data["ai_reason"] = (f"룰점수({rule_score})"
                                 + (f" | {bonus_reason}" if bonus_reason else ""))
             if buy_tag:
