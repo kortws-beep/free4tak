@@ -24,6 +24,14 @@
     {
       "role": "assistant",
       "content": "CMD:!브리핑"
+    },
+    {
+      "role": "user",
+      "content": "브리핑"
+    },
+    {
+      "role": "assistant",
+      "content": "CMD:!브리핑"
     }
   ]
 }
