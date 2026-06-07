@@ -301,53 +301,68 @@ def _get_global_market() -> dict:
 
         llm = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
-        MAX_DAILY_RATE = 7.0
+        import re as _re
 
-        for key, (query, rkey, name, pmin, pmax) in queries.items():
+        # ★ 통합 1회 웹서치 — 4개 지수 한번에
+        combined_query = f"나스닥 S&P500 다우 필라델피아반도체 SOX 종가 {yesterday}"
+        raw_all = _ai._web_search_korea(combined_query)
+        if not raw_all or raw_all == "검색 결과 없음":
+            raw_all = ""
+
+        # 지수별 개별 보완 검색 (통합에서 누락된 경우 대비)
+        raw_ndx = _ai._web_search_korea(f"나스닥 NASDAQ 종합지수 종가 {yesterday}")
+        raw_sox = _ai._web_search_korea(f"필라델피아반도체 SOX 지수 종가 {yesterday}")
+        raw_all = raw_all + "\n" + (raw_ndx or "") + "\n" + (raw_sox or "")
+
+        if not raw_all.strip():
+            print("  ⚠️ 미국 지수 검색 결과 없음")
+            return result
+
+        # ★ Claude API 1회 호출로 4개 지수 모두 추출
+        prompt_text = (
+            f"다음 검색결과에서 {yesterday} 기준 미국 지수 종가와 등락률을 추출해줘.\n"
+            f"각 지수의 실제 수치를 아래 형식으로만 출력 (없으면 해당 줄 생략):\n"
+            f"나스닥: 가격,등락률%\n"
+            f"S&P500: 가격,등락률%\n"
+            f"다우: 가격,등락률%\n"
+            f"SOX: 가격,등락률%\n\n"
+            f"주의: 가격/등락률은 숫자만(콤마/% 포함 가능), 추측하지 말것\n\n"
+            f"검색결과:\n{raw_all[:1200]}"
+        )
+        res = _claude_call(llm,
+            model=DEFAULT_MODEL, max_tokens=80,
+            messages=[{"role": "user", "content": prompt_text}],
+        )
+        parsed = res.content[0].text.strip()
+        print(f"  📊 지수 파싱 결과:\n{parsed}")
+
+        # 정규식으로 추출
+        idx_map = {
+            "나스닥": ("ndx", "나스닥",           15000, 30000),
+            "S&P500": ("spx", "S&P500",            4000,  10000),
+            "다우":   ("dji", "다우",              35000, 60000),
+            "SOX":    ("sox", "필라델피아 반도체",  5000,  30000),
+        }
+        for label, (rkey, name, pmin, pmax) in idx_map.items():
             try:
-                raw = _ai._web_search_korea(query)
-                if not raw or raw == "검색 결과 없음":
-                    # 영문 폴백
-                    raw = _ai._web_search_global(query)
-                if not raw or raw == "검색 결과 없음":
-                    print(f"  ⚠️ {name} 검색 결과 없음")
+                # "나스닥: 25,709.43,-4.18%" 형태 파싱
+                pat = rf"{label}[:\s]+([0-9,\.]+)[,\s]+([+-]?[0-9\.]+)%?"
+                m = _re.search(pat, parsed)
+                if not m:
+                    print(f"  ⚠️ {name} 정규식 미매칭")
                     continue
-
-                prompt_text = (
-                    f"검색결과에서 {name} 지수의 {yesterday} 종가와 전일대비 등락률만 추출해줘.\n"
-                    f"- 가격은 반드시 {pmin:,}~{pmax:,} 사이 숫자\n"
-                    f"- 등락률은 ±7% 이내\n"
-                    f"- 조건 불만족하거나 데이터 없으면 NONE\n"
-                    f"- 형식: 가격|등락률 (예: 13500.25|+2.34)\n\n"
-                    f"검색결과:\n{raw[:700]}"
-                )
-                res = _claude_call(llm,
-                    model=DEFAULT_MODEL, max_tokens=20,
-                    messages=[{"role": "user", "content": prompt_text}],
-                )
-                parsed = res.content[0].text.strip()
-                if "NONE" in parsed or "|" not in parsed:
-                    print(f"  ⚠️ {name} 파싱 실패: {parsed[:30]}")
-                    continue
-
-                parts = parsed.split("|")
-                price = float(parts[0].replace(",", "").strip())
-                rate  = float(parts[1].replace("%", "").replace("+", "").strip())
-
-                # 2중 검증
+                price = float(m.group(1).replace(",", ""))
+                rate  = float(m.group(2))
                 if not (pmin <= price <= pmax):
-                    print(f"  ⚠️ {name} 가격 범위 초과: {price:,.0f} ({pmin:,}~{pmax:,})")
+                    print(f"  ⚠️ {name} 범위 초과: {price:,.0f}")
                     continue
-                if abs(rate) > MAX_DAILY_RATE:
+                if abs(rate) > 15.0:   # 15% 이상은 확실한 오류
                     print(f"  ⚠️ {name} 등락률 이상: {rate:+.2f}%")
                     continue
-
                 result[rkey] = {'name': name, 'price': price, 'rate': rate, 'date': yesterday_mmdd}
                 print(f"  ✅ {name}: {price:,.2f} ({rate:+.2f}%) [{yesterday_mmdd}]")
-
             except Exception as e:
-                print(f"  ⚠️ {name} 조회 오류: {e}")
-                continue
+                print(f"  ⚠️ {name} 처리 오류: {e}")
 
     except Exception as e:
         print(f"⚠️ 글로벌 지수 웹서치 오류: {e}")
