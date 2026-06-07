@@ -277,56 +277,54 @@ def _get_global_market() -> dict:
         if not _ai:
             return result
 
-        # 웹서치로 미국 주요 지수 현재가 조회
-        query = f"나스닥 필라델피아반도체 S&P500 다우 지수 어제 종가 {today}"
-        raw = _ai._web_search_korea(query)
-        if not raw or raw == "검색 결과 없음":
-            raw = _ai._web_search_global(f"NASDAQ SOX SP500 DJI index closing price {today}")
-
-        if not raw:
-            return result
-
-        # Claude로 수치 추출
-        llm = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-        prompt_text = (
-            f"다음 검색결과에서 미국 지수 최신 종가와 등락률을 추출해줘.\n"
-            f"오늘: {today}\n없는 값은 0으로.\n"
-            f"반드시 아래 형식으로만 답해 (다른 말 하지 마):\n"
-            f"SOX|가격|등락률\nNASDAQ|가격|등락률\nSP500|가격|등락률\nDOW|가격|등락률\n\n"
-            f"검색결과:\n{raw[:600]}"
-        )
-        res = _claude_call(llm,
-            model=DEFAULT_MODEL, max_tokens=200,
-            messages=[{"role": "user", "content": prompt_text}],
-        )
-        parsed = res.content[0].text.strip()
-        key_map = {
-            'SOX':    ('sox', '필라델피아 반도체'),
-            'NASDAQ': ('ndx', '나스닥'),
-            'SP500':  ('spx', 'S&P500'),
-            'DOW':    ('dji', '다우'),
-        }
+        import datetime as _dt2
         today_mmdd = _dt.datetime.now().strftime("%m/%d")
-        for line in parsed.splitlines():
-            parts = line.strip().split("|")
-            if len(parts) != 3:
-                continue
-            sym_key, price_s, rate_s = parts
-            sym_key = sym_key.strip().upper()
-            if sym_key not in key_map:
-                continue
+        yesterday  = (_dt.datetime.now() - _dt.timedelta(days=1)).strftime("%Y-%m-%d")
+
+        # ★ 지수별 개별 웹서치 — 한 번에 묶으면 파싱 누락됨
+        queries = {
+            'sox': (f"필라델피아 반도체 지수 SOX 어제 종가 등락률 {yesterday}", "sox", "필라델피아 반도체"),
+            'ndx': (f"나스닥 종합 지수 NASDAQ 어제 종가 등락률 {yesterday}", "ndx", "나스닥"),
+            'spx': (f"S&P500 지수 어제 종가 등락률 {yesterday}", "spx", "S&P500"),
+            'dji': (f"다우존스 지수 DOW 어제 종가 등락률 {yesterday}", "dji", "다우"),
+        }
+
+        llm = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+
+        for key, (query, rkey, name) in queries.items():
             try:
-                price = float(price_s.replace(",", "").strip())
-                rate  = float(rate_s.replace("%", "").replace("+", "").strip())
-                key, name = key_map[sym_key]
-                result[key] = {
-                    'name':  name,
-                    'price': price,
-                    'rate':  rate,
-                    'date':  today_mmdd,
-                }
-            except Exception:
+                raw = _ai._web_search_korea(query)
+                if not raw or raw == "검색 결과 없음":
+                    continue
+
+                prompt_text = (
+                    f"검색결과에서 {name} 지수의 어제({yesterday}) 종가와 등락률만 추출해줘.\n"
+                    f"반드시 아래 형식으로만 답해 (숫자만, 다른 말 금지):\n"
+                    f"가격|등락률\n"
+                    f"예시: 13500.25|+2.34\n\n"
+                    f"검색결과:\n{raw[:500]}"
+                )
+                res = _claude_call(llm,
+                    model=DEFAULT_MODEL, max_tokens=30,
+                    messages=[{"role": "user", "content": prompt_text}],
+                )
+                parsed = res.content[0].text.strip()
+                parts = parsed.split("|")
+                if len(parts) == 2:
+                    price = float(parts[0].replace(",", "").strip())
+                    rate  = float(parts[1].replace("%", "").replace("+", "").strip())
+                    if price > 0:
+                        result[rkey] = {
+                            'name':  name,
+                            'price': price,
+                            'rate':  rate,
+                            'date':  today_mmdd,
+                        }
+                        print(f"  ✅ {name}: {price:,.2f} ({rate:+.2f}%)")
+            except Exception as e:
+                print(f"  ⚠️ {name} 조회 오류: {e}")
                 continue
+
     except Exception as e:
         print(f"⚠️ 글로벌 지수 웹서치 오류: {e}")
 

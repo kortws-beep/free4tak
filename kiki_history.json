@@ -8,6 +8,14 @@
     {
       "role": "assistant",
       "content": "CMD:!브리핑"
+    },
+    {
+      "role": "user",
+      "content": "브리핑하자"
+    },
+    {
+      "role": "assistant",
+      "content": "CMD:!브리핑"
     }
   ]
 }
