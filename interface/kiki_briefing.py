@@ -278,63 +278,56 @@ def _get_global_market() -> dict:
             return result
 
         import datetime as _dt2
-        today_mmdd = _dt.datetime.now().strftime("%m/%d")
-        # ★ 주말 처리 — 월요일이면 금요일(2일 전) 종가, 평일이면 전날
         _today_dt = _dt.datetime.now()
+        # ★ 주말 처리 — 월요일이면 금요일(3일 전) 종가, 평일이면 전날
         if _today_dt.weekday() == 0:   # 월요일
             _us_days_back = 3
-        elif _today_dt.weekday() == 6: # 일요일 (혹시 실행 시)
+        elif _today_dt.weekday() == 6: # 일요일
             _us_days_back = 2
         else:
             _us_days_back = 1
-        yesterday = (_today_dt - _dt.timedelta(days=_us_days_back)).strftime("%Y-%m-%d")
-        print(f"  📅 미국 지수 기준일: {yesterday} (오늘 weekday={_today_dt.weekday()})")
+        _us_date_dt = _today_dt - _dt.timedelta(days=_us_days_back)
+        yesterday     = _us_date_dt.strftime("%Y-%m-%d")
+        yesterday_mmdd = _us_date_dt.strftime("%m/%d")   # ★ 표시용 날짜도 기준일로
+        print(f"  📅 미국 지수 기준일: {yesterday} (weekday={_today_dt.weekday()})")
 
         # ★ 지수별 개별 웹서치 — 한 번에 묶으면 파싱 누락됨
         queries = {
-            'sox': (f"필라델피아 반도체 지수 SOX 어제 종가 등락률 {yesterday}", "sox", "필라델피아 반도체"),
-            'ndx': (f"나스닥 종합 지수 NASDAQ 어제 종가 등락률 {yesterday}", "ndx", "나스닥"),
-            'spx': (f"S&P500 지수 어제 종가 등락률 {yesterday}", "spx", "S&P500"),
-            'dji': (f"다우존스 지수 DOW 어제 종가 등락률 {yesterday}", "dji", "다우"),
+            'sox': (f"필라델피아 반도체지수 SOX {yesterday} 종가", "sox", "필라델피아 반도체",  8000, 25000),
+            'ndx': (f"나스닥 NASDAQ 지수 {yesterday} 종가 시황", "ndx", "나스닥",             15000, 25000),
+            'spx': (f"S&P500 지수 {yesterday} 종가 시황",         "spx", "S&P500",            4000,  9000),
+            'dji': (f"다우존스 DOW 지수 {yesterday} 종가 시황",   "dji", "다우",              38000, 55000),
         }
 
         llm = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
-        # 지수별 합리적 가격 범위 (이 범위 벗어나면 파싱 오류로 간주)
-        price_range = {
-            'sox': (8000,  25000),   # 필라델피아반도체
-            'ndx': (15000, 25000),   # 나스닥
-            'spx': (4000,  9000),    # S&P500 (현재 ~7000)
-            'dji': (38000, 50000),   # 다우 (현재 ~44000)
-        }
-        # 등락률 합리적 범위: 하루 ±7% 이내
         MAX_DAILY_RATE = 7.0
 
-        for key, (query, rkey, name) in queries.items():
+        for key, (query, rkey, name, pmin, pmax) in queries.items():
             try:
                 raw = _ai._web_search_korea(query)
+                if not raw or raw == "검색 결과 없음":
+                    # 영문 폴백
+                    raw = _ai._web_search_global(query)
                 if not raw or raw == "검색 결과 없음":
                     print(f"  ⚠️ {name} 검색 결과 없음")
                     continue
 
-                pmin, pmax = price_range.get(rkey, (0, 999999))
                 prompt_text = (
-                    f"검색결과에서 {name} 지수의 {yesterday} 종가와 등락률만 추출해줘.\n"
-                    f"- 가격 범위: {pmin:,}~{pmax:,} 사이여야 함\n"
-                    f"- 등락률: ±7% 이내여야 함\n"
-                    f"- 범위 벗어나면 NONE 출력\n"
-                    f"- 반드시 아래 형식으로만 (다른 말 금지):\n"
-                    f"가격|등락률\n"
-                    f"예시: 13500.25|+2.34 또는 NONE\n\n"
-                    f"검색결과:\n{raw[:600]}"
+                    f"검색결과에서 {name} 지수의 {yesterday} 종가와 전일대비 등락률만 추출해줘.\n"
+                    f"- 가격은 반드시 {pmin:,}~{pmax:,} 사이 숫자\n"
+                    f"- 등락률은 ±7% 이내\n"
+                    f"- 조건 불만족하거나 데이터 없으면 NONE\n"
+                    f"- 형식: 가격|등락률 (예: 13500.25|+2.34)\n\n"
+                    f"검색결과:\n{raw[:700]}"
                 )
                 res = _claude_call(llm,
                     model=DEFAULT_MODEL, max_tokens=20,
                     messages=[{"role": "user", "content": prompt_text}],
                 )
                 parsed = res.content[0].text.strip()
-                if parsed == "NONE" or "|" not in parsed:
-                    print(f"  ⚠️ {name} 파싱 실패: {parsed}")
+                if "NONE" in parsed or "|" not in parsed:
+                    print(f"  ⚠️ {name} 파싱 실패: {parsed[:30]}")
                     continue
 
                 parts = parsed.split("|")
@@ -343,19 +336,14 @@ def _get_global_market() -> dict:
 
                 # 2중 검증
                 if not (pmin <= price <= pmax):
-                    print(f"  ⚠️ {name} 가격 범위 초과: {price:,.0f} (허용:{pmin:,}~{pmax:,})")
+                    print(f"  ⚠️ {name} 가격 범위 초과: {price:,.0f} ({pmin:,}~{pmax:,})")
                     continue
                 if abs(rate) > MAX_DAILY_RATE:
-                    print(f"  ⚠️ {name} 등락률 이상: {rate:+.2f}% (허용:±{MAX_DAILY_RATE}%)")
+                    print(f"  ⚠️ {name} 등락률 이상: {rate:+.2f}%")
                     continue
 
-                result[rkey] = {
-                    'name':  name,
-                    'price': price,
-                    'rate':  rate,
-                    'date':  today_mmdd,
-                }
-                print(f"  ✅ {name}: {price:,.2f} ({rate:+.2f}%)")
+                result[rkey] = {'name': name, 'price': price, 'rate': rate, 'date': yesterday_mmdd}
+                print(f"  ✅ {name}: {price:,.2f} ({rate:+.2f}%) [{yesterday_mmdd}]")
 
             except Exception as e:
                 print(f"  ⚠️ {name} 조회 오류: {e}")
