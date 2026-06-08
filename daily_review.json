@@ -1,184 +1,69 @@
 {
-  "date": "2026-06-05",
-  "saved_at": "2026-06-05 20:10",
+  "date": "2026-06-08",
+  "saved_at": "2026-06-08 20:10",
   "summary": {
-    "today": "2026-06-05",
-    "trades": 13,
-    "wins": 1,
-    "losses": 12,
-    "win_rate": 7.7,
-    "avg_profit": -5.39,
-    "total_pnl": -728770,
-    "avg_win": 3.87,
-    "avg_loss": -6.17,
+    "today": "2026-06-08",
+    "trades": 2,
+    "wins": 2,
+    "losses": 0,
+    "win_rate": 100.0,
+    "avg_profit": 10.24,
+    "total_pnl": 12405,
+    "avg_win": 10.24,
+    "avg_loss": 0,
     "by_hour": {},
     "by_reason": {
-      "손절": {
-        "count": 11,
-        "avg_profit": -6.51,
-        "pct": 84.6
-      },
-      "본절보호": {
+      "2차익절": {
         "count": 1,
-        "avg_profit": -2.36,
-        "pct": 7.7
+        "avg_profit": 10.34,
+        "pct": 50.0
       },
-      "1차익절": {
+      "트레일링": {
         "count": 1,
-        "avg_profit": 3.87,
-        "pct": 7.7
+        "avg_profit": 10.14,
+        "pct": 50.0
       }
     },
     "by_stock": [
       {
-        "code": "005930",
+        "code": "KRW-SAHARA",
         "trades": 2,
-        "win_rate": 50.0,
-        "avg_profit": 0.4,
-        "total": 0.79
+        "win_rate": 100.0,
+        "avg_profit": 10.24,
+        "total": 20.48
       }
     ],
     "trade_details": [
       {
-        "code": "KRW-TRAC",
-        "buy_price": 594.0,
-        "sell_price": 580.0,
-        "profit_rate": -2.36,
-        "sell_reason": "본절보호(-2.40%)",
+        "code": "KRW-SAHARA",
+        "buy_price": 50.3,
+        "sell_price": 55.5,
+        "profit_rate": 10.34,
+        "sell_reason": "2차익절(+10.34%)",
         "buy_time": "",
-        "sell_time": "00:19",
+        "sell_time": "03:01",
         "ai_score": null
       },
       {
-        "code": "032500",
-        "buy_price": 38500.0,
-        "sell_price": 35650.0,
-        "profit_rate": -7.4,
-        "sell_reason": "손절(-7.40%)",
+        "code": "KRW-SAHARA",
+        "buy_price": 50.3,
+        "sell_price": 55.4,
+        "profit_rate": 10.14,
+        "sell_reason": "트레일링스탑(+10.14%)",
         "buy_time": "",
-        "sell_time": "09:00",
-        "ai_score": null
-      },
-      {
-        "code": "353200",
-        "buy_price": 163800.0,
-        "sell_price": 151800.0,
-        "profit_rate": -7.33,
-        "sell_reason": "손절(-7.33%)",
-        "buy_time": "",
-        "sell_time": "09:00",
-        "ai_score": null
-      },
-      {
-        "code": "247540",
-        "buy_price": 210700.0,
-        "sell_price": 189600.0,
-        "profit_rate": -10.01,
-        "sell_reason": "손절(-10.01%)",
-        "buy_time": "",
-        "sell_time": "09:05",
-        "ai_score": null
-      },
-      {
-        "code": "005930",
-        "buy_price": 341000.0,
-        "sell_price": 330500.0,
-        "profit_rate": -3.08,
-        "sell_reason": "긴급손절(약세장)",
-        "buy_time": "",
-        "sell_time": "09:07",
-        "ai_score": null
-      },
-      {
-        "code": "007660",
-        "buy_price": 137500.0,
-        "sell_price": 122100.0,
-        "profit_rate": -11.2,
-        "sell_reason": "손절(-11.20%)",
-        "buy_time": "",
-        "sell_time": "09:13",
-        "ai_score": null
-      },
-      {
-        "code": "347850",
-        "buy_price": 93600.0,
-        "sell_price": 89900.0,
-        "profit_rate": -3.95,
-        "sell_reason": "긴급손절(약세장)",
-        "buy_time": "",
-        "sell_time": "09:14",
-        "ai_score": null
-      },
-      {
-        "code": "417840",
-        "buy_price": 16110.0,
-        "sell_price": 14490.0,
-        "profit_rate": -10.06,
-        "sell_reason": "손절(-10.06%)",
-        "buy_time": "",
-        "sell_time": "09:25",
-        "ai_score": null
-      },
-      {
-        "code": "196170",
-        "buy_price": 371625.0,
-        "sell_price": 337000.0,
-        "profit_rate": -9.32,
-        "sell_reason": "손절(-9.32%)",
-        "buy_time": "",
-        "sell_time": "09:33",
-        "ai_score": null
-      },
-      {
-        "code": "005930",
-        "buy_price": 329500.0,
-        "sell_price": 342250.0,
-        "profit_rate": 3.87,
-        "sell_reason": "1차익절(+3.87%)",
-        "buy_time": "",
-        "sell_time": "11:33",
-        "ai_score": null
-      },
-      {
-        "code": "281820",
-        "buy_price": 69800.0,
-        "sell_price": 67700.0,
-        "profit_rate": -3.01,
-        "sell_reason": "긴급손절(약세장)",
-        "buy_time": "",
-        "sell_time": "12:02",
-        "ai_score": null
-      },
-      {
-        "code": "195870",
-        "buy_price": 77300.0,
-        "sell_price": 74900.0,
-        "profit_rate": -3.1,
-        "sell_reason": "긴급손절(약세장)",
-        "buy_time": "",
-        "sell_time": "12:47",
-        "ai_score": null
-      },
-      {
-        "code": "403870",
-        "buy_price": 53800.0,
-        "sell_price": 52100.0,
-        "profit_rate": -3.16,
-        "sell_reason": "긴급손절(약세장)",
-        "buy_time": "",
-        "sell_time": "12:53",
+        "sell_time": "13:39",
         "ai_score": null
       }
     ]
   },
   "review": {
-    "오늘평가": "승률 7.7%로 극도로 낮고 장초반 연속 손절 — 시장 흐름 읽기와 진입 타이밍 전면 재검토 필요",
-    "잘한점": "오후 11:33 삼성전자에서 +3.87% 익절로 유일한 수익 실현, 긴급손절을 통해 추가 손실 방지",
-    "못한점": "09:00~09:33 구간에서 8연속 손절(-7%~-11%), 장초반 변동성 높은 시점에 무분별한 진입, 종목별 사전 분석 부족",
-    "반복패턴": "7일 데이터 부족으로 정확한 패턴 분석 불가, 하지만 오늘 기준 장초반 집중 매수 후 연속 손절 패턴 관찰됨",
-    "내일전략": "09:30 이전 신중한 진입 유지, 장초반 30분간 시장 관찰 후 진입, 1회 손절 시 30분 쿨타임 적용, 최대 연속 손절 3회로 제한",
-    "주의종목유형": "전날 급등한 종목, 거래량 급증 없는 갭상승 종목, 차트상 저항선 근처 종목, 소형주 위주 투기성 종목",
-    "주목시간대": "11:00~12:00 (유일한 수익 구간), 14:00~15:00 (오후 반등 구간 노리기)",
-    "신뢰도": 2
+    "오늘평가": "승률 100%에 평균 10%대 수익 — 우량 성과이나 표본 부족으로 운 요소 배제 못함",
+    "잘한점": "KRW-SAHARA 동일 종목 2회 연속 성공으로 종목 분석력 우수, 트레일링스탑과 2차익절 혼용으로 수익 극대화 달성",
+    "못한점": "총 2건으로 거래량 부족, 새벽 3시 매매는 유동성 리스크 존재, AI 점수 미활용으로 진입 근거 부족",
+    "반복패턴": "7일 데이터 부족으로 패턴 분석 불가 — 향후 시간대별/종목별 선호도 추적 필요",
+    "내일전략": "동일 종목 연속 성공 경험 활용해 KRW-SAHARA 모니터링 강화, 거래량 3-5건으로 확대하되 신중한 진입",
+    "주의종목유형": "새벽 시간대 저유동성 알트코인, 전일 급등 후 고점 근처 종목, 거래량 급감 코인",
+    "주목시간대": "09:00-11:00 (개장 초기 모멘텀), 13:00-15:00 (오늘 성공 시간대 재현)",
+    "신뢰도": 3
   }
 }

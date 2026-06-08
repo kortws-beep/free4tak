@@ -374,8 +374,8 @@
   ],
   "sector_updated_at": "2026-06-05 19:10",
   "loss_date": "2026-06-05",
-  "am_score_recommend": 72,
-  "pm_score_recommend": 68,
-  "market_forecast": "미국 반도체 보합, 국내 반도체 소폭 조정 예상",
+  "am_score_recommend": 80,
+  "pm_score_recommend": 75,
+  "market_forecast": "미국 반도체 급락으로 국내도 하락 압력",
   "forecast_date": "2026-06-08"
 }

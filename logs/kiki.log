@@ -2719,3 +2719,26 @@ aiohttp.client_exceptions.ClientConnectorDNSError: Cannot connect to host discor
 ✅ kiki_monitor 초기화 완료
 ✅ 토큰 캐시 사용 [44322407] (만료:2026-06-08 10:55:41)
 ⚠️ KIS 해외지수 결과 없음
+♻️ 대화 히스토리 복원: 18개
+🤖 영암9 AI 비서 (키키) 시작...
+📈 단타봇 | 📊 스윙봇 | 🪙 코인봇 연동
+🦊 Lv1 능동 알림: 위험/주의/인사이트/일일리뷰
+🏭 HTS 관심그룹 자동 동기화: 09:00 / 11:00 / 14:00
+🌅 모닝 브리핑: 08:00 | 🌆 저녁 브리핑: 20:00
+[2026-06-08 09:08:14] [INFO    ] discord.client: logging in using static token
+[2026-06-08 09:08:16] [INFO    ] discord.gateway: Shard ID None has connected to Gateway (Session ID: ca00aee4a79dcf74a0daca9876dcc5ae).
+✅ AI 비서 봇 온라인: KiKi#3353
+✅ kiki_monitor 초기화 완료
+✅ 토큰 캐시 사용 [44322407] (만료:2026-06-08 10:55:41)
+  ✅ 나스닥: 25,709.43 (-4.18%) [06/05]
+  ✅ S&P500: 7,383.74 (-2.64%) [06/05]
+  ✅ 필라델피아 반도체: 12,220.76 (-10.26%) [06/05]
+[2026-06-08 12:24:15] [INFO    ] discord.gateway: Shard ID None has successfully RESUMED session ca00aee4a79dcf74a0daca9876dcc5ae.
+[2026-06-08 15:33:28] [INFO    ] discord.gateway: Shard ID None has successfully RESUMED session ca00aee4a79dcf74a0daca9876dcc5ae.
+[2026-06-08 16:47:32] [INFO    ] discord.gateway: Shard ID None has successfully RESUMED session ca00aee4a79dcf74a0daca9876dcc5ae.
+[2026-06-08 17:58:56] [INFO    ] discord.gateway: Shard ID None has successfully RESUMED session ca00aee4a79dcf74a0daca9876dcc5ae.
+[2026-06-08 18:54:14] [INFO    ] discord.gateway: Shard ID None has successfully RESUMED session ca00aee4a79dcf74a0daca9876dcc5ae.
+[2026-06-08 20:45:51] [INFO    ] discord.gateway: Shard ID None has successfully RESUMED session ca00aee4a79dcf74a0daca9876dcc5ae.
+[2026-06-09 00:24:27] [INFO    ] discord.gateway: Shard ID None has successfully RESUMED session ca00aee4a79dcf74a0daca9876dcc5ae.
+[2026-06-09 03:07:43] [INFO    ] discord.gateway: Shard ID None has successfully RESUMED session ca00aee4a79dcf74a0daca9876dcc5ae.
+[2026-06-09 05:40:17] [INFO    ] discord.gateway: Shard ID None has successfully RESUMED session ca00aee4a79dcf74a0daca9876dcc5ae.

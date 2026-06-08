@@ -3,40 +3,34 @@
   "pending_cmd": null,
   "cmd_result": "✅ KRW-WLD 즉시매도 완료",
   "last_status": {
-    "krw": 68784,
-    "total_profit": 7789,
+    "krw": 167681,
+    "total_profit": -6341,
     "daily_pnl": 0,
-    "positions": 4,
+    "positions": 3,
     "positions_detail": {
       "KRW-BTC": {
-        "current": 95278000,
+        "current": 95000000,
         "entry_price": 95289000,
         "qty": 0.00314831,
-        "rate": -0.01
+        "rate": -0.3
       },
       "KRW-USDT": {
-        "current": 1507,
+        "current": 1499,
         "entry_price": 1477,
         "qty": 203.11442112,
-        "rate": 2.03
+        "rate": 1.49
       },
       "KRW-SOON": {
         "current": 250,
         "entry_price": 255,
         "qty": 1760.40025942,
         "rate": -2.2
-      },
-      "KRW-SAHARA": {
-        "current": 56,
-        "entry_price": 50,
-        "qty": 1789.26441353,
-        "rate": 12.92
       }
     },
     "daily_loss": 0,
     "market_status": "normal",
-    "btc_rate": 2.98401037,
-    "fear_greed": 12,
+    "btc_rate": -0.22424813999999998,
+    "fear_greed": 8,
     "is_night": false,
     "coin_pool": [
       "KRW-BTC",
@@ -44,26 +38,31 @@
       "KRW-XRP",
       "KRW-SOL",
       "KRW-WLD",
-      "KRW-XLM",
-      "KRW-USDT",
-      "KRW-JTO",
-      "KRW-ONDO",
-      "KRW-NEAR",
-      "KRW-DOGE",
-      "KRW-SUI",
-      "KRW-IN",
-      "KRW-SAHARA",
-      "KRW-ENA",
-      "KRW-ADA",
-      "KRW-SLX",
-      "KRW-MIRA",
-      "KRW-VIRTUAL",
       "KRW-MOVE",
-      "KRW-IP",
-      "KRW-PENGU",
+      "KRW-USDT",
+      "KRW-NEAR",
+      "KRW-XLM",
+      "KRW-ONDO",
+      "KRW-SAHARA",
+      "KRW-JTO",
+      "KRW-BIO",
+      "KRW-DOGE",
+      "KRW-TRAC",
       "KRW-BCH",
-      "KRW-LA",
-      "KRW-XPL"
+      "KRW-SUI",
+      "KRW-LAYER",
+      "KRW-PROVE",
+      "KRW-ENA",
+      "KRW-BERA",
+      "KRW-ADA",
+      "KRW-ZBT",
+      "KRW-SLX",
+      "KRW-IN",
+      "KRW-MEGA",
+      "KRW-IP",
+      "KRW-BABY",
+      "KRW-AERGO",
+      "KRW-VVV"
     ],
     "coins": [
       "KRW-BTC",
@@ -71,52 +70,52 @@
       "KRW-XRP",
       "KRW-SOL",
       "KRW-WLD",
-      "KRW-XLM",
-      "KRW-USDT",
-      "KRW-JTO",
-      "KRW-ONDO",
-      "KRW-NEAR",
-      "KRW-DOGE",
-      "KRW-SUI",
-      "KRW-IN",
-      "KRW-SAHARA",
-      "KRW-ENA",
-      "KRW-ADA",
-      "KRW-SLX",
-      "KRW-MIRA",
-      "KRW-VIRTUAL",
       "KRW-MOVE",
-      "KRW-IP",
-      "KRW-PENGU",
+      "KRW-USDT",
+      "KRW-NEAR",
+      "KRW-XLM",
+      "KRW-ONDO",
+      "KRW-SAHARA",
+      "KRW-JTO",
+      "KRW-BIO",
+      "KRW-DOGE",
+      "KRW-TRAC",
       "KRW-BCH",
-      "KRW-LA",
-      "KRW-XPL"
+      "KRW-SUI",
+      "KRW-LAYER",
+      "KRW-PROVE",
+      "KRW-ENA",
+      "KRW-BERA",
+      "KRW-ADA",
+      "KRW-ZBT",
+      "KRW-SLX",
+      "KRW-IN",
+      "KRW-MEGA",
+      "KRW-IP",
+      "KRW-BABY",
+      "KRW-AERGO",
+      "KRW-VVV"
     ],
     "seed": "30만원 소액 모드"
   },
-  "last_update": "09:07:50",
+  "last_update": "08:17:19",
   "daily_loss": 0,
-  "loss_date": "2026-06-08",
+  "loss_date": "2026-06-09",
   "positions": {
     "KRW-BTC": {
       "entry_price": 95289000.0,
       "qty": 0.00314831,
-      "current": 95278000.0
+      "current": 95000000.0
     },
     "KRW-USDT": {
       "entry_price": 1477.0,
       "qty": 203.11442112,
-      "current": 1507.0
+      "current": 1499.0
     },
     "KRW-SOON": {
       "entry_price": 255.62368421,
       "qty": 1760.40025942,
       "current": 250.0
-    },
-    "KRW-SAHARA": {
-      "entry_price": 50.3,
-      "qty": 1789.26441353,
-      "current": 56.8
     }
   },
   "peak_tracker": {
@@ -136,16 +135,8 @@
       "buy1_price": 257.0,
       "effective_entry": 257.0
     },
-    "KRW-SAHARA": {
-      "peak_rate": 0.14512922465208758,
-      "stage": 2,
-      "remain_qty": 4174.950298204,
-      "buy2_done": false,
-      "buy1_price": 50.3,
-      "effective_entry": 46.778999999999996
-    },
     "KRW-BTC": {
-      "peak_rate": 0.0005247195374072558,
+      "peak_rate": 0.011659268121189224,
       "stage": 0,
       "remain_qty": 0.003148317224443535,
       "buy2_done": false,
