@@ -1,13 +1,15 @@
 {
   "telegram_event": {
     "keywords": [
-      "상장"
+      "AI"
     ],
     "themes": [
-      "IPO"
+      "클라우드",
+      "반도체",
+      "AI"
     ],
     "score": 10,
-    "text": "🌞\\ 장전 동시호가 특징주 \\🌞\n\n\n마키나락스 장전 동시호가 급등세 ♦\n\n‘마르디 메크르디’ 코스닥 상장…공모주 4곳 수요예측 시험대 [이번...\nhttp://m.stock.naver.com/item/main.nhn#/stocks/477850/news/0004628524/office/011\n\n🌞\\\\\\\\\\🌞",
-    "time": "08:53:01"
+    "text": "🟦──── 하한가 ────🟦\n\n코퍼스코리아 장중 하한가 도달 🔻\n\n무암, AI 하이브리드 기술로 글로벌 K-드라마 IP 개발 나서\nhttp://m.stock.naver.com/item/main.nhn#/stocks/322780/news/0005366417/office/008\n\n🟦────────────🟦",
+    "time": "09:04:49"
   }
 }

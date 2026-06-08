@@ -3,11 +3,17 @@
   "pending_cmd": null,
   "cmd_result": "✅ KRW-WLD 즉시매도 완료",
   "last_status": {
-    "krw": 368933,
-    "total_profit": 7286,
+    "krw": 68784,
+    "total_profit": 7789,
     "daily_pnl": 0,
-    "positions": 3,
+    "positions": 4,
     "positions_detail": {
+      "KRW-BTC": {
+        "current": 95278000,
+        "entry_price": 95289000,
+        "qty": 0.00314831,
+        "rate": -0.01
+      },
       "KRW-USDT": {
         "current": 1507,
         "entry_price": 1477,
@@ -24,7 +30,7 @@
         "current": 56,
         "entry_price": 50,
         "qty": 1789.26441353,
-        "rate": 12.33
+        "rate": 12.92
       }
     },
     "daily_loss": 0,
@@ -51,11 +57,11 @@
       "KRW-ADA",
       "KRW-SLX",
       "KRW-MIRA",
-      "KRW-MOVE",
       "KRW-VIRTUAL",
+      "KRW-MOVE",
       "KRW-IP",
-      "KRW-BCH",
       "KRW-PENGU",
+      "KRW-BCH",
       "KRW-LA",
       "KRW-XPL"
     ],
@@ -78,20 +84,25 @@
       "KRW-ADA",
       "KRW-SLX",
       "KRW-MIRA",
-      "KRW-MOVE",
       "KRW-VIRTUAL",
+      "KRW-MOVE",
       "KRW-IP",
-      "KRW-BCH",
       "KRW-PENGU",
+      "KRW-BCH",
       "KRW-LA",
       "KRW-XPL"
     ],
     "seed": "30만원 소액 모드"
   },
-  "last_update": "08:59:07",
+  "last_update": "09:07:50",
   "daily_loss": 0,
   "loss_date": "2026-06-08",
   "positions": {
+    "KRW-BTC": {
+      "entry_price": 95289000.0,
+      "qty": 0.00314831,
+      "current": 95278000.0
+    },
     "KRW-USDT": {
       "entry_price": 1477.0,
       "qty": 203.11442112,
@@ -105,7 +116,7 @@
     "KRW-SAHARA": {
       "entry_price": 50.3,
       "qty": 1789.26441353,
-      "current": 56.5
+      "current": 56.8
     }
   },
   "peak_tracker": {
@@ -132,6 +143,14 @@
       "buy2_done": false,
       "buy1_price": 50.3,
       "effective_entry": 46.778999999999996
+    },
+    "KRW-BTC": {
+      "peak_rate": 0.0005247195374072558,
+      "stage": 0,
+      "remain_qty": 0.003148317224443535,
+      "buy2_done": false,
+      "buy1_price": 95289000.0,
+      "effective_entry": 95289000.0
     }
   }
 }
