@@ -4,21 +4,21 @@
   "cmd_result": "✅ KRW-WLD 즉시매도 완료",
   "last_status": {
     "krw": 167681,
-    "total_profit": -6341,
+    "total_profit": -6172,
     "daily_pnl": 0,
     "positions": 3,
     "positions_detail": {
       "KRW-BTC": {
-        "current": 95000000,
+        "current": 94989000,
         "entry_price": 95289000,
         "qty": 0.00314831,
-        "rate": -0.3
+        "rate": -0.31
       },
       "KRW-USDT": {
-        "current": 1499,
+        "current": 1500,
         "entry_price": 1477,
         "qty": 203.11442112,
-        "rate": 1.49
+        "rate": 1.56
       },
       "KRW-SOON": {
         "current": 250,
@@ -98,19 +98,19 @@
     ],
     "seed": "30만원 소액 모드"
   },
-  "last_update": "08:17:19",
+  "last_update": "08:17:49",
   "daily_loss": 0,
   "loss_date": "2026-06-09",
   "positions": {
     "KRW-BTC": {
       "entry_price": 95289000.0,
       "qty": 0.00314831,
-      "current": 95000000.0
+      "current": 94989000.0
     },
     "KRW-USDT": {
       "entry_price": 1477.0,
       "qty": 203.11442112,
-      "current": 1499.0
+      "current": 1500.0
     },
     "KRW-SOON": {
       "entry_price": 255.62368421,

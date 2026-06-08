@@ -1261,13 +1261,12 @@ async def auto_briefing():
 
             ch = bot.get_channel(CHANNEL_ID)
 
-            # ── 08:00 모닝 브리핑 ─────────────────────────
+            # ── 07:30 모닝 브리핑 ─────────────────────────
             if last_morning_date != today:
-                wait = _next_target(8, 0)
-                if wait > 3600:   # 1시간 이상 남음 → 대기
-                    await asyncio.sleep(min(wait - 60, 1800))
+                wait = _next_target(7, 30)
+                if wait > 60:
+                    await asyncio.sleep(min(wait - 30, 1800))
                     continue
-                # 08:00 도달 — 정확히 대기
                 await asyncio.sleep(max(wait, 0))
                 now = now_kst()
                 if now.weekday() < 5 and ch:
@@ -1277,12 +1276,13 @@ async def auto_briefing():
                         None, _build_briefing_msg)
                     await send_long(ch, msg)
                     print(f"✅ 모닝 브리핑 전송 {today}")
+                continue
 
             # ── 20:00 저녁 브리핑 ─────────────────────────
             if last_evening_date != today:
                 wait = _next_target(20, 0)
-                if wait > 3600:
-                    await asyncio.sleep(min(wait - 60, 1800))
+                if wait > 60:
+                    await asyncio.sleep(min(wait - 30, 1800))
                     continue
                 await asyncio.sleep(max(wait, 0))
                 now = now_kst()
@@ -1293,11 +1293,12 @@ async def auto_briefing():
                         None, _build_evening_briefing_msg)
                     await send_long(ch, msg)
                     print(f"✅ 저녁 브리핑 전송 {today}")
+                continue
 
-            # 두 브리핑 모두 전송 완료 → 내일 08:00까지 대기
+            # 두 브리핑 모두 완료 → 내일 07:30까지 대기
             if last_morning_date == today and last_evening_date == today:
-                wait = _next_target(8, 0)
-                print(f"📌 오늘 브리핑 완료 — 내일 08:00까지 {wait/3600:.1f}h 대기")
+                wait = _next_target(7, 30)
+                print(f"📌 오늘 브리핑 완료 — 내일 07:30까지 {wait/3600:.1f}h 대기")
                 await asyncio.sleep(max(wait, 60))
 
         except Exception as e:
