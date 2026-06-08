@@ -315,12 +315,11 @@ class KisAPI:
         """
         import datetime as _dt
 
-        url     = f"{self.base_url}/uapi/overseas-price/v1/quotations/inquire-daily-chartprice"
         headers = {
             "authorization": f"Bearer {self.token}",
             "appkey":   self.appkey,
             "appsecret": self.secret,
-            "tr_id":    "HHDFS76200200",
+            "tr_id":    "FHKST03030100",
         }
 
         # 월요일이면 금요일(3일 전), 그 외 전날
@@ -335,13 +334,15 @@ class KisAPI:
         base_date = _base_dt.strftime("%Y%m%d")
         base_mmdd = _base_dt.strftime("%m/%d")
 
-        # 심볼 → (키, 이름, 거래소코드)
+        # ★ 검증된 심볼 (서버 테스트 완료)
+        # 다우존스는 KIS API 미지원 → 제외
         symbols = {
-            "NDX":  ("ndx", "나스닥",            "NAS"),
-            "SPX":  ("spx", "S&P500",            "NYS"),
-            ".DJI": ("dji", "다우",              "NYS"),
-            "SOX":  ("sox", "필라델피아 반도체",  "NAS"),
+            "COMP": ("ndx", "나스닥",            "NAS"),   # 나스닥 종합
+            "SPX":  ("spx", "S&P500",            "NYS"),   # S&P500
+            "SOX":  ("sox", "필라델피아 반도체",  "NAS"),   # 필라델피아반도체
         }
+
+        url = f"{self.base_url}/uapi/overseas-price/v1/quotations/inquire-daily-chartprice"
 
         result = {}
         for sym, (key, name, excd) in symbols.items():
@@ -352,14 +353,13 @@ class KisAPI:
                     "FID_INPUT_DATE_1":        base_date,
                     "FID_INPUT_DATE_2":        base_date,
                     "FID_PERIOD_DIV_CODE":     "D",
+                    "FID_ORG_ADJ_PRC":         "0",
+                    "EXCD":                    excd,
                 }
-                res  = requests.get(url, headers=headers, params=params, timeout=8).json()
-                out  = res.get("output2", [{}])
-                if not out:
-                    continue
-                row   = out[0]
-                price = float(row.get("ovrs_nmix_prpr", 0) or 0)
-                rate  = float(row.get("ovrs_nmix_prdy_ctrt", 0) or 0)
+                res   = requests.get(url, headers=headers, params=params, timeout=8).json()
+                out   = res.get("output1", {})
+                price = float(out.get("ovrs_nmix_prpr",  0) or 0)
+                rate  = float(out.get("prdy_ctrt",       0) or 0)
                 if price > 0:
                     result[key] = {
                         "name":  name,

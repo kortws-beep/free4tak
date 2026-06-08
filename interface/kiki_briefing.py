@@ -264,6 +264,12 @@ def _get_global_market() -> dict:
     반환: {'sox': {...}, 'ndx': {...}, 'spx': {...}, 'dji': {...}}
     """
     try:
+        # ★ .env 로드 (kiki_briefing은 별도 프로세스에서 실행되므로 명시 필요)
+        from dotenv import load_dotenv as _lde
+        import os as _os
+        _base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        _lde(os.path.join(_base, ".env"), override=False)
+
         from kis_api import KisAPI as _KisAPI
         _api = _KisAPI()
         result = _api.get_overseas_index()
