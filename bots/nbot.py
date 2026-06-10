@@ -132,7 +132,7 @@ USE_COND_KEYWORDS = ["단타", "주도주", "당일고가", "090930","성장주"
 
 # 시장 방어
 MARKET_WEAK_THRESH = -1.0   # 코스피 -1.0% 이하 → 약세장 (★ 강화: -1.5→-1.0)
-MARKET_STOP_THRESH = -3.0   # 코스피 -2.5% 이하 → 중단
+MARKET_STOP_THRESH = -4.5   # 코스피 -4.5% 이하 → 중단 (-3%→-4.5% 완화)
 MAX_DAILY_LOSS     = 5      # 하루 최대 손절 횟수
 MAX_SAME_SECTOR    = 2      # 같은 업종 동시 보유 최대
 
@@ -1287,11 +1287,19 @@ class NBot:
                             continue
                         cur   = safe_float(mdata.get("stck_prpr", 0))
                         entry = pos["entry_price"]
-                        if entry > 0 and cur > 0 and (cur - entry)/entry <= -0.03:
-                            self._notify(f"🚨 긴급손절(약세장) {code}", critical=True)
-                            self._do_sell(code, pos["qty"], "긴급손절(약세장)", cur)
-                            self._do_loss()
-                            self.peak_tracker.pop(code, None)
+                        if entry > 0 and cur > 0:
+                            pnl_rate = (cur - entry) / entry
+                            # ★ 손실 중인 종목만 긴급손절 (-3% 이하)
+                            # 수익 중이거나 본절 이상이면 보유 유지
+                            if pnl_rate <= -0.03:
+                                self._notify(
+                                    f"🚨 긴급손절(약세장) {code} ({pnl_rate:+.1%})",
+                                    critical=True)
+                                self._do_sell(code, pos["qty"], "긴급손절(약세장)", cur)
+                                self._do_loss()
+                                self.peak_tracker.pop(code, None)
+                            else:
+                                print(f"  ⏸️ {code} 긴급손절 제외 ({pnl_rate:+.1%} — 손실 아님)")
 
                         # ★ 반등 감지 매수 — 코스피 최저점 대비 +1% 반등 (2번 연속 확인)
                     kospi_now = self.market_rate

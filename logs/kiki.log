@@ -2752,3 +2752,169 @@ aiohttp.client_exceptions.ClientConnectorDNSError: Cannot connect to host discor
 [2026-06-09 08:17:52] [INFO    ] discord.gateway: Shard ID None has connected to Gateway (Session ID: 3be535c80f3ff1ccb75a2d8723e78a5a).
 ✅ AI 비서 봇 온라인: KiKi#3353
 ✅ kiki_monitor 초기화 완료
+♻️ 대화 히스토리 복원: 20개
+🤖 영암9 AI 비서 (키키) 시작...
+📈 단타봇 | 📊 스윙봇 | 🪙 코인봇 연동
+🦊 Lv1 능동 알림: 위험/주의/인사이트/일일리뷰
+🏭 HTS 관심그룹 자동 동기화: 09:00 / 11:00 / 14:00
+🌅 모닝 브리핑: 08:00 | 🌆 저녁 브리핑: 20:00
+[2026-06-09 08:18:18] [INFO    ] discord.client: logging in using static token
+[2026-06-09 08:18:19] [INFO    ] discord.gateway: Shard ID None has connected to Gateway (Session ID: c86dcf75dcdef90154047134ddb7bfe4).
+✅ AI 비서 봇 온라인: KiKi#3353
+✅ kiki_monitor 초기화 완료
+⚠️ 토큰 캐시 만료/불일치 [44322407] - 재발급
+✅ 한투 토큰 발급 완료 [44322407]
+  ✅ 나스닥: 25,929.66 (+0.86%) [06/08]
+  ✅ S&P500: 7,405.73 (+0.30%) [06/08]
+  ✅ 필라델피아 반도체: 12,906.69 (+5.61%) [06/08]
+[2026-06-09 09:32:17] [INFO    ] discord.gateway: Shard ID None has successfully RESUMED session c86dcf75dcdef90154047134ddb7bfe4.
+[2026-06-09 11:39:09] [INFO    ] discord.gateway: Shard ID None has successfully RESUMED session c86dcf75dcdef90154047134ddb7bfe4.
+[2026-06-09 12:30:16] [INFO    ] discord.gateway: Shard ID None has successfully RESUMED session c86dcf75dcdef90154047134ddb7bfe4.
+[2026-06-09 15:30:46] [INFO    ] discord.gateway: Shard ID None has successfully RESUMED session c86dcf75dcdef90154047134ddb7bfe4.
+[2026-06-09 16:49:07] [INFO    ] discord.gateway: Shard ID None has successfully RESUMED session c86dcf75dcdef90154047134ddb7bfe4.
+[2026-06-09 17:51:24] [INFO    ] discord.gateway: Shard ID None has successfully RESUMED session c86dcf75dcdef90154047134ddb7bfe4.
+[2026-06-09 19:56:08] [INFO    ] discord.gateway: Shard ID None has successfully RESUMED session c86dcf75dcdef90154047134ddb7bfe4.
+[2026-06-09 22:20:43] [INFO    ] discord.gateway: Shard ID None has successfully RESUMED session c86dcf75dcdef90154047134ddb7bfe4.
+[2026-06-10 01:32:32] [INFO    ] discord.gateway: Shard ID None has successfully RESUMED session c86dcf75dcdef90154047134ddb7bfe4.
+[2026-06-10 02:31:48] [INFO    ] discord.gateway: Shard ID None has successfully RESUMED session c86dcf75dcdef90154047134ddb7bfe4.
+[2026-06-10 02:50:49] [INFO    ] discord.gateway: Shard ID None has successfully RESUMED session c86dcf75dcdef90154047134ddb7bfe4.
+[2026-06-10 03:01:08] [INFO    ] discord.gateway: Shard ID None has successfully RESUMED session c86dcf75dcdef90154047134ddb7bfe4.
+[2026-06-10 03:28:50] [INFO    ] discord.gateway: Shard ID None has successfully RESUMED session c86dcf75dcdef90154047134ddb7bfe4.
+[2026-06-10 06:14:38] [INFO    ] discord.gateway: Shard ID None session has been invalidated.
+[2026-06-10 06:14:49] [INFO    ] discord.gateway: Shard ID None session has been invalidated.
+[2026-06-10 06:15:00] [ERROR   ] discord.client: Attempting a reconnect in 1.24s
+Traceback (most recent call last):
+  File "/home/free4tak/k-bot/stock_bot/venv/lib/python3.14/site-packages/discord/client.py", line 728, in connect
+    self.ws = await asyncio.wait_for(coro, timeout=60.0)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/asyncio/tasks.py", line 488, in wait_for
+    return await fut
+           ^^^^^^^^^
+  File "/home/free4tak/k-bot/stock_bot/venv/lib/python3.14/site-packages/discord/gateway.py", line 392, in from_client
+    socket = await client.http.ws_connect(str(url))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/free4tak/k-bot/stock_bot/venv/lib/python3.14/site-packages/discord/http.py", line 571, in ws_connect
+    return await self.__session.ws_connect(url, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/free4tak/k-bot/stock_bot/venv/lib/python3.14/site-packages/aiohttp/client.py", line 1104, in _ws_connect
+    raise WSServerHandshakeError(
+    ...<5 lines>...
+    )
+aiohttp.client_exceptions.WSServerHandshakeError: 520, message='Invalid response status', url='wss://gateway-us-east1-b.discord.gg/?v=10&encoding=json&compress=zstd-stream'
+[2026-06-10 06:15:06] [ERROR   ] discord.client: Attempting a reconnect in 3.45s
+Traceback (most recent call last):
+  File "/home/free4tak/k-bot/stock_bot/venv/lib/python3.14/site-packages/discord/client.py", line 728, in connect
+    self.ws = await asyncio.wait_for(coro, timeout=60.0)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/asyncio/tasks.py", line 488, in wait_for
+    return await fut
+           ^^^^^^^^^
+  File "/home/free4tak/k-bot/stock_bot/venv/lib/python3.14/site-packages/discord/gateway.py", line 392, in from_client
+    socket = await client.http.ws_connect(str(url))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/free4tak/k-bot/stock_bot/venv/lib/python3.14/site-packages/discord/http.py", line 571, in ws_connect
+    return await self.__session.ws_connect(url, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/free4tak/k-bot/stock_bot/venv/lib/python3.14/site-packages/aiohttp/client.py", line 1104, in _ws_connect
+    raise WSServerHandshakeError(
+    ...<5 lines>...
+    )
+aiohttp.client_exceptions.WSServerHandshakeError: 520, message='Invalid response status', url='wss://gateway-us-east1-b.discord.gg/?v=10&encoding=json&compress=zstd-stream'
+[2026-06-10 06:15:15] [ERROR   ] discord.client: Attempting a reconnect in 6.15s
+Traceback (most recent call last):
+  File "/home/free4tak/k-bot/stock_bot/venv/lib/python3.14/site-packages/discord/client.py", line 728, in connect
+    self.ws = await asyncio.wait_for(coro, timeout=60.0)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/asyncio/tasks.py", line 488, in wait_for
+    return await fut
+           ^^^^^^^^^
+  File "/home/free4tak/k-bot/stock_bot/venv/lib/python3.14/site-packages/discord/gateway.py", line 392, in from_client
+    socket = await client.http.ws_connect(str(url))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/free4tak/k-bot/stock_bot/venv/lib/python3.14/site-packages/discord/http.py", line 571, in ws_connect
+    return await self.__session.ws_connect(url, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/free4tak/k-bot/stock_bot/venv/lib/python3.14/site-packages/aiohttp/client.py", line 1104, in _ws_connect
+    raise WSServerHandshakeError(
+    ...<5 lines>...
+    )
+aiohttp.client_exceptions.WSServerHandshakeError: 520, message='Invalid response status', url='wss://gateway-us-east1-b.discord.gg/?v=10&encoding=json&compress=zstd-stream'
+[2026-06-10 06:15:21] [ERROR   ] discord.client: Attempting a reconnect in 10.03s
+Traceback (most recent call last):
+  File "/home/free4tak/k-bot/stock_bot/venv/lib/python3.14/site-packages/discord/client.py", line 728, in connect
+    self.ws = await asyncio.wait_for(coro, timeout=60.0)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/asyncio/tasks.py", line 488, in wait_for
+    return await fut
+           ^^^^^^^^^
+  File "/home/free4tak/k-bot/stock_bot/venv/lib/python3.14/site-packages/discord/gateway.py", line 392, in from_client
+    socket = await client.http.ws_connect(str(url))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/free4tak/k-bot/stock_bot/venv/lib/python3.14/site-packages/discord/http.py", line 571, in ws_connect
+    return await self.__session.ws_connect(url, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/free4tak/k-bot/stock_bot/venv/lib/python3.14/site-packages/aiohttp/client.py", line 1104, in _ws_connect
+    raise WSServerHandshakeError(
+    ...<5 lines>...
+    )
+aiohttp.client_exceptions.WSServerHandshakeError: 520, message='Invalid response status', url='wss://gateway-us-east1-b.discord.gg/?v=10&encoding=json&compress=zstd-stream'
+[2026-06-10 06:15:37] [INFO    ] discord.gateway: Shard ID None session has been invalidated.
+[2026-06-10 06:15:46] [INFO    ] discord.gateway: Shard ID None session has been invalidated.
+[2026-06-10 06:15:51] [ERROR   ] discord.client: Attempting a reconnect in 21.04s
+Traceback (most recent call last):
+  File "/home/free4tak/k-bot/stock_bot/venv/lib/python3.14/site-packages/discord/client.py", line 728, in connect
+    self.ws = await asyncio.wait_for(coro, timeout=60.0)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/asyncio/tasks.py", line 488, in wait_for
+    return await fut
+           ^^^^^^^^^
+  File "/home/free4tak/k-bot/stock_bot/venv/lib/python3.14/site-packages/discord/gateway.py", line 392, in from_client
+    socket = await client.http.ws_connect(str(url))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/free4tak/k-bot/stock_bot/venv/lib/python3.14/site-packages/discord/http.py", line 571, in ws_connect
+    return await self.__session.ws_connect(url, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/free4tak/k-bot/stock_bot/venv/lib/python3.14/site-packages/aiohttp/client.py", line 1104, in _ws_connect
+    raise WSServerHandshakeError(
+    ...<5 lines>...
+    )
+aiohttp.client_exceptions.WSServerHandshakeError: 520, message='Invalid response status', url='wss://gateway-us-east1-b.discord.gg/?v=10&encoding=json&compress=zstd-stream'
+[2026-06-10 06:16:16] [INFO    ] discord.gateway: Shard ID None session has been invalidated.
+[2026-06-10 06:16:26] [INFO    ] discord.gateway: Shard ID None session has been invalidated.
+[2026-06-10 06:16:37] [INFO    ] discord.gateway: Shard ID None session has been invalidated.
+[2026-06-10 06:16:46] [INFO    ] discord.gateway: Shard ID None session has been invalidated.
+[2026-06-10 06:16:56] [INFO    ] discord.gateway: Shard ID None session has been invalidated.
+[2026-06-10 06:17:07] [INFO    ] discord.gateway: Shard ID None session has been invalidated.
+[2026-06-10 06:17:16] [INFO    ] discord.gateway: Shard ID None session has been invalidated.
+[2026-06-10 06:17:26] [INFO    ] discord.gateway: Shard ID None session has been invalidated.
+[2026-06-10 06:17:37] [INFO    ] discord.gateway: Shard ID None session has been invalidated.
+[2026-06-10 06:17:48] [INFO    ] discord.gateway: Shard ID None session has been invalidated.
+[2026-06-10 06:17:57] [INFO    ] discord.gateway: Shard ID None session has been invalidated.
+[2026-06-10 06:18:06] [INFO    ] discord.gateway: Shard ID None session has been invalidated.
+[2026-06-10 06:18:17] [INFO    ] discord.gateway: Shard ID None session has been invalidated.
+[2026-06-10 06:18:26] [INFO    ] discord.gateway: Shard ID None session has been invalidated.
+[2026-06-10 06:18:34] [INFO    ] discord.gateway: Shard ID None session has been invalidated.
+[2026-06-10 06:18:43] [INFO    ] discord.gateway: Shard ID None session has been invalidated.
+[2026-06-10 06:18:53] [INFO    ] discord.gateway: Shard ID None session has been invalidated.
+[2026-06-10 06:19:04] [INFO    ] discord.gateway: Shard ID None session has been invalidated.
+[2026-06-10 06:19:12] [INFO    ] discord.gateway: Shard ID None session has been invalidated.
+[2026-06-10 06:19:18] [INFO    ] discord.gateway: Shard ID None has connected to Gateway (Session ID: f10c47d3e12b0d5d9b463038cf449273).
+✅ AI 비서 봇 온라인: KiKi#3353
+✅ kiki_monitor 초기화 완료
+[2026-06-10 07:14:04] [INFO    ] discord.gateway: Shard ID None has successfully RESUMED session f10c47d3e12b0d5d9b463038cf449273.
+⚠️ 토큰 캐시 만료/불일치 [44322407] - 재발급
+✅ 한투 토큰 발급 완료 [44322407]
+  ✅ 나스닥: 25,678.82 (-0.97%) [06/09]
+  ✅ S&P500: 7,386.65 (-0.26%) [06/09]
+  ✅ 필라델피아 반도체: 12,657.81 (-1.93%) [06/09]
+[2026-06-10 09:09:08] [INFO    ] discord.gateway: Shard ID None has successfully RESUMED session f10c47d3e12b0d5d9b463038cf449273.
+♻️ 대화 히스토리 복원: 20개
+🤖 영암9 AI 비서 (키키) 시작...
+📈 단타봇 | 📊 스윙봇 | 🪙 코인봇 연동
+🦊 Lv1 능동 알림: 위험/주의/인사이트/일일리뷰
+🏭 HTS 관심그룹 자동 동기화: 09:00 / 11:00 / 14:00
+🌅 모닝 브리핑: 08:00 | 🌆 저녁 브리핑: 20:00
+[2026-06-10 09:51:02] [INFO    ] discord.client: logging in using static token
+[2026-06-10 09:51:03] [INFO    ] discord.gateway: Shard ID None has connected to Gateway (Session ID: e65ce80d8d6a4b60ae07a46079e9dae7).
+✅ AI 비서 봇 온라인: KiKi#3353
+✅ kiki_monitor 초기화 완료
