@@ -4,22 +4,22 @@
   "pending_cmd": null,
   "cmd_result": null,
   "last_status": {
-    "cash": 319366,
-    "psbl_cash": 3863412,
-    "total_profit": 0,
+    "cash": 0,
+    "psbl_cash": 2903412,
+    "total_profit": 4000,
     "positions": 1,
     "positions_detail": {
-      "089030": {
-        "name": "089030",
-        "current": 63100,
-        "entry_price": 63100,
-        "qty": 18,
-        "rate": 0.0,
+      "010120": {
+        "name": "LS ELECTRIC",
+        "current": 241000,
+        "entry_price": 240000,
+        "qty": 4,
+        "rate": 0.42,
         "buy_tag": ""
       }
     },
     "score_enter": 75,
-    "last_update": "10:09:22",
+    "last_update": "10:12:19",
     "code_name_map": {
       "209640": "와이제이링크",
       "417010": "나노팀",
@@ -246,16 +246,20 @@
       "108380": "대양전기공업",
       "041830": "인바디",
       "006140": "피제이전자",
-      "011790": "SKC",
-      "095910": "에스에너지",
-      "099220": "SDN"
+      "089230": "THE E&M",
+      "018000": "유니슨",
+      "100130": "동국S&C",
+      "101170": "우림피티에스",
+      "011790": "SKC"
     },
     "market_status": "weak",
     "market_rate": -2.66,
     "daily_loss": 0,
-    "active_sectors": []
+    "active_sectors": [
+      "반도체"
+    ]
   },
-  "last_update": "10:09:22",
+  "last_update": "10:12:20",
   "sold_today": {
     "010120": "10:06:49",
     "089030": "10:08:21"
@@ -267,17 +271,17 @@
   "watchlist_expire": {},
   "daily_loss": 5,
   "kiwoom_themes": {
-    "반도체_전공정장비": [
-      "031980",
-      "095610",
-      "036930",
-      "084370",
-      "030530"
-    ],
     "조선_해양플랜트기자재": [
       "100090",
       "014940",
       "108380"
+    ],
+    "풍력_단조/기자재": [
+      "089230",
+      "018000",
+      "044490",
+      "054540",
+      "101170"
     ],
     "태양광_부품/소재/장비": [
       "036930",
@@ -285,18 +289,13 @@
       "078600",
       "094820",
       "011790"
-    ],
-    "태양광_발전/설치/운영": [
-      "095910",
-      "099220",
-      "009830"
     ]
   },
-  "kiwoom_theme_at": "2026-06-10 10:04",
+  "kiwoom_theme_at": "2026-06-10 10:10",
   "active_sectors": [
     "반도체"
   ],
-  "sector_updated_at": "2026-06-05 19:10",
+  "sector_updated_at": "2026-06-10 10:10",
   "loss_date": "2026-06-10",
   "am_score_recommend": 82,
   "pm_score_recommend": 78,

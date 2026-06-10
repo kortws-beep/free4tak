@@ -5,12 +5,12 @@
   "cmd_result": null,
   "last_status": {
     "cash": 82240,
-    "total_profit": 4640,
+    "total_profit": 10840,
     "positions": 3,
     "score_enter": 85,
-    "last_update": "10:08:43",
+    "last_update": "10:11:47",
     "market_status": "weak",
-    "market_rate": -2.52,
+    "market_rate": -2.94,
     "daily_loss": 0,
     "code_name_map": {
       "010120": "LS ELECTRIC",
@@ -190,33 +190,34 @@
       "005290": {
         "name": "동진쎄미켐",
         "entry_price": 56000,
-        "current": 54500,
-        "rate": -2.68,
+        "current": 54200,
+        "rate": -3.21,
         "qty": 18,
         "buy_tag": ""
       },
       "093370": {
         "name": "후성",
         "entry_price": 14550,
-        "current": 15710,
-        "rate": 7.97,
-        "qty": 24,
+        "current": 15860,
+        "rate": 9.0,
+        "qty": 17,
         "buy_tag": ""
       },
       "240810": {
         "name": "원익IPS",
         "entry_price": 127620,
-        "current": 128000,
-        "rate": 0.3,
+        "current": 128800,
+        "rate": 0.92,
         "qty": 10,
         "buy_tag": ""
       }
     }
   },
-  "last_update": "10:08:44",
+  "last_update": "10:11:49",
   "sold_today": {
     "010140": "09:34:37",
-    "327260": "09:34:39"
+    "327260": "09:34:39",
+    "093370": "10:11:49"
   },
   "sold_today_date": "2026-06-10",
   "daily_loss": 4,
