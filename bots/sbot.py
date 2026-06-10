@@ -185,7 +185,7 @@ SKIP_COND_KEYWORDS = ["종가","단타", "장개장", "직후", "시가이탈", 
 
 # 약세장 방어
 MARKET_WEAK_THRESH = -1.5
-MARKET_STOP_THRESH = -3.0
+MARKET_STOP_THRESH = -4.5   # -3%→-4.5% 완화 (nbot과 통일)
 MAX_DAILY_LOSS     = 5
 # 종목 기준
 MKT_CAP_MIN = 10000     # 1조원 (스윙은 대형주)

@@ -1,22 +1,6 @@
 {
-  "date": "2026-06-09",
+  "date": "2026-06-10",
   "history": [
-    {
-      "role": "user",
-      "content": "브리핑하자"
-    },
-    {
-      "role": "assistant",
-      "content": "CMD:!브리핑"
-    },
-    {
-      "role": "user",
-      "content": "브리핑"
-    },
-    {
-      "role": "assistant",
-      "content": "CMD:!브리핑"
-    },
     {
       "role": "user",
       "content": "브리핑"
@@ -80,6 +64,22 @@
     {
       "role": "assistant",
       "content": "CMD:!c시작"
+    },
+    {
+      "role": "user",
+      "content": "브리핑"
+    },
+    {
+      "role": "assistant",
+      "content": "CMD:!브리핑"
+    },
+    {
+      "role": "user",
+      "content": "브리핑"
+    },
+    {
+      "role": "assistant",
+      "content": "CMD:!브리핑"
     }
   ]
 }
