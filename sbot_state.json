@@ -5,12 +5,12 @@
   "cmd_result": null,
   "last_status": {
     "cash": 82240,
-    "total_profit": -16080,
+    "total_profit": 4640,
     "positions": 3,
     "score_enter": 85,
-    "last_update": "10:03:38",
+    "last_update": "10:08:43",
     "market_status": "weak",
-    "market_rate": -2.88,
+    "market_rate": -2.52,
     "daily_loss": 0,
     "code_name_map": {
       "010120": "LS ELECTRIC",
@@ -142,7 +142,9 @@
       "001740": "SK네트웍스",
       "034220": "LG디스플레이",
       "240810": "원익IPS",
-      "357880": "SKAI"
+      "357880": "SKAI",
+      "000720": "현대건설",
+      "131970": "두산테스나"
     },
     "new_codes": [
       "089030",
@@ -188,30 +190,30 @@
       "005290": {
         "name": "동진쎄미켐",
         "entry_price": 56000,
-        "current": 54700,
-        "rate": -2.32,
+        "current": 54500,
+        "rate": -2.68,
         "qty": 18,
         "buy_tag": ""
       },
       "093370": {
         "name": "후성",
         "entry_price": 14550,
-        "current": 15280,
-        "rate": 5.02,
+        "current": 15710,
+        "rate": 7.97,
         "qty": 24,
         "buy_tag": ""
       },
       "240810": {
         "name": "원익IPS",
         "entry_price": 127620,
-        "current": 126600,
-        "rate": -0.8,
+        "current": 128000,
+        "rate": 0.3,
         "qty": 10,
         "buy_tag": ""
       }
     }
   },
-  "last_update": "10:03:39",
+  "last_update": "10:08:44",
   "sold_today": {
     "010140": "09:34:37",
     "327260": "09:34:39"

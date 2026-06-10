@@ -114,10 +114,12 @@ class OrderManager:
         ctx = self.buy_context.get(code, {})
 
         # ★ 매수 직후 메모리에 즉시 반영
+        import datetime as _dt_ord
         if not is_second:
             self.positions[code] = {
                 "entry_price": price,
                 "qty":         qty,
+                "buy_date":    _dt_ord.date.today().isoformat(),  # ★ 시간청산 기준일
             }
         else:
             existing = self.positions.get(code, {"entry_price": price, "qty": 0})
