@@ -1776,6 +1776,8 @@ class NBot:
             self.buy_tags[code] = buy_tag
 
             # ★ peak_tracker 즉시 초기화 (매수 직후 매도 체크에서 NPE 방지)
+            # holding_days/buy_date 명시 초기화 → 재매수 시 시간청산 카운트 리셋
+            import datetime as _dt_buy
             self.peak_tracker[code] = {
                 "peak_rate":       0.0,
                 "stage":           0,
@@ -1783,6 +1785,8 @@ class NBot:
                 "buy2_done":       False,
                 "buy1_price":      data["current_price"],
                 "effective_entry": data["current_price"],
+                "holding_days":    0,                                    # ★ 시간청산 카운트 리셋
+                "buy_date":        _dt_buy.date.today().isoformat(),     # ★ 오늘 날짜로 기준일 설정
             }
             slots -= 1
             time.sleep(1)  # API rate limit 회피
