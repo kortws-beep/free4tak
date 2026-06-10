@@ -601,17 +601,26 @@ class Strategy:
         # ----------------------------------------------------------
         if TIME_STOP_DAYS > 0 and stage < 1:
             import datetime as _dt
+            _today = _dt.date.today().isoformat()
             _buy_date = pos.get("buy_date", "")
-            if _buy_date:
-                try:
-                    _bd = _dt.date.fromisoformat(str(_buy_date)[:10])
-                    _sim = _dt.date.fromisoformat(str(pos.get("sim_date", _dt.date.today().isoformat()))[:10])
-                    _holding = (_sim - _bd).days
-                except Exception:
-                    _holding = tracker.get("holding_days", 0)
-            else:
-                _holding = tracker.get("holding_days", 0) + 1
-                tracker["holding_days"] = _holding
+
+            # ★ buy_date 없으면 오늘로 자동 세팅 (루프카운트 방지)
+            if not _buy_date:
+                pos["buy_date"] = _today
+                _buy_date = _today
+                tracker["holding_days"] = 0
+                print(f"  ⚠️ {code} buy_date 없음 → 오늘로 초기화")
+
+            try:
+                _bd  = _dt.date.fromisoformat(str(_buy_date)[:10])
+                _sim = _dt.date.fromisoformat(
+                    str(pos.get("sim_date", _today))[:10])
+                _holding = (_sim - _bd).days
+            except Exception:
+                _holding = 0
+                pos["buy_date"] = _today
+
+            print(f"  ⏱️ {code} 보유{_holding}일 (buy:{_buy_date} / 기준:{TIME_STOP_DAYS}일)")
             if _holding >= TIME_STOP_DAYS:
                 on_sell(code, qty, f"시간청산({_holding}일)", current)
                 return "시간청산"
