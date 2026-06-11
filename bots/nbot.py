@@ -131,7 +131,7 @@ SLEEP_INTERVAL   = 60
 USE_COND_KEYWORDS = ["단타", "주도주", "당일고가", "090930","성장주","실적호전"]
 
 # 시장 방어
-MARKET_WEAK_THRESH = -1.0   # 코스피 -1.0% 이하 → 약세장 (★ 강화: -1.5→-1.0)
+MARKET_WEAK_THRESH = -2.0   # 코스피 -2.0% 이하 → 약세장 (-1.0%→-2.0% 완화)
 MARKET_STOP_THRESH = -4.5   # 코스피 -4.5% 이하 → 중단 (-3%→-4.5% 완화)
 MAX_DAILY_LOSS     = 5      # 하루 최대 손절 횟수
 MAX_SAME_SECTOR    = 2      # 같은 업종 동시 보유 최대

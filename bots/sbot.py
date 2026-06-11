@@ -184,7 +184,7 @@ SLEEP_INTERVAL   = 60
 SKIP_COND_KEYWORDS = ["종가","단타", "장개장", "직후", "시가이탈", "오전중저가", "090930", "당일고가"]
 
 # 약세장 방어
-MARKET_WEAK_THRESH = -1.5
+MARKET_WEAK_THRESH = -2.0   # -1.5%→-2.0% 완화 (nbot과 통일)
 MARKET_STOP_THRESH = -4.5   # -3%→-4.5% 완화 (nbot과 통일)
 MAX_DAILY_LOSS     = 5
 # 종목 기준
