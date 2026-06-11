@@ -671,6 +671,53 @@ class SBot2:
             print(f"♻️ [MID] 날짜변경({loss_date}→{today}) — 손절카운터 리셋")
 
     # ============================================================
+    # ★ 디스코드 명령 처리
+    # ============================================================
+    def _handle_pending_command(self, st: dict):
+        """kiki !매도 / !매수 / !시작 명령 처리"""
+        pending = st.get("pending_cmd")
+        if not pending:
+            return
+
+        cmd_type = pending.get("type", "")
+        _update_state(pending_cmd=None)  # 즉시 클리어
+
+        if cmd_type == "sell":
+            code = pending.get("code", "")
+            if code in self.positions:
+                pos = self.positions[code]
+                mdata = self.api.get_market_data(code)
+                cur = float(mdata.get("stck_prpr", pos["entry_price"])) if mdata else pos["entry_price"]
+                self._do_sell(code, pos["qty"], "즉시매도(kiki명령)", cur)
+                _update_state(cmd_result=f"✅ {code} {pos['qty']}주 매도 완료")
+                print(f"✅ [MID] kiki 매도 명령 처리: {code}")
+            else:
+                _update_state(cmd_result=f"⚠️ {code} 보유 중이지 않음")
+
+        elif cmd_type == "buy":
+            code = pending.get("code", "")
+            qty  = pending.get("qty", 0)
+            mdata = self.api.get_market_data(code)
+            if mdata:
+                cur = int(float(mdata.get("stck_prpr", 0)))
+                if cur > 0 and qty > 0:
+                    amt = cur * qty
+                    if self._do_buy(code, cur, amt):
+                        _update_state(cmd_result=f"✅ {code} {qty}주 매수 완료")
+                    else:
+                        _update_state(cmd_result=f"❌ {code} 매수 실패")
+                else:
+                    _update_state(cmd_result=f"⚠️ 가격/수량 오류")
+            else:
+                _update_state(cmd_result=f"⚠️ {code} 시세 조회 실패")
+
+        elif cmd_type == "start":
+            self.daily_loss_count = 0
+            self._is_paused = False
+            _update_state(paused=False, daily_loss=0, loss_date=today_str(), cmd_result="✅ 재개 완료")
+            print("♻️ [MID] kiki !시작 명령 처리")
+
+    # ============================================================
     # 상태 출력
     # ============================================================
     def _print_status(self, score_enter: int, psbl_cash: int):
@@ -745,6 +792,9 @@ class SBot2:
                 paused      = st.get("paused", False)
                 if paused != self._is_paused:
                     self._is_paused = paused
+
+                # ★ 디스코드 명령 처리
+                self._handle_pending_command(st)
 
                 # 예수금
                 # ★ 종목별 주문가능금액 (현재가 기반)
