@@ -432,6 +432,8 @@ class NBot:
         self.daily_loss_count  = 0
         self.daily_loss_amount = 0
         self._last_market_check = 0
+        self._prefer_kosdaq     = False   # ★ 초기화
+        self._prefer_kospi      = False   # ★ 초기화
 
         # ── 업종/테마 ─────────────────────────────────────
         self.active_sectors           = []
