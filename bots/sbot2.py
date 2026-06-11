@@ -779,7 +779,7 @@ class SBot2:
             f"🚀 [영암9 MID-SWING] 중단기봇2 가동\n"
             f"⏰ {now_kst().strftime('%Y-%m-%d %H:%M:%S')}\n"
             f"💰 1차:{fmt_won(BUY_1ST_AMT_BASE)} / 최대 {MAX_POSITIONS}종목\n"
-            f"📈 익절:+8/+15/+25% | 손절:-5% | 트레일:-4% | 청산:11영업일",
+            f"📈 익절:+15/+25/+40% | 손절:-10% | 트레일:-8% | 청산:20영업일",
             critical=True,
         )
 
