@@ -80,7 +80,7 @@ MAX_POSITIONS    = 5
 BUY_1ST_AMT_BASE = 1_000_000    # 100만원 × 5종목 = 500만원
 BUY_SCORE_MIN    = 50
 BUY_SCORE_ENTER  = 75            # sbot1(80)보다 낮게 — 중단기는 여유있게
-LOOP_SLEEP       = 60
+LOOP_SLEEP       = 30    # nbot 제거로 API 여유 확보
 POOL_SIZE        = 100
 
 REG_MARKET_START = "0900"
