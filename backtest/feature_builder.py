@@ -47,7 +47,7 @@ class DataLoader:
             return self._ohlcv_cache[code]
         conn = sqlite3.connect(self.db_path, timeout=10)
         df = pd.read_sql(
-            "SELECT date, open, high, low, close, volume, value, change "
+            "SELECT date, open, high, low, close, volume, value, change_rate as change "
             "FROM daily_ohlcv WHERE code = ? ORDER BY date",
             conn, params=(code,))
         conn.close()
@@ -61,15 +61,26 @@ class DataLoader:
     def load_flow(self, code: str) -> pd.DataFrame:
         if code in self._flow_cache:
             return self._flow_cache[code]
-        conn = sqlite3.connect(self.db_path, timeout=10)
-        df = pd.read_sql(
-            "SELECT date, foreign_qty, orgn_qty, prsn_qty "
-            "FROM daily_flow WHERE code = ? ORDER BY date",
-            conn, params=(code,))
-        conn.close()
-        if not df.empty:
-            df["date"] = pd.to_datetime(df["date"], format="mixed")
-            df = df.set_index("date").sort_index()
+        try:
+            conn = sqlite3.connect(self.db_path, timeout=10)
+            # ★ daily_flow 테이블 없으면 빈 DataFrame 반환
+            tables = [r[0] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
+            if "daily_flow" not in tables:
+                conn.close()
+                self._flow_cache[code] = pd.DataFrame()
+                return pd.DataFrame()
+            df = pd.read_sql(
+                "SELECT date, foreign_qty, orgn_qty, prsn_qty "
+                "FROM daily_flow WHERE code = ? ORDER BY date",
+                conn, params=(code,))
+            conn.close()
+            if not df.empty:
+                df["date"] = pd.to_datetime(df["date"], format="mixed")
+                df = df.set_index("date").sort_index()
+        except Exception as e:
+            print(f"⚠️ load_flow 오류 {code}: {e}")
+            df = pd.DataFrame()
         self._flow_cache[code] = df
         return df
 
@@ -229,7 +240,7 @@ def build_features_at(loader: DataLoader,
             prsn_today    = int(last_flow["prsn_qty"])
 
     # ── 거래대금 (억 단위) — strategy.py 가정 ────
-    trading_value_eok = f(last["value"]) / 1e8
+    trading_value_eok = f(last["value"])  # 이미 억원 단위
 
     # ── 거래량 회전율 (간이: 최근거래량/20일평균) ─
     vol_tnrt = 0
@@ -276,6 +287,9 @@ def build_features_at(loader: DataLoader,
         "macd_hist":       f(last.get("macd_hist", 0)),
         "bb_pct":          f(last.get("bb_pct", 0.5), 0.5),
         "bb_width":        f(last.get("bb_width", 0)),
+        # ★ 52주 고가/저가 (눌림목 계산용)
+        "high_52w":        float(df["high"].rolling(252).max().iloc[-1]) if len(df) >= 20 else 0,
+        "low_52w":         float(df["low"].rolling(252).min().iloc[-1])  if len(df) >= 20 else 0,
         "stoch_k":         f(last.get("stoch_k", 50), 50),
         "candle_pattern":  int(f(last.get("candle_pattern", 0))),
         # 변동성 (risk_manager용)

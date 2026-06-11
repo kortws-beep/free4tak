@@ -149,13 +149,15 @@ class SwingStrategy:
             return False, "상한가 제외"
 
         # ★ 추세 강한 종목은 음봉/약양봉도 허용
-        is_strong = (ma5 > ma20 > 0 and foreign > 5000) or is_new
-        if is_strong:
-            if change < -2:
-                return False, "약세종목(-2% 미만)"
-        else:
-            if change < 1.0:
-                return False, "양봉 미달(+1% 미만)"
+        # 백테스트 모드(change_rate=0)에서는 등락률 필터 스킵
+        if change != 0:
+            is_strong = (ma5 > ma20 > 0 and foreign > 5000) or is_new
+            if is_strong:
+                if change < -2:
+                    return False, "약세종목(-2% 미만)"
+            else:
+                if change < 1.0:
+                    return False, "양봉 미달(+1% 미만)"
 
         return True, ""
 
