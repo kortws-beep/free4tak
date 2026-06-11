@@ -172,7 +172,7 @@ MAX_POSITIONS    = 5              # 최대 보유 종목 (3→5)
 BUY_1ST_AMT_BASE = 1_000_000    # 1차 매수 기본 금액 (330K→100만, 5종목)
 BUY_SCORE_MIN    = 45             # 후보 최소 점수
 BUY_SCORE_ENTER  = 80             # 매수 진입 기준점
-LOOP_SLEEP       = 60
+LOOP_SLEEP       = 30    # nbot 제거로 API 여유 확보
 POOL_SIZE        = 100
 
 REG_MARKET_START = "0900"
