@@ -1046,6 +1046,13 @@ class NBot:
         )
         self._is_paused = False
         self._last_market_check = 0
+        # ★ 재시작 시 손절 카운터/일시중단 자동 초기화
+        self.daily_loss_count = 0
+        if hasattr(self, 'order'):
+            self.order.daily_loss_count = 0
+        # state 파일도 초기화
+        update_state(BOT_STATE_FILE, paused=False, daily_loss=0)
+        print("♻️ 재시작 — 손절카운터/일시중단 자동 초기화")
 
         # ★ 실계좌 ↔ DB 정합성 체크
         self._sync_protected: set = set()  # 복구 종목 보호 (첫 루프 수동매도 감지 제외)
@@ -1176,6 +1183,15 @@ class NBot:
                                       f"(권장:{pm_rec}점, 제한±{AI_ADJUST_LIMIT})")
                                 score_enter = limited
                                 st["score_enter"] = limited  # ★ 표시 정확도
+
+                # ★ 날짜 바뀌면 손절카운터/일시중단 자동 리셋
+                _loss_date = st.get("loss_date", "")
+                if _loss_date and _loss_date != today and self.daily_loss_count > 0:
+                    self.daily_loss_count = 0
+                    self._is_paused = False
+                    self.order.daily_loss_count = 0
+                    update_state(BOT_STATE_FILE, paused=False, daily_loss=0, loss_date=today)
+                    print(f"♻️ 날짜변경({_loss_date}→{today}) — 손절카운터/일시중단 자동 리셋")
 
                 # 손절 카운터 초기화 (디스코드에서 !시작 명령으로 daily_loss=0 보낼 때)
                 if (st.get("daily_loss") == 0 and self.daily_loss_count > 0
