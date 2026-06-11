@@ -317,48 +317,74 @@ class SBot2:
     # ============================================================
     # 종목 풀 구성 (sbot1 공유)
     # ============================================================
+    def _load_new_codes(self):
+        """new 그룹 종목 로드 (sbot 방식)"""
+        try:
+            import asyncio as _asyncio
+            loop   = _asyncio.new_event_loop()
+            stocks = loop.run_until_complete(
+                self.kiwoom.get_new_group_stocks()
+            )
+            loop.close()
+            self.new_codes_list = [c for c, _ in stocks] if stocks else []
+        except Exception as e:
+            print(f"⚠️ new 그룹 로드 오류: {e}")
+            self.new_codes_list = []
+
     def _build_pool(self) -> list:
         """키움 조건검색 + new 그룹으로 종목 풀 구성 (sbot 방식)"""
-        pool = []
+        if not self.kiwoom.enabled:
+            print("⚠️ [MID] 키움 없음 — 빈 풀")
+            return []
         try:
-            if not self.kiwoom.enabled:
-                return pool
-            # 동기 방식으로 조건검색 결과 가져오기
-            cond_pool = self.kiwoom.cond_pool if hasattr(self.kiwoom, 'cond_pool') else []
-            for code, cond_name in cond_pool:
-                if any(kw in cond_name for kw in SKIP_COND_KEYWORDS):
-                    continue
-                pool.append(code)
+            import asyncio as _asyncio
+            loop  = _asyncio.new_event_loop()
+            codes = loop.run_until_complete(
+                self.kiwoom.get_condition_codes(
+                    use_keywords=None,
+                    skip_keywords=SKIP_COND_KEYWORDS,
+                    code_name_map=self.code_name_map,
+                )
+            )
+            loop.close()
+
+            if codes:
+                # new 그룹 추가
+                try:
+                    self._load_new_codes()
+                    added = 0
+                    for nc in self.new_codes_list:
+                        if nc not in codes:
+                            codes.append(nc); added += 1
+                    if added:
+                        print(f"  🆕 [MID] new 종목 {added}개 추가")
+                except Exception as e:
+                    print(f"⚠️ new 그룹 오류: {e}")
+
+                # sbot1 보유 종목 제외
+                if _get_all_positions:
+                    try:
+                        sbot1_codes = {p["code"] for p in _get_all_positions()
+                                       if p.get("bot_type") in ("sbot", "sbot1")}
+                        before = len(codes)
+                        codes = [c for c in codes if c not in sbot1_codes]
+                        if before != len(codes):
+                            print(f"  ⏭️ [MID] sbot1 교차 제외: {before-len(codes)}개")
+                    except Exception:
+                        pass
+
+                # 현재 보유 제외 + 중복 제거
+                codes = list(dict.fromkeys(
+                    c for c in codes if c not in self.positions
+                ))
+                result = codes[:POOL_SIZE]
+                print(f"🎯 [MID] 종목 풀: {len(result)}개")
+                return result
+
         except Exception as e:
-            print(f"⚠️ 조건검색 오류: {e}")
-
-        # new 그룹
-        try:
-            new_stocks = self.kiwoom.new_pool if hasattr(self.kiwoom, 'new_pool') else []
-            self.new_codes_list = [c for c, _ in new_stocks] if new_stocks else []
-            pool.extend(self.new_codes_list)
-            if self.new_codes_list:
-                print(f"  🆕 new그룹: {len(self.new_codes_list)}개")
-        except Exception as e:
-            print(f"⚠️ new 그룹 오류: {e}")
-
-        # sbot1 보유 종목 제외
-        if _get_all_positions:
-            try:
-                sbot1_codes = {p["code"] for p in _get_all_positions()
-                               if p.get("bot_type") in ("sbot", "sbot1")}
-                before = len(pool)
-                pool = [c for c in pool if c not in sbot1_codes]
-                if before != len(pool):
-                    print(f"  ⏭️ sbot1 교차 제외: {before-len(pool)}개")
-            except Exception:
-                pass
-
-        # 중복 제거 + 현재 보유 제외
-        pool = list(dict.fromkeys(
-            c for c in pool if c not in self.positions
-        ))
-        return pool[:POOL_SIZE]
+            print(f"⚠️ [MID] 키움 오류: {e}")
+            self.kiwoom.reset_token()
+        return []
 
     # ============================================================
     # 개별 종목 분석
@@ -730,8 +756,14 @@ class SBot2:
                     avail = MAX_POSITIONS - len(self.positions)
                     if avail > 0 and psbl_cash >= BUY_1ST_AMT_BASE:
                         pool = self._build_pool()
+                        print(f"  🔍 [MID] 종목 풀: {len(pool)}개")
                         if pool:
                             self._run_analysis(pool, now_t, score_enter, psbl_cash)
+                        else:
+                            # ★ kiwoom cond_pool 상태 확인
+                            cp = getattr(self.kiwoom, 'cond_pool', [])
+                            np = getattr(self.kiwoom, 'new_pool', [])
+                            print(f"  ⚠️ [MID] 풀 비어있음 — cond_pool:{len(cp)} new_pool:{len(np)}")
                     else:
                         if avail <= 0:
                             print(f"⛔ [MID] 슬롯 없음 ({len(self.positions)}/{MAX_POSITIONS})")
