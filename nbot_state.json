@@ -1,14 +1,15 @@
 {
   "telegram_event": {
     "keywords": [
-      "빅파마"
+      "AI"
     ],
     "themes": [
-      "바이오",
-      "제약"
+      "반도체",
+      "AI",
+      "클라우드"
     ],
-    "score": 18,
-    "text": "'비만약 격전지' 中 잡는다…인바디, 글로벌 빅파마와 공략 '맞손'\nhttps://www.etnews.com/20260610000046",
-    "time": "09:44:31"
+    "score": 10,
+    "text": "“삼성에스디에스, ‘AI인프라 시대’ 수혜주 등극”…목표가↑\nhttps://n.news.naver.com/article/009/0005692244",
+    "time": "09:16:28"
   }
 }

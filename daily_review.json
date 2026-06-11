@@ -1,69 +1,305 @@
 {
-  "date": "2026-06-08",
-  "saved_at": "2026-06-08 20:10",
+  "date": "2026-06-10",
+  "saved_at": "2026-06-10 20:10",
   "summary": {
-    "today": "2026-06-08",
-    "trades": 2,
-    "wins": 2,
-    "losses": 0,
-    "win_rate": 100.0,
-    "avg_profit": 10.24,
-    "total_pnl": 12405,
-    "avg_win": 10.24,
-    "avg_loss": 0,
+    "today": "2026-06-10",
+    "trades": 22,
+    "wins": 6,
+    "losses": 16,
+    "win_rate": 27.3,
+    "avg_profit": -3.1,
+    "total_pnl": -971978,
+    "avg_win": 4.84,
+    "avg_loss": -6.07,
     "by_hour": {},
     "by_reason": {
-      "2차익절": {
+      "손절": {
+        "count": 12,
+        "avg_profit": -7.35,
+        "pct": 54.5
+      },
+      "기타": {
+        "count": 5,
+        "avg_profit": -1.69,
+        "pct": 22.7
+      },
+      "1차익절": {
+        "count": 3,
+        "avg_profit": 6.04,
+        "pct": 13.6
+      },
+      "즉시매도(수동)": {
         "count": 1,
-        "avg_profit": 10.34,
-        "pct": 50.0
+        "avg_profit": 1.56,
+        "pct": 4.5
       },
       "트레일링": {
         "count": 1,
-        "avg_profit": 10.14,
-        "pct": 50.0
+        "avg_profit": 8.87,
+        "pct": 4.5
       }
     },
     "by_stock": [
       {
-        "code": "KRW-SAHARA",
+        "code": "093370",
         "trades": 2,
         "win_rate": 100.0,
-        "avg_profit": 10.24,
-        "total": 20.48
+        "avg_profit": 8.93,
+        "total": 17.87
+      },
+      {
+        "code": "010120",
+        "trades": 4,
+        "win_rate": 0.0,
+        "avg_profit": -1.57,
+        "total": -6.29
+      },
+      {
+        "code": "084370",
+        "trades": 3,
+        "win_rate": 33.3,
+        "avg_profit": -1.76,
+        "total": -5.28
+      },
+      {
+        "code": "089030",
+        "trades": 2,
+        "win_rate": 50.0,
+        "avg_profit": -2.29,
+        "total": -4.59
       }
     ],
     "trade_details": [
       {
-        "code": "KRW-SAHARA",
-        "buy_price": 50.3,
-        "sell_price": 55.5,
-        "profit_rate": 10.34,
-        "sell_reason": "2차익절(+10.34%)",
+        "code": "KRW-USDT",
+        "buy_price": 1477.0,
+        "sell_price": 1500.0,
+        "profit_rate": 1.56,
+        "sell_reason": "즉시매도(kiki명령)",
         "buy_time": "",
-        "sell_time": "03:01",
+        "sell_time": "08:33",
         "ai_score": null
       },
       {
-        "code": "KRW-SAHARA",
-        "buy_price": 50.3,
-        "sell_price": 55.4,
-        "profit_rate": 10.14,
-        "sell_reason": "트레일링스탑(+10.14%)",
+        "code": "010140",
+        "buy_price": 27950.0,
+        "sell_price": 25700.0,
+        "profit_rate": -8.05,
+        "sell_reason": "손절(-8.05%)",
         "buy_time": "",
-        "sell_time": "13:39",
+        "sell_time": "09:34",
+        "ai_score": null
+      },
+      {
+        "code": "327260",
+        "buy_price": 77473.3333,
+        "sell_price": 62000.0,
+        "profit_rate": -19.97,
+        "sell_reason": "손절(-19.97%)",
+        "buy_time": "",
+        "sell_time": "09:34",
+        "ai_score": null
+      },
+      {
+        "code": "035420",
+        "buy_price": 275500.0,
+        "sell_price": 239000.0,
+        "profit_rate": -13.25,
+        "sell_reason": "손절(약세장)(-13.25%)",
+        "buy_time": "",
+        "sell_time": "09:34",
+        "ai_score": null
+      },
+      {
+        "code": "005930",
+        "buy_price": 326250.0,
+        "sell_price": 307500.0,
+        "profit_rate": -5.75,
+        "sell_reason": "시간청산(5일)",
+        "buy_time": "",
+        "sell_time": "09:37",
+        "ai_score": null
+      },
+      {
+        "code": "010120",
+        "buy_price": 234000.0,
+        "sell_price": 232500.0,
+        "profit_rate": -0.64,
+        "sell_reason": "시간청산(5일)",
+        "buy_time": "",
+        "sell_time": "09:37",
+        "ai_score": null
+      },
+      {
+        "code": "084370",
+        "buy_price": 163100.0,
+        "sell_price": 156400.0,
+        "profit_rate": -4.11,
+        "sell_reason": "긴급손절(약세장)",
+        "buy_time": "",
+        "sell_time": "09:51",
+        "ai_score": null
+      },
+      {
+        "code": "010120",
+        "buy_price": 238500.0,
+        "sell_price": 234000.0,
+        "profit_rate": -1.89,
+        "sell_reason": "시간청산(5일)",
+        "buy_time": "",
+        "sell_time": "10:00",
+        "ai_score": null
+      },
+      {
+        "code": "010120",
+        "buy_price": 236000.0,
+        "sell_price": 234500.0,
+        "profit_rate": -0.64,
+        "sell_reason": "시간청산(5일)",
+        "buy_time": "",
+        "sell_time": "10:06",
+        "ai_score": null
+      },
+      {
+        "code": "089030",
+        "buy_price": 63100.0,
+        "sell_price": 63400.0,
+        "profit_rate": 0.48,
+        "sell_reason": "시간청산(5일)",
+        "buy_time": "",
+        "sell_time": "10:08",
+        "ai_score": null
+      },
+      {
+        "code": "093370",
+        "buy_price": 14550.0,
+        "sell_price": 15860.0,
+        "profit_rate": 9.0,
+        "sell_reason": "1차익절(+9.00%)",
+        "buy_time": "",
+        "sell_time": "10:11",
+        "ai_score": null
+      },
+      {
+        "code": "084370",
+        "buy_price": 162000.0,
+        "sell_price": 167500.0,
+        "profit_rate": 3.4,
+        "sell_reason": "1차익절(+3.40%)",
+        "buy_time": "",
+        "sell_time": "10:50",
+        "ai_score": null
+      },
+      {
+        "code": "093370",
+        "buy_price": 14550.0,
+        "sell_price": 15840.0,
+        "profit_rate": 8.87,
+        "sell_reason": "트레일링1(+8.87%)",
+        "buy_time": "",
+        "sell_time": "11:02",
+        "ai_score": null
+      },
+      {
+        "code": "089030",
+        "buy_price": 63100.0,
+        "sell_price": 59900.0,
+        "profit_rate": -5.07,
+        "sell_reason": "손절(약세장)(-5.07%)",
+        "buy_time": "",
+        "sell_time": "11:58",
+        "ai_score": null
+      },
+      {
+        "code": "039030",
+        "buy_price": 468500.0,
+        "sell_price": 442500.0,
+        "profit_rate": -5.55,
+        "sell_reason": "긴급손절(약세장)",
+        "buy_time": "",
+        "sell_time": "13:06",
+        "ai_score": null
+      },
+      {
+        "code": "069960",
+        "buy_price": 175200.0,
+        "sell_price": 169500.0,
+        "profit_rate": -3.25,
+        "sell_reason": "긴급손절(약세장)",
+        "buy_time": "",
+        "sell_time": "13:06",
+        "ai_score": null
+      },
+      {
+        "code": "084370",
+        "buy_price": 162000.0,
+        "sell_price": 154600.0,
+        "profit_rate": -4.57,
+        "sell_reason": "긴급손절(약세장)",
+        "buy_time": "",
+        "sell_time": "13:06",
+        "ai_score": null
+      },
+      {
+        "code": "010120",
+        "buy_price": 240000.0,
+        "sell_price": 232500.0,
+        "profit_rate": -3.12,
+        "sell_reason": "긴급손절(약세장)",
+        "buy_time": "",
+        "sell_time": "13:08",
+        "ai_score": null
+      },
+      {
+        "code": "240810",
+        "buy_price": 127620.0,
+        "sell_price": 118600.0,
+        "profit_rate": -7.07,
+        "sell_reason": "손절(-7.07%)",
+        "buy_time": "",
+        "sell_time": "13:22",
+        "ai_score": null
+      },
+      {
+        "code": "005290",
+        "buy_price": 56000.0,
+        "sell_price": 52000.0,
+        "profit_rate": -7.14,
+        "sell_reason": "손절(-7.14%)",
+        "buy_time": "",
+        "sell_time": "13:25",
+        "ai_score": null
+      },
+      {
+        "code": "170920",
+        "buy_price": 52200.0,
+        "sell_price": 48500.0,
+        "profit_rate": -7.09,
+        "sell_reason": "손절(-7.09%)",
+        "buy_time": "",
+        "sell_time": "14:39",
+        "ai_score": null
+      },
+      {
+        "code": "KRW-IO",
+        "buy_price": 245.0,
+        "sell_price": 259.0,
+        "profit_rate": 5.71,
+        "sell_reason": "1차익절(+5.28%)",
+        "buy_time": "",
+        "sell_time": "16:37",
         "ai_score": null
       }
     ]
   },
   "review": {
-    "오늘평가": "승률 100%에 평균 10%대 수익 — 우량 성과이나 표본 부족으로 운 요소 배제 못함",
-    "잘한점": "KRW-SAHARA 동일 종목 2회 연속 성공으로 종목 분석력 우수, 트레일링스탑과 2차익절 혼용으로 수익 극대화 달성",
-    "못한점": "총 2건으로 거래량 부족, 새벽 3시 매매는 유동성 리스크 존재, AI 점수 미활용으로 진입 근거 부족",
-    "반복패턴": "7일 데이터 부족으로 패턴 분석 불가 — 향후 시간대별/종목별 선호도 추적 필요",
-    "내일전략": "동일 종목 연속 성공 경험 활용해 KRW-SAHARA 모니터링 강화, 거래량 3-5건으로 확대하되 신중한 진입",
-    "주의종목유형": "새벽 시간대 저유동성 알트코인, 전일 급등 후 고점 근처 종목, 거래량 급감 코인",
-    "주목시간대": "09:00-11:00 (개장 초기 모멘텀), 13:00-15:00 (오늘 성공 시간대 재현)",
-    "신뢰도": 3
+    "오늘평가": "승률 27.3%로 극도로 낮고 대형 손실 다수 — 종목 선별과 진입 타이밍 전면 재검토 필요",
+    "잘한점": "093370 종목에서 연속 익절(+9.00%, +8.87%) 성공하고 트레일링 전략이 효과적으로 작동함",
+    "못한점": "09:34 동시매수한 3종목 모두 대형 손실(-8.05%, -19.97%, -13.25%)로 리스크 관리 부재, 13시대 약세장 상황에서 무분별한 진입으로 연속 손절",
+    "반복패턴": "7일 데이터 부족으로 패턴 분석 불가하나, 오늘만으로도 동일 시간대 집중 매수와 약세장 상황 미판단 반복",
+    "내일전략": "장 초반 09:30-09:40 동시 다중 신중한 진입 유지, 약세장 신호 감지 시 신규 진입 중단, 종목당 최대 손실 -5% 하드 스탑 설정",
+    "주의종목유형": "전일 급락 후 반등 시도 종목, 거래량 급증 없는 기술적 반등 종목, 업종 전반 약세 시 개별 강세 종목",
+    "주목시간대": "10:10-11:30 (오늘 유일한 연속 수익 구간), 16:30 이후 (코인 수익 발생)",
+    "신뢰도": 2
   }
 }
