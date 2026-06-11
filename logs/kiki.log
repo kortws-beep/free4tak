@@ -2957,3 +2957,4 @@ aiohttp.client_exceptions.WSServerHandshakeError: 520, message='Invalid response
 [2026-06-11 08:23:38] [INFO    ] discord.gateway: Shard ID None has connected to Gateway (Session ID: 60842827ddb508d2bf23d968b875c297).
 ✅ AI 비서 봇 온라인: KiKi#3353
 ✅ kiki_monitor 초기화 완료
+[2026-06-11 10:48:51] [INFO    ] discord.gateway: Shard ID None has successfully RESUMED session 60842827ddb508d2bf23d968b875c297.
