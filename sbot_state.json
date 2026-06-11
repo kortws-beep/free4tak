@@ -5,12 +5,12 @@
   "cmd_result": null,
   "last_status": {
     "cash": 82240,
-    "total_profit": -23000,
+    "total_profit": -29000,
     "positions": 1,
     "score_enter": 85,
-    "last_update": "13:46:12",
+    "last_update": "14:03:57",
     "market_status": "normal",
-    "market_rate": 0.2,
+    "market_rate": 0.39,
     "daily_loss": 0,
     "code_name_map": {
       "001820": "삼화콘덴서",
@@ -136,7 +136,11 @@
       "126640": "화신정공",
       "178320": "서진시스템",
       "267260": "HD현대일렉트릭",
-      "347700": "스피어"
+      "347700": "스피어",
+      "295310": "에이치브이엠",
+      "090360": "로보스타",
+      "010060": "OCI홀딩스",
+      "000990": "DB하이텍"
     },
     "new_codes": [
       "090460",
@@ -180,14 +184,14 @@
       "005930": {
         "name": "삼성전자",
         "entry_price": 306750,
-        "current": 301000,
-        "rate": -1.87,
+        "current": 299500,
+        "rate": -2.36,
         "qty": 4,
         "buy_tag": ""
       }
     }
   },
-  "last_update": "13:46:19",
+  "last_update": "14:04:09",
   "sold_today": {
     "319400": "10:58:51"
   },
