@@ -4,32 +4,32 @@
   "cmd_result": "✅ KRW-USDT 즉시매도 완료",
   "last_status": {
     "krw": 44650,
-    "total_profit": -1296,
+    "total_profit": -3116,
     "daily_pnl": 0,
     "positions": 3,
     "positions_detail": {
       "KRW-BTC": {
-        "current": 94116000,
+        "current": 94613000,
         "entry_price": 94315855,
         "qty": 0.00477119,
-        "rate": -0.21
+        "rate": 0.32
       },
       "KRW-SOON": {
-        "current": 256,
+        "current": 254,
         "entry_price": 255,
         "qty": 1760.40025942,
-        "rate": 0.15
+        "rate": -0.64
       },
       "KRW-WLFI": {
         "current": 89,
         "entry_price": 89,
         "qty": 3351.95530726,
-        "rate": -0.34
+        "rate": -0.56
       }
     },
     "daily_loss": 0,
     "market_status": "normal",
-    "btc_rate": 1.56477792,
+    "btc_rate": 2.17060291,
     "fear_greed": 12,
     "is_night": false,
     "coin_pool": [
@@ -39,30 +39,30 @@
       "KRW-SOL",
       "KRW-WLD",
       "KRW-SAHARA",
-      "KRW-STRAX",
       "KRW-USDT",
-      "KRW-ID",
-      "KRW-XLM",
       "KRW-ONDO",
-      "KRW-BLEND",
+      "KRW-ASTR",
+      "KRW-XLM",
       "KRW-NEAR",
       "KRW-DOGE",
-      "KRW-HIVE",
+      "KRW-BLEND",
       "KRW-KAT",
+      "KRW-HIVE",
+      "KRW-SUI",
       "KRW-WLFI",
       "KRW-IP",
-      "KRW-SUI",
-      "KRW-MOVE",
       "KRW-ENA",
-      "KRW-AERGO",
-      "KRW-ZBT",
-      "KRW-FLUID",
+      "KRW-PYTH",
       "KRW-ZETA",
-      "KRW-SLX",
+      "KRW-FLUID",
+      "KRW-ZBT",
+      "KRW-CTC",
+      "KRW-MOVE",
       "KRW-ADA",
-      "KRW-MANTRA",
+      "KRW-SENT",
       "KRW-BCH",
-      "KRW-BABY"
+      "KRW-CHZ",
+      "KRW-SLX"
     ],
     "coins": [
       "KRW-BTC",
@@ -71,75 +71,75 @@
       "KRW-SOL",
       "KRW-WLD",
       "KRW-SAHARA",
-      "KRW-STRAX",
       "KRW-USDT",
-      "KRW-ID",
-      "KRW-XLM",
       "KRW-ONDO",
-      "KRW-BLEND",
+      "KRW-ASTR",
+      "KRW-XLM",
       "KRW-NEAR",
       "KRW-DOGE",
-      "KRW-HIVE",
+      "KRW-BLEND",
       "KRW-KAT",
+      "KRW-HIVE",
+      "KRW-SUI",
       "KRW-WLFI",
       "KRW-IP",
-      "KRW-SUI",
-      "KRW-MOVE",
       "KRW-ENA",
-      "KRW-AERGO",
-      "KRW-ZBT",
-      "KRW-FLUID",
+      "KRW-PYTH",
       "KRW-ZETA",
-      "KRW-SLX",
+      "KRW-FLUID",
+      "KRW-ZBT",
+      "KRW-CTC",
+      "KRW-MOVE",
       "KRW-ADA",
-      "KRW-MANTRA",
+      "KRW-SENT",
       "KRW-BCH",
-      "KRW-BABY"
+      "KRW-CHZ",
+      "KRW-SLX"
     ],
     "seed": "30만원 소액 모드"
   },
-  "last_update": "14:22:54",
+  "last_update": "19:27:06",
   "daily_loss": 0,
   "loss_date": "2026-06-11",
   "positions": {
     "KRW-BTC": {
       "entry_price": 94315855.00263037,
       "qty": 0.00477119,
-      "current": 94116000.0
+      "current": 94613000.0
     },
     "KRW-SOON": {
       "entry_price": 255.62368421,
       "qty": 1760.40025942,
-      "current": 256.0
+      "current": 254.0
     },
     "KRW-WLFI": {
       "entry_price": 89.5,
       "qty": 3351.95530726,
-      "current": 89.2
+      "current": 89.0
     }
   },
   "peak_tracker": {
     "KRW-BTC": {
-      "peak_rate": 0.011659268121189224,
+      "peak_rate": 0.004603096662353581,
       "stage": 0,
-      "remain_qty": 0.003148317224443535,
+      "remain_qty": 0.00477119,
       "buy2_done": true,
-      "buy1_price": 95289000.0,
-      "effective_entry": 95289000.0
+      "buy1_price": 94315855.00263037,
+      "effective_entry": 94315855.00263037
     },
     "KRW-SOON": {
-      "peak_rate": 0.01937984496124031,
+      "peak_rate": -0.0063518535655956825,
       "stage": 0,
-      "remain_qty": 1167.3151750972763,
+      "remain_qty": 1760.40025942,
       "buy2_done": true,
-      "buy1_price": 257.0,
-      "effective_entry": 257.0
+      "buy1_price": 255.62368421,
+      "effective_entry": 255.62368421
     },
     "KRW-WLFI": {
-      "peak_rate": 0.014525139664804438,
+      "peak_rate": -0.002234636871508412,
       "stage": 0,
-      "remain_qty": 3351.95530726257,
-      "buy2_done": false,
+      "remain_qty": 3351.95530726,
+      "buy2_done": true,
       "buy1_price": 89.5,
       "effective_entry": 89.5
     }

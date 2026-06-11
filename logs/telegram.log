@@ -2614,3 +2614,75 @@ http://m.stock.naver.com/item/main.nhn#/
    채널: AllStockNews | 키워드: ['트럼프'] | +15점
    내용: 트럼프 "토마호크 49발로 이란 공습…합의 안하면 내일 박살"
 https://n.news.naver.com/mnews/article/015/0005297605?sid=104
+
+🚨 [14:30:27] 빅 이벤트 감지!
+   채널: AllStockNews | 키워드: ['수주'] | +15점
+   내용: 스피어 "美 글로벌 발사업체향 수주 3300억 돌파"
+https://naver.me/551J5YZ1
+
+🚨 [14:34:27] 빅 이벤트 감지!
+   채널: AllStockNews | 키워드: ['수주'] | +15점
+   내용: 🔺──── 상한가 ────🔺
+
+스피어 장중 상한가 도달 🔺
+
+[ET특징주]스피어, 미국 우주발사업체향 수주 확대에 상승세
+http://m.stock.naver.com/item/ma
+
+🚨 [14:50:26] 빅 이벤트 감지!
+   채널: AllStockNews | 키워드: ['상장'] | +10점
+   내용: "목표액의 4배 380조 몰렸다"...스페이스X 상장 D-1
+https://n.news.naver.com/mnews/article/215/0001255070?sid=101
+
+🚨 [15:37:03] 빅 이벤트 감지!
+   채널: AllStockNews | 키워드: ['AI'] | +10점
+   내용: “삼성에스디에스, ‘AI인프라 시대’ 수혜주 등극”…목표가↑
+https://naver.me/FoXz96Ev
+
+🚨 [15:46:26] 빅 이벤트 감지!
+   채널: AllStockNews | 키워드: ['상장'] | +10점
+   내용: "SK하이닉스, 이르면 8월 美 ADR 상장" 전망…저평가 해소 기대
+https://naver.me/Ffs8iBlN
+🚀 텔레그램 모니터 v2 시작
+Attempt 1 at connecting failed: OSError: [Errno 101] Network is unreachable
+Attempt 2 at connecting failed: OSError: [Errno 101] Network is unreachable
+Attempt 3 at connecting failed: OSError: [Errno 101] Network is unreachable
+Attempt 4 at connecting failed: OSError: [Errno 101] Network is unreachable
+Attempt 5 at connecting failed: OSError: [Errno 101] Network is unreachable
+Attempt 6 at connecting failed: OSError: [Errno 101] Network is unreachable
+Traceback (most recent call last):
+  File "/home/free4tak/k-bot/stock_bot/intelligence/telegram_monitor.py", line 438, in <module>
+    asyncio.run(main())
+    ~~~~~~~~~~~^^^^^^^^
+  File "/usr/lib/python3.14/asyncio/runners.py", line 204, in run
+    return runner.run(main)
+           ~~~~~~~~~~^^^^^^
+  File "/usr/lib/python3.14/asyncio/runners.py", line 127, in run
+    return self._loop.run_until_complete(task)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "/usr/lib/python3.14/asyncio/base_events.py", line 719, in run_until_complete
+    return future.result()
+           ~~~~~~~~~~~~~^^
+  File "/home/free4tak/k-bot/stock_bot/intelligence/telegram_monitor.py", line 398, in main
+    await client.start()
+  File "/home/free4tak/k-bot/stock_bot/venv/lib/python3.14/site-packages/telethon/client/auth.py", line 135, in _start
+    await self.connect()
+  File "/home/free4tak/k-bot/stock_bot/venv/lib/python3.14/site-packages/telethon/client/telegrambaseclient.py", line 560, in connect
+    if not await self._sender.connect(self._connection(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<6 lines>...
+    )):
+    ^^
+  File "/home/free4tak/k-bot/stock_bot/venv/lib/python3.14/site-packages/telethon/network/mtprotosender.py", line 133, in connect
+    await self._connect()
+  File "/home/free4tak/k-bot/stock_bot/venv/lib/python3.14/site-packages/telethon/network/mtprotosender.py", line 266, in _connect
+    raise ConnectionError('Connection to Telegram failed {} time(s)'.format(self._retries))
+ConnectionError: Connection to Telegram failed 5 time(s)
+🚀 텔레그램 모니터 v2 시작
+✅ 텔레그램 연결 완료
+📡 모니터링 채널: ['hankyung_fin', 'stocknewskorea', 'kind_krx', 'AllStockNews']
+👂 메시지 대기 중...
+🚀 텔레그램 모니터 v2 시작
+✅ 텔레그램 연결 완료
+📡 모니터링 채널: ['hankyung_fin', 'stocknewskorea', 'kind_krx', 'AllStockNews']
+👂 메시지 대기 중...
