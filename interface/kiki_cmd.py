@@ -58,13 +58,13 @@ SBOT_HIST_DB  = os.path.join(_base, "sbot_trade_history.db")
 CBOT_HIST_DB  = os.path.join(_base, "cbot_trade_history.db")
 BOT_STATE_DIR = _base
 
-async def cmd_status(ctx, bot_name: str = "nbot"):
+async def cmd_status(ctx, bot_name: str = "sbot2"):
     state     = read_state(bot_name)
     status    = state.get("last_status", {})
     pos_rows  = get_open_positions_from_db(bot_name)
     now       = now_kst().strftime("%H:%M:%S")
     paused    = "⏸️ 일시중단" if state.get("paused") else "▶️ 실행중"
-    bot_label = "📈 단타봇" if bot_name == "nbot" else "📊 스윙봇" if bot_name == "sbot" else "🤖 봇"
+    bot_label = "📈 단타봇" if bot_name == "sbot2" else "📊 스윙봇" if bot_name == "sbot" else "🤖 봇"
 
     lines = [
         f"{bot_label} **영암9 현황** [{now}]",
@@ -79,8 +79,8 @@ async def cmd_status(ctx, bot_name: str = "nbot"):
             f"📊 시장: {status.get('market_status', 'normal')} | "
             f"코스피: {status.get('market_rate', 0):+.2f}%",
         ]
-        # 단타봇 손절카운터 표시
-        if bot_name == "nbot":
+        # 중단기봇 손절카운터 표시
+        if bot_name == "sbot2":
             daily_loss = status.get("daily_loss", 0)
             if daily_loss > 0:
                 lines.append(f"🛑 당일 손절: {daily_loss}회")
@@ -115,11 +115,11 @@ async def cmd_score(ctx, score: int):
     if not 0 <= score <= 100:
         await ctx.send("❌ 점수는 0~100 사이여야 해요")
         return
-    update_state("nbot", score_enter=score)
+    update_state("sbot2", score_enter=score)
     await ctx.send(f"✅ 매수 기준 점수 변경: **{score}점**\n(다음 루프부터 적용)")
 
 
-async def cmd_sell(ctx, code: str, bot_name: str = "nbot"):
+async def cmd_sell(ctx, code: str, bot_name: str = "sbot2"):
     """단타/스윙 매도 명령. 종목명으로 검색 가능."""
     if not code.isdigit():
         # 종목명 → 코드 변환
@@ -131,7 +131,7 @@ async def cmd_sell(ctx, code: str, bot_name: str = "nbot"):
             await ctx.send(f"🔍 종목명 '{code}' → 코드 **{found}** 로 변환")
             code = found
         else:
-            db = TRADE_HIST_DB if bot_name == "nbot" else SBOT_HIST_DB
+            db = SBOT_HIST_DB
             try:
                 conn = _ro_connect(db)
                 row  = conn.execute(
@@ -194,7 +194,7 @@ async def cmd_sell(ctx, code: str, bot_name: str = "nbot"):
 async def cmd_buy(ctx, code: str, qty: int):
     # ★ 종목명 → 코드 변환
     if not code.isdigit():
-        state         = read_state("nbot")
+        state         = read_state("sbot2")
         code_name_map = state.get("last_status", {}).get("code_name_map", {})
         found = next((c for c, nm in code_name_map.items()
                       if code in nm or nm in code), None)
@@ -208,12 +208,12 @@ async def cmd_buy(ctx, code: str, qty: int):
         await ctx.send("수량은 1 이상이어야 해요")
         return
 
-    state = read_state("nbot")
+    state = read_state("sbot2")
     name  = state.get("last_status", {}).get("code_name_map", {}).get(code, code)
-    update_state("nbot", pending_cmd={"type": "buy", "code": code, "qty": qty})
+    update_state("sbot2", pending_cmd={"type": "buy", "code": code, "qty": qty})
     await ctx.send(f"📤 매수 명령 전달: **{code}({name})** {qty}주\n(다음 루프에서 실행)")
 
-    result = await wait_cmd_result("nbot")
+    result = await wait_cmd_result("sbot2")
     if result:
         await ctx.send(f"✅ 결과: {result}")
     else:
@@ -243,8 +243,8 @@ async def cmd_analyze(ctx, code: str):
         await ctx.send(f"❌ 조회 오류: {e}")
 
 
-async def cmd_pause(ctx, pause: bool, bot_name: str = "nbot"):
-    labels = {"nbot": "단타봇", "sbot": "스윙봇", "cbot": "코인봇"}
+async def cmd_pause(ctx, pause: bool, bot_name: str = "sbot2"):
+    labels = {"sbot2": "단타봇", "sbot": "스윙봇", "cbot": "코인봇"}
     label  = labels.get(bot_name, bot_name)
     if pause:
         update_state(bot_name, paused=True)
@@ -254,9 +254,9 @@ async def cmd_pause(ctx, pause: bool, bot_name: str = "nbot"):
         update_state(bot_name, paused=False, daily_loss=0,
                     loss_date=today_str())
         # 시장 상태 확인
-        nbot_st = read_state("nbot")
-        mkt_status = nbot_st.get("last_status", {}).get("market_status", "normal")
-        mkt_rate   = nbot_st.get("last_status", {}).get("market_rate", 0)
+        sbot2_st = read_state("sbot2")
+        mkt_status = sbot2_st.get("last_status", {}).get("market_status", "normal")
+        mkt_rate   = sbot2_st.get("last_status", {}).get("market_rate", 0)
         if mkt_status == "stop":
             await ctx.send(
                 f"▶️ **{label} 재개** | 손절카운터 초기화 완료\n"
@@ -282,10 +282,10 @@ async def cmd_performance(ctx):
     today  = today_str()
     realized_all = get_today_realized_all()
 
-    nbot_p = realized_all.get("nbot", 0)
+    sbot2_p = realized_all.get("sbot2", 0)
     sbot_p = realized_all.get("sbot", 0)
     cbot_p = realized_all.get("cbot", 0)
-    total  = nbot_p + sbot_p + cbot_p
+    total  = sbot2_p + sbot_p + cbot_p
 
     # ★ KDA 스타일 대시보드
     # 최근 매매 이력
@@ -320,7 +320,7 @@ async def cmd_performance(ctx):
     msg += f"💹 **Avg Win** : {avg_win:+.2f}% | **Avg Loss** : {avg_loss:+.2f}%\n"
     msg += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
     msg += "💰 **TODAY P&L**\n"
-    if nbot_p: msg += f"  📈 단타봇: **{nbot_p:+,}원**\n"
+    if sbot2_p: msg += f"  📈 중단기봇: **{sbot2_p:+,}원**\n"
     if sbot_p: msg += f"  📊 스윙봇: **{sbot_p:+,}원**\n"
     if cbot_p: msg += f"  🪙 코인봇: **{cbot_p:+,}원**\n"
     if not (nbot_p or sbot_p or cbot_p):
@@ -462,7 +462,7 @@ MDD:-{r.get('mdd',0):.1f}% | 샤프:{r.get('sharpe',0):.2f}{hour_insight}
         await ctx.send(f"❌ 분석 오류: {e}")
 
 
-async def cmd_watchlist(ctx, code: str, bot_name: str = "nbot"):
+async def cmd_watchlist(ctx, code: str, bot_name: str = "sbot2"):
     state     = read_state(bot_name)
     watchlist = state.get("watchlist", [])
     wl_expire = state.get("watchlist_expire", {})
@@ -484,14 +484,14 @@ async def cmd_watchlist(ctx, code: str, bot_name: str = "nbot"):
         await ctx.send(f"👀 관심종목 추가: **{code}({name})**\n만료: {expire_date}")
 
 
-async def cmd_watchlist_show(ctx, bot_name: str = "nbot"):
+async def cmd_watchlist_show(ctx, bot_name: str = "sbot2"):
     state     = read_state(bot_name)
     watchlist = state.get("watchlist", [])
     wl_expire = state.get("watchlist_expire", {})
     wl_source = state.get("watchlist_source", {})
     name_map  = state.get("last_status", {}).get("code_name_map", {})
     name_map.update(state.get("hts_watchlist", {}))
-    bot_label = "단타봇" if bot_name == "nbot" else "스윙봇"
+    bot_label = "단타봇" if bot_name == "sbot2" else "스윙봇"
 
     today   = today_str()
     expired = [c for c in watchlist
@@ -534,7 +534,7 @@ async def cmd_restart_all(ctx):
     import asyncio as _ac
 
     SERVICES = [
-        ("nbot",     "yeongam9-nbot"),
+        ("sbot2",     "yeongam9-nbot"),
         ("sbot",     "yeongam9-sbot"),
         ("cbot",     "yeongam9-cbot"),
         ("telegram", "yeongam9-telegram"),
@@ -569,7 +569,7 @@ async def cmd_restart_all(ctx):
 # 핸들러 — 업종/테마
 # ============================================================
 async def cmd_theme_status(ctx):
-    state          = read_state("nbot")
+    state          = read_state("sbot2")
     active_sectors = state.get("active_sectors", [])
     sector_updated = state.get("sector_updated_at", "")
     name_map       = state.get("last_status", {}).get("code_name_map", {})
@@ -757,7 +757,7 @@ def _sync_watchlist_to_state(codes: list) -> dict:
     expire_date = (now_kst() + datetime.timedelta(days=30)).strftime("%Y-%m-%d")
     summary     = {"added": 0, "removed": 0, "total": len(hts_codes), "codes": hts_codes}
 
-    for bot_name in ("nbot", "sbot"):
+    for bot_name in ("sbot2", "sbot"):
         state     = read_state(bot_name)
         watchlist = state.get("watchlist", [])
         wl_expire = state.get("watchlist_expire", {})
@@ -820,7 +820,7 @@ async def cmd_watchlist_hts(ctx):
         )
         return
 
-    state    = read_state("nbot")
+    state    = read_state("sbot2")
     name_map = state.get("last_status", {}).get("code_name_map", {})
     name_map.update(state.get("hts_watchlist", {}))
     watchlist = state.get("watchlist", [])
@@ -910,7 +910,7 @@ async def cmd_total_performance(ctx, days: int = 30):
 
         today_sum = get_today_summary()
         perf      = get_performance(days=days)
-        perf_n    = get_performance(days=days, bot_type="nbot")
+        perf_n    = get_performance(days=days, bot_type="sbot2")
         perf_s    = get_performance(days=days, bot_type="sbot")
         perf_c    = get_performance(days=days, bot_type="cbot")
 
