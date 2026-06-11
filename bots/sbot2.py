@@ -225,9 +225,15 @@ class SBot2:
     def _do_buy(self, code: str, price: int, amount: int,
                 is_second: bool = False):
         qty = max(1, amount // price)
-        ok, orgno, odno = self.api.buy(code, price, qty, self.code_name_map)
+        _res  = self.api.buy(code, price, price * qty, self.code_name_map)
+        if isinstance(_res, (list, tuple)) and len(_res) == 3:
+            ok, orgno, odno = _res
+        elif isinstance(_res, (list, tuple)) and len(_res) == 2:
+            ok, orgno, odno = _res[0], "", ""
+        else:
+            ok, orgno, odno = False, "", ""
         if not ok:
-            print(f"❌ 매수 실패 {code}")
+            print(f"❌ 매수 실패 {code}: {err_msg}")
             return False
 
         import datetime as _dt
@@ -237,7 +243,6 @@ class SBot2:
                 "qty":         qty,
                 "buy_date":    _dt.date.today().isoformat(),
             }
-            self._pending_orders[code] = (orgno or "", odno or "", qty)
 
         # master_db 기록
         if _master_upsert:
@@ -318,17 +323,27 @@ class SBot2:
     # 종목 풀 구성 (sbot1 공유)
     # ============================================================
     def _load_new_codes(self):
-        """new 그룹 종목 로드 (sbot 방식)"""
+        """한투 관심그룹 new에서 신규 추천 종목 로딩 (sbot 방식)"""
         try:
-            import asyncio as _asyncio
-            loop   = _asyncio.new_event_loop()
-            stocks = loop.run_until_complete(
-                self.kiwoom.get_new_group_stocks()
+            hts_id = os.getenv("KIS_HTS_ID2", os.getenv("KIS_HTS_ID", ""))
+            if not hts_id:
+                return
+            groups = self.api.get_watchlist_groups(hts_id)
+            target = next(
+                ((gc, gn) for gc, gn in groups.items()
+                 if gn.lower() in ("new", "신규추천", "신규", "new추천")),
+                None,
             )
-            loop.close()
-            self.new_codes_list = [c for c, _ in stocks] if stocks else []
+            if not target:
+                print("  ⚠️ [MID] new 관심그룹 없음")
+                return
+            grp_code, grp_name = target
+            print(f"  🆕 [MID] new그룹 발견: [{grp_code}]{grp_name}")
+            stocks = self.api.get_watchlist_stocks(grp_code, hts_id, self.code_name_map)
+            self.new_codes_list = [c for c, _ in stocks]
+            print(f"  🆕 [MID] new그룹 종목: {len(self.new_codes_list)}개")
         except Exception as e:
-            print(f"⚠️ new 그룹 로드 오류: {e}")
+            print(f"⚠️ [MID] new 그룹 로드 오류: {e}")
             self.new_codes_list = []
 
     def _build_pool(self) -> list:
@@ -409,7 +424,7 @@ class SBot2:
                 return None, 0
 
             # 기술적 지표
-            tech = self.api.get_technical_indicators(code)
+            tech = self.api.get_technical_indicators(code, self.atr_cache)
             if not tech:
                 return None, 0
 
@@ -573,7 +588,7 @@ class SBot2:
                 continue
 
             cur  = int(data.get("current_price", 0))
-            amt  = self.risk.calc_position_size(score, psbl_cash, BUY_1ST_AMT_BASE)
+            amt  = self.risk.calc_buy_amount(score=score, psbl_cash=psbl_cash)
             if psbl_cash < amt:
                 print(f"  ⏭️ {code} — 자금 부족")
                 continue
@@ -734,8 +749,6 @@ class SBot2:
                 # 예수금
                 # ★ 종목별 주문가능금액 (현재가 기반)
                 psbl_cash = self.api.get_psbl_order_cash("005930", BUY_1ST_AMT_BASE)
-                if psbl_cash <= 0:
-                    psbl_cash = self.api.get_buyable_cash()
 
                 # 상태 출력
                 self._print_status(score_enter, psbl_cash)
