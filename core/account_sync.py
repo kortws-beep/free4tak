@@ -149,6 +149,41 @@ def sync_positions(
 
     print(f"✅ [{bot_type}] DB 정합성 체크 완료")
 
+    # ★ buy_date 복원 — DB trades 테이블의 buy_time 기준
+    import datetime as _dt_sync
+    _today = _dt_sync.date.today()
+    MAX_HOLD_DAYS = 30  # 30일 이상 된 레코드는 오늘 날짜로 리셋 (오래된 DB 오염 방어)
+    try:
+        conn = sqlite3.connect(db_path, timeout=10)
+        for code in real_pos:
+            row = conn.execute("""
+                SELECT buy_time FROM trades
+                WHERE code=? AND sell_price IS NULL
+                ORDER BY buy_time ASC LIMIT 1
+            """, (code,)).fetchone()
+            if row and row[0]:
+                buy_date_str = str(row[0])[:10]
+                try:
+                    buy_dt = _dt_sync.date.fromisoformat(buy_date_str)
+                    days_held = (_today - buy_dt).days
+                    if days_held > MAX_HOLD_DAYS:
+                        # 너무 오래된 레코드 → 오늘 날짜로 리셋
+                        real_pos[code]["buy_date"] = _today.isoformat()
+                        print(f"   ⚠️ buy_date 오염 감지: {code} ({buy_date_str}, {days_held}일) → 오늘로 리셋")
+                    else:
+                        real_pos[code]["buy_date"] = buy_date_str
+                        print(f"   📅 buy_date 복원: {code} → {buy_date_str} ({days_held}일 보유)")
+                except Exception:
+                    real_pos[code]["buy_date"] = _today.isoformat()
+                    print(f"   ⚠️ buy_date 파싱 실패: {code} → 오늘로 리셋")
+            else:
+                # DB에 레코드 없으면 오늘 날짜
+                real_pos[code]["buy_date"] = _today.isoformat()
+                print(f"   📅 buy_date 없음: {code} → 오늘로 설정")
+        conn.close()
+    except Exception as e:
+        print(f"⚠️ buy_date 복원 오류: {e}")
+
     # ★ master_positions 실계좌 기준 동기화 비활성 (API 호출 제한)
     return real_pos
     try:  # noqa
