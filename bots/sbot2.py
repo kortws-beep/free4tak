@@ -247,11 +247,11 @@ class SBot2:
         # master_db 기록
         if _master_upsert:
             try:
-                _master_upsert(code, price, qty, bot_type="sbot2")
+                _master_upsert("sbot2", code, entry_price=price, qty=qty)
             except Exception as e:
                 print(f"⚠️ master_db upsert 오류: {e}")
 
-        self.db.record_buy(
+        self.db.save_buy(
             code=code, buy_price=price, qty=qty,
             score=self.score_cache.get(code, (0, {}))[0],
             buy_reason=self.buy_context.get(code, {}).get("reason", ""),
@@ -282,7 +282,7 @@ class SBot2:
         entry = self.positions.get(code, {}).get("entry_price", price)
         rate  = (price - entry) / entry if entry else 0
 
-        self.db.record_sell(code=code, sell_price=int(price),
+        self.db.save_sell(code=code, sell_price=int(price),
                             qty=qty, sell_reason=reason)
         if _master_record:
             try:
