@@ -635,7 +635,7 @@ class SBot2:
     def _print_status(self, score_enter: int, psbl_cash: int):
         paused_str = "⏸️" if self._is_paused else "▶️"
         print(f"\n{'='*50}")
-        print(f"📈 [MID] {paused_str} 기준:{score_enter}점 | 예수금:{psbl_cash:,}")
+        print(f"📈 [MID] {paused_str} 기준:{score_enter}점 | 주문가능:{psbl_cash:,}")
         print(f"📊 시장:{self.market_status} | 손절:{self.daily_loss_count}/{MAX_DAILY_LOSS}")
         for code, pos in self.positions.items():
             entry = pos["entry_price"]
