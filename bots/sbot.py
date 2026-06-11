@@ -168,8 +168,8 @@ def get_swing_theme_bonus(code: str, theme_group_map: dict) -> tuple:
 # ============================================================
 # 상수 (튜닝 포인트)
 # ============================================================
-MAX_POSITIONS    = 3              # 최대 보유 종목
-BUY_1ST_AMT_BASE = 330_000      # 1차 매수 기본 금액 (점수 따라 ±)
+MAX_POSITIONS    = 5              # 최대 보유 종목 (3→5)
+BUY_1ST_AMT_BASE = 1_000_000    # 1차 매수 기본 금액 (330K→100만, 5종목)
 BUY_SCORE_MIN    = 45             # 후보 최소 점수
 BUY_SCORE_ENTER  = 80             # 매수 진입 기준점
 LOOP_SLEEP       = 60
