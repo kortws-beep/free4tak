@@ -172,12 +172,14 @@ MAX_POSITIONS    = 5              # 최대 보유 종목 (3→5)
 BUY_1ST_AMT_BASE = 1_000_000    # 1차 매수 기본 금액 (330K→100만, 5종목)
 BUY_SCORE_MIN    = 45             # 후보 최소 점수
 BUY_SCORE_ENTER  = 80             # 매수 진입 기준점
-LOOP_SLEEP       = 30    # nbot 제거로 API 여유 확보
+LOOP_SLEEP       = 60
 POOL_SIZE        = 100
 
 REG_MARKET_START = "0900"
 REG_MARKET_END   = "1530"
-BUY_START_TIME   = "0920"         # 09:20 이후만 매수
+BUY_START_TIME   = "0910"         # ★ 09:10 이후 매수
+SELL_CHECK_START = "0800"         # ★ 08:00부터 매도 체크
+SELL_CHECK_END   = "2000"         # ★ 20:00까지 매도 체크
 SLEEP_INTERVAL   = 60
 
 # 키움 조건검색식에서 단타용 키워드는 제외 (스윙엔 부적합)
@@ -1177,13 +1179,16 @@ class SBot:
                     print(f"🎌 [{now}] 휴장일 — 대기 중...")
                     time.sleep(300); continue
 
-                # ── 정규장 시간 ───────────────────────────
-                is_reg = REG_MARKET_START <= now_t <= REG_MARKET_END
-                if not is_reg:
-                    print(f"😴 [{now}] 장외 대기...")
-                    time.sleep(SLEEP_INTERVAL); continue
+                # ── 시간대별 동작 ─────────────────────────
+                is_reg      = REG_MARKET_START <= now_t <= REG_MARKET_END
+                is_sell_ok  = SELL_CHECK_START <= now_t <= SELL_CHECK_END
+                is_buy_ok   = REG_MARKET_START <= now_t <= REG_MARKET_END and now_t >= BUY_START_TIME
 
-                print(f"\n📈 [SWING] 정규장 [{now}]")
+                if not is_sell_ok:
+                    print(f"😴 [{now}] 장외 대기 (20시 이후)...")
+                    time.sleep(300); continue
+
+                print(f"\n📈 [SWING] {'정규장' if is_reg else '장전/후 매도체크'} [{now}]")
 
                 st              = _read_state()
                 self._is_paused = st.get("paused", False)
@@ -1356,6 +1361,11 @@ class SBot:
                     time.sleep(LOOP_SLEEP); continue
 
                 # ── 종목 풀 ───────────────────────────────
+                # ★ 09:10 이전이면 매수 스킵 (매도 체크만)
+                if not is_buy_ok:
+                    print(f"⏳ [SWING] {BUY_START_TIME} 이전 — 매도 체크만")
+                    time.sleep(LOOP_SLEEP); continue
+
                 codes = self._get_pool()
                 if not codes:
                     print("⚠️ 종목 풀 없음")
