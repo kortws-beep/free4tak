@@ -155,6 +155,12 @@ def sync_positions(
     MAX_HOLD_DAYS = 30  # 30일 이상 된 레코드는 오늘 날짜로 리셋 (오래된 DB 오염 방어)
     try:
         conn = sqlite3.connect(db_path, timeout=10)
+        # ★ trades 테이블 없으면 스킵
+        tables = [r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
+        if "trades" not in tables:
+            conn.close()
+            return real_pos
         for code in real_pos:
             row = conn.execute("""
                 SELECT buy_time FROM trades
