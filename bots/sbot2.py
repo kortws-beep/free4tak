@@ -706,7 +706,10 @@ class SBot2:
                     self._is_paused = paused
 
                 # 예수금
-                psbl_cash = self.api.get_buyable_cash()
+                # ★ 종목별 주문가능금액 (현재가 기반)
+                psbl_cash = self.api.get_psbl_order_cash("005930", BUY_1ST_AMT_BASE)
+                if psbl_cash <= 0:
+                    psbl_cash = self.api.get_buyable_cash()
 
                 # 상태 출력
                 self._print_status(score_enter, psbl_cash)

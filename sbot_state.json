@@ -4,13 +4,13 @@
   "pending_cmd": null,
   "cmd_result": null,
   "last_status": {
-    "cash": 82240,
-    "total_profit": -31000,
+    "cash": 0,
+    "total_profit": -27000,
     "positions": 1,
     "score_enter": 85,
-    "last_update": "13:36:36",
+    "last_update": "13:42:32",
     "market_status": "normal",
-    "market_rate": 0.03,
+    "market_rate": 0.2,
     "daily_loss": 0,
     "code_name_map": {
       "001820": "삼화콘덴서",
@@ -178,14 +178,14 @@
       "005930": {
         "name": "삼성전자",
         "entry_price": 306750,
-        "current": 299000,
-        "rate": -2.53,
+        "current": 300000,
+        "rate": -2.2,
         "qty": 4,
         "buy_tag": ""
       }
     }
   },
-  "last_update": "13:36:54",
+  "last_update": "13:42:44",
   "sold_today": {
     "319400": "10:58:51"
   },
