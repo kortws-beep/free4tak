@@ -323,7 +323,7 @@ async def cmd_performance(ctx):
     if sbot2_p: msg += f"  📈 중단기봇: **{sbot2_p:+,}원**\n"
     if sbot_p: msg += f"  📊 스윙봇: **{sbot_p:+,}원**\n"
     if cbot_p: msg += f"  🪙 코인봇: **{cbot_p:+,}원**\n"
-    if not (nbot_p or sbot_p or cbot_p):
+    if not (sbot2_p or sbot_p or cbot_p):
         msg += "  오늘 실현 매매 없음\n"
     msg += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
     msg += f"{total_emoji} **합계: {total:+,}원**\n"

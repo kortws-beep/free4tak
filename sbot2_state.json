@@ -1,4 +1,9 @@
 {
   "paused": false,
-  "daily_loss": 0
+  "daily_loss": 0,
+  "pending_cmd": {
+    "type": "sell",
+    "code": "039030",
+    "qty": 1
+  }
 }

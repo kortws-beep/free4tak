@@ -1,7 +1,10 @@
 {
   "paused": false,
   "score_enter": 75,
-  "pending_cmd": null,
+  "pending_cmd": {
+    "type": "sell",
+    "code": "039030"
+  },
   "cmd_result": null,
   "last_status": {
     "cash": 1393073,
