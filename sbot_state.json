@@ -4,11 +4,11 @@
   "pending_cmd": null,
   "cmd_result": null,
   "last_status": {
-    "cash": 0,
-    "total_profit": -27000,
+    "cash": 82240,
+    "total_profit": -23000,
     "positions": 1,
     "score_enter": 85,
-    "last_update": "13:42:32",
+    "last_update": "13:46:12",
     "market_status": "normal",
     "market_rate": 0.2,
     "daily_loss": 0,
@@ -134,7 +134,9 @@
       "007660": "이수페타시스",
       "089970": "브이엠",
       "126640": "화신정공",
-      "178320": "서진시스템"
+      "178320": "서진시스템",
+      "267260": "HD현대일렉트릭",
+      "347700": "스피어"
     },
     "new_codes": [
       "090460",
@@ -178,14 +180,14 @@
       "005930": {
         "name": "삼성전자",
         "entry_price": 306750,
-        "current": 300000,
-        "rate": -2.2,
+        "current": 301000,
+        "rate": -1.87,
         "qty": 4,
         "buy_tag": ""
       }
     }
   },
-  "last_update": "13:42:44",
+  "last_update": "13:46:19",
   "sold_today": {
     "319400": "10:58:51"
   },
