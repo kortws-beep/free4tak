@@ -80,12 +80,14 @@ MAX_POSITIONS    = 5
 BUY_1ST_AMT_BASE = 1_000_000    # 100만원 × 5종목 = 500만원
 BUY_SCORE_MIN    = 50
 BUY_SCORE_ENTER  = 75            # sbot1(80)보다 낮게 — 중단기는 여유있게
-LOOP_SLEEP       = 30    # nbot 제거로 API 여유 확보
+LOOP_SLEEP       = 60
 POOL_SIZE        = 100
 
 REG_MARKET_START = "0900"
 REG_MARKET_END   = "1530"
-BUY_START_TIME   = "0930"        # 09:30 이후 (장 안정 후)
+BUY_START_TIME   = "0910"        # ★ 09:10 이후 매수
+SELL_CHECK_START = "0800"        # ★ 08:00부터 매도 체크
+SELL_CHECK_END   = "2000"        # ★ 20:00까지 매도 체크
 
 # 키움 조건검색 제외 키워드 (단기용 제외)
 SKIP_COND_KEYWORDS = ["종가","단타","장개장","직후","시가이탈",
@@ -775,8 +777,14 @@ class SBot2:
                     time.sleep(60)
                     continue
 
-                # 장 전/후
-                if now_t < "0850" or now_t > "1545":
+                # ★ 20:00 이후 완전 장외 대기
+                if now_t > SELL_CHECK_END:
+                    print(f"😴 [MID] 장외 대기 (20시 이후)...")
+                    time.sleep(300)
+                    continue
+
+                # 08:00 이전 대기
+                if now_t < SELL_CHECK_START:
                     time.sleep(30)
                     continue
 
@@ -810,7 +818,7 @@ class SBot2:
                 pos_mkt_cache = {}
                 self._check_all_sells(pos_mkt_cache)
 
-                # 매수 (장중, 일시중단 아닐 때)
+                # 매수 (09:10 이후 장중, 일시중단 아닐 때)
                 if (REG_MARKET_START <= now_t <= REG_MARKET_END
                         and now_t >= BUY_START_TIME
                         and not self._is_paused
