@@ -129,17 +129,18 @@ class SBot2:
         print("🚀 [영암9 MID-SWING] 중단기봇2 가동")
 
         # ── KIS API (sbot1과 동일 계좌 사용) ──────────────
+        # ★ nbot 계좌 사용 (KIS_APPKEY — 기본 계좌)
         self.api = KisAPI(
-            appkey=os.getenv("KIS_APPKEY2"),
-            secret=os.getenv("KIS_SECRET2"),
-            cano  =os.getenv("KIS_CANO2"),
-            acnt  =os.getenv("KIS_ACNT_PRDT_CD2"),
+            appkey=os.getenv("KIS_APPKEY"),
+            secret=os.getenv("KIS_SECRET"),
+            cano  =os.getenv("KIS_CANO"),
+            acnt  =os.getenv("KIS_ACNT_PRDT_CD"),
         )
         self.kiwoom   = KiwoomAPI()
         self.notifier = Notifier(name="sbot2")
         self.strategy = MidSwingStrategy()
         self.ai       = SwingAnalyzer()
-        self.db       = SwingDB(db_path="sbot2_trade_history.db")
+        self.db       = SwingDB()   # sbot_trade_history.db 공유 (sbot2 레코드는 ai_reason으로 구분)
         self.risk     = RiskManager(
             base_buy_amt         = BUY_1ST_AMT_BASE,
             max_daily_loss_count = MAX_DAILY_LOSS,
@@ -317,22 +318,27 @@ class SBot2:
     # 종목 풀 구성 (sbot1 공유)
     # ============================================================
     def _build_pool(self) -> list:
-        """키움 조건검색 + new 그룹으로 종목 풀 구성"""
+        """키움 조건검색 + new 그룹으로 종목 풀 구성 (sbot 방식)"""
         pool = []
         try:
-            cond_results = self.kiwoom.get_condition_stocks()
-            for cond_name, codes in cond_results.items():
+            if not self.kiwoom.enabled:
+                return pool
+            # 동기 방식으로 조건검색 결과 가져오기
+            cond_pool = self.kiwoom.cond_pool if hasattr(self.kiwoom, 'cond_pool') else []
+            for code, cond_name in cond_pool:
                 if any(kw in cond_name for kw in SKIP_COND_KEYWORDS):
                     continue
-                pool.extend(codes)
+                pool.append(code)
         except Exception as e:
             print(f"⚠️ 조건검색 오류: {e}")
 
         # new 그룹
         try:
-            new_codes = self.kiwoom.get_new_group_stocks()
-            self.new_codes_list = new_codes
-            pool.extend(new_codes)
+            new_stocks = self.kiwoom.new_pool if hasattr(self.kiwoom, 'new_pool') else []
+            self.new_codes_list = [c for c, _ in new_stocks] if new_stocks else []
+            pool.extend(self.new_codes_list)
+            if self.new_codes_list:
+                print(f"  🆕 new그룹: {len(self.new_codes_list)}개")
         except Exception as e:
             print(f"⚠️ new 그룹 오류: {e}")
 
@@ -646,7 +652,7 @@ class SBot2:
             f"🚀 [영암9 MID-SWING] 중단기봇2 가동\n"
             f"⏰ {now_kst().strftime('%Y-%m-%d %H:%M:%S')}\n"
             f"💰 1차:{fmt_won(BUY_1ST_AMT_BASE)} / 최대 {MAX_POSITIONS}종목\n"
-            f"📈 익절:+15/+25/+40% | 손절:-10% | 청산:20영업일",
+            f"📈 익절:+8/+15/+25% | 손절:-5% | 트레일:-4% | 청산:11영업일",
             critical=True,
         )
 
@@ -676,7 +682,7 @@ class SBot2:
                 now_t  = now.strftime("%H%M")
 
                 # 주말/휴장
-                if is_weekend(now):
+                if now.weekday() >= 5:
                     print(f"🗓️ [MID] 주말 — 60초 대기")
                     time.sleep(60)
                     continue
@@ -700,8 +706,7 @@ class SBot2:
                     self._is_paused = paused
 
                 # 예수금
-                balance = self.api.get_balance()
-                psbl_cash = safe_int(balance.get("psbl_cash", 0)) if balance else 0
+                psbl_cash = self.api.get_buyable_cash()
 
                 # 상태 출력
                 self._print_status(score_enter, psbl_cash)
