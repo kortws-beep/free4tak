@@ -446,11 +446,13 @@ class SBot2:
             low_52w  = safe_float(basic.get("stck_drwn_pbmn", 0) or
                                    basic.get("w52_lwpr",       0))
 
-            # 수급
-            foreign_5d = safe_float(tech.get("foreign_5d", 0))
-            orgn_5d    = safe_float(tech.get("institution_5d", 0))
+            # 수급 (5일 + ★ 15일 누적)
+            foreign_5d   = safe_float(tech.get("foreign_5d",      0))
+            orgn_5d      = safe_float(tech.get("institution_5d",  0))
+            foreign_15d  = safe_float(tech.get("foreign_15d",     0))
+            orgn_15d     = safe_float(tech.get("institution_15d", 0))
 
-            # 실적
+            # 실적/펀더멘탈
             roe    = safe_float(basic.get("roe",   0))
             op_yoy = safe_float(basic.get("op_yoy", 0))
 
@@ -472,6 +474,8 @@ class SBot2:
                 "low_52w":          low_52w,
                 "foreign_5d":       foreign_5d,
                 "institution_5d":   orgn_5d,
+                "foreign_15d":      foreign_15d,     # ★ 15일 누적
+                "institution_15d":  orgn_15d,        # ★ 15일 누적
                 "foreign_today":    safe_float(basic.get("frgn_ntby_qty", 0)),
                 "orgn_today":       safe_float(basic.get("orgn_ntby_qty", 0)),
                 "volume_ratio":     vol_ratio,
@@ -630,13 +634,15 @@ class SBot2:
                     else:
                         print(f"  ⏸️ {code} 긴급손절 제외 ({pnl:+.1%})")
 
+            tech2 = self._tech_cache.get(code, ({}, 0))
+            ma200 = tech2[0].get("ma200", 0) if isinstance(tech2, tuple) else 0
             self.strategy.check_sell(
                 code, pos, mdata, self.market_status,
                 self.peak_tracker, self._is_paused,
                 lambda c, p, a: self._do_buy(c, p, a, is_second=True),
                 lambda c, q, r, sp: self._do_sell(c, q, r, sp),
                 self._do_loss,
-                ma20=ma20, vol_ratio=vol_ratio,
+                ma20=ma20, ma200=ma200, vol_ratio=vol_ratio,
             )
 
     # ============================================================

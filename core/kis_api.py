@@ -586,9 +586,11 @@ class KisAPI:
             net_buy    = foreign_today + orgn_today
             buy_pressure = round(net_buy / total_pbmn * 100, 1) if total_pbmn > 0 else 0.0
 
-            # ── 5일 누적 ─────────────────────────────────────
-            frgn_5d = sum(safe_int(x.get("frgn_ntby_qty") or x.get("frgn_ntby_tr_pbmn", 0)) for x in items[:5])
-            orgn_5d = sum(safe_int(x.get("orgn_ntby_qty") or x.get("orgn_ntby_tr_pbmn", 0)) for x in items[:5])
+            # ── 5일/15일 누적 ────────────────────────────────
+            frgn_5d  = sum(safe_int(x.get("frgn_ntby_qty") or x.get("frgn_ntby_tr_pbmn", 0)) for x in items[:5])
+            orgn_5d  = sum(safe_int(x.get("orgn_ntby_qty") or x.get("orgn_ntby_tr_pbmn", 0)) for x in items[:5])
+            frgn_15d = sum(safe_int(x.get("frgn_ntby_qty") or x.get("frgn_ntby_tr_pbmn", 0)) for x in items[:15])
+            orgn_15d = sum(safe_int(x.get("orgn_ntby_qty") or x.get("orgn_ntby_tr_pbmn", 0)) for x in items[:15])
 
             result = {
                 # 당일 실시간
@@ -602,6 +604,10 @@ class KisAPI:
                 # 5일 누적 (기존 호환)
                 "foreign_5d":     frgn_5d,
                 "institution_5d": orgn_5d,
+
+                # ★ 15일 누적 (sbot2 중기 추세 판단용)
+                "foreign_15d":    frgn_15d,
+                "institution_15d": orgn_15d,
             }
             cache[code] = (result, time.time())
             return result

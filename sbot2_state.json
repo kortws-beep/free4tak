@@ -1,9 +1,6 @@
 {
   "paused": false,
   "daily_loss": 0,
-  "pending_cmd": {
-    "type": "sell",
-    "code": "039030",
-    "qty": 1
-  }
+  "pending_cmd": null,
+  "cmd_result": "⚠️ 039030 보유 중이지 않음"
 }
