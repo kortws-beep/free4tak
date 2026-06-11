@@ -5,12 +5,12 @@
   "cmd_result": null,
   "last_status": {
     "cash": 82240,
-    "total_profit": -2000,
-    "positions": 2,
+    "total_profit": -33000,
+    "positions": 1,
     "score_enter": 85,
-    "last_update": "12:41:02",
+    "last_update": "13:20:27",
     "market_status": "normal",
-    "market_rate": -0.77,
+    "market_rate": -0.43,
     "daily_loss": 1,
     "code_name_map": {
       "183300": "코미코",
@@ -195,22 +195,14 @@
       "005930": {
         "name": "삼성전자",
         "entry_price": 306750,
-        "current": 298000,
-        "rate": -2.85,
+        "current": 298500,
+        "rate": -2.69,
         "qty": 4,
-        "buy_tag": ""
-      },
-      "170920": {
-        "name": "엘티씨",
-        "entry_price": 54700,
-        "current": 56900,
-        "rate": 4.02,
-        "qty": 15,
         "buy_tag": ""
       }
     }
   },
-  "last_update": "12:41:11",
+  "last_update": "13:20:39",
   "sold_today": {
     "319400": "10:58:51"
   },

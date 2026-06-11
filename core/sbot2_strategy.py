@@ -48,12 +48,16 @@ TRAIL_STOP_AFTER_1ST = 0.08    # 1차 후: 고점 -8%
 TRAIL_STOP_AFTER_2ND = 0.10    # 2차 후: 고점 -10%
 
 # 손절
-STOP_LOSS_BASIC     = -0.10   # 기본: -10%
-STOP_LOSS_AFTER_1ST = -0.05   # 1차 익절 후 본절 보호 -5%
-STOP_LOSS_WEAK      = -0.07   # 약세장: -7%
+STOP_LOSS_BASIC     = -0.05   # ★ 기본: -5% (백테스트 최적)
+STOP_LOSS_AFTER_1ST = -0.03   # 1차 익절 후 본절 보호 -3%
+STOP_LOSS_WEAK      = -0.05   # 약세장: -5%
+
+# 트레일링 (백테스트 최적)
+TRAIL_STOP_AFTER_1ST = 0.04   # 1차 후: 고점 -4% (★ 8%→4%)
+TRAIL_STOP_AFTER_2ND = 0.06   # 2차 후: 고점 -6% (★ 10%→6%)
 
 # 시간청산
-TIME_STOP_DAYS = 20   # 20영업일
+TIME_STOP_DAYS = 11   # ★ 11영업일 (20→11, 백테스트 최적)
 
 # 가산점
 NEW_BONUS         = 7
