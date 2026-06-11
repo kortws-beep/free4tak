@@ -1,13 +1,15 @@
 {
   "telegram_event": {
     "keywords": [
-      "상장"
+      "AI"
     ],
     "themes": [
-      "IPO"
+      "반도체",
+      "클라우드",
+      "AI"
     ],
     "score": 10,
-    "text": "\"SK하이닉스, 이르면 8월 美 ADR 상장\" 전망…저평가 해소 기대\nhttps://naver.me/Ffs8iBlN",
-    "time": "15:46:26"
+    "text": "오픈AI, API가격 인하 검토…앤스로픽과 ‘치킨게임’ 나서나\nhttps://naver.me/5OlvGYip",
+    "time": "20:02:40"
   }
 }

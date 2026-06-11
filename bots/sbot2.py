@@ -93,6 +93,13 @@ SELL_CHECK_END   = "2000"        # ★ 20:00까지 매도 체크
 SKIP_COND_KEYWORDS = ["종가","단타","장개장","직후","시가이탈",
                        "오전중저가","090930","당일고가"]
 
+# ★ sbot2 전용: 키움에서 사용할 조건식 (new그룹 + 실적호전만)
+SBOT2_COND_KEYWORDS = ["실적호전"]  # 이 키워드 포함된 조건식만 사용
+SECTOR_MONITOR_DB   = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "sector_monitor.db"
+)
+
 # 시장 방어
 MARKET_WEAK_THRESH = -2.0
 MARKET_STOP_THRESH = -4.5
@@ -349,59 +356,83 @@ class SBot2:
             self.new_codes_list = []
 
     def _build_pool(self) -> list:
-        """키움 조건검색 + new 그룹으로 종목 풀 구성 (sbot 방식)"""
-        if not self.kiwoom.enabled:
-            print("⚠️ [MID] 키움 없음 — 빈 풀")
-            return []
+        """
+        sbot2 종목 풀 구성:
+          1. sector_monitor.db 등장 빈도 상위 종목 (주도섹터 대장주)
+          2. 키움 new그룹
+          3. 키움 실적호전 조건식
+        """
+        import sqlite3 as _sl
+
+        codes = []
+
+        # ── 1. sector_monitor 주도섹터 대장주 ─────────────────
         try:
-            import asyncio as _asyncio
-            loop  = _asyncio.new_event_loop()
-            codes = loop.run_until_complete(
-                self.kiwoom.get_condition_codes(
-                    use_keywords=None,
-                    skip_keywords=SKIP_COND_KEYWORDS,
-                    code_name_map=self.code_name_map,
-                )
-            )
-            loop.close()
-
-            if codes:
-                # new 그룹 추가
-                try:
-                    self._load_new_codes()
-                    added = 0
-                    for nc in self.new_codes_list:
-                        if nc not in codes:
-                            codes.append(nc); added += 1
-                    if added:
-                        print(f"  🆕 [MID] new 종목 {added}개 추가")
-                except Exception as e:
-                    print(f"⚠️ new 그룹 오류: {e}")
-
-                # sbot1 보유 종목 제외
-                if _get_all_positions:
-                    try:
-                        sbot1_codes = {p["code"] for p in _get_all_positions()
-                                       if p.get("bot_type") in ("sbot", "sbot1")}
-                        before = len(codes)
-                        codes = [c for c in codes if c not in sbot1_codes]
-                        if before != len(codes):
-                            print(f"  ⏭️ [MID] sbot1 교차 제외: {before-len(codes)}개")
-                    except Exception:
-                        pass
-
-                # 현재 보유 제외 + 중복 제거
-                codes = list(dict.fromkeys(
-                    c for c in codes if c not in self.positions
-                ))
-                result = codes[:POOL_SIZE]
-                print(f"🎯 [MID] 종목 풀: {len(result)}개")
-                return result
-
+            conn = _sl.connect(SECTOR_MONITOR_DB, timeout=5)
+            rows = conn.execute("""
+                SELECT code, AVG(trde_amt) as amt, COUNT(*) as cnt
+                FROM stock_momentum
+                WHERE ts >= datetime('now', '-30 days')
+                GROUP BY code
+                HAVING cnt >= 3
+                ORDER BY amt DESC
+                LIMIT 200
+            """).fetchall()
+            conn.close()
+            sector_codes = [r[0] for r in rows]
+            codes.extend(sector_codes)
+            print(f"  📊 [MID] sector_monitor: {len(sector_codes)}개")
         except Exception as e:
-            print(f"⚠️ [MID] 키움 오류: {e}")
-            self.kiwoom.reset_token()
-        return []
+            print(f"⚠️ [MID] sector_monitor 오류: {e}")
+
+        # ── 2. 키움 new그룹 + 실적호전 조건식 ────────────────
+        if self.kiwoom.enabled:
+            try:
+                import asyncio as _asyncio
+                loop  = _asyncio.new_event_loop()
+                cond_codes = loop.run_until_complete(
+                    self.kiwoom.get_condition_codes(
+                        use_keywords=SBOT2_COND_KEYWORDS,  # 실적호전만
+                        skip_keywords=SKIP_COND_KEYWORDS,
+                        code_name_map=self.code_name_map,
+                    )
+                )
+                loop.close()
+                for c in cond_codes:
+                    if c not in codes:
+                        codes.append(c)
+                print(f"  📋 [MID] 실적호전 조건: {len(cond_codes)}개")
+            except Exception as e:
+                print(f"⚠️ [MID] 조건검색 오류: {e}")
+
+            # new 그룹
+            try:
+                self._load_new_codes()
+                added = 0
+                for nc in self.new_codes_list:
+                    if nc not in codes:
+                        codes.append(nc); added += 1
+                if added:
+                    print(f"  🆕 [MID] new그룹: {added}개")
+            except Exception as e:
+                print(f"⚠️ [MID] new그룹 오류: {e}")
+
+        # ── 3. sbot1 교차 제외 + 현재 보유 제외 ──────────────
+        if _get_all_positions:
+            try:
+                sbot1_codes = {p["code"] for p in _get_all_positions()
+                               if p.get("bot_type") in ("sbot", "sbot1")}
+                before = len(codes)
+                codes = [c for c in codes if c not in sbot1_codes]
+                if before != len(codes):
+                    print(f"  ⏭️ [MID] sbot1 교차 제외: {before-len(codes)}개")
+            except Exception:
+                pass
+
+        codes = list(dict.fromkeys(c for c in codes if c not in self.positions))
+        result = codes[:POOL_SIZE]
+        print(f"🎯 [MID] 종목 풀: {len(result)}개")
+        return result
 
     # ============================================================
     # 개별 종목 분석
