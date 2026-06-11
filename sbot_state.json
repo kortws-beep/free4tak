@@ -4,13 +4,13 @@
   "pending_cmd": null,
   "cmd_result": null,
   "last_status": {
-    "cash": 0,
-    "total_profit": -57000,
+    "cash": 82240,
+    "total_profit": -37000,
     "positions": 3,
     "score_enter": 85,
-    "last_update": "09:54:22",
-    "market_status": "weak",
-    "market_rate": -2.87,
+    "last_update": "10:02:17",
+    "market_status": "normal",
+    "market_rate": -1.16,
     "daily_loss": 0,
     "code_name_map": {
       "183300": "코미코",
@@ -131,7 +131,10 @@
       "240810": "원익IPS",
       "126640": "화신정공",
       "222800": "심텍",
-      "475150": "SK이터닉스"
+      "475150": "SK이터닉스",
+      "007660": "이수페타시스",
+      "007810": "코리아써키트",
+      "034020": "두산에너빌리티"
     },
     "new_codes": [
       "090460",
@@ -175,30 +178,30 @@
       "005930": {
         "name": "삼성전자",
         "entry_price": 306750,
-        "current": 297000,
-        "rate": -3.18,
+        "current": 299000,
+        "rate": -2.53,
         "qty": 4,
         "buy_tag": ""
       },
       "170920": {
         "name": "엘티씨",
         "entry_price": 54700,
-        "current": 56100,
-        "rate": 2.56,
+        "current": 56700,
+        "rate": 3.66,
         "qty": 15,
         "buy_tag": ""
       },
       "319400": {
         "name": "현대무벡스",
         "entry_price": 35400,
-        "current": 34100,
-        "rate": -3.67,
+        "current": 34200,
+        "rate": -3.39,
         "qty": 30,
         "buy_tag": ""
       }
     }
   },
-  "last_update": "09:54:35",
+  "last_update": "10:02:27",
   "sold_today": {
     "010140": "09:34:37",
     "327260": "09:34:39",
