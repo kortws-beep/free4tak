@@ -11,7 +11,7 @@
 #   ./bot.sh log all      # 전체 실시간 로그
 # ============================================================
 
-BOTS="nbot sbot cbot kiki sector dashboard telegram"
+BOTS="sbot sbot2 cbot kiki sector dashboard telegram"
 
 case "$1" in
 
@@ -134,7 +134,7 @@ case "$1" in
     echo "  stop          — 전체 봇 정지"
     echo "  restart       — 전체 봇 재시작"
     echo "  status        — 봇별 실행 상태"
-    echo "  log [bot]     — 실시간 로그 (all/nbot/sbot/ebot/cbot/kiki)"
+    echo "  log [bot]     — 실시간 로그 (all/sbot/sbot2/cbot/kiki)"
     echo "  today [bot]   — 오늘 로그"
     echo "  enable        — 부팅 자동시작 등록"
     echo "  disable       — 부팅 자동시작 해제"

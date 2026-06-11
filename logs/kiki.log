@@ -2958,3 +2958,13 @@ aiohttp.client_exceptions.WSServerHandshakeError: 520, message='Invalid response
 ✅ AI 비서 봇 온라인: KiKi#3353
 ✅ kiki_monitor 초기화 완료
 [2026-06-11 10:48:51] [INFO    ] discord.gateway: Shard ID None has successfully RESUMED session 60842827ddb508d2bf23d968b875c297.
+♻️ 대화 히스토리 복원: 20개
+🤖 영암9 AI 비서 (키키) 시작...
+📈 단타봇 | 📊 스윙봇 | 🪙 코인봇 연동
+🦊 Lv1 능동 알림: 위험/주의/인사이트/일일리뷰
+🏭 HTS 관심그룹 자동 동기화: 09:00 / 11:00 / 14:00
+🌅 모닝 브리핑: 08:00 | 🌆 저녁 브리핑: 20:00
+[2026-06-11 13:25:00] [INFO    ] discord.client: logging in using static token
+[2026-06-11 13:25:02] [INFO    ] discord.gateway: Shard ID None has connected to Gateway (Session ID: 1f0048977e3fc112b785c3a4012d78d7).
+✅ AI 비서 봇 온라인: KiKi#3353
+✅ kiki_monitor 초기화 완료
