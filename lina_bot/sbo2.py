@@ -375,18 +375,26 @@ def calc_buy_amount(grade: str, psbl_cash: int) -> int:
 # ============================================================
 def get_candidates() -> list:
     """
-    swing_master S/A급 종목 + 상세 데이터 추출
-    반환: [{"name", "grade", "score", "vcp", "trend", "catalyst",
-             "curr", "stop", "tgt", "rr", "code"}, ...]
+    swing_data + trend_data 직접 호출 → S/A급 후보 반환
+    텍스트 파싱 없이 100% 정확한 딕셔너리 데이터 사용
     """
-    from swing_analyzer import get_swing_picks
-    from trend_analyzer import get_trend_picks
+    from swing_analyzer import get_swing_data
+    from trend_analyzer import get_trend_data
 
     catalyst_set = _get_catalyst_stocks()
-    swing_report = get_swing_picks(top_n=20)
-    trend_report = get_trend_picks(top_n=20)
-    swing_names  = _extract_names_from_report(swing_report)
-    trend_names  = _extract_names_from_report(trend_report)
+    swing_data   = get_swing_data(top_n=20)
+    trend_data   = get_trend_data(top_n=20)
+
+    swing_names  = {d["name"] for d in swing_data}
+    trend_names  = {d["name"] for d in trend_data}
+
+    # 상세 데이터 맵 (name → dict)
+    detail_map = {}
+    for d in swing_data:
+        detail_map[d["name"]] = d
+    for d in trend_data:
+        if d["name"] not in detail_map:
+            detail_map[d["name"]] = d
 
     s_grade = swing_names & trend_names & catalyst_set
     a_grade = (
@@ -395,65 +403,9 @@ def get_candidates() -> list:
         ((trend_names & catalyst_set) - swing_names)
     )
 
-    # swing_analyzer 상세 데이터 파싱 (ATR 손절/목표)
-    detail_map = {}
-    for line in swing_report.splitlines():
-        import re
-        m = re.search(r'\*?\*?\d+위:\s*\*?\*?(.+?)\*?\*?\s*\(스코어:\s*(\d+)', line)
-        if m:
-            cur_name  = m.group(1).strip()
-            cur_score = int(m.group(2))
-            detail_map[cur_name] = {"score": cur_score, "stop": 0, "tgt": 0, "rr": 0, "curr": 0}
-        if '현재가' in line:
-            try:
-                price = int(re.sub(r'[^\d]', '', line.split(':')[1].split('원')[0]))
-                if cur_name: detail_map[cur_name]["curr"] = price
-            except Exception: pass
-        if '목표가' in line:
-            try:
-                price = int(re.sub(r'[^\d]', '', line.split(':')[1].split('원')[0]))
-                if cur_name: detail_map[cur_name]["tgt"] = price
-            except Exception: pass
-        if '손절가' in line:
-            try:
-                price = int(re.sub(r'[^\d]', '', line.split(':')[1].split('원')[0]))
-                if cur_name: detail_map[cur_name]["stop"] = price
-            except Exception: pass
-        if 'R:R' in line:
-            try:
-                rr = float(re.search(r'1\s*:\s*([\d.]+)', line).group(1))
-                if cur_name: detail_map[cur_name]["rr"] = rr
-            except Exception: pass
-
-    # trend_analyzer 상세도 파싱
-    cur_name = None
-    for line in trend_report.splitlines():
-        import re
-        m = re.search(r'\*?\*?\d+위:\s*\*?\*?(.+?)\*?\*?\s*\(스코어:\s*(\d+)', line)
-        if m:
-            cur_name  = m.group(1).strip()
-            cur_score = int(m.group(2))
-            if cur_name not in detail_map:
-                detail_map[cur_name] = {"score": cur_score, "stop": 0, "tgt": 0, "rr": 0, "curr": 0}
-        if cur_name and '현재가' in line and detail_map.get(cur_name, {}).get("curr") == 0:
-            try:
-                price = int(re.sub(r'[^\d]', '', line.split(':')[1].split('원')[0]))
-                detail_map[cur_name]["curr"] = price
-            except Exception: pass
-        if cur_name and '목표가' in line and detail_map.get(cur_name, {}).get("tgt") == 0:
-            try:
-                price = int(re.sub(r'[^\d]', '', line.split(':')[1].split('원')[0]))
-                detail_map[cur_name]["tgt"] = price
-            except Exception: pass
-        if cur_name and '손절가' in line and detail_map.get(cur_name, {}).get("stop") == 0:
-            try:
-                price = int(re.sub(r'[^\d]', '', line.split(':')[1].split('원')[0]))
-                detail_map[cur_name]["stop"] = price
-            except Exception: pass
-
     candidates = []
 
-    # S급
+    # S급 — 무조건 추가
     for name in s_grade:
         d = detail_map.get(name, {})
         candidates.append({
@@ -463,10 +415,11 @@ def get_candidates() -> list:
             "vcp":      name in swing_names,
             "trend":    name in trend_names,
             "catalyst": name in catalyst_set,
-            "curr":     d.get("curr", 0),
-            "stop":     d.get("stop", 0),
-            "tgt":      d.get("tgt", 0),
-            "rr":       d.get("rr", 0),
+            "curr":     d.get("curr_price", 0),
+            "stop":     d.get("stop_price", 0),
+            "tgt":      d.get("tgt_price", 0),
+            "rr":       d.get("rr_ratio", 0),
+            "themes":   d.get("themes", []),
         })
 
     # A급 — 점수 상위 70%만
@@ -480,11 +433,13 @@ def get_candidates() -> list:
             "vcp":      name in swing_names,
             "trend":    name in trend_names,
             "catalyst": name in catalyst_set,
-            "curr":     d.get("curr", 0),
-            "stop":     d.get("stop", 0),
-            "tgt":      d.get("tgt", 0),
-            "rr":       d.get("rr", 0),
+            "curr":     d.get("curr_price", 0),
+            "stop":     d.get("stop_price", 0),
+            "tgt":      d.get("tgt_price", 0),
+            "rr":       d.get("rr_ratio", 0),
+            "themes":   d.get("themes", []),
         })
+
     a_list.sort(key=lambda x: x["score"], reverse=True)
     cutoff = max(1, int(len(a_list) * A_GRADE_RATIO))
     candidates += a_list[:cutoff]
@@ -495,6 +450,24 @@ def get_candidates() -> list:
 # ============================================================
 # 종목코드 조회 (이름 → 코드)
 # ============================================================
+def get_stock_name(code: str) -> str:
+    """코드 → 한글 종목명 조회 (kr_theme_stocks DB)"""
+    import re
+    try:
+        db  = os.path.join(BASE_DIR, "kr_theme_finance.db")
+        conn = sqlite3.connect(db, timeout=5)
+        row  = conn.execute("""
+            SELECT stock_name FROM kr_theme_stocks
+            WHERE stock_name LIKE ? LIMIT 1
+        """, (f"%{code}%",)).fetchone()
+        conn.close()
+        if row:
+            return re.sub(r'(KOSPI|KOSDAQ).*|\d{6}', '', row[0]).strip()
+    except Exception:
+        pass
+    return code
+
+
 def get_stock_code(name: str) -> str:
     """kr_theme_finance.db 에서 종목명으로 코드 조회"""
     import re
@@ -769,17 +742,15 @@ class Sbo2:
             rate = (curr - entry) / entry * 100
             reason = None
 
-            # 손절 체크
-            if curr <= stop:
+            # 손절 체크 (0원 방어)
+            if stop > 0 and curr <= stop:
                 reason = f"손절 {rate:+.1f}%"
 
-            # 목표가 체크
-            elif curr >= tgt:
+            # 목표가 체크 (0원 방어)
+            elif tgt > 0 and curr >= tgt:
                 reason = f"목표달성 {rate:+.1f}%"
 
-            # 장 마감 전 청산 (15:20)
-            elif now_t >= "1520":
-                reason = f"장마감청산 {rate:+.1f}%"
+            # ⚠️ 장마감 청산 없음 — 스윙봇은 목표가/손절가만 반응
 
             if reason:
                 ok = self.api.sell(code, qty)
@@ -845,14 +816,20 @@ class Sbo2:
                     existing = self.positions[code]
                     existing["qty"]         = rdata["qty"]
                     existing["entry_price"] = rdata["entry_price"]
-                    existing["name"]        = rdata.get("name", existing.get("name", code))
+                    # 종목명이 코드 그대로면 DB에서 다시 조회
+                    cur_name = existing.get("name", code)
+                    if cur_name == code:
+                        cur_name = get_stock_name(code)
+                    existing["name"] = cur_name
                     updated[code] = existing
                 else:
                     # 신규 (수동매수 또는 새로 잡힌 종목)
                     entry = rdata["entry_price"]
+                    # 종목명: KIS API → DB 조회 → 코드 순으로 폴백
+                    _name = rdata.get("name", "") or get_stock_name(code)
                     updated[code] = {
                         "code":        code,
-                        "name":        rdata.get("name", code),
+                        "name":        _name,
                         "grade":       "실계좌",
                         "entry_price": entry,
                         "qty":         rdata["qty"],
