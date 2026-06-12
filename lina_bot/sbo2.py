@@ -46,7 +46,8 @@ elif os.path.exists(_env2):
 
 # ── 의존 모듈 ─────────────────────────────────────────────────
 from kis_api       import KisAPI
-from swing_master  import get_master_report, _get_catalyst_stocks, _extract_names_from_report
+from swing_master        import get_master_report, _get_catalyst_stocks, _extract_names_from_report
+from tele_swing_analyzer import get_tele_swing_picks
 from swing_analyzer import get_swing_picks
 from trend_analyzer import get_trend_picks
 
@@ -590,6 +591,26 @@ class Sbo2:
         if slots <= 0:
             print("📦 [sbo2] 포지션 FULL")
             return
+
+        # ── 텔레스윙 후보 병합 (최대 TELE_SWING_SLOTS개) ────
+        tele_cands = get_tele_swing_picks(top_n=TELE_SWING_SLOTS)
+        for tc in tele_cands:
+            # 이미 3단콤보 후보에 없는 종목만 추가
+            if not any(c["name"] == tc["name"] for c in self.candidates):
+                self.candidates.append({
+                    "name":     tc["name"],
+                    "grade":    "T",   # T = 텔레스윙
+                    "score":    tc["score"],
+                    "vcp":      False,
+                    "trend":    False,
+                    "catalyst": True,
+                    "curr":     tc["curr_price"],
+                    "stop":     tc["stop_price"],
+                    "tgt":      tc["tgt_price"],
+                    "rr":       tc["rr_ratio"],
+                    "themes":   [],
+                })
+                print(f"   📡 텔레스윙 후보 추가: {tc['name']} ({tc['score']}점)")
 
         # 주문가능금액 조회 — 보유종목 기준 (진짜 주문가능금액)
         psbl_cash = 0
