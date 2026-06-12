@@ -3166,3 +3166,6 @@ aiohttp.client_exceptions.ClientConnectorDNSError: Cannot connect to host discor
 [2026-06-12 14:07:35] [INFO    ] discord.gateway: Shard ID None has connected to Gateway (Session ID: 054fa70f5ab64e1bd7769f4abb01ed2e).
 ✅ AI 비서 봇 온라인: KiKi#3353
 ✅ kiki_monitor 초기화 완료
+[2026-06-12 14:40:06] [INFO    ] discord.gateway: Shard ID None has successfully RESUMED session 054fa70f5ab64e1bd7769f4abb01ed2e.
+[2026-06-12 16:00:56] [INFO    ] discord.gateway: Shard ID None has successfully RESUMED session 054fa70f5ab64e1bd7769f4abb01ed2e.
+[2026-06-12 16:23:07] [INFO    ] discord.gateway: Shard ID None has successfully RESUMED session 054fa70f5ab64e1bd7769f4abb01ed2e.

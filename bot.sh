@@ -89,7 +89,7 @@ case "$1" in
       journalctl -u 'yeongam9-*' -f --output=short-monotonic
     else
       echo "📋 yeongam9-${bot} 실시간 로그 (Ctrl+C로 종료)"
-      journalctl -u yeongam9-${bot} -f
+      journalctl -u yeongam9-${bot} -f --output=cat
     fi
     ;;
 

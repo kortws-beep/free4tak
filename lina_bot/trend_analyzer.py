@@ -419,5 +419,184 @@ def get_trend_picks(top_n: int = TOP_N_DEFAULT) -> str:
     return report
 
 
+# ══════════════════════════════════════════════════════════════
+# sbo2 등 자동매매용 — 딕셔너리 리스트 직접 반환
+# ══════════════════════════════════════════════════════════════
+
+def get_trend_data(top_n: int = 20) -> list:
+    """
+    상승추세 눌림목 필터 통과 종목을 딕셔너리 리스트로 반환
+
+    반환 형식:
+    [
+        {
+            "name":       "두산퓨얼셀",
+            "score":      94,
+            "curr_price": 70500,
+            "stop_price": 64000,
+            "tgt_price":  83000,
+            "stop_pct":   9.2,
+            "tgt_pct":    17.7,
+            "rr_ratio":   1.9,
+            "rsi":        44.1,
+            "themes":     ["수소차", "두산그룹"],
+            "cluster_cnt": 12,
+            "f_pos_days": 3,
+            "i_pos_days": 5,
+        },
+        ...
+    ]
+    """
+    import sqlite3, os, re
+
+    if not os.path.exists(DB_PATH):
+        return []
+
+    conn   = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT DISTINCT stock_name FROM kr_stock_daily_data")
+    all_stocks = [r[0] for r in cursor.fetchall()]
+
+    cursor.execute("SELECT stock_name, theme_name FROM kr_theme_stocks")
+    theme_map: dict = {}
+    for sname, tname in cursor.fetchall():
+        pure = re.sub(r"\s*(KOSPI|KOSDAQ)\s*\d{6}$", "", sname).strip()
+        theme_map.setdefault(pure, [])
+        if tname not in theme_map[pure]:
+            theme_map[pure].append(tname)
+
+    ma60_pass: dict = {}
+    passed = []
+
+    for stock_name in all_stocks:
+        cursor.execute("""
+            SELECT date, close_price, volume, foreign_net_buy, institution_net_buy
+            FROM kr_stock_daily_data WHERE stock_name = ?
+            ORDER BY date DESC LIMIT 220
+        """, (stock_name,))
+        rows = cursor.fetchall()
+        if len(rows) < 60: continue
+
+        closes  = [r[1] if r[1] else 0 for r in rows]
+        volumes = [r[2] if r[2] else 0 for r in rows]
+        valid_closes = [c for c in closes if c > 0]
+        if len(valid_closes) < 60: continue
+
+        curr_price = valid_closes[0]
+        pure_name  = re.sub(r"\s*(KOSPI|KOSDAQ)\s*\d{6}$", "", stock_name).strip()
+
+        etf_kw = ["KODEX","TIGER","KBSTAR","ARIRANG","HANARO","KOSEF","TREX",
+                  "SOL","ACE","PLUS","RISE","인버스","레버리지","ETN"]
+        if any(k in pure_name for k in etf_kw): continue
+        if pure_name.endswith("우") or pure_name.endswith("우B"): continue
+
+        ma60 = _ma(valid_closes, 60)
+        if ma60 == 0 or curr_price < ma60: continue
+        if not _is_upslope(valid_closes, 60): continue
+        ma60_pass[pure_name] = curr_price
+
+        if len(valid_closes) < WAVE_RECENT + WAVE_PREV: continue
+        recent_hi = max(valid_closes[0:WAVE_RECENT])
+        recent_lo = min(valid_closes[0:WAVE_RECENT])
+        prev_hi   = max(valid_closes[WAVE_RECENT:WAVE_RECENT + WAVE_PREV])
+        prev_lo   = min(valid_closes[WAVE_RECENT:WAVE_RECENT + WAVE_PREV])
+        if recent_hi <= prev_hi: continue
+        if recent_lo <= prev_lo: continue
+
+        dist_from_lo = abs(curr_price - recent_lo) / recent_lo if recent_lo > 0 else 1
+        if dist_from_lo > PULLBACK_BAND: continue
+
+        rsi = _rsi(valid_closes, 14)
+        if not (RSI_LOW <= rsi <= RSI_HIGH): continue
+
+        valid_volumes = [v for v in volumes if v > 0]
+        if len(valid_volumes) < 10: continue
+        vol_avg_all    = sum(valid_volumes) / len(valid_volumes)
+        vol_avg_recent = sum(valid_volumes[:5]) / 5
+        if vol_avg_all == 0 or vol_avg_recent >= vol_avg_all * VOL_PULL_RATIO: continue
+
+        f_net_raw  = [r[3] for r in rows]
+        i_net_raw  = [r[4] for r in rows]
+        supply_len = max(sum(1 for v in f_net_raw if v is not None),
+                         sum(1 for v in i_net_raw if v is not None))
+        f_net = [v if v is not None else 0 for v in f_net_raw]
+        i_net = [v if v is not None else 0 for v in i_net_raw]
+
+        if supply_len == 0:
+            smart_ok = True
+            f_pos_days = i_pos_days = f_cum = i_cum = 0
+        else:
+            sw         = min(SMART_DAYS, supply_len)
+            f_pos_days = sum(1 for v in f_net[:sw] if v > 0)
+            i_pos_days = sum(1 for v in i_net[:sw] if v > 0)
+            f_cum      = sum(f_net[:sw])
+            i_cum      = sum(i_net[:sw])
+            adj_min    = max(2, int(SMART_MIN_DAYS * supply_len / SMART_DAYS))
+            smart_ok   = (f_pos_days >= adj_min or i_pos_days >= adj_min or
+                          (f_cum > 0 and i_cum > 0) or (f_cum > 0 or i_cum > 0))
+        if not smart_ok: continue
+
+        atr        = _atr(valid_closes, ATR_PERIOD)
+        stop_price = round(curr_price - atr * ATR_STOP_MULT, 0)
+        tgt_price  = round(curr_price + atr * ATR_TARGET_MULT, 0)
+        stop_pct   = round((curr_price - stop_price) / curr_price * 100, 1)
+        tgt_pct    = round((tgt_price  - curr_price) / curr_price * 100, 1)
+        rr_ratio   = round(tgt_pct / stop_pct, 1) if stop_pct > 0 else 0
+        if rr_ratio < 1.5: continue
+
+        gap60     = (curr_price - ma60) / ma60
+        dry_ratio = vol_avg_recent / vol_avg_all if vol_avg_all > 0 else 1
+        hh_pct    = (recent_hi - prev_hi) / prev_hi if prev_hi > 0 else 0
+        hl_pct    = (recent_lo - prev_lo) / prev_lo if prev_lo > 0 else 0
+
+        score = 0
+        score += max(0, 20 - int(gap60 * 100))
+        score += min(20, int(hh_pct * 200))
+        score += min(20, int(hl_pct * 200))
+        score += max(0, 20 - int(dist_from_lo * 200))
+        score += max(0, 10 - int(abs(rsi - 50)))
+        score += int((1 - dry_ratio) * 10)
+        score += min(15, (f_pos_days + i_pos_days) * 2)
+
+        themes = theme_map.get(pure_name, ["테마 미분류"])
+        passed.append({
+            "name":        pure_name,
+            "score":       score,
+            "curr_price":  curr_price,
+            "stop_price":  stop_price,
+            "tgt_price":   tgt_price,
+            "stop_pct":    stop_pct,
+            "tgt_pct":     tgt_pct,
+            "rr_ratio":    rr_ratio,
+            "rsi":         rsi,
+            "themes":      themes[:2],
+            "f_pos_days":  f_pos_days,
+            "i_pos_days":  i_pos_days,
+            "f_cum":       f_cum,
+            "i_cum":       i_cum,
+            "cluster_cnt": 0,
+            "cluster_stocks": [],
+        })
+
+    conn.close()
+
+    # 군집 계산
+    for item in passed:
+        cs = []
+        for theme in item["themes"]:
+            for sname, tlist in theme_map.items():
+                if theme in tlist and sname in ma60_pass and sname != item["name"]:
+                    cs.append(sname)
+        cs = list(set(cs))
+        item["cluster_cnt"]    = len(cs)
+        item["cluster_stocks"] = cs[:3]
+        if item["cluster_cnt"] >= CLUSTER_MIN:
+            item["score"] += min(15, item["cluster_cnt"] * 3)
+
+    passed.sort(key=lambda x: x["score"], reverse=True)
+    return passed[:top_n]
+
+
 if __name__ == "__main__":
     print(get_trend_picks(top_n=5))
