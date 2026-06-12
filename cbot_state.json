@@ -4,32 +4,32 @@
   "cmd_result": "✅ KRW-USDT 즉시매도 완료",
   "last_status": {
     "krw": 44650,
-    "total_profit": 822,
+    "total_profit": 21888,
     "daily_pnl": 0,
     "positions": 3,
     "positions_detail": {
       "KRW-BTC": {
-        "current": 95895000,
+        "current": 95866000,
         "entry_price": 94315855,
         "qty": 0.00477119,
-        "rate": 1.67
+        "rate": 1.64
       },
       "KRW-SOON": {
-        "current": 256,
+        "current": 261,
         "entry_price": 255,
         "qty": 1760.40025942,
-        "rate": 0.15
+        "rate": 2.1
       },
       "KRW-WLFI": {
-        "current": 87,
+        "current": 91,
         "entry_price": 89,
         "qty": 3351.95530726,
-        "rate": -2.46
+        "rate": 1.68
       }
     },
     "daily_loss": 0,
     "market_status": "normal",
-    "btc_rate": 0.29281658,
+    "btc_rate": 0.29072503,
     "fear_greed": 12,
     "is_night": false,
     "coin_pool": [
@@ -48,10 +48,10 @@
       "KRW-NEAR",
       "KRW-ASTR",
       "KRW-DOGE",
-      "KRW-XPL",
-      "KRW-WAVES",
-      "KRW-CHZ",
       "KRW-TRUMP",
+      "KRW-WAVES",
+      "KRW-XPL",
+      "KRW-CHZ",
       "KRW-ZRO",
       "KRW-DOOD",
       "KRW-PYTH",
@@ -60,8 +60,8 @@
       "KRW-JTO",
       "KRW-ADA",
       "KRW-KAT",
-      "KRW-ZETA",
       "KRW-ENA",
+      "KRW-ZETA",
       "KRW-PRL"
     ],
     "coins": [
@@ -80,10 +80,10 @@
       "KRW-NEAR",
       "KRW-ASTR",
       "KRW-DOGE",
-      "KRW-XPL",
-      "KRW-WAVES",
-      "KRW-CHZ",
       "KRW-TRUMP",
+      "KRW-WAVES",
+      "KRW-XPL",
+      "KRW-CHZ",
       "KRW-ZRO",
       "KRW-DOOD",
       "KRW-PYTH",
@@ -92,30 +92,30 @@
       "KRW-JTO",
       "KRW-ADA",
       "KRW-KAT",
-      "KRW-ZETA",
       "KRW-ENA",
+      "KRW-ZETA",
       "KRW-PRL"
     ],
     "seed": "30만원 소액 모드"
   },
-  "last_update": "18:38:47",
+  "last_update": "18:51:53",
   "daily_loss": 0,
   "loss_date": "2026-06-12",
   "positions": {
     "KRW-BTC": {
       "entry_price": 94315855.00263037,
       "qty": 0.00477119,
-      "current": 95895000.0
+      "current": 95866000.0
     },
     "KRW-SOON": {
       "entry_price": 255.62368421,
       "qty": 1760.40025942,
-      "current": 256.0
+      "current": 261.0
     },
     "KRW-WLFI": {
       "entry_price": 89.5,
       "qty": 3351.95530726,
-      "current": 87.3
+      "current": 91.0
     }
   },
   "peak_tracker": {
@@ -128,7 +128,7 @@
       "effective_entry": 94315855.00263037
     },
     "KRW-SOON": {
-      "peak_rate": 0.0014721475874311229,
+      "peak_rate": 0.021032150469998137,
       "stage": 0,
       "remain_qty": 1760.40025942,
       "buy2_done": true,
@@ -136,7 +136,7 @@
       "effective_entry": 255.62368421
     },
     "KRW-WLFI": {
-      "peak_rate": 0.006703910614525076,
+      "peak_rate": 0.01675977653631285,
       "stage": 0,
       "remain_qty": 3351.95530726,
       "buy2_done": true,
