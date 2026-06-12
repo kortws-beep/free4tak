@@ -302,78 +302,6 @@ class KisAPI:
                 print(f"⚠️ 지수 조회 오류 {key}: {e}")
         return result
 
-    def get_overseas_index(self) -> dict:
-        """
-        ★ KIS API 해외 주요 지수 조회 (HHDFS76200200)
-        나스닥, S&P500, 다우, 필라델피아반도체 종가/등락률 반환.
-        반환: {
-            'ndx': {'name':'나스닥',           'price':25709.43, 'rate':-4.18},
-            'spx': {'name':'S&P500',           'price':7383.74,  'rate':-2.64},
-            'dji': {'name':'다우',             'price':50866.78, 'rate':-1.35},
-            'sox': {'name':'필라델피아 반도체', 'price':12220.76, 'rate':-10.26},
-        }
-        """
-        import datetime as _dt
-
-        headers = {
-            "authorization": f"Bearer {self.token}",
-            "appkey":   self.appkey,
-            "appsecret": self.secret,
-            "tr_id":    "FHKST03030100",
-        }
-
-        # 월요일이면 금요일(3일 전), 그 외 전날
-        _now = _dt.datetime.now()
-        if _now.weekday() == 0:
-            _days = 3
-        elif _now.weekday() == 6:
-            _days = 2
-        else:
-            _days = 1
-        _base_dt  = _now - _dt.timedelta(days=_days)
-        base_date = _base_dt.strftime("%Y%m%d")
-        base_mmdd = _base_dt.strftime("%m/%d")
-
-        # ★ 검증된 심볼 (서버 테스트 완료)
-        # 다우존스는 KIS API 미지원 → 제외
-        symbols = {
-            "COMP": ("ndx", "나스닥",            "NAS"),   # 나스닥 종합
-            "SPX":  ("spx", "S&P500",            "NYS"),   # S&P500
-            "SOX":  ("sox", "필라델피아 반도체",  "NAS"),   # 필라델피아반도체
-        }
-
-        url = f"{self.base_url}/uapi/overseas-price/v1/quotations/inquire-daily-chartprice"
-
-        result = {}
-        for sym, (key, name, excd) in symbols.items():
-            try:
-                params = {
-                    "FID_COND_MRKT_DIV_CODE": "N",
-                    "FID_INPUT_ISCD":          sym,
-                    "FID_INPUT_DATE_1":        base_date,
-                    "FID_INPUT_DATE_2":        base_date,
-                    "FID_PERIOD_DIV_CODE":     "D",
-                    "FID_ORG_ADJ_PRC":         "0",
-                    "EXCD":                    excd,
-                }
-                res   = requests.get(url, headers=headers, params=params, timeout=8).json()
-                out   = res.get("output1", {})
-                price = float(out.get("ovrs_nmix_prpr",  0) or 0)
-                rate  = float(out.get("prdy_ctrt",       0) or 0)
-                if price > 0:
-                    result[key] = {
-                        "name":  name,
-                        "price": price,
-                        "rate":  rate,
-                        "date":  base_mmdd,
-                    }
-                    print(f"  ✅ {name}: {price:,.2f} ({rate:+.2f}%) [{base_mmdd}]")
-                time.sleep(0.1)
-            except Exception as e:
-                print(f"  ⚠️ {name} 조회 오류: {e}")
-
-        return result
-
     def get_sector_change_rates(self, sector_code_map: dict) -> dict:
         result  = {}
         url     = f"{self.base_url}/uapi/domestic-stock/v1/quotations/inquire-index-price"
@@ -407,7 +335,7 @@ class KisAPI:
                    "appKey": self.appkey, "appSecret": self.secret,
                    "tr_id": "FHKST03010100"}
         end_date   = datetime.datetime.now().strftime("%Y%m%d")
-        start_date = (datetime.datetime.now() - datetime.timedelta(days=200)).strftime("%Y%m%d")
+        start_date = (datetime.datetime.now() - datetime.timedelta(days=290)).strftime("%Y%m%d")  # ★ 200 MA 확보위해 290일 (영업일 ~200일)
         params = {"fid_cond_mrkt_div_code": "J", "fid_input_iscd": code,
                   "fid_input_date_1": start_date, "fid_input_date_2": end_date,
                   "fid_period_div_code": "D", "fid_org_adj_prc": "0"}
@@ -498,6 +426,8 @@ class KisAPI:
                 "ma10":          ma(10),
                 "ma20":          ma(20),
                 "ma60":          ma(60),
+                "ma120":         ma(120),   # ★ 추가
+                "ma200":         ma(200),   # ★ sbot2 추세추종 핵심
                 "rsi":           round(rsi(), 1),
                 # ★ 신규
                 "macd":          round(macd, 2),
@@ -586,11 +516,9 @@ class KisAPI:
             net_buy    = foreign_today + orgn_today
             buy_pressure = round(net_buy / total_pbmn * 100, 1) if total_pbmn > 0 else 0.0
 
-            # ── 5일/15일 누적 ────────────────────────────────
-            frgn_5d  = sum(safe_int(x.get("frgn_ntby_qty") or x.get("frgn_ntby_tr_pbmn", 0)) for x in items[:5])
-            orgn_5d  = sum(safe_int(x.get("orgn_ntby_qty") or x.get("orgn_ntby_tr_pbmn", 0)) for x in items[:5])
-            frgn_15d = sum(safe_int(x.get("frgn_ntby_qty") or x.get("frgn_ntby_tr_pbmn", 0)) for x in items[:15])
-            orgn_15d = sum(safe_int(x.get("orgn_ntby_qty") or x.get("orgn_ntby_tr_pbmn", 0)) for x in items[:15])
+            # ── 5일 누적 ─────────────────────────────────────
+            frgn_5d = sum(safe_int(x.get("frgn_ntby_qty") or x.get("frgn_ntby_tr_pbmn", 0)) for x in items[:5])
+            orgn_5d = sum(safe_int(x.get("orgn_ntby_qty") or x.get("orgn_ntby_tr_pbmn", 0)) for x in items[:5])
 
             result = {
                 # 당일 실시간
@@ -604,10 +532,6 @@ class KisAPI:
                 # 5일 누적 (기존 호환)
                 "foreign_5d":     frgn_5d,
                 "institution_5d": orgn_5d,
-
-                # ★ 15일 누적 (sbot2 중기 추세 판단용)
-                "foreign_15d":    frgn_15d,
-                "institution_15d": orgn_15d,
             }
             cache[code] = (result, time.time())
             return result

@@ -1144,6 +1144,123 @@ async def cmd_news(ctx):
     except Exception as e:
         await ctx.send(f"❌ 뉴스 조회 오류: {e}")
 
+
+# ============================================================
+# git 커밋 & 푸시  (!git "커밋 메시지")
+# ============================================================
+GIT_REPO_PATH = "/home/free4tak/k-bot"   # ★ 실서버 git 루트 경로
+
+async def cmd_git(ctx, message: str):
+    """!git 메시지 — 전체 변경사항 add → commit → push"""
+    import subprocess as _sp
+    import asyncio as _ac
+
+    if not message or not message.strip():
+        await ctx.send("❌ 커밋 메시지를 입력해주세요\n예) `!git 데이터 기반의 주도주 필터링`")
+        return
+
+    await ctx.send(f"📦 git 커밋 중...\n메시지: **{message}**")
+
+    loop    = _ac.get_event_loop()
+    results = []
+
+    def _run(cmd, cwd=GIT_REPO_PATH):
+        ret = _sp.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=30)
+        return ret.returncode, ret.stdout.strip(), ret.stderr.strip()
+
+    try:
+        # 1. git status
+        rc, out, err = await loop.run_in_executor(None, _run, ["git", "status", "--short"])
+        if not out:
+            await ctx.send("ℹ️ 변경된 파일 없음 — 커밋 스킵")
+            return
+        changed = out.splitlines()
+        results.append(
+            f"📄 변경 파일 {len(changed)}개:\n" +
+            "\n".join(f"  `{l}`" for l in changed[:10]) +
+            (f"\n  ... 외 {len(changed)-10}개" if len(changed) > 10 else "")
+        )
+
+        # 2. git add -A
+        rc, out, err = await loop.run_in_executor(None, _run, ["git", "add", "-A"])
+        if rc != 0:
+            await ctx.send(f"❌ git add 실패:\n```{err[:300]}```")
+            return
+
+        # 3. git commit
+        rc, out, err = await loop.run_in_executor(None, _run,
+            ["git", "commit", "-m", message])
+        if rc != 0:
+            await ctx.send(f"❌ git commit 실패:\n```{err[:300]}```")
+            return
+        commit_line = out.splitlines()[0] if out else ""
+        results.append(f"✅ 커밋 완료: `{commit_line}`")
+
+        # 4. git push
+        rc, out, err = await loop.run_in_executor(None, _run, ["git", "push"])
+        if rc != 0:
+            await ctx.send(f"❌ git push 실패:\n```{err[:300]}```")
+            return
+        results.append("🚀 푸시 완료")
+
+        await ctx.send("\n".join(results))
+
+    except Exception as e:
+        await ctx.send(f"❌ git 오류: {e}")
+
+
+async def cmd_git_log(ctx, n: int = 5):
+    """!git로그 — 최근 커밋 이력"""
+    import subprocess as _sp
+    import asyncio as _ac
+
+    loop = _ac.get_event_loop()
+
+    def _run():
+        ret = _sp.run(
+            ["git", "log", f"-{n}", "--oneline", "--no-color"],
+            cwd=GIT_REPO_PATH, capture_output=True, text=True, timeout=10
+        )
+        return ret.returncode, ret.stdout.strip(), ret.stderr.strip()
+
+    try:
+        rc, out, err = await loop.run_in_executor(None, _run)
+        if rc != 0 or not out:
+            await ctx.send(f"❌ git log 실패: {err[:200]}")
+            return
+        await ctx.send(f"📋 **최근 커밋 {n}건**\n```\n{out}\n```")
+    except Exception as e:
+        await ctx.send(f"❌ git log 오류: {e}")
+
+
+async def cmd_git_status(ctx):
+    """!git상태 — 현재 변경사항 확인 (커밋 전 확인용)"""
+    import subprocess as _sp
+    import asyncio as _ac
+
+    loop = _ac.get_event_loop()
+
+    def _run():
+        ret = _sp.run(
+            ["git", "status", "--short"],
+            cwd=GIT_REPO_PATH, capture_output=True, text=True, timeout=10
+        )
+        return ret.returncode, ret.stdout.strip(), ret.stderr.strip()
+
+    try:
+        rc, out, err = await loop.run_in_executor(None, _run)
+        if rc != 0:
+            await ctx.send(f"❌ git status 실패: {err[:200]}")
+            return
+        if not out:
+            await ctx.send("✅ 변경사항 없음 (clean)")
+            return
+        lines = out.splitlines()
+        await ctx.send(f"📄 **변경파일 {len(lines)}개**\n```\n{out[:800]}\n```")
+    except Exception as e:
+        await ctx.send(f"❌ git status 오류: {e}")
+
+
 async def cmd_help(ctx):
     msg = """🦊 **키키 — 명령어 안 외워도 돼요!**
 그냥 말하면 알아서 해줍니다 😄
@@ -1172,6 +1289,13 @@ async def cmd_help(ctx):
 
 **🌐 공통**
   `!전체상태`  `!브리핑`  `!테마`  `!관심HTS`
+  `!리스크`  `!긴급중단`  `!긴급재개`
+  `!이벤트`  `!뉴스`
+
+**🗂️ Git**
+  `!git 메시지`  — add → commit → push 한번에
+  `!git상태`     — 변경파일 확인
+  `!git로그`     — 최근 커밋 5건 (`!git로그 10` 으로 개수 지정)
 
 ━━━ 🌟 Tip ━━━
 매도/정지는 확인 후 실행 → "네"=실행 / "아니"=취소
