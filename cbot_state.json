@@ -4,15 +4,15 @@
   "cmd_result": "✅ KRW-USDT 즉시매도 완료",
   "last_status": {
     "krw": 44650,
-    "total_profit": 21888,
+    "total_profit": 21597,
     "daily_pnl": 0,
     "positions": 3,
     "positions_detail": {
       "KRW-BTC": {
-        "current": 95866000,
+        "current": 95805000,
         "entry_price": 94315855,
         "qty": 0.00477119,
-        "rate": 1.64
+        "rate": 1.58
       },
       "KRW-SOON": {
         "current": 261,
@@ -29,7 +29,7 @@
     },
     "daily_loss": 0,
     "market_status": "normal",
-    "btc_rate": 0.29072503,
+    "btc_rate": 0.28549617,
     "fear_greed": 12,
     "is_night": false,
     "coin_pool": [
@@ -42,14 +42,14 @@
       "KRW-USDT",
       "KRW-SAHARA",
       "KRW-ONDO",
+      "KRW-TRUMP",
       "KRW-XLM",
       "KRW-SOPH",
       "KRW-ENSO",
       "KRW-NEAR",
+      "KRW-WAVES",
       "KRW-ASTR",
       "KRW-DOGE",
-      "KRW-TRUMP",
-      "KRW-WAVES",
       "KRW-XPL",
       "KRW-CHZ",
       "KRW-ZRO",
@@ -60,9 +60,9 @@
       "KRW-JTO",
       "KRW-ADA",
       "KRW-KAT",
-      "KRW-ENA",
       "KRW-ZETA",
-      "KRW-PRL"
+      "KRW-ENA",
+      "KRW-VIRTUAL"
     ],
     "coins": [
       "KRW-BTC",
@@ -74,14 +74,14 @@
       "KRW-USDT",
       "KRW-SAHARA",
       "KRW-ONDO",
+      "KRW-TRUMP",
       "KRW-XLM",
       "KRW-SOPH",
       "KRW-ENSO",
       "KRW-NEAR",
+      "KRW-WAVES",
       "KRW-ASTR",
       "KRW-DOGE",
-      "KRW-TRUMP",
-      "KRW-WAVES",
       "KRW-XPL",
       "KRW-CHZ",
       "KRW-ZRO",
@@ -92,20 +92,20 @@
       "KRW-JTO",
       "KRW-ADA",
       "KRW-KAT",
-      "KRW-ENA",
       "KRW-ZETA",
-      "KRW-PRL"
+      "KRW-ENA",
+      "KRW-VIRTUAL"
     ],
     "seed": "30만원 소액 모드"
   },
-  "last_update": "18:51:53",
+  "last_update": "19:16:22",
   "daily_loss": 0,
   "loss_date": "2026-06-12",
   "positions": {
     "KRW-BTC": {
       "entry_price": 94315855.00263037,
       "qty": 0.00477119,
-      "current": 95866000.0
+      "current": 95805000.0
     },
     "KRW-SOON": {
       "entry_price": 255.62368421,

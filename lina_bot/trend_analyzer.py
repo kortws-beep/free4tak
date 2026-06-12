@@ -487,7 +487,8 @@ def get_trend_data(top_n: int = 20) -> list:
         pure_name  = re.sub(r"\s*(KOSPI|KOSDAQ)\s*\d{6}$", "", stock_name).strip()
 
         etf_kw = ["KODEX","TIGER","KBSTAR","ARIRANG","HANARO","KOSEF","TREX",
-                  "SOL","ACE","PLUS","RISE","인버스","레버리지","ETN"]
+                  "SOL","ACE","PLUS","RISE","KIWOOM","SMART","FOCUS",
+                  "인버스","레버리지","ETN","ETF"]
         if any(k in pure_name for k in etf_kw): continue
         if pure_name.endswith("우") or pure_name.endswith("우B"): continue
 
