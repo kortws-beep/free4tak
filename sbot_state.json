@@ -5,10 +5,10 @@
   "cmd_result": null,
   "last_status": {
     "cash": 1867033,
-    "total_profit": 5700,
+    "total_profit": 10800,
     "positions": 3,
     "score_enter": 85,
-    "last_update": "13:19:41",
+    "last_update": "13:21:28",
     "market_status": "normal",
     "market_rate": 8.29,
     "daily_loss": 0,
@@ -189,30 +189,30 @@
       "089030": {
         "name": "테크윙",
         "entry_price": 67300,
-        "current": 66800,
-        "rate": -0.74,
+        "current": 66900,
+        "rate": -0.59,
         "qty": 14,
         "buy_tag": ""
       },
       "103590": {
         "name": "일진전기",
         "entry_price": 82200,
-        "current": 83800,
-        "rate": 1.95,
+        "current": 84000,
+        "rate": 2.19,
         "qty": 12,
         "buy_tag": ""
       },
       "489790": {
         "name": "489790",
         "entry_price": 76800,
-        "current": 76300,
-        "rate": -0.65,
+        "current": 76400,
+        "rate": -0.52,
         "qty": 13,
         "buy_tag": ""
       }
     }
   },
-  "last_update": "13:20:28",
+  "last_update": "13:21:46",
   "sold_today": {},
   "sold_today_date": "2026-06-12",
   "daily_loss": 0,
