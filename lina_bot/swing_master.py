@@ -29,7 +29,15 @@ BASE_DIR         = os.path.dirname(os.path.abspath(__file__))
 DB_PATH          = os.path.join(BASE_DIR, "kr_theme_finance.db")
 DB_PATH_MAPPING  = os.path.join(BASE_DIR, "us_kr_mapping.db")
 DB_PATH_TELEGRAM = os.path.join(BASE_DIR, "intelligence", "telegram_events.db")
-DB_PATH_SECTOR   = os.path.join(BASE_DIR, "..", "intelligence", "sector_monitor.db")
+# sector_monitor DB — 여러 경로 중 존재하는 것 사용
+_sector_candidates = [
+    os.path.join(BASE_DIR, "..", "intelligence", "sector_monitor.db"),
+    os.path.join(BASE_DIR, "intelligence", "sector_monitor.db"),
+    os.path.join(BASE_DIR, "..", "data", "sector_monitor.db"),
+    "/home/free4tak/k-bot/stock_bot/intelligence/sector_monitor.db",
+]
+DB_PATH_SECTOR = next((p for p in _sector_candidates if os.path.exists(p)),
+                      _sector_candidates[0])
 
 TOP_N_DEFAULT    = 5
 
@@ -114,16 +122,15 @@ def _get_catalyst_stocks() -> set:
             sec_conn   = sqlite3.connect(DB_PATH_SECTOR, timeout=5)
             sec_cursor = sec_conn.cursor()
 
-            # 오늘 + 최근 2시간 내 급등 테마 (등락률 +5% 이상)
-            cutoff = (datetime.datetime.now() -
-                      datetime.timedelta(hours=2)).strftime("%Y-%m-%d %H:%M")
+            # 오늘 장중 데이터 전체 사용 (09:00 이후)
+            cutoff = datetime.datetime.now().strftime("%Y-%m-%d") + " 09:00"
             sec_cursor.execute("""
                 SELECT DISTINCT theme_nm, MAX(flu_rt) as max_flu
                 FROM sector_flow
-                WHERE ts >= ? AND flu_rt >= 5.0
+                WHERE ts >= ? AND flu_rt >= 7.0
                 GROUP BY theme_nm
                 ORDER BY max_flu DESC
-                LIMIT 10
+                LIMIT 5
             """, (cutoff,))
             hot_themes = sec_cursor.fetchall()
             sec_conn.close()
@@ -192,12 +199,14 @@ def get_master_report(top_n: int = TOP_N_DEFAULT) -> str:
     catalyst_set = _get_catalyst_stocks()
 
     print("⚙️  [마스터] 2번 VCP 스윙 엔진 실행 중...")
-    swing_report = get_swing_picks(top_n=20)   # 넉넉하게 20개
-    swing_names  = _extract_names_from_report(swing_report)
+    from swing_analyzer import get_swing_data
+    swing_list  = get_swing_data(top_n=20)
+    swing_names = {d["name"] for d in swing_list}
 
     print("⚙️  [마스터] 3번 상승추세 엔진 실행 중...")
-    trend_report = get_trend_picks(top_n=20)
-    trend_names  = _extract_names_from_report(trend_report)
+    from trend_analyzer import get_trend_data
+    trend_list  = get_trend_data(top_n=20)
+    trend_names = {d["name"] for d in trend_list}
 
     print(f"   촉매 종목: {len(catalyst_set)}개")
     print(f"   VCP 통과: {len(swing_names)}개")
