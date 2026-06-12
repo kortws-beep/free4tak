@@ -1,15 +1,15 @@
 {
   "telegram_event": {
     "keywords": [
-      "수주"
+      "AI"
     ],
     "themes": [
-      "조선",
-      "방산",
-      "건설"
+      "클라우드",
+      "AI",
+      "반도체"
     ],
-    "score": 15,
-    "text": "삼성 파운드리, 구글 TPU 수주 눈앞?…TSMC 독주에 균열\nhttps://n.news.naver.com/mnews/article/648/0000047957",
-    "time": "09:30:29"
+    "score": 10,
+    "text": "［新連載］イビデン、5000億円投資の裏にNVIDIAの「先払い」　AIインフラ270兆円経済圏\nhttps://buly.kr/1wXrvQ",
+    "time": "11:58:50"
   }
 }

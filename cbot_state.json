@@ -4,32 +4,32 @@
   "cmd_result": "✅ KRW-USDT 즉시매도 완료",
   "last_status": {
     "krw": 44650,
-    "total_profit": -5654,
+    "total_profit": -755,
     "daily_pnl": 0,
     "positions": 3,
     "positions_detail": {
       "KRW-BTC": {
-        "current": 95750000,
+        "current": 95582000,
         "entry_price": 94315855,
         "qty": 0.00477119,
-        "rate": 1.52
+        "rate": 1.34
       },
       "KRW-SOON": {
-        "current": 251,
+        "current": 255,
         "entry_price": 255,
         "qty": 1760.40025942,
-        "rate": -1.81
+        "rate": -0.24
       },
       "KRW-WLFI": {
-        "current": 88,
+        "current": 87,
         "entry_price": 89,
         "qty": 3351.95530726,
-        "rate": -1.45
+        "rate": -1.9
       }
     },
     "daily_loss": 0,
     "market_status": "normal",
-    "btc_rate": 0.02719011,
+    "btc_rate": -0.059609089999999997,
     "fear_greed": 12,
     "is_night": false,
     "coin_pool": [
@@ -45,24 +45,24 @@
       "KRW-ONDO",
       "KRW-XLM",
       "KRW-NEAR",
-      "KRW-DOGE",
+      "KRW-ENSO",
       "KRW-CHZ",
-      "KRW-STRAX",
+      "KRW-DOGE",
+      "KRW-SOPH",
       "KRW-PYTH",
-      "KRW-HIVE",
-      "KRW-CTC",
-      "KRW-KAT",
+      "KRW-STRAX",
       "KRW-ZRO",
-      "KRW-ZETA",
-      "KRW-SUI",
-      "KRW-ENA",
       "KRW-XPL",
+      "KRW-KAT",
+      "KRW-CTC",
+      "KRW-SUI",
+      "KRW-HIVE",
+      "KRW-ENA",
+      "KRW-ZETA",
       "KRW-ADA",
       "KRW-PRL",
-      "KRW-SOPH",
-      "KRW-MOVE",
-      "KRW-IP",
-      "KRW-BCH"
+      "KRW-JTO",
+      "KRW-IP"
     ],
     "coins": [
       "KRW-BTC",
@@ -77,45 +77,45 @@
       "KRW-ONDO",
       "KRW-XLM",
       "KRW-NEAR",
-      "KRW-DOGE",
+      "KRW-ENSO",
       "KRW-CHZ",
-      "KRW-STRAX",
+      "KRW-DOGE",
+      "KRW-SOPH",
       "KRW-PYTH",
-      "KRW-HIVE",
-      "KRW-CTC",
-      "KRW-KAT",
+      "KRW-STRAX",
       "KRW-ZRO",
-      "KRW-ZETA",
-      "KRW-SUI",
-      "KRW-ENA",
       "KRW-XPL",
+      "KRW-KAT",
+      "KRW-CTC",
+      "KRW-SUI",
+      "KRW-HIVE",
+      "KRW-ENA",
+      "KRW-ZETA",
       "KRW-ADA",
       "KRW-PRL",
-      "KRW-SOPH",
-      "KRW-MOVE",
-      "KRW-IP",
-      "KRW-BCH"
+      "KRW-JTO",
+      "KRW-IP"
     ],
     "seed": "30만원 소액 모드"
   },
-  "last_update": "09:35:35",
+  "last_update": "13:20:22",
   "daily_loss": 0,
   "loss_date": "2026-06-12",
   "positions": {
     "KRW-BTC": {
       "entry_price": 94315855.00263037,
       "qty": 0.00477119,
-      "current": 95750000.0
+      "current": 95582000.0
     },
     "KRW-SOON": {
       "entry_price": 255.62368421,
       "qty": 1760.40025942,
-      "current": 251.0
+      "current": 255.0
     },
     "KRW-WLFI": {
       "entry_price": 89.5,
       "qty": 3351.95530726,
-      "current": 88.2
+      "current": 87.8
     }
   },
   "peak_tracker": {
@@ -128,7 +128,7 @@
       "effective_entry": 94315855.00263037
     },
     "KRW-SOON": {
-      "peak_rate": -0.0063518535655956825,
+      "peak_rate": -0.00243985298908228,
       "stage": 0,
       "remain_qty": 1760.40025942,
       "buy2_done": true,
