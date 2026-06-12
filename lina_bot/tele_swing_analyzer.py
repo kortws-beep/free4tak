@@ -29,9 +29,9 @@ DB_PATH          = os.path.join(BASE_DIR, "kr_theme_finance.db")
 DB_PATH_TELEGRAM = os.path.join(BASE_DIR, "intelligence", "telegram_events.db")
 
 # ── 튜닝 파라미터 ─────────────────────────────────────
-MIN_SCORE        = 60     # 최소 통과 점수
+MIN_SCORE        = 50     # 최소 통과 점수
 TOP_N            = 2      # 최종 선정 종목 수
-TELE_HOURS       = 240    # 텔레그램 수집 시간 범위 (10일 = 240시간)
+TELE_HOURS       = 360    # 텔레그램 수집 시간 범위 (15일 = 360시간)
 RSI_PERIOD       = 14
 MACD_FAST        = 12
 MACD_SLOW        = 26
@@ -161,12 +161,29 @@ def _get_tele_stocks() -> dict:
                 fresh_score = sum((r[1] or 10) * 2
                                   for r in rows
                                   if r[0] and pure in r[0])
-                result[pure] = min(fresh_score, 100)  # 최대 100점 캡
+                score = min(fresh_score, 100)
+                # 최소 30점 이상만 후보 포함
+                if score >= 30:
+                    result[pure] = score
 
     except Exception as e:
         print(f"⚠️ [텔레스윙] 텔레그램 조회 오류: {e}")
 
     return result
+
+
+# ══════════════════════════════════════════════════════════════
+# 생쇼 종목 조회
+# ══════════════════════════════════════════════════════════════
+
+def _get_sshow_stocks() -> dict:
+    """생쇼 DB에서 최근 5영업일 종목 반환"""
+    try:
+        from sshow_db import get_sshow_stocks
+        return get_sshow_stocks(days=7)
+    except Exception as e:
+        print(f"⚠️ [텔레스윙] 생쇼 조회 오류: {e}")
+        return {}
 
 
 # ══════════════════════════════════════════════════════════════
@@ -250,13 +267,17 @@ def _calc_swing_score(stock_name: str, tele_score: int) -> dict:
         result["rsi"] = rsi
         if 30 <= rsi <= 45:
             score += 15
-            detail["RSI눌림"] = f"+15 (RSI:{rsi})"
+            detail["RSI눌림"] = f"+15 (RSI:{rsi} 최적눌림)"
         elif 45 < rsi <= 55:
             score += 10
-            detail["RSI눌림"] = f"+10 (RSI:{rsi})"
+            detail["RSI눌림"] = f"+10 (RSI:{rsi} 건전)"
+        elif 55 < rsi <= 65:
+            score += 5
+            detail["RSI눌림"] = f"+5 (RSI:{rsi} 주의)"
         elif rsi < 30:
             score += 5
             detail["RSI눌림"] = f"+5 (RSI:{rsi} 과매도)"
+        # 70 초과는 점수 없음 (뒤에서 감점)
 
         # ── 5. 피보나치 되돌림 구간 (+15점) ──────────────────
         # 최근 60일 고점/저점 기준
@@ -297,8 +318,32 @@ def _calc_swing_score(stock_name: str, tele_score: int) -> dict:
         tgt_pct    = round((tgt_price - curr) / curr * 100, 1) if curr > 0 else 0
         rr_ratio   = round(tgt_pct / stop_pct, 1) if stop_pct > 0 else 0
 
+        # ── 방어막 ────────────────────────────────────────────
+        # 손절가 음수 or 손절폭 20% 초과 → 비정상 ATR → 스킵
+        if stop_price <= 0 or stop_pct > 20:
+            return result
+
+        # 목표가 최소 +8% 이상
+        if tgt_pct < 8.0:
+            return result
+
+        # 200일선 위 확인 (데이터 부족시 통과)
+        ma200_check = _ma(closes, 200)
+        if ma200_check > 0 and curr < ma200_check:
+            return result
+
+        # 피보나치 고점권(0.7 이상) 감점
+        if fib > 0.7:
+            score -= 10
+            detail["피보나치고점감점"] = "-10 (고점권 진입 위험)"
+
+        # RSI 과매수(70 이상) 감점
+        if rsi > 70:
+            score -= 10
+            detail["RSI과매수감점"] = f"-10 (RSI:{rsi} 과매수)"
+
         result.update({
-            "score":        score,
+            "score":        max(0, score),
             "curr_price":   curr,
             "stop_price":   stop_price,
             "tgt_price":    tgt_price,
@@ -400,6 +445,24 @@ def get_tele_swing_report(top_n: int = TOP_N) -> str:
         else:
             rr_tag = "❌ 불량"
 
+        rsi_val  = item["rsi"]
+        if rsi_val >= 70:
+            rsi_tag = f"{rsi_val} ⚠️ 과매수"
+        elif rsi_val >= 55:
+            rsi_tag = f"{rsi_val} 주의"
+        elif rsi_val >= 30:
+            rsi_tag = f"{rsi_val} ✅ 눌림목"
+        else:
+            rsi_tag = f"{rsi_val} 과매도"
+
+        fib_val = item["fib_level"] * 100
+        if fib_val >= 70:
+            fib_tag = f"{fib_val:.1f}% ⚠️ 고점권"
+        elif 38.2 <= fib_val <= 61.8:
+            fib_tag = f"{fib_val:.1f}% ✅ 황금구간"
+        else:
+            fib_tag = f"{fib_val:.1f}%"
+
         report += (
             f"\n 📌 **{idx}위: {item['name']}**  (총점: {item['score']}점)\n"
             f"    📡 텔레그램  : 원점수 {item['tele_score']}점\n"
@@ -407,9 +470,9 @@ def get_tele_swing_report(top_n: int = TOP_N) -> str:
             f"    🎯 목표가    : {item['tgt_price']:,}원  (+{item['tgt_pct']}%)\n"
             f"    🛑 손절가    : {item['stop_price']:,}원  (-{item['stop_pct']}%)\n"
             f"    ⚖️  R:R       : 1 : {item['rr_ratio']}  {rr_tag}\n"
-            f"    📉 RSI       : {item['rsi']} (눌림목 구간)\n"
+            f"    📉 RSI       : {rsi_tag}\n"
             f"    📊 MACD      : {macd_tag}\n"
-            f"    🌀 피보나치  : {fib_pct:.1f}% 위치\n"
+            f"    🌀 피보나치  : {fib_tag}\n"
             f"    📈 점수 상세 : {detail_str}\n"
             f"------------------------------------------------------------"
         )
