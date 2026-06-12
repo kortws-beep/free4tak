@@ -762,10 +762,10 @@ class SBot2:
     # ============================================================
     # 상태 출력
     # ============================================================
-    def _print_status(self, score_enter: int, psbl_cash: int):
+    def _print_status(self, cash: int, score_enter: int, psbl_cash: int):
         paused_str = "⏸️" if self._is_paused else "▶️"
-        print(f"\n{'='*50}")
-        print(f"📈 [MID] {paused_str} 기준:{score_enter}점 | 주문가능:{psbl_cash:,}")
+        print(f"{'='*50}")
+        print(f"📈 [MID] {paused_str} 기준:{score_enter}점 | 💵 예수금:{cash:,} | 💰 주문가능:{psbl_cash:,}")
         print(f"📊 시장:{self.market_status} | 손절:{self.daily_loss_count}/{MAX_DAILY_LOSS}")
         for code, pos in self.positions.items():
             entry = pos["entry_price"]
@@ -838,7 +838,8 @@ class SBot2:
             try:
                 real = _sync_positions(
                     self.api, "sbot2_trade_history.db",
-                    lambda msg: self._notify(msg)
+                    lambda msg: self._notify(msg),
+                    bot_type="sbot2",
                 )
                 if real:
                     self.positions.update(real)
@@ -885,12 +886,15 @@ class SBot2:
                 # ★ 디스코드 명령 처리
                 self._handle_pending_command(st)
 
-                # 예수금
-                # ★ 종목별 주문가능금액 (현재가 기반)
-                psbl_cash = self.api.get_psbl_order_cash("005930", BUY_1ST_AMT_BASE)
+                # 예수금 + 최대 주문가능금액 (sbot 방식)
+                cash      = self.api.get_buyable_cash()
+                psbl_cash = self.api.get_psbl_order_cash("005930")
+                if psbl_cash <= 0:
+                    psbl_cash = cash
+                print(f"\n⏰ {now.strftime('%H:%M:%S')} | 💵 예수금: {cash:,} | 💰 주문가능: {psbl_cash:,}")
 
                 # 상태 출력
-                self._print_status(score_enter, psbl_cash)
+                self._print_status(cash, score_enter, psbl_cash)
 
                 # 미체결 취소
                 self._cancel_pending_orders()
@@ -922,13 +926,12 @@ class SBot2:
 
                 # ★ 키키 명령어용 상태 저장 (매 루프 말미)
                 try:
-                    cash_now = self.api.get_buyable_cash() if hasattr(self.api, 'get_buyable_cash') else 0
                     total_profit = sum(
                         (float(pos_mkt_cache.get(c, {}).get("stck_prpr", 0) or p["entry_price"])
                          - p["entry_price"]) * p.get("qty", 0)
                         for c, p in self.positions.items()
                     )
-                    self._save_status(cash_now, total_profit, score_enter,
+                    self._save_status(cash, total_profit, score_enter,
                                       now.strftime("%H:%M:%S"), pos_mkt_cache)
                 except Exception as _se:
                     print(f"⚠️ [MID] 상태 저장 오류: {_se}")

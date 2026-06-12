@@ -1,15 +1,15 @@
 {
   "telegram_event": {
     "keywords": [
-      "AI"
+      "수주"
     ],
     "themes": [
-      "AI",
-      "반도체",
-      "클라우드"
+      "조선",
+      "방산",
+      "건설"
     ],
-    "score": 10,
-    "text": "머큐리, AI 데이터센터發 광케이블 수요 확대 수혜…유럽·북미 시장 공략 가속\nhttps://view.asiae.co.kr/article/2026061208330050188",
-    "time": "09:20:55"
+    "score": 15,
+    "text": "삼성 파운드리, 구글 TPU 수주 눈앞?…TSMC 독주에 균열\nhttps://n.news.naver.com/mnews/article/648/0000047957",
+    "time": "09:30:29"
   }
 }
