@@ -593,6 +593,7 @@ class Sbo2:
             return
 
         # ── 텔레스윙 후보 병합 (최대 TELE_SWING_SLOTS개) ────
+        # 14:40 이후엔 생쇼 반영 텔레스윙 재스캔
         tele_cands = get_tele_swing_picks(top_n=TELE_SWING_SLOTS)
         for tc in tele_cands:
             # 이미 3단콤보 후보에 없는 종목만 추가
@@ -611,6 +612,11 @@ class Sbo2:
                     "themes":   [],
                 })
                 print(f"   📡 텔레스윙 후보 추가: {tc['name']} ({tc['score']}점)")
+            else:
+                # 기존 후보 점수 업데이트
+                for c in self.candidates:
+                    if c["name"] == tc["name"]:
+                        c["score"] = max(c["score"], tc["score"])
 
         # 주문가능금액 조회 — 보유종목 기준 (진짜 주문가능금액)
         psbl_cash = 0
