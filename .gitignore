@@ -9,3 +9,8 @@ __pycache__/
 *.bak*
 backtest/results/*.json
 backtest/data/*.db
+lina_bot/*.session
+lina_bot/intelligence/*.session
+lina_bot/*_state.json
+lina_bot/xxx.py
+lina_bot/*.db
