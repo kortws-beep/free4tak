@@ -4,15 +4,15 @@
   "cmd_result": "✅ KRW-USDT 즉시매도 완료",
   "last_status": {
     "krw": 44650,
-    "total_profit": 388,
+    "total_profit": 822,
     "daily_pnl": 0,
     "positions": 3,
     "positions_detail": {
       "KRW-BTC": {
-        "current": 95804000,
+        "current": 95895000,
         "entry_price": 94315855,
         "qty": 0.00477119,
-        "rate": 1.58
+        "rate": 1.67
       },
       "KRW-SOON": {
         "current": 256,
@@ -29,7 +29,7 @@
     },
     "daily_loss": 0,
     "market_status": "normal",
-    "btc_rate": 0.05751753999999999,
+    "btc_rate": 0.29281658,
     "fear_greed": 12,
     "is_night": false,
     "coin_pool": [
@@ -41,8 +41,8 @@
       "KRW-ID",
       "KRW-USDT",
       "KRW-SAHARA",
-      "KRW-XLM",
       "KRW-ONDO",
+      "KRW-XLM",
       "KRW-SOPH",
       "KRW-ENSO",
       "KRW-NEAR",
@@ -55,11 +55,11 @@
       "KRW-ZRO",
       "KRW-DOOD",
       "KRW-PYTH",
-      "KRW-STRAX",
       "KRW-SUI",
-      "KRW-KAT",
-      "KRW-ADA",
+      "KRW-STRAX",
       "KRW-JTO",
+      "KRW-ADA",
+      "KRW-KAT",
       "KRW-ZETA",
       "KRW-ENA",
       "KRW-PRL"
@@ -73,8 +73,8 @@
       "KRW-ID",
       "KRW-USDT",
       "KRW-SAHARA",
-      "KRW-XLM",
       "KRW-ONDO",
+      "KRW-XLM",
       "KRW-SOPH",
       "KRW-ENSO",
       "KRW-NEAR",
@@ -87,25 +87,25 @@
       "KRW-ZRO",
       "KRW-DOOD",
       "KRW-PYTH",
-      "KRW-STRAX",
       "KRW-SUI",
-      "KRW-KAT",
-      "KRW-ADA",
+      "KRW-STRAX",
       "KRW-JTO",
+      "KRW-ADA",
+      "KRW-KAT",
       "KRW-ZETA",
       "KRW-ENA",
       "KRW-PRL"
     ],
     "seed": "30만원 소액 모드"
   },
-  "last_update": "18:31:36",
+  "last_update": "18:38:47",
   "daily_loss": 0,
   "loss_date": "2026-06-12",
   "positions": {
     "KRW-BTC": {
       "entry_price": 94315855.00263037,
       "qty": 0.00477119,
-      "current": 95804000.0
+      "current": 95895000.0
     },
     "KRW-SOON": {
       "entry_price": 255.62368421,
@@ -120,7 +120,7 @@
   },
   "peak_tracker": {
     "KRW-BTC": {
-      "peak_rate": 0.016923400602423817,
+      "peak_rate": 0.017761011627609315,
       "stage": 0,
       "remain_qty": 0.00477119,
       "buy2_done": true,
