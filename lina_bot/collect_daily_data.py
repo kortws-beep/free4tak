@@ -13,14 +13,21 @@ import re
 import time
 import sqlite3
 from datetime import datetime, timedelta
-from dotenv import load_dotenv
-from kis_api import KisAPI
+from dotenv import load_dotenv, find_dotenv  # 💡 find_dotenv 추가
 
-# ── 환경변수 & 경로 ────────────────────────────────────────────
-load_dotenv(dotenv_path=os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"), override=True)
+# ── 환경변수 & 경로 (대장님 전용 stock_bot .env 자동 연동) ──────
+load_dotenv(find_dotenv(), override=True)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH  = os.path.join(BASE_DIR, "kr_theme_finance.db")
+
+# ── 💡 한투 API 임포트 수정 (신형 클래스명 반영) ──────────────────
+# sbot2.py와 동일하게 kis_api 파일에서 KoreaInvestmentAPI를 가져옵니다.
+try:
+    from kis_api import KoreaInvestmentAPI as KisAPI
+except ImportError:
+    # 혹시 모를 구형 명칭 백업용 방어 코드
+    from kis_api import KisAPI
 
 
 # ── 종목명 파싱 ────────────────────────────────────────────────

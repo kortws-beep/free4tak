@@ -1,0 +1,1820 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>영암9 주간 리뷰 — 2026-06-12</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700;900&family=JetBrains+Mono:wght@400;700&display=swap');
+
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --surface2: #21262d;
+    --border: #30363d;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --positive: #26a69a;
+    --negative: #ef5350;
+    --accent: #f0a500;
+    --best: #1a2a1a;
+    --best-border: #26a69a;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Noto Sans KR', sans-serif;
+    min-height: 100vh;
+    padding: 32px 24px;
+  }
+
+  .header {
+    text-align: center;
+    margin-bottom: 48px;
+    padding-bottom: 32px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .header-label {
+    font-size: 12px;
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    color: var(--accent);
+    font-family: 'JetBrains Mono', monospace;
+    margin-bottom: 12px;
+  }
+
+  .header h1 {
+    font-size: 36px;
+    font-weight: 900;
+    letter-spacing: -1px;
+    margin-bottom: 8px;
+  }
+
+  .header-date {
+    color: var(--muted);
+    font-size: 14px;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .section-title {
+    font-size: 13px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 20px;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  /* 카드 그리드 */
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 20px;
+    margin-bottom: 48px;
+  }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    transition: transform 0.2s;
+  }
+
+  .card:hover { transform: translateY(-2px); }
+
+  .card-best {
+    background: var(--best);
+    border-color: var(--best-border);
+    box-shadow: 0 0 24px rgba(38,166,154,0.15);
+  }
+
+  .card-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+
+  .card-header h3 {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text);
+  }
+
+  .badge {
+    font-size: 11px;
+    background: var(--positive);
+    color: #000;
+    padding: 2px 8px;
+    border-radius: 20px;
+    font-weight: 700;
+  }
+
+  .big-return {
+    font-size: 42px;
+    font-weight: 900;
+    font-family: 'JetBrains Mono', monospace;
+    letter-spacing: -2px;
+    line-height: 1;
+    margin-bottom: 6px;
+  }
+
+  .pnl {
+    font-size: 13px;
+    font-family: 'JetBrains Mono', monospace;
+    margin-bottom: 20px;
+    opacity: 0.8;
+  }
+
+  .positive { color: var(--positive); }
+  .negative { color: var(--negative); }
+  .neutral  { color: var(--muted); }
+
+  .metrics-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  .metric { background: var(--surface2); border-radius: 8px; padding: 10px 12px; }
+  .metric-label { font-size: 10px; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 4px; }
+  .metric-value { font-size: 16px; font-weight: 700; font-family: 'JetBrains Mono', monospace; }
+
+  /* 승/패 바 */
+  .win-loss-bar {
+    display: flex;
+    height: 28px;
+    border-radius: 6px;
+    overflow: hidden;
+    font-size: 11px;
+    font-weight: 700;
+  }
+  .wl-win {
+    background: var(--positive);
+    color: #000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 30px;
+  }
+  .wl-loss {
+    background: var(--negative);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: 1;
+    min-width: 30px;
+  }
+
+  /* 비교 테이블 */
+  .table-wrap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+    margin-bottom: 48px;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+  }
+
+  thead { background: var(--surface2); }
+
+  th {
+    padding: 14px 16px;
+    text-align: right;
+    color: var(--muted);
+    font-size: 11px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    font-weight: 500;
+  }
+  th:first-child { text-align: left; }
+
+  td {
+    padding: 14px 16px;
+    text-align: right;
+    border-top: 1px solid var(--border);
+  }
+  td:first-child { text-align: left; font-family: 'Noto Sans KR', sans-serif; }
+
+  tr:hover td { background: var(--surface2); }
+  .best-row td { background: var(--best); }
+  .best-row:hover td { background: #1e3a1e; }
+
+  /* 조치 카드 */
+  .action-card {
+    border-radius: 12px;
+    padding: 24px 28px;
+    margin-bottom: 32px;
+    font-size: 15px;
+    line-height: 1.6;
+  }
+  .action-good    { background: #0d2818; border: 1px solid #26a69a; }
+  .action-warn    { background: #2a1f00; border: 1px solid #f0a500; }
+  .action-bad     { background: #2a0d0d; border: 1px solid #ef5350; }
+  .action-neutral { background: var(--surface); border: 1px solid var(--border); }
+
+  .footer {
+    text-align: center;
+    color: var(--muted);
+    font-size: 12px;
+    font-family: 'JetBrains Mono', monospace;
+    margin-top: 48px;
+    padding-top: 24px;
+    border-top: 1px solid var(--border);
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-label">Weekly Review</div>
+  <h1>영암9 전략 리포트</h1>
+  <div class="header-date">2026-06-12 · 백테스트 기준일 2025-08-01 ~</div>
+</div>
+
+<div class="section-title">시나리오별 성과</div>
+<div class="cards">
+
+        <div class="card ">
+            <div class="card-header">
+                <h3>기본(임계치60,max=5)</h3>
+                
+            </div>
+            <div class="big-return positive">
+                +26.38%
+            </div>
+            <div class="pnl positive">
+                순손익 +1,332,702원
+            </div>
+            <div class="metrics-grid">
+                <div class="metric">
+                    <div class="metric-label">승률</div>
+                    <div class="metric-value positive">+52.39%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">MDD</div>
+                    <div class="metric-value negative">-3.71%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">샤프</div>
+                    <div class="metric-value positive">+1.59</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">PF</div>
+                    <div class="metric-value positive">1.50</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">평균익절</div>
+                    <div class="metric-value positive">+6.38%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">평균손절</div>
+                    <div class="metric-value negative">-4.94%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">거래수</div>
+                    <div class="metric-value neutral">397건</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">최대연속손절</div>
+                    <div class="metric-value negative">8건</div>
+                </div>
+            </div>
+            <div class="win-loss-bar">
+                <div class="wl-win" style="width:52%">
+                    승 208
+                </div>
+                <div class="wl-loss" style="width:48%">
+                    패 189
+                </div>
+            </div>
+        </div>
+        <div class="card ">
+            <div class="card-header">
+                <h3>시간청산 3일 적용</h3>
+                
+            </div>
+            <div class="big-return positive">
+                +0.95%
+            </div>
+            <div class="pnl positive">
+                순손익 +68,744원
+            </div>
+            <div class="metrics-grid">
+                <div class="metric">
+                    <div class="metric-label">승률</div>
+                    <div class="metric-value positive">+50.32%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">MDD</div>
+                    <div class="metric-value negative">-10.94%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">샤프</div>
+                    <div class="metric-value positive">+0.11</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">PF</div>
+                    <div class="metric-value positive">1.02</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">평균익절</div>
+                    <div class="metric-value positive">+4.23%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">평균손절</div>
+                    <div class="metric-value negative">-3.50%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">거래수</div>
+                    <div class="metric-value neutral">616건</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">최대연속손절</div>
+                    <div class="metric-value negative">10건</div>
+                </div>
+            </div>
+            <div class="win-loss-bar">
+                <div class="wl-win" style="width:50%">
+                    승 310
+                </div>
+                <div class="wl-loss" style="width:50%">
+                    패 306
+                </div>
+            </div>
+        </div>
+        <div class="card ">
+            <div class="card-header">
+                <h3>시간청산 5일 적용</h3>
+                
+            </div>
+            <div class="big-return positive">
+                +9.54%
+            </div>
+            <div class="pnl positive">
+                순손익 +497,457원
+            </div>
+            <div class="metrics-grid">
+                <div class="metric">
+                    <div class="metric-label">승률</div>
+                    <div class="metric-value positive">+51.74%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">MDD</div>
+                    <div class="metric-value negative">-11.01%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">샤프</div>
+                    <div class="metric-value positive">+0.53</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">PF</div>
+                    <div class="metric-value positive">1.13</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">평균익절</div>
+                    <div class="metric-value positive">+4.81%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">평균손절</div>
+                    <div class="metric-value negative">-4.18%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">거래수</div>
+                    <div class="metric-value neutral">547건</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">최대연속손절</div>
+                    <div class="metric-value negative">8건</div>
+                </div>
+            </div>
+            <div class="win-loss-bar">
+                <div class="wl-win" style="width:52%">
+                    승 283
+                </div>
+                <div class="wl-loss" style="width:48%">
+                    패 264
+                </div>
+            </div>
+        </div>
+        <div class="card ">
+            <div class="card-header">
+                <h3>보수적(임계치70,max=5)</h3>
+                
+            </div>
+            <div class="big-return positive">
+                +16.20%
+            </div>
+            <div class="pnl positive">
+                순손익 +822,566원
+            </div>
+            <div class="metrics-grid">
+                <div class="metric">
+                    <div class="metric-label">승률</div>
+                    <div class="metric-value positive">+50.13%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">MDD</div>
+                    <div class="metric-value negative">-4.85%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">샤프</div>
+                    <div class="metric-value positive">+1.00</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">PF</div>
+                    <div class="metric-value positive">1.30</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">평균익절</div>
+                    <div class="metric-value positive">+6.29%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">평균손절</div>
+                    <div class="metric-value negative">-4.99%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">거래수</div>
+                    <div class="metric-value neutral">377건</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">최대연속손절</div>
+                    <div class="metric-value negative">8건</div>
+                </div>
+            </div>
+            <div class="win-loss-bar">
+                <div class="wl-win" style="width:50%">
+                    승 189
+                </div>
+                <div class="wl-loss" style="width:50%">
+                    패 188
+                </div>
+            </div>
+        </div>
+        <div class="card ">
+            <div class="card-header">
+                <h3>공격적(max=8,임계치60)</h3>
+                
+            </div>
+            <div class="big-return positive">
+                +27.14%
+            </div>
+            <div class="pnl positive">
+                순손익 +1,377,271원
+            </div>
+            <div class="metrics-grid">
+                <div class="metric">
+                    <div class="metric-label">승률</div>
+                    <div class="metric-value positive">+50.81%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">MDD</div>
+                    <div class="metric-value negative">-10.86%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">샤프</div>
+                    <div class="metric-value positive">+1.16</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">PF</div>
+                    <div class="metric-value positive">1.28</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">평균익절</div>
+                    <div class="metric-value positive">+6.38%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">평균손절</div>
+                    <div class="metric-value negative">-5.11%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">거래수</div>
+                    <div class="metric-value neutral">616건</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">최대연속손절</div>
+                    <div class="metric-value negative">11건</div>
+                </div>
+            </div>
+            <div class="win-loss-bar">
+                <div class="wl-win" style="width:51%">
+                    승 313
+                </div>
+                <div class="wl-loss" style="width:49%">
+                    패 303
+                </div>
+            </div>
+        </div>
+        <div class="card ">
+            <div class="card-header">
+                <h3>손절-5%+max5</h3>
+                
+            </div>
+            <div class="big-return positive">
+                +26.38%
+            </div>
+            <div class="pnl positive">
+                순손익 +1,332,702원
+            </div>
+            <div class="metrics-grid">
+                <div class="metric">
+                    <div class="metric-label">승률</div>
+                    <div class="metric-value positive">+52.39%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">MDD</div>
+                    <div class="metric-value negative">-3.71%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">샤프</div>
+                    <div class="metric-value positive">+1.59</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">PF</div>
+                    <div class="metric-value positive">1.50</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">평균익절</div>
+                    <div class="metric-value positive">+6.38%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">평균손절</div>
+                    <div class="metric-value negative">-4.94%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">거래수</div>
+                    <div class="metric-value neutral">397건</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">최대연속손절</div>
+                    <div class="metric-value negative">8건</div>
+                </div>
+            </div>
+            <div class="win-loss-bar">
+                <div class="wl-win" style="width:52%">
+                    승 208
+                </div>
+                <div class="wl-loss" style="width:48%">
+                    패 189
+                </div>
+            </div>
+        </div>
+        <div class="card ">
+            <div class="card-header">
+                <h3>손절-7%+max5(현재)</h3>
+                
+            </div>
+            <div class="big-return positive">
+                +28.81%
+            </div>
+            <div class="pnl positive">
+                순손익 +1,453,653원
+            </div>
+            <div class="metrics-grid">
+                <div class="metric">
+                    <div class="metric-label">승률</div>
+                    <div class="metric-value positive">+54.01%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">MDD</div>
+                    <div class="metric-value negative">-6.11%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">샤프</div>
+                    <div class="metric-value positive">+1.69</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">PF</div>
+                    <div class="metric-value positive">1.57</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">평균익절</div>
+                    <div class="metric-value positive">+6.39%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">평균손절</div>
+                    <div class="metric-value negative">-4.89%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">거래수</div>
+                    <div class="metric-value neutral">387건</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">최대연속손절</div>
+                    <div class="metric-value negative">8건</div>
+                </div>
+            </div>
+            <div class="win-loss-bar">
+                <div class="wl-win" style="width:54%">
+                    승 209
+                </div>
+                <div class="wl-loss" style="width:46%">
+                    패 178
+                </div>
+            </div>
+        </div>
+        <div class="card ">
+            <div class="card-header">
+                <h3>손절-10%+max5</h3>
+                
+            </div>
+            <div class="big-return positive">
+                +31.42%
+            </div>
+            <div class="pnl positive">
+                순손익 +1,584,208원
+            </div>
+            <div class="metrics-grid">
+                <div class="metric">
+                    <div class="metric-label">승률</div>
+                    <div class="metric-value positive">+54.26%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">MDD</div>
+                    <div class="metric-value negative">-4.68%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">샤프</div>
+                    <div class="metric-value positive">+1.89</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">PF</div>
+                    <div class="metric-value positive">1.65</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">평균익절</div>
+                    <div class="metric-value positive">+6.38%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">평균손절</div>
+                    <div class="metric-value negative">-4.73%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">거래수</div>
+                    <div class="metric-value neutral">387건</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">최대연속손절</div>
+                    <div class="metric-value negative">8건</div>
+                </div>
+            </div>
+            <div class="win-loss-bar">
+                <div class="wl-win" style="width:54%">
+                    승 210
+                </div>
+                <div class="wl-loss" style="width:46%">
+                    패 177
+                </div>
+            </div>
+        </div>
+        <div class="card ">
+            <div class="card-header">
+                <h3>익절축소(1차3%,2차6%,3차10%)+손절7%</h3>
+                
+            </div>
+            <div class="big-return positive">
+                +23.96%
+            </div>
+            <div class="pnl positive">
+                순손익 +1,219,390원
+            </div>
+            <div class="metrics-grid">
+                <div class="metric">
+                    <div class="metric-label">승률</div>
+                    <div class="metric-value positive">+61.63%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">MDD</div>
+                    <div class="metric-value negative">-8.04%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">샤프</div>
+                    <div class="metric-value positive">+1.20</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">PF</div>
+                    <div class="metric-value positive">1.33</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">평균익절</div>
+                    <div class="metric-value positive">+4.63%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">평균손절</div>
+                    <div class="metric-value negative">-4.86%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">거래수</div>
+                    <div class="metric-value neutral">576건</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">최대연속손절</div>
+                    <div class="metric-value negative">9건</div>
+                </div>
+            </div>
+            <div class="win-loss-bar">
+                <div class="wl-win" style="width:62%">
+                    승 355
+                </div>
+                <div class="wl-loss" style="width:38%">
+                    패 221
+                </div>
+            </div>
+        </div>
+        <div class="card ">
+            <div class="card-header">
+                <h3>2단계익절(1차5%50%,2차10%50%)+손절7%</h3>
+                
+            </div>
+            <div class="big-return positive">
+                +28.81%
+            </div>
+            <div class="pnl positive">
+                순손익 +1,453,653원
+            </div>
+            <div class="metrics-grid">
+                <div class="metric">
+                    <div class="metric-label">승률</div>
+                    <div class="metric-value positive">+54.01%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">MDD</div>
+                    <div class="metric-value negative">-6.11%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">샤프</div>
+                    <div class="metric-value positive">+1.69</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">PF</div>
+                    <div class="metric-value positive">1.57</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">평균익절</div>
+                    <div class="metric-value positive">+6.39%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">평균손절</div>
+                    <div class="metric-value negative">-4.89%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">거래수</div>
+                    <div class="metric-value neutral">387건</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">최대연속손절</div>
+                    <div class="metric-value negative">8건</div>
+                </div>
+            </div>
+            <div class="win-loss-bar">
+                <div class="wl-win" style="width:54%">
+                    승 209
+                </div>
+                <div class="wl-loss" style="width:46%">
+                    패 178
+                </div>
+            </div>
+        </div>
+        <div class="card ">
+            <div class="card-header">
+                <h3>트레일링전량(5%진입,3%트레일)+손절7%</h3>
+                
+            </div>
+            <div class="big-return positive">
+                +28.81%
+            </div>
+            <div class="pnl positive">
+                순손익 +1,453,653원
+            </div>
+            <div class="metrics-grid">
+                <div class="metric">
+                    <div class="metric-label">승률</div>
+                    <div class="metric-value positive">+54.01%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">MDD</div>
+                    <div class="metric-value negative">-6.11%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">샤프</div>
+                    <div class="metric-value positive">+1.69</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">PF</div>
+                    <div class="metric-value positive">1.57</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">평균익절</div>
+                    <div class="metric-value positive">+6.39%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">평균손절</div>
+                    <div class="metric-value negative">-4.89%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">거래수</div>
+                    <div class="metric-value neutral">387건</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">최대연속손절</div>
+                    <div class="metric-value negative">8건</div>
+                </div>
+            </div>
+            <div class="win-loss-bar">
+                <div class="wl-win" style="width:54%">
+                    승 209
+                </div>
+                <div class="wl-loss" style="width:46%">
+                    패 178
+                </div>
+            </div>
+        </div>
+        <div class="card ">
+            <div class="card-header">
+                <h3>2단계익절(1차5%50%,2차10%50%)+손절10%</h3>
+                
+            </div>
+            <div class="big-return positive">
+                +31.42%
+            </div>
+            <div class="pnl positive">
+                순손익 +1,584,208원
+            </div>
+            <div class="metrics-grid">
+                <div class="metric">
+                    <div class="metric-label">승률</div>
+                    <div class="metric-value positive">+54.26%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">MDD</div>
+                    <div class="metric-value negative">-4.68%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">샤프</div>
+                    <div class="metric-value positive">+1.89</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">PF</div>
+                    <div class="metric-value positive">1.65</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">평균익절</div>
+                    <div class="metric-value positive">+6.38%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">평균손절</div>
+                    <div class="metric-value negative">-4.73%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">거래수</div>
+                    <div class="metric-value neutral">387건</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">최대연속손절</div>
+                    <div class="metric-value negative">8건</div>
+                </div>
+            </div>
+            <div class="win-loss-bar">
+                <div class="wl-win" style="width:54%">
+                    승 210
+                </div>
+                <div class="wl-loss" style="width:46%">
+                    패 177
+                </div>
+            </div>
+        </div>
+        <div class="card ">
+            <div class="card-header">
+                <h3>익절축소(1차3%,2차6%,3차10%)+손절10%</h3>
+                
+            </div>
+            <div class="big-return positive">
+                +28.77%
+            </div>
+            <div class="pnl positive">
+                순손익 +1,459,800원
+            </div>
+            <div class="metrics-grid">
+                <div class="metric">
+                    <div class="metric-label">승률</div>
+                    <div class="metric-value positive">+62.15%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">MDD</div>
+                    <div class="metric-value negative">-7.69%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">샤프</div>
+                    <div class="metric-value positive">+1.46</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">PF</div>
+                    <div class="metric-value positive">1.41</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">평균익절</div>
+                    <div class="metric-value positive">+4.62%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">평균손절</div>
+                    <div class="metric-value negative">-4.75%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">거래수</div>
+                    <div class="metric-value neutral">576건</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">최대연속손절</div>
+                    <div class="metric-value negative">9건</div>
+                </div>
+            </div>
+            <div class="win-loss-bar">
+                <div class="wl-win" style="width:62%">
+                    승 358
+                </div>
+                <div class="wl-loss" style="width:38%">
+                    패 218
+                </div>
+            </div>
+        </div>
+        <div class="card ">
+            <div class="card-header">
+                <h3>랜덤진입(현재손절-10%)</h3>
+                
+            </div>
+            <div class="big-return positive">
+                +37.97%
+            </div>
+            <div class="pnl positive">
+                순손익 +1,912,759원
+            </div>
+            <div class="metrics-grid">
+                <div class="metric">
+                    <div class="metric-label">승률</div>
+                    <div class="metric-value positive">+53.94%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">MDD</div>
+                    <div class="metric-value negative">-9.16%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">샤프</div>
+                    <div class="metric-value positive">+1.89</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">PF</div>
+                    <div class="metric-value positive">1.72</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">평균익절</div>
+                    <div class="metric-value positive">+6.49%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">평균손절</div>
+                    <div class="metric-value negative">-4.88%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">거래수</div>
+                    <div class="metric-value neutral">406건</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">최대연속손절</div>
+                    <div class="metric-value negative">9건</div>
+                </div>
+            </div>
+            <div class="win-loss-bar">
+                <div class="wl-win" style="width:54%">
+                    승 219
+                </div>
+                <div class="wl-loss" style="width:46%">
+                    패 187
+                </div>
+            </div>
+        </div>
+        <div class="card ">
+            <div class="card-header">
+                <h3>랜덤진입+시간청산5일</h3>
+                
+            </div>
+            <div class="big-return positive">
+                +42.53%
+            </div>
+            <div class="pnl positive">
+                순손익 +2,147,178원
+            </div>
+            <div class="metrics-grid">
+                <div class="metric">
+                    <div class="metric-label">승률</div>
+                    <div class="metric-value positive">+54.11%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">MDD</div>
+                    <div class="metric-value negative">-4.72%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">샤프</div>
+                    <div class="metric-value positive">+2.12</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">PF</div>
+                    <div class="metric-value positive">1.75</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">평균익절</div>
+                    <div class="metric-value positive">+5.18%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">평균손절</div>
+                    <div class="metric-value negative">-3.70%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">거래수</div>
+                    <div class="metric-value neutral">560건</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">최대연속손절</div>
+                    <div class="metric-value negative">12건</div>
+                </div>
+            </div>
+            <div class="win-loss-bar">
+                <div class="wl-win" style="width:54%">
+                    승 303
+                </div>
+                <div class="wl-loss" style="width:46%">
+                    패 257
+                </div>
+            </div>
+        </div>
+        <div class="card ">
+            <div class="card-header">
+                <h3>랜덤진입+타이트손절(-5%)</h3>
+                
+            </div>
+            <div class="big-return positive">
+                +25.48%
+            </div>
+            <div class="pnl positive">
+                순손익 +1,287,512원
+            </div>
+            <div class="metrics-grid">
+                <div class="metric">
+                    <div class="metric-label">승률</div>
+                    <div class="metric-value positive">+51.75%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">MDD</div>
+                    <div class="metric-value negative">-5.30%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">샤프</div>
+                    <div class="metric-value positive">+1.63</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">PF</div>
+                    <div class="metric-value positive">1.47</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">평균익절</div>
+                    <div class="metric-value positive">+6.35%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">평균손절</div>
+                    <div class="metric-value negative">-5.04%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">거래수</div>
+                    <div class="metric-value neutral">429건</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">최대연속손절</div>
+                    <div class="metric-value negative">10건</div>
+                </div>
+            </div>
+            <div class="win-loss-bar">
+                <div class="wl-win" style="width:52%">
+                    승 222
+                </div>
+                <div class="wl-loss" style="width:48%">
+                    패 207
+                </div>
+            </div>
+        </div>
+        <div class="card ">
+            <div class="card-header">
+                <h3>랜덤진입(현재손절)</h3>
+                
+            </div>
+            <div class="big-return positive">
+                +25.73%
+            </div>
+            <div class="pnl positive">
+                순손익 +1,299,276원
+            </div>
+            <div class="metrics-grid">
+                <div class="metric">
+                    <div class="metric-label">승률</div>
+                    <div class="metric-value positive">+51.31%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">MDD</div>
+                    <div class="metric-value negative">-6.16%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">샤프</div>
+                    <div class="metric-value positive">+1.62</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">PF</div>
+                    <div class="metric-value positive">1.45</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">평균익절</div>
+                    <div class="metric-value positive">+6.68%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">평균손절</div>
+                    <div class="metric-value negative">-4.85%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">거래수</div>
+                    <div class="metric-value neutral">419건</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">최대연속손절</div>
+                    <div class="metric-value negative">10건</div>
+                </div>
+            </div>
+            <div class="win-loss-bar">
+                <div class="wl-win" style="width:51%">
+                    승 215
+                </div>
+                <div class="wl-loss" style="width:49%">
+                    패 204
+                </div>
+            </div>
+        </div>
+        <div class="card ">
+            <div class="card-header">
+                <h3>랜덤진입+시간청산5일</h3>
+                
+            </div>
+            <div class="big-return positive">
+                +25.32%
+            </div>
+            <div class="pnl positive">
+                순손익 +1,285,221원
+            </div>
+            <div class="metrics-grid">
+                <div class="metric">
+                    <div class="metric-label">승률</div>
+                    <div class="metric-value positive">+50.72%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">MDD</div>
+                    <div class="metric-value negative">-8.20%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">샤프</div>
+                    <div class="metric-value positive">+1.45</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">PF</div>
+                    <div class="metric-value positive">1.43</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">평균익절</div>
+                    <div class="metric-value positive">+4.85%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">평균손절</div>
+                    <div class="metric-value negative">-3.72%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">거래수</div>
+                    <div class="metric-value neutral">558건</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">최대연속손절</div>
+                    <div class="metric-value negative">15건</div>
+                </div>
+            </div>
+            <div class="win-loss-bar">
+                <div class="wl-win" style="width:51%">
+                    승 283
+                </div>
+                <div class="wl-loss" style="width:49%">
+                    패 275
+                </div>
+            </div>
+        </div>
+        <div class="card ">
+            <div class="card-header">
+                <h3>랜덤진입+타이트손절(-5%)</h3>
+                
+            </div>
+            <div class="big-return positive">
+                +4.04%
+            </div>
+            <div class="pnl positive">
+                순손익 +214,023원
+            </div>
+            <div class="metrics-grid">
+                <div class="metric">
+                    <div class="metric-label">승률</div>
+                    <div class="metric-value negative">+49.14%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">MDD</div>
+                    <div class="metric-value negative">-11.46%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">샤프</div>
+                    <div class="metric-value positive">+0.26</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">PF</div>
+                    <div class="metric-value positive">1.06</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">평균익절</div>
+                    <div class="metric-value positive">+6.34%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">평균손절</div>
+                    <div class="metric-value negative">-5.17%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">거래수</div>
+                    <div class="metric-value neutral">405건</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">최대연속손절</div>
+                    <div class="metric-value negative">11건</div>
+                </div>
+            </div>
+            <div class="win-loss-bar">
+                <div class="wl-win" style="width:49%">
+                    승 199
+                </div>
+                <div class="wl-loss" style="width:51%">
+                    패 206
+                </div>
+            </div>
+        </div>
+        <div class="card card-best">
+            <div class="card-header">
+                <h3>랜덤진입(손절-10%)</h3>
+                <span class="badge">⭐ 최우수</span>
+            </div>
+            <div class="big-return positive">
+                +43.96%
+            </div>
+            <div class="pnl positive">
+                순손익 +2,209,649원
+            </div>
+            <div class="metrics-grid">
+                <div class="metric">
+                    <div class="metric-label">승률</div>
+                    <div class="metric-value positive">+54.18%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">MDD</div>
+                    <div class="metric-value negative">-3.14%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">샤프</div>
+                    <div class="metric-value positive">+2.48</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">PF</div>
+                    <div class="metric-value positive">1.93</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">평균익절</div>
+                    <div class="metric-value positive">+6.57%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">평균손절</div>
+                    <div class="metric-value negative">-5.06%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">거래수</div>
+                    <div class="metric-value neutral">419건</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">최대연속손절</div>
+                    <div class="metric-value negative">9건</div>
+                </div>
+            </div>
+            <div class="win-loss-bar">
+                <div class="wl-win" style="width:54%">
+                    승 227
+                </div>
+                <div class="wl-loss" style="width:46%">
+                    패 192
+                </div>
+            </div>
+        </div>
+        <div class="card ">
+            <div class="card-header">
+                <h3>랜덤진입+시간청산5일</h3>
+                
+            </div>
+            <div class="big-return positive">
+                +32.23%
+            </div>
+            <div class="pnl positive">
+                순손익 +1,629,699원
+            </div>
+            <div class="metrics-grid">
+                <div class="metric">
+                    <div class="metric-label">승률</div>
+                    <div class="metric-value positive">+52.37%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">MDD</div>
+                    <div class="metric-value negative">-4.43%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">샤프</div>
+                    <div class="metric-value positive">+1.74</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">PF</div>
+                    <div class="metric-value positive">1.60</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">평균익절</div>
+                    <div class="metric-value positive">+4.78%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">평균손절</div>
+                    <div class="metric-value negative">-3.77%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">거래수</div>
+                    <div class="metric-value neutral">548건</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">최대연속손절</div>
+                    <div class="metric-value negative">10건</div>
+                </div>
+            </div>
+            <div class="win-loss-bar">
+                <div class="wl-win" style="width:52%">
+                    승 287
+                </div>
+                <div class="wl-loss" style="width:48%">
+                    패 261
+                </div>
+            </div>
+        </div>
+        <div class="card ">
+            <div class="card-header">
+                <h3>랜덤진입+타이트손절(-5%)</h3>
+                
+            </div>
+            <div class="big-return positive">
+                +8.01%
+            </div>
+            <div class="pnl positive">
+                순손익 +411,845원
+            </div>
+            <div class="metrics-grid">
+                <div class="metric">
+                    <div class="metric-label">승률</div>
+                    <div class="metric-value positive">+50.93%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">MDD</div>
+                    <div class="metric-value negative">-9.07%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">샤프</div>
+                    <div class="metric-value positive">+0.52</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">PF</div>
+                    <div class="metric-value positive">1.14</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">평균익절</div>
+                    <div class="metric-value positive">+6.32%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">평균손절</div>
+                    <div class="metric-value negative">-4.94%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">거래수</div>
+                    <div class="metric-value neutral">375건</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">최대연속손절</div>
+                    <div class="metric-value negative">10건</div>
+                </div>
+            </div>
+            <div class="win-loss-bar">
+                <div class="wl-win" style="width:51%">
+                    승 191
+                </div>
+                <div class="wl-loss" style="width:49%">
+                    패 184
+                </div>
+            </div>
+        </div>
+        <div class="card ">
+            <div class="card-header">
+                <h3>하락장만+반등2회매수+익절축소</h3>
+                
+            </div>
+            <div class="big-return positive">
+                +13.47%
+            </div>
+            <div class="pnl positive">
+                순손익 +672,244원
+            </div>
+            <div class="metrics-grid">
+                <div class="metric">
+                    <div class="metric-label">승률</div>
+                    <div class="metric-value positive">+50.00%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">MDD</div>
+                    <div class="metric-value negative">-7.63%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">샤프</div>
+                    <div class="metric-value positive">+1.28</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">PF</div>
+                    <div class="metric-value positive">2.98</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">평균익절</div>
+                    <div class="metric-value positive">+29.20%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">평균손절</div>
+                    <div class="metric-value negative">-6.97%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">거래수</div>
+                    <div class="metric-value neutral">26건</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">최대연속손절</div>
+                    <div class="metric-value negative">7건</div>
+                </div>
+            </div>
+            <div class="win-loss-bar">
+                <div class="wl-win" style="width:50%">
+                    승 13
+                </div>
+                <div class="wl-loss" style="width:50%">
+                    패 13
+                </div>
+            </div>
+        </div>
+        <div class="card ">
+            <div class="card-header">
+                <h3>반등2회매수+익절축소+손절7%(전체장)</h3>
+                
+            </div>
+            <div class="big-return positive">
+                +19.68%
+            </div>
+            <div class="pnl positive">
+                순손익 +1,006,185원
+            </div>
+            <div class="metrics-grid">
+                <div class="metric">
+                    <div class="metric-label">승률</div>
+                    <div class="metric-value positive">+60.57%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">MDD</div>
+                    <div class="metric-value negative">-8.04%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">샤프</div>
+                    <div class="metric-value positive">+1.00</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">PF</div>
+                    <div class="metric-value positive">1.25</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">평균익절</div>
+                    <div class="metric-value positive">+4.61%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">평균손절</div>
+                    <div class="metric-value negative">-4.85%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">거래수</div>
+                    <div class="metric-value neutral">596건</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">최대연속손절</div>
+                    <div class="metric-value negative">9건</div>
+                </div>
+            </div>
+            <div class="win-loss-bar">
+                <div class="wl-win" style="width:61%">
+                    승 361
+                </div>
+                <div class="wl-loss" style="width:39%">
+                    패 235
+                </div>
+            </div>
+        </div>
+</div>
+
+<div class="section-title">비교 테이블</div>
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>시나리오</th>
+        <th>수익률</th>
+        <th>CAGR</th>
+        <th>승률</th>
+        <th>MDD</th>
+        <th>샤프</th>
+        <th>PF</th>
+        <th>거래수</th>
+      </tr>
+    </thead>
+    <tbody>
+      
+            <tr >
+                <td>기본(임계치60,max=5)</td>
+                <td style="color:#26a69a;font-weight:700">+26.38%</td>
+                <td style="color:#26a69a">+15.29%</td>
+                <td style="color:#26a69a">+52.39%</td>
+                <td style="color:#ef5350">-3.71%</td>
+                <td style="color:#26a69a">+1.59</td>
+                <td style="color:#26a69a">1.50</td>
+                <td>397</td>
+            </tr>
+            <tr >
+                <td>시간청산 3일 적용</td>
+                <td style="color:#26a69a;font-weight:700">+0.95%</td>
+                <td style="color:#26a69a">+0.58%</td>
+                <td style="color:#26a69a">+50.32%</td>
+                <td style="color:#ef5350">-10.94%</td>
+                <td style="color:#26a69a">+0.11</td>
+                <td style="color:#26a69a">1.02</td>
+                <td>616</td>
+            </tr>
+            <tr >
+                <td>시간청산 5일 적용</td>
+                <td style="color:#26a69a;font-weight:700">+9.54%</td>
+                <td style="color:#26a69a">+5.69%</td>
+                <td style="color:#26a69a">+51.74%</td>
+                <td style="color:#ef5350">-11.01%</td>
+                <td style="color:#26a69a">+0.53</td>
+                <td style="color:#26a69a">1.13</td>
+                <td>547</td>
+            </tr>
+            <tr >
+                <td>보수적(임계치70,max=5)</td>
+                <td style="color:#26a69a;font-weight:700">+16.20%</td>
+                <td style="color:#26a69a">+9.55%</td>
+                <td style="color:#26a69a">+50.13%</td>
+                <td style="color:#ef5350">-4.85%</td>
+                <td style="color:#26a69a">+1.00</td>
+                <td style="color:#26a69a">1.30</td>
+                <td>377</td>
+            </tr>
+            <tr >
+                <td>공격적(max=8,임계치60)</td>
+                <td style="color:#26a69a;font-weight:700">+27.14%</td>
+                <td style="color:#26a69a">+15.71%</td>
+                <td style="color:#26a69a">+50.81%</td>
+                <td style="color:#ef5350">-10.86%</td>
+                <td style="color:#26a69a">+1.16</td>
+                <td style="color:#26a69a">1.28</td>
+                <td>616</td>
+            </tr>
+            <tr >
+                <td>손절-5%+max5</td>
+                <td style="color:#26a69a;font-weight:700">+26.38%</td>
+                <td style="color:#26a69a">+15.29%</td>
+                <td style="color:#26a69a">+52.39%</td>
+                <td style="color:#ef5350">-3.71%</td>
+                <td style="color:#26a69a">+1.59</td>
+                <td style="color:#26a69a">1.50</td>
+                <td>397</td>
+            </tr>
+            <tr >
+                <td>손절-7%+max5(현재)</td>
+                <td style="color:#26a69a;font-weight:700">+28.81%</td>
+                <td style="color:#26a69a">+16.63%</td>
+                <td style="color:#26a69a">+54.01%</td>
+                <td style="color:#ef5350">-6.11%</td>
+                <td style="color:#26a69a">+1.69</td>
+                <td style="color:#26a69a">1.57</td>
+                <td>387</td>
+            </tr>
+            <tr >
+                <td>손절-10%+max5</td>
+                <td style="color:#26a69a;font-weight:700">+31.42%</td>
+                <td style="color:#26a69a">+18.06%</td>
+                <td style="color:#26a69a">+54.26%</td>
+                <td style="color:#ef5350">-4.68%</td>
+                <td style="color:#26a69a">+1.89</td>
+                <td style="color:#26a69a">1.65</td>
+                <td>387</td>
+            </tr>
+            <tr >
+                <td>익절축소(1차3%,2차6%,3차10%)+손절7%</td>
+                <td style="color:#26a69a;font-weight:700">+23.96%</td>
+                <td style="color:#26a69a">+13.94%</td>
+                <td style="color:#26a69a">+61.63%</td>
+                <td style="color:#ef5350">-8.04%</td>
+                <td style="color:#26a69a">+1.20</td>
+                <td style="color:#26a69a">1.33</td>
+                <td>576</td>
+            </tr>
+            <tr >
+                <td>2단계익절(1차5%50%,2차10%50%)+손절7%</td>
+                <td style="color:#26a69a;font-weight:700">+28.81%</td>
+                <td style="color:#26a69a">+16.63%</td>
+                <td style="color:#26a69a">+54.01%</td>
+                <td style="color:#ef5350">-6.11%</td>
+                <td style="color:#26a69a">+1.69</td>
+                <td style="color:#26a69a">1.57</td>
+                <td>387</td>
+            </tr>
+            <tr >
+                <td>트레일링전량(5%진입,3%트레일)+손절7%</td>
+                <td style="color:#26a69a;font-weight:700">+28.81%</td>
+                <td style="color:#26a69a">+16.63%</td>
+                <td style="color:#26a69a">+54.01%</td>
+                <td style="color:#ef5350">-6.11%</td>
+                <td style="color:#26a69a">+1.69</td>
+                <td style="color:#26a69a">1.57</td>
+                <td>387</td>
+            </tr>
+            <tr >
+                <td>2단계익절(1차5%50%,2차10%50%)+손절10%</td>
+                <td style="color:#26a69a;font-weight:700">+31.42%</td>
+                <td style="color:#26a69a">+18.06%</td>
+                <td style="color:#26a69a">+54.26%</td>
+                <td style="color:#ef5350">-4.68%</td>
+                <td style="color:#26a69a">+1.89</td>
+                <td style="color:#26a69a">1.65</td>
+                <td>387</td>
+            </tr>
+            <tr >
+                <td>익절축소(1차3%,2차6%,3차10%)+손절10%</td>
+                <td style="color:#26a69a;font-weight:700">+28.77%</td>
+                <td style="color:#26a69a">+16.61%</td>
+                <td style="color:#26a69a">+62.15%</td>
+                <td style="color:#ef5350">-7.69%</td>
+                <td style="color:#26a69a">+1.46</td>
+                <td style="color:#26a69a">1.41</td>
+                <td>576</td>
+            </tr>
+            <tr >
+                <td>랜덤진입(현재손절-10%)</td>
+                <td style="color:#26a69a;font-weight:700">+37.97%</td>
+                <td style="color:#26a69a">+21.60%</td>
+                <td style="color:#26a69a">+53.94%</td>
+                <td style="color:#ef5350">-9.16%</td>
+                <td style="color:#26a69a">+1.89</td>
+                <td style="color:#26a69a">1.72</td>
+                <td>406</td>
+            </tr>
+            <tr >
+                <td>랜덤진입+시간청산5일</td>
+                <td style="color:#26a69a;font-weight:700">+42.53%</td>
+                <td style="color:#26a69a">+24.03%</td>
+                <td style="color:#26a69a">+54.11%</td>
+                <td style="color:#ef5350">-4.72%</td>
+                <td style="color:#26a69a">+2.12</td>
+                <td style="color:#26a69a">1.75</td>
+                <td>560</td>
+            </tr>
+            <tr >
+                <td>랜덤진입+타이트손절(-5%)</td>
+                <td style="color:#26a69a;font-weight:700">+25.48%</td>
+                <td style="color:#26a69a">+14.79%</td>
+                <td style="color:#26a69a">+51.75%</td>
+                <td style="color:#ef5350">-5.30%</td>
+                <td style="color:#26a69a">+1.63</td>
+                <td style="color:#26a69a">1.47</td>
+                <td>429</td>
+            </tr>
+            <tr >
+                <td>랜덤진입(현재손절)</td>
+                <td style="color:#26a69a;font-weight:700">+25.73%</td>
+                <td style="color:#26a69a">+14.93%</td>
+                <td style="color:#26a69a">+51.31%</td>
+                <td style="color:#ef5350">-6.16%</td>
+                <td style="color:#26a69a">+1.62</td>
+                <td style="color:#26a69a">1.45</td>
+                <td>419</td>
+            </tr>
+            <tr >
+                <td>랜덤진입+시간청산5일</td>
+                <td style="color:#26a69a;font-weight:700">+25.32%</td>
+                <td style="color:#26a69a">+14.70%</td>
+                <td style="color:#26a69a">+50.72%</td>
+                <td style="color:#ef5350">-8.20%</td>
+                <td style="color:#26a69a">+1.45</td>
+                <td style="color:#26a69a">1.43</td>
+                <td>558</td>
+            </tr>
+            <tr >
+                <td>랜덤진입+타이트손절(-5%)</td>
+                <td style="color:#26a69a;font-weight:700">+4.04%</td>
+                <td style="color:#26a69a">+2.43%</td>
+                <td style="color:#ef5350">+49.14%</td>
+                <td style="color:#ef5350">-11.46%</td>
+                <td style="color:#26a69a">+0.26</td>
+                <td style="color:#26a69a">1.06</td>
+                <td>405</td>
+            </tr>
+            <tr class="best-row">
+                <td>⭐ 랜덤진입(손절-10%)</td>
+                <td style="color:#26a69a;font-weight:700">+43.96%</td>
+                <td style="color:#26a69a">+24.79%</td>
+                <td style="color:#26a69a">+54.18%</td>
+                <td style="color:#ef5350">-3.14%</td>
+                <td style="color:#26a69a">+2.48</td>
+                <td style="color:#26a69a">1.93</td>
+                <td>419</td>
+            </tr>
+            <tr >
+                <td>랜덤진입+시간청산5일</td>
+                <td style="color:#26a69a;font-weight:700">+32.23%</td>
+                <td style="color:#26a69a">+18.50%</td>
+                <td style="color:#26a69a">+52.37%</td>
+                <td style="color:#ef5350">-4.43%</td>
+                <td style="color:#26a69a">+1.74</td>
+                <td style="color:#26a69a">1.60</td>
+                <td>548</td>
+            </tr>
+            <tr >
+                <td>랜덤진입+타이트손절(-5%)</td>
+                <td style="color:#26a69a;font-weight:700">+8.01%</td>
+                <td style="color:#26a69a">+4.79%</td>
+                <td style="color:#26a69a">+50.93%</td>
+                <td style="color:#ef5350">-9.07%</td>
+                <td style="color:#26a69a">+0.52</td>
+                <td style="color:#26a69a">1.14</td>
+                <td>375</td>
+            </tr>
+            <tr >
+                <td>하락장만+반등2회매수+익절축소</td>
+                <td style="color:#26a69a;font-weight:700">+13.47%</td>
+                <td style="color:#26a69a">+7.98%</td>
+                <td style="color:#26a69a">+50.00%</td>
+                <td style="color:#ef5350">-7.63%</td>
+                <td style="color:#26a69a">+1.28</td>
+                <td style="color:#26a69a">2.98</td>
+                <td>26</td>
+            </tr>
+            <tr >
+                <td>반등2회매수+익절축소+손절7%(전체장)</td>
+                <td style="color:#26a69a;font-weight:700">+19.68%</td>
+                <td style="color:#26a69a">+11.53%</td>
+                <td style="color:#26a69a">+60.57%</td>
+                <td style="color:#ef5350">-8.04%</td>
+                <td style="color:#26a69a">+1.00</td>
+                <td style="color:#26a69a">1.25</td>
+                <td>596</td>
+            </tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="section-title">이번 주 조치</div>
+<div class="action-card action-good">
+  ✅ <strong>현행 유지</strong> — 전략이 잘 작동하고 있습니다.
+</div>
+
+<div class="footer">
+  generated by 영암9 backtest engine · 2026-06-12 23:19
+</div>
+
+</body>
+</html>
