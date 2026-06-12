@@ -91,7 +91,7 @@ SEED_MONEY       = 5_000_000   # 시드머니 500만원
 BASE_BUY_AMT     = 1_500_000   # 1종목 기본 매수금액 150만원
 MAX_POSITIONS    = 4            # 최대 보유 종목
 A_GRADE_RATIO    = 0.7          # A급 상위 70%만 매수
-LOOP_SLEEP       = 60           # 루프 간격 (초)
+LOOP_SLEEP       = 30           # 루프 간격 (초)
 BUY_START_TIME   = "0910"       # 매수 시작
 BUY_END_TIME     = "1520"       # 매수 마감
 SELL_START_TIME  = "0800"       # 프리장부터 매도 체크
@@ -344,6 +344,12 @@ def _write_state(state: dict):
     except Exception as e:
         print(f"⚠️ 상태 저장 오류: {e}")
 
+def _save_cand_date(date: str):
+    """후보 갱신 날짜 상태파일에 저장"""
+    st = _read_state()
+    st["cand_date"] = date
+    _write_state(st)
+
 
 # ============================================================
 # 점수 비례 매수금액 계산
@@ -495,16 +501,33 @@ def get_stock_code(name: str) -> str:
     try:
         db = os.path.join(BASE_DIR, "kr_theme_finance.db")
         conn = sqlite3.connect(db, timeout=5)
+
+        # 1. kr_theme_stocks 에서 조회 (코드 포함된 경우 많음)
+        row = conn.execute("""
+            SELECT DISTINCT stock_name FROM kr_theme_stocks
+            WHERE stock_name LIKE ?
+            LIMIT 1
+        """, (f"%{name}%",)).fetchone()
+
+        if row:
+            m = re.search(r'(\d{6})', row[0])
+            if m:
+                conn.close()
+                return m.group(1)
+
+        # 2. kr_stock_daily_data 에서 폴백
         row = conn.execute("""
             SELECT stock_name FROM kr_stock_daily_data
             WHERE stock_name LIKE ?
             LIMIT 1
         """, (f"%{name}%",)).fetchone()
         conn.close()
+
         if row:
-            m = re.search(r'(\d{6})$', row[0])
+            m = re.search(r'(\d{6})', row[0])
             if m:
                 return m.group(1)
+
     except Exception as e:
         print(f"⚠️ 코드 조회 오류 {name}: {e}")
     return ""
@@ -527,6 +550,7 @@ class Sbo2:
         st = _read_state()
         self.positions  = st.get("positions", {})
         self.sold_today = st.get("sold_today", {})
+        self._cand_date = st.get("cand_date", "")   # 후보 갱신 날짜 복원
         if st.get("sold_today_date") != today_str():
             self.sold_today = {}
 
@@ -543,6 +567,7 @@ class Sbo2:
             "positions":       self.positions,
             "sold_today":      self.sold_today,
             "sold_today_date": today_str(),
+            "cand_date":       getattr(self, "_cand_date", ""),
         })
 
     def _name(self, code: str) -> str:
@@ -567,6 +592,7 @@ class Sbo2:
             self.candidates = get_candidates()
             self._cand_ts   = now
             self._cand_date = today_str()
+            _save_cand_date(self._cand_date)
             print(f"   S급: {sum(1 for c in self.candidates if c['grade']=='S')}개 "
                   f"A급: {sum(1 for c in self.candidates if c['grade']=='A')}개")
 
@@ -591,36 +617,23 @@ class Sbo2:
             print("📦 [sbo2] 포지션 FULL")
             return
 
-        # 주문가능금액 조회 (계좌 전체)
-        psbl_cash = self.api.get_psbl_order_cash("", 0)
+        # 주문가능금액 조회 — 보유종목 기준 (진짜 주문가능금액)
+        psbl_cash = 0
+        for _code in list(self.positions.keys()):
+            psbl_cash = self.api.get_psbl_order_cash(_code)
+            if psbl_cash > 0:
+                break
+        # 보유종목 없으면 후보 종목으로 조회
+        if psbl_cash <= 0 and self.candidates:
+            for cand in self.candidates:
+                _code = get_stock_code(cand["name"])
+                if _code:
+                    psbl_cash = self.api.get_psbl_order_cash(_code)
+                    if psbl_cash > 0:
+                        break
+        print(f"   💰 주문가능: {psbl_cash:,}원")
         if psbl_cash <= 0:
-            # 폴백: 잔고에서 예수금 직접 조회
-            try:
-                import requests as _r
-                url = f"{self.api.base_url}/uapi/domestic-stock/v1/trading/inquire-balance"
-                headers = {
-                    "authorization": f"Bearer {self.api.token}",
-                    "appkey": self.api.appkey, "appsecret": self.api.secret,
-                    "tr_id": "TTTC8434R"
-                }
-                params = {
-                    "CANO": self.api.cano, "ACNT_PRDT_CD": self.api.acnt,
-                    "AFHR_FLPR_YN": "N", "OFL_YN": "", "INQR_DVSN": "01",
-                    "UNPR_DVSN": "01", "FUND_STTL_ICLD_YN": "N",
-                    "FNCG_AMT_AUTO_RDPT_YN": "N", "PRCS_DVSN": "00",
-                    "CTX_AREA_FK100": "", "CTX_AREA_NK100": "",
-                }
-                res = _r.get(url, headers=headers, params=params, timeout=5).json()
-                output2 = res.get("output2", [{}])
-                if output2:
-                    psbl_cash = int(float(output2[0].get("prvs_rcdl_excc_amt", 0) or
-                                         output2[0].get("ord_psbl_cash", 0) or 0))
-                    print(f"   💰 예수금 조회: {psbl_cash:,}원")
-            except Exception as e:
-                print(f"⚠️ 예수금 조회 오류: {e}")
-
-        if psbl_cash <= 0:
-            print("⚠️ [sbo2] 주문가능금액 없음")
+            print("⚠️ [sbo2] 주문가능금액 없음 — 매수 스킵")
             return
 
         for cand in self.candidates:
@@ -805,32 +818,58 @@ class Sbo2:
 
     # ── 메인 루프 ─────────────────────────────────────────────
     def _sync_real_positions(self):
-        """실계좌 잔고에서 포지션 동기화"""
+        """
+        실계좌 잔고 기준 포지션 동기화 (sbot 방식)
+        매 루프 실행 — 실계좌가 진실
+        """
         try:
-            real_pos = self.api.get_current_positions()
-            if real_pos:
-                for code, pos in real_pos.items():
-                    if code not in self.positions:
-                        name = (pos.get("name") or
-                                pos.get("prdt_name") or
-                                pos.get("stock_name") or code)
-                        self.positions[code] = {
-                            "code":        code,
-                            "name":        name,
-                            "grade":       "실계좌",
-                            "entry_price": pos["entry_price"],
-                            "qty":         pos["qty"],
-                            "buy_time":    today_str(),
-                            "stop_price":  pos["entry_price"] * 0.90,  # -10%
-                            "tgt_price":   pos["entry_price"] * 1.15,
-                            "score":       0,
-                            "vcp":         False,
-                            "trend":       False,
-                            "catalyst":    False,
-                        }
-                        print(f"   📥 실계좌 포지션 동기화: {code} {pos['entry_price']:,}원 {pos['qty']}주")
-                self._save_state()
-                print(f"   실계좌 포지션 {len(real_pos)}종목 동기화 완료")
+            new_pos = self.api.get_current_positions()
+            if not new_pos and self.positions:
+                print("⚠️ 실계좌 잔고 빈값 — 동기화 스킵 (캐시 유지)")
+                return
+
+            # ── 수동매도/손절 감지 ─────────────────────────────
+            for code in list(self.positions.keys()):
+                if code not in new_pos and code not in self.sold_today:
+                    self.sold_today[code] = now_hms()
+                    print(f"   🔍 수동매도 감지: {code} → sold_today 추가")
+                    if _master_remove:
+                        _master_remove("sbo2", code)
+
+            # ── 실계좌 기준으로 포지션 갱신 ───────────────────
+            # 기존 포지션 메타(손절/목표/등급) 보존하면서 수량/평단 갱신
+            updated = {}
+            for code, rdata in new_pos.items():
+                if code in self.positions:
+                    # 기존 포지션 메타 유지 + 수량/평단 갱신
+                    existing = self.positions[code]
+                    existing["qty"]         = rdata["qty"]
+                    existing["entry_price"] = rdata["entry_price"]
+                    existing["name"]        = rdata.get("name", existing.get("name", code))
+                    updated[code] = existing
+                else:
+                    # 신규 (수동매수 또는 새로 잡힌 종목)
+                    entry = rdata["entry_price"]
+                    updated[code] = {
+                        "code":        code,
+                        "name":        rdata.get("name", code),
+                        "grade":       "실계좌",
+                        "entry_price": entry,
+                        "qty":         rdata["qty"],
+                        "buy_time":    today_str(),
+                        "stop_price":  round(entry * 0.90, 0),
+                        "tgt_price":   round(entry * 1.15, 0),
+                        "score":       0,
+                        "vcp":         False,
+                        "trend":       False,
+                        "catalyst":    False,
+                    }
+                    print(f"   📥 신규: {rdata.get('name', code)}({code}) "
+                          f"{entry:,}원 × {rdata['qty']}주")
+
+            self.positions = updated
+            self._save_state()
+
         except Exception as e:
             print(f"⚠️ 실계좌 동기화 오류: {e}")
 
