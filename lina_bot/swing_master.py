@@ -22,12 +22,14 @@ import sqlite3
 import os
 import re
 
+import datetime
 import yfinance as yf
 
 BASE_DIR         = os.path.dirname(os.path.abspath(__file__))
 DB_PATH          = os.path.join(BASE_DIR, "kr_theme_finance.db")
 DB_PATH_MAPPING  = os.path.join(BASE_DIR, "us_kr_mapping.db")
 DB_PATH_TELEGRAM = os.path.join(BASE_DIR, "intelligence", "telegram_events.db")
+DB_PATH_SECTOR   = os.path.join(BASE_DIR, "..", "intelligence", "sector_monitor.db")
 
 TOP_N_DEFAULT    = 5
 
@@ -104,8 +106,62 @@ def _get_catalyst_stocks() -> set:
 
     # ── 3. 대장님 전용 왓치리스트 강제 주입 ──────────────────────
     from watchlist_manager import get_watchlist_stocks
-    hot_kr |= get_watchlist_stocks(priority=1)   # ← 대장님 세팅 완벽 유지
-    
+    hot_kr |= get_watchlist_stocks(priority=1)
+
+    # ── 4. sector_monitor 실시간 급등 테마 연동 ───────────────
+    if os.path.exists(DB_PATH_SECTOR):
+        try:
+            sec_conn   = sqlite3.connect(DB_PATH_SECTOR, timeout=5)
+            sec_cursor = sec_conn.cursor()
+
+            # 오늘 + 최근 2시간 내 급등 테마 (등락률 +5% 이상)
+            cutoff = (datetime.datetime.now() -
+                      datetime.timedelta(hours=2)).strftime("%Y-%m-%d %H:%M")
+            sec_cursor.execute("""
+                SELECT DISTINCT theme_nm, MAX(flu_rt) as max_flu
+                FROM sector_flow
+                WHERE ts >= ? AND flu_rt >= 5.0
+                GROUP BY theme_nm
+                ORDER BY max_flu DESC
+                LIMIT 10
+            """, (cutoff,))
+            hot_themes = sec_cursor.fetchall()
+            sec_conn.close()
+
+            if hot_themes:
+                print(f"   🔥 sector 급등 테마: {[t[0] for t in hot_themes[:3]]}")
+
+            # 테마명 키워드 매칭 → kr_stock_daily_data 종목 추가
+            fin_conn   = sqlite3.connect(DB_PATH)
+            fin_cursor = fin_conn.cursor()
+            fin_cursor.execute("SELECT DISTINCT stock_name FROM kr_stock_daily_data")
+            all_stocks = fin_cursor.fetchall()
+
+            # kr_theme_stocks 테마 매핑
+            fin_cursor.execute("SELECT stock_name, theme_name FROM kr_theme_stocks")
+            theme_rows = fin_cursor.fetchall()
+            fin_conn.close()
+
+            # 종목 → 테마 맵
+            stock_theme_map = {}
+            for sname, tname in theme_rows:
+                pure = re.sub(r'\s*(KOSPI|KOSDAQ)\s*\d{6}$', '', sname).strip()
+                stock_theme_map.setdefault(pure, [])
+                stock_theme_map[pure].append(tname)
+
+            for sec_theme, flu_rt in hot_themes:
+                # 언더바 앞 키워드 추출 (예: "반도체_후공정장비" → "반도체")
+                keywords = [k.strip() for k in sec_theme.replace('_', ' ').split()]
+
+                for pure, themes in stock_theme_map.items():
+                    for t in themes:
+                        if any(kw in t for kw in keywords):
+                            hot_kr.add(pure)
+                            break
+
+        except Exception as e:
+            print(f"⚠️ sector_monitor 연동 오류: {e}")
+
     return hot_kr
 
 
