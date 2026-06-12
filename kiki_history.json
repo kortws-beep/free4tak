@@ -1,14 +1,6 @@
 {
-  "date": "2026-06-11",
+  "date": "2026-06-12",
   "history": [
-    {
-      "role": "user",
-      "content": "브리핑"
-    },
-    {
-      "role": "assistant",
-      "content": "CMD:!브리핑"
-    },
     {
       "role": "user",
       "content": "브리핑"
@@ -80,6 +72,14 @@
     {
       "role": "assistant",
       "content": "오, 현대차 6주 매도 명령이 들어갔네! 👍\n\n다음 봇 루프에서 실행될 거야. 체결되면 바로 알려줄게~ 🚀\n\n뭐 더 필요한 거 있어?"
+    },
+    {
+      "role": "user",
+      "content": "naver 팔아줘."
+    },
+    {
+      "role": "assistant",
+      "content": "CMD:!매도 035420"
     }
   ]
 }

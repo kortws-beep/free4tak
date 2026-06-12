@@ -261,9 +261,12 @@ class SBot2:
                 print(f"⚠️ master_db upsert 오류: {e}")
 
         self.db.save_buy(
-            code=code, buy_price=price, qty=qty,
-            score=self.score_cache.get(code, (0, {}))[0],
-            buy_reason=self.buy_context.get(code, {}).get("reason", ""),
+            code       = code,
+            buy_price  = price,
+            qty        = qty,
+            ai_score   = self.score_cache.get(code, (0, {}))[0],
+            ai_reason  = self.buy_context.get(code, {}).get("reason", ""),
+            stock_name = self._name(code),
         )
 
         # peak_tracker 초기화
@@ -772,6 +775,47 @@ class SBot2:
         print(f"{'='*50}\n")
 
     # ============================================================
+    # 상태 저장 (키키 !m상태 등 명령어용)
+    # ============================================================
+    def _save_status(self, cash: int, total_profit: float,
+                     score_enter: int, now: str, pos_mkt_cache: dict = None):
+        _update_state(last_status={
+            "cash":          cash,
+            "psbl_cash":     cash,
+            "total_profit":  int(total_profit),
+            "positions":     len(self.positions),
+            "score_enter":   score_enter,
+            "last_update":   now,
+            "market_status": self.market_status,
+            "market_rate":   getattr(self, "market_rate", 0.0),
+            "daily_loss":    self.daily_loss_count,
+            "code_name_map": self.code_name_map,
+            "new_codes":     self.new_codes_list,
+            "active_sectors": [],
+            "positions_detail": {
+                code: {
+                    "name":        self.code_name_map.get(code, code),
+                    "entry_price": int(pos.get("entry_price", 0)),
+                    "current":     int(float(
+                        (pos_mkt_cache or {}).get(code, {}).get("stck_prpr", 0)
+                        or pos.get("entry_price", 0)
+                    )),
+                    "rate": round(
+                        (float(
+                            (pos_mkt_cache or {}).get(code, {}).get("stck_prpr", 0)
+                            or pos.get("entry_price", 0)
+                        ) - pos.get("entry_price", 0))
+                        / max(pos.get("entry_price", 1), 1) * 100, 2
+                    ),
+                    "qty":     pos.get("qty", 0),
+                    "buy_tag": pos.get("buy_tag", "mid_swing"),
+                    "buy_date": pos.get("buy_date", ""),
+                }
+                for code, pos in self.positions.items()
+            },
+        })
+
+    # ============================================================
     # 메인 루프
     # ============================================================
     def run(self):
@@ -875,6 +919,19 @@ class SBot2:
                     else:
                         if avail <= 0:
                             print(f"⛔ [MID] 슬롯 없음 ({len(self.positions)}/{MAX_POSITIONS})")
+
+                # ★ 키키 명령어용 상태 저장 (매 루프 말미)
+                try:
+                    cash_now = self.api.get_buyable_cash() if hasattr(self.api, 'get_buyable_cash') else 0
+                    total_profit = sum(
+                        (float(pos_mkt_cache.get(c, {}).get("stck_prpr", 0) or p["entry_price"])
+                         - p["entry_price"]) * p.get("qty", 0)
+                        for c, p in self.positions.items()
+                    )
+                    self._save_status(cash_now, total_profit, score_enter,
+                                      now.strftime("%H:%M:%S"), pos_mkt_cache)
+                except Exception as _se:
+                    print(f"⚠️ [MID] 상태 저장 오류: {_se}")
 
                 time.sleep(LOOP_SLEEP)
 
