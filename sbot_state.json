@@ -8,9 +8,9 @@
     "total_profit": 0,
     "positions": 0,
     "score_enter": 85,
-    "last_update": "09:27:39",
+    "last_update": "09:35:28",
     "market_status": "normal",
-    "market_rate": 7.77,
+    "market_rate": 7.99,
     "daily_loss": 0,
     "code_name_map": {
       "001740": "SK네트웍스",
@@ -166,7 +166,12 @@
       "126640": "화신정공",
       "247540": "에코프로비엠",
       "267260": "HD현대일렉트릭",
-      "307950": "현대오토에버"
+      "307950": "현대오토에버",
+      "010060": "OCI홀딩스",
+      "010140": "삼성중공업",
+      "272210": "한화시스템",
+      "277810": "레인보우로보틱스",
+      "298040": "효성중공업"
     },
     "new_codes": [
       "007660",
@@ -210,7 +215,7 @@
     ],
     "positions_detail": {}
   },
-  "last_update": "09:28:26",
+  "last_update": "09:35:43",
   "sold_today": {},
   "sold_today_date": "2026-06-12",
   "daily_loss": 0,
