@@ -1,15 +1,13 @@
 {
   "telegram_event": {
     "keywords": [
-      "AI"
+      "상장"
     ],
     "themes": [
-      "클라우드",
-      "AI",
-      "반도체"
+      "IPO"
     ],
     "score": 10,
-    "text": "챗GPT·클로드만 쓰던 미국 기업들, 中모델 섞어 AI 비용 95% 절감\nhttps://n.news.naver.com/mnews/article/003/0014003917?rc=N&ntype=RANKING&sid=001",
-    "time": "17:44:23"
+    "text": "스페이스X ‘배짱 상장’ 대박…단번에 114조원 조달 ‘역대 최대’\nhttps://www.donga.com/news/Economy/article/all/20260612/134099973/1",
+    "time": "22:24:23"
   }
 }
