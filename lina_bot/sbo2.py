@@ -515,9 +515,10 @@ class Sbo2:
         self.api        = KisAPI()
         self.positions  = {}       # {code: {entry, qty, stop, tgt, name, grade, buy_time}}
         self.sold_today = {}       # {code: time}
-        self.candidates = []       # 현재 후보 리스트
-        self._cand_ts   = 0        # 후보 마지막 갱신 시각
-        self._cand_date = ""       # 후보 마지막 갱신 날짜
+        self.candidates  = []       # 현재 후보 리스트
+        self._cand_ts    = 0        # 후보 마지막 갱신 시각
+        self._cand_date  = ""       # 후보 마지막 갱신 날짜
+        self._pending_orders = {}   # 미체결 주문 {code: (orgno, odno, qty)}
 
         # 상태 복원
         st = _read_state()
@@ -662,6 +663,9 @@ class Sbo2:
 
             qty = max(int(amount / curr_price), 1)
 
+            # 미체결 추적 등록
+            self._pending_orders[code] = (orgno or "", odno or "", qty)
+
             # 포지션 등록
             self.positions[code] = {
                 "code":       code,
@@ -788,6 +792,61 @@ class Sbo2:
                 )
 
     # ── 메인 루프 ─────────────────────────────────────────────
+    def _get_pending_orders(self) -> list:
+        """미체결 매수 주문 조회"""
+        try:
+            import requests as _rq
+            url = f"{self.api.base_url}/uapi/domestic-stock/v1/trading/inquire-psbl-rvsecncl"
+            headers = {
+                "authorization": f"Bearer {self.api.token}",
+                "appkey": self.api.appkey, "appsecret": self.api.secret,
+                "tr_id": "TTTC8036R"
+            }
+            params = {
+                "CANO": self.api.cano, "ACNT_PRDT_CD": self.api.acnt,
+                "CTX_AREA_FK100": "", "CTX_AREA_NK100": "",
+                "INQR_DVSN_1": "0", "INQR_DVSN_2": "0"
+            }
+            res = _rq.get(url, headers=headers, params=params, timeout=5).json()
+            orders = []
+            for item in res.get("output", []):
+                # 매수 미체결만
+                if item.get("sll_buy_dvsn_cd") != "02":  # 02=매수
+                    continue
+                rmn_qty = int(item.get("rmn_qty", 0))
+                if rmn_qty <= 0:
+                    continue
+                orders.append({
+                    "code":  item.get("pdno", ""),
+                    "name":  item.get("prdt_name", ""),
+                    "odno":  item.get("odno", ""),
+                    "orgno": item.get("krx_fwdg_ord_orgno", ""),
+                    "qty":   rmn_qty,
+                    "price": float(item.get("ord_unpr", 0)),
+                })
+            return orders
+        except Exception as e:
+            print(f"⚠️ 미체결 조회 오류: {e}")
+            return []
+
+    def _cancel_stale_orders(self):
+        """1루프 이상 미체결 주문 취소 (sbot 방식)"""
+        # 1. 체결 완료된 종목 pending에서 제거
+        for code in list(self.positions.keys()):
+            self._pending_orders.pop(code, None)
+
+        # 2. 남은 pending = 미체결 → 취소
+        for code, (orgno, odno, qty) in list(self._pending_orders.items()):
+            name = get_stock_name(code)
+            print(f"   🚫 미체결 취소: {name}({code}) odno:{odno}")
+            ok = self.api.cancel_order(orgno, odno, code, qty)
+            if ok:
+                _notify(f"🚫 [sbo2] 미체결 취소 {name}({code}) → 자금 반환 / 재매수 방지 등록")
+            # 재매수 방지
+            self.sold_today[code] = now_hms()
+            self._pending_orders.pop(code, None)
+            self._save_state()
+
     def _sync_real_positions(self):
         """
         실계좌 잔고 기준 포지션 동기화 (sbot 방식)
