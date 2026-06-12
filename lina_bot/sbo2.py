@@ -32,8 +32,17 @@ import sqlite3
 from dotenv import load_dotenv
 
 # ── 경로 설정 ─────────────────────────────────────────────────
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-load_dotenv(os.path.join(BASE_DIR, '.env'))
+BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
+STOCK_BOT  = os.path.dirname(BASE_DIR)   # ~/k-bot/stock_bot
+
+# .env 우선순위: lina_bot/.env → stock_bot/.env
+_env1 = os.path.join(BASE_DIR, '.env')
+_env2 = os.path.join(STOCK_BOT, '.env')
+if os.path.exists(_env1):
+    load_dotenv(_env1)
+elif os.path.exists(_env2):
+    load_dotenv(_env2)
+    print(f"✅ .env 로드: {_env2}")
 
 # ── 의존 모듈 ─────────────────────────────────────────────────
 from kis_api       import KisAPI
@@ -85,9 +94,9 @@ A_GRADE_RATIO    = 0.7          # A급 상위 70%만 매수
 LOOP_SLEEP       = 60           # 루프 간격 (초)
 BUY_START_TIME   = "0910"       # 매수 시작
 BUY_END_TIME     = "1520"       # 매수 마감
-SELL_START_TIME  = "0900"       # 매도 체크 시작
-SELL_END_TIME    = "1530"       # 매도 체크 마감
-CANDIDATE_REFRESH= 1800         # 후보 갱신 주기 (30분)
+SELL_START_TIME  = "0800"       # 프리장부터 매도 체크
+SELL_END_TIME    = "2000"       # 애프터장까지 매도 체크
+CANDIDATE_REFRESH= 86400        # 후보 갱신 주기 (하루 1회)
 
 MIN_PRICE        = 3_000        # 최소 주가
 MAX_PRICE        = 3_000_000    # 최대 주가
@@ -512,6 +521,7 @@ class Sbo2:
         self.sold_today = {}       # {code: time}
         self.candidates = []       # 현재 후보 리스트
         self._cand_ts   = 0        # 후보 마지막 갱신 시각
+        self._cand_date = ""       # 후보 마지막 갱신 날짜
 
         # 상태 복원
         st = _read_state()
@@ -521,6 +531,10 @@ class Sbo2:
             self.sold_today = {}
 
         init_sbo2_db()
+
+        # 실계좌 포지션 동기화
+        self._sync_real_positions()
+
         print("✅ [sbo2] 초기화 완료")
         print(f"   보유 포지션: {list(self.positions.keys())}")
 
@@ -540,12 +554,19 @@ class Sbo2:
     # ── 후보 갱신 ─────────────────────────────────────────────
     def _refresh_candidates(self):
         now = time.time()
-        if now - self._cand_ts < CANDIDATE_REFRESH:
+        # 하루 1회 갱신 (날짜 바뀌거나 처음 실행시)
+        today = today_str()
+        if hasattr(self, '_cand_date') and self._cand_date == today and self.candidates:
+            return
+        # 장 시작 전(~08:50)에만 갱신 (장중 재시작 시엔 이전 캐시 유지)
+        now_t = now_hhmm()
+        if hasattr(self, '_cand_date') and self._cand_date == today and now_t > "0850":
             return
         print(f"\n🔄 [sbo2] 후보 갱신 중...")
         try:
             self.candidates = get_candidates()
             self._cand_ts   = now
+            self._cand_date = today_str()
             print(f"   S급: {sum(1 for c in self.candidates if c['grade']=='S')}개 "
                   f"A급: {sum(1 for c in self.candidates if c['grade']=='A')}개")
 
@@ -570,8 +591,34 @@ class Sbo2:
             print("📦 [sbo2] 포지션 FULL")
             return
 
-        # 주문가능금액 조회
-        psbl_cash = self.api.get_psbl_order_cash("005930")  # 삼전으로 조회
+        # 주문가능금액 조회 (계좌 전체)
+        psbl_cash = self.api.get_psbl_order_cash("", 0)
+        if psbl_cash <= 0:
+            # 폴백: 잔고에서 예수금 직접 조회
+            try:
+                import requests as _r
+                url = f"{self.api.base_url}/uapi/domestic-stock/v1/trading/inquire-balance"
+                headers = {
+                    "authorization": f"Bearer {self.api.token}",
+                    "appkey": self.api.appkey, "appsecret": self.api.secret,
+                    "tr_id": "TTTC8434R"
+                }
+                params = {
+                    "CANO": self.api.cano, "ACNT_PRDT_CD": self.api.acnt,
+                    "AFHR_FLPR_YN": "N", "OFL_YN": "", "INQR_DVSN": "01",
+                    "UNPR_DVSN": "01", "FUND_STTL_ICLD_YN": "N",
+                    "FNCG_AMT_AUTO_RDPT_YN": "N", "PRCS_DVSN": "00",
+                    "CTX_AREA_FK100": "", "CTX_AREA_NK100": "",
+                }
+                res = _r.get(url, headers=headers, params=params, timeout=5).json()
+                output2 = res.get("output2", [{}])
+                if output2:
+                    psbl_cash = int(float(output2[0].get("prvs_rcdl_excc_amt", 0) or
+                                         output2[0].get("ord_psbl_cash", 0) or 0))
+                    print(f"   💰 예수금 조회: {psbl_cash:,}원")
+            except Exception as e:
+                print(f"⚠️ 예수금 조회 오류: {e}")
+
         if psbl_cash <= 0:
             print("⚠️ [sbo2] 주문가능금액 없음")
             return
@@ -605,8 +652,15 @@ class Sbo2:
             if not (MIN_PRICE <= curr_price <= MAX_PRICE):
                 continue
 
-            # 매수금액 계산
+            # 매수금액 계산 — 예수금 부족시 있는 만큼 매수
             amount = calc_buy_amount(cand["grade"], psbl_cash)
+
+            # 예수금이 기본금액보다 적으면 있는 만큼으로 조정
+            if psbl_cash < amount:
+                amount = psbl_cash
+                print(f"💡 {name} 예산 조정: {amount:,}원 (예수금 부족)")
+
+            # 1주도 못 사면 패스
             if amount < curr_price:
                 print(f"⏭️ {name} 패스 — 예산({amount:,}) < 주가({curr_price:,})")
                 save_candidate(name=name, grade=cand["grade"], score=cand["score"],
@@ -750,6 +804,36 @@ class Sbo2:
                 )
 
     # ── 메인 루프 ─────────────────────────────────────────────
+    def _sync_real_positions(self):
+        """실계좌 잔고에서 포지션 동기화"""
+        try:
+            real_pos = self.api.get_current_positions()
+            if real_pos:
+                for code, pos in real_pos.items():
+                    if code not in self.positions:
+                        name = (pos.get("name") or
+                                pos.get("prdt_name") or
+                                pos.get("stock_name") or code)
+                        self.positions[code] = {
+                            "code":        code,
+                            "name":        name,
+                            "grade":       "실계좌",
+                            "entry_price": pos["entry_price"],
+                            "qty":         pos["qty"],
+                            "buy_time":    today_str(),
+                            "stop_price":  pos["entry_price"] * 0.90,  # -10%
+                            "tgt_price":   pos["entry_price"] * 1.15,
+                            "score":       0,
+                            "vcp":         False,
+                            "trend":       False,
+                            "catalyst":    False,
+                        }
+                        print(f"   📥 실계좌 포지션 동기화: {code} {pos['entry_price']:,}원 {pos['qty']}주")
+                self._save_state()
+                print(f"   실계좌 포지션 {len(real_pos)}종목 동기화 완료")
+        except Exception as e:
+            print(f"⚠️ 실계좌 동기화 오류: {e}")
+
     def run(self):
         _notify("🤖 [sbo2] 리나 스윙봇 시작!", critical=True)
         print("\n" + "=" * 50)

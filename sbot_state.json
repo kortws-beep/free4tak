@@ -5,12 +5,12 @@
   "cmd_result": null,
   "last_status": {
     "cash": 1867033,
-    "total_profit": 10800,
+    "total_profit": 15600,
     "positions": 3,
     "score_enter": 85,
-    "last_update": "13:21:28",
+    "last_update": "13:48:57",
     "market_status": "normal",
-    "market_rate": 8.29,
+    "market_rate": 8.58,
     "daily_loss": 0,
     "code_name_map": {
       "000270": "기아",
@@ -144,7 +144,17 @@
       "030530": "원익홀딩스",
       "356860": "티엘비",
       "043260": "성호전자",
-      "103590": "일진전기"
+      "103590": "일진전기",
+      "092730": "네오팜",
+      "003490": "대한항공",
+      "000150": "두산",
+      "066570": "LG전자",
+      "105560": "KB금융",
+      "080220": "제주반도체",
+      "055550": "신한지주",
+      "028260": "삼성물산",
+      "035720": "카카오",
+      "074600": "원익QnC"
     },
     "new_codes": [
       "007660",
@@ -189,30 +199,30 @@
       "089030": {
         "name": "테크윙",
         "entry_price": 67300,
-        "current": 66900,
-        "rate": -0.59,
+        "current": 66600,
+        "rate": -1.04,
         "qty": 14,
         "buy_tag": ""
       },
       "103590": {
         "name": "일진전기",
         "entry_price": 82200,
-        "current": 84000,
-        "rate": 2.19,
+        "current": 84100,
+        "rate": 2.31,
         "qty": 12,
         "buy_tag": ""
       },
       "489790": {
         "name": "489790",
         "entry_price": 76800,
-        "current": 76400,
-        "rate": -0.52,
+        "current": 77000,
+        "rate": 0.26,
         "qty": 13,
         "buy_tag": ""
       }
     }
   },
-  "last_update": "13:21:46",
+  "last_update": "13:49:09",
   "sold_today": {},
   "sold_today_date": "2026-06-12",
   "daily_loss": 0,
