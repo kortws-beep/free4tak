@@ -14,3 +14,4 @@ lina_bot/intelligence/*.session
 lina_bot/*_state.json
 lina_bot/xxx.py
 lina_bot/*.db
+logs/
