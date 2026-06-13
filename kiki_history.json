@@ -3,14 +3,6 @@
   "history": [
     {
       "role": "user",
-      "content": "브리핑"
-    },
-    {
-      "role": "assistant",
-      "content": "CMD:!브리핑"
-    },
-    {
-      "role": "user",
       "content": "cbot 재시작 하자."
     },
     {
@@ -80,6 +72,14 @@
     {
       "role": "assistant",
       "content": "CMD:!브리핑"
+    },
+    {
+      "role": "user",
+      "content": "btc매도해줘."
+    },
+    {
+      "role": "assistant",
+      "content": "CMD:!c매도 KRW-BTC"
     }
   ]
 }
