@@ -1,15 +1,17 @@
 {
   "telegram_event": {
     "keywords": [
+      "엔비디아",
       "AI"
     ],
     "themes": [
       "클라우드",
       "AI",
-      "반도체"
+      "반도체",
+      "HBM"
     ],
-    "score": 10,
-    "text": "[AI돋보기] 젠슨 황은 왜 한국에서 닷새나 머물렀나\nhttps://naver.me/GsBWbyZq",
-    "time": "10:32:51"
+    "score": 15,
+    "text": "“엔비디아? 글쎄요” 거리두는 빅테크들···세계는 지금 ‘AI깐부’ 대전 [산업이지]\nhttps://naver.me/GsBWb2mV",
+    "time": "10:54:54"
   }
 }
