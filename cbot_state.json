@@ -4,7 +4,7 @@
   "cmd_result": "✅ KRW-BTC 즉시매도 완료",
   "last_status": {
     "krw": 202808,
-    "total_profit": 10039,
+    "total_profit": 7322,
     "daily_pnl": 2820,
     "positions": 3,
     "positions_detail": {
@@ -12,7 +12,7 @@
         "current": 43,
         "entry_price": 43,
         "qty": 6880.07438405,
-        "rate": 0.22
+        "rate": -0.24
       },
       "KRW-SOON": {
         "current": 260,
@@ -21,10 +21,10 @@
         "rate": 1.71
       },
       "KRW-WLFI": {
-        "current": 90,
+        "current": 89,
         "entry_price": 89,
         "qty": 3351.95530726,
-        "rate": 0.56
+        "rate": 0.11
       }
     },
     "daily_loss": 0,
@@ -51,11 +51,11 @@
       "KRW-SAHARA",
       "KRW-XLM",
       "KRW-XPL",
-      "KRW-NEAR",
       "KRW-VVV",
+      "KRW-NEAR",
       "KRW-ICX",
-      "KRW-ZBT",
       "KRW-MEGA",
+      "KRW-ZBT",
       "KRW-SUI",
       "KRW-VIRTUAL",
       "KRW-WLFI",
@@ -83,11 +83,11 @@
       "KRW-SAHARA",
       "KRW-XLM",
       "KRW-XPL",
-      "KRW-NEAR",
       "KRW-VVV",
+      "KRW-NEAR",
       "KRW-ICX",
-      "KRW-ZBT",
       "KRW-MEGA",
+      "KRW-ZBT",
       "KRW-SUI",
       "KRW-VIRTUAL",
       "KRW-WLFI",
@@ -98,14 +98,14 @@
     ],
     "seed": "30만원 소액 모드"
   },
-  "last_update": "16:04:38",
+  "last_update": "16:10:44",
   "daily_loss": 0,
   "loss_date": "2026-06-13",
   "positions": {
     "KRW-ICX": {
       "entry_price": 43.60417973,
       "qty": 6880.07438405,
-      "current": 43.7
+      "current": 43.5
     },
     "KRW-SOON": {
       "entry_price": 255.62368421,
@@ -115,7 +115,7 @@
     "KRW-WLFI": {
       "entry_price": 89.5,
       "qty": 3351.95530726,
-      "current": 90.0
+      "current": 89.6
     }
   },
   "peak_tracker": {
