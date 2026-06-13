@@ -42,13 +42,13 @@ class BacktestConfig:
     max_hold_days:   int   = 20           # 최대 보유일
     min_rr:          float = 1.5          # 최소 R:R
     # VCP 파라미터
-    ma20_band:       float = 0.07         # 20일선 ±7%
-    vcp_ratio:       float = 0.60         # VCP 수렴 비율
+    ma20_band:       float = 0.10         # 20일선 ±10%
+    vcp_ratio:       float = 0.70         # VCP 수렴 비율
     vol_dry_ratio:   float = 0.50         # 거래량 마름 비율
     # 추세 파라미터
-    pullback_band:   float = 0.08         # 눌림목 ±8%
-    rsi_low:         float = 40.0
-    rsi_high:        float = 60.0
+    pullback_band:   float = 0.12         # 눌림목 ±12%
+    rsi_low:         float = 35.0
+    rsi_high:        float = 65.0
 
 
 # ══════════════════════════════════════════════════════════════
@@ -117,6 +117,20 @@ def get_all_stocks(conn) -> list:
 # ══════════════════════════════════════════════════════════════
 # 신호 계산 (특정 날짜 기준 과거 데이터로)
 # ══════════════════════════════════════════════════════════════
+
+def _get_theme(conn, stock_name: str) -> str:
+    """종목의 첫번째 테마 반환"""
+    try:
+        import re
+        pure = re.sub(r'\s*(KOSPI|KOSDAQ)\s*\d{6}$', '', stock_name).strip()
+        row = conn.execute("""
+            SELECT theme_name FROM kr_theme_stocks
+            WHERE stock_name LIKE ? LIMIT 1
+        """, (f"%{pure}%",)).fetchone()
+        return row[0] if row else ""
+    except Exception:
+        return ""
+
 
 def check_vcp_signal(data: list, cfg: BacktestConfig) -> dict:
     """
@@ -348,6 +362,11 @@ class LinaBacktest:
             qty        = pos["qty"]
             reason     = None
 
+            # 본절 보호: +5% 이상 수익시 손절선 → 진입가로 올리기
+            rate_now = (curr - entry) / entry * 100 if entry > 0 else 0
+            if rate_now >= 5.0:
+                stop = max(stop, entry)  # 손절선 최소 진입가
+
             # 손절
             if stop > 0 and curr <= stop:
                 reason = f"손절 {(curr-entry)/entry*100:+.1f}%"
@@ -415,9 +434,11 @@ class LinaBacktest:
                 sig = check_trend_signal(data, self.cfg)
 
             if sig["signal"]:
+                theme = _get_theme(self.conn, stock_name)
                 candidates.append({
                     "stock_name": stock_name,
                     "pure_name":  pure,
+                    "theme":      theme,
                     **sig,
                 })
 
@@ -439,6 +460,7 @@ class LinaBacktest:
             self.positions[cand["stock_name"]] = {
                 "name":       cand["pure_name"],
                 "type":       cand["type"],
+                "theme":      cand.get("theme", ""),
                 "entry":      entry_price,
                 "stop":       cand["stop"],
                 "tgt":        cand["tgt"],
@@ -446,6 +468,7 @@ class LinaBacktest:
                 "entry_date": date,
                 "hold_days":  0,
             }
+
 
     # ── 메인 실행 ─────────────────────────────────────────────
     def _preload_data(self, all_stocks: list) -> dict:

@@ -4,7 +4,7 @@
   "cmd_result": "✅ KRW-BTC 즉시매도 완료",
   "last_status": {
     "krw": 202808,
-    "total_profit": 10004,
+    "total_profit": 10709,
     "daily_pnl": 2820,
     "positions": 3,
     "positions_detail": {
@@ -12,7 +12,7 @@
         "current": 43,
         "entry_price": 43,
         "qty": 6880.07438405,
-        "rate": -0.24
+        "rate": 0.22
       },
       "KRW-SOON": {
         "current": 260,
@@ -24,12 +24,12 @@
         "current": 90,
         "entry_price": 89,
         "qty": 3351.95530726,
-        "rate": 1.01
+        "rate": 0.78
       }
     },
     "daily_loss": 0,
     "market_status": "normal",
-    "btc_rate": -0.01041352,
+    "btc_rate": 0.07706005,
     "fear_greed": 13,
     "is_night": false,
     "coin_pool": [
@@ -45,23 +45,23 @@
       "KRW-SOPH",
       "KRW-ORCA",
       "KRW-ENSO",
-      "KRW-ONDO",
-      "KRW-ID",
-      "KRW-XLM",
-      "KRW-SAHARA",
       "KRW-AXL",
+      "KRW-ID",
+      "KRW-ONDO",
+      "KRW-SAHARA",
+      "KRW-XLM",
       "KRW-XPL",
       "KRW-NEAR",
       "KRW-VVV",
       "KRW-ICX",
       "KRW-ZBT",
-      "KRW-SUI",
       "KRW-MEGA",
-      "KRW-WLFI",
+      "KRW-SUI",
       "KRW-VIRTUAL",
-      "KRW-DOOD",
+      "KRW-WLFI",
       "KRW-JTO",
       "KRW-ENA",
+      "KRW-IP",
       "KRW-CHZ"
     ],
     "coins": [
@@ -77,35 +77,35 @@
       "KRW-SOPH",
       "KRW-ORCA",
       "KRW-ENSO",
-      "KRW-ONDO",
-      "KRW-ID",
-      "KRW-XLM",
-      "KRW-SAHARA",
       "KRW-AXL",
+      "KRW-ID",
+      "KRW-ONDO",
+      "KRW-SAHARA",
+      "KRW-XLM",
       "KRW-XPL",
       "KRW-NEAR",
       "KRW-VVV",
       "KRW-ICX",
       "KRW-ZBT",
-      "KRW-SUI",
       "KRW-MEGA",
-      "KRW-WLFI",
+      "KRW-SUI",
       "KRW-VIRTUAL",
-      "KRW-DOOD",
+      "KRW-WLFI",
       "KRW-JTO",
       "KRW-ENA",
+      "KRW-IP",
       "KRW-CHZ"
     ],
     "seed": "30만원 소액 모드"
   },
-  "last_update": "15:30:29",
+  "last_update": "16:00:33",
   "daily_loss": 0,
   "loss_date": "2026-06-13",
   "positions": {
     "KRW-ICX": {
       "entry_price": 43.60417973,
       "qty": 6880.07438405,
-      "current": 43.5
+      "current": 43.7
     },
     "KRW-SOON": {
       "entry_price": 255.62368421,
@@ -115,7 +115,7 @@
     "KRW-WLFI": {
       "entry_price": 89.5,
       "qty": 3351.95530726,
-      "current": 90.4
+      "current": 90.2
     }
   },
   "peak_tracker": {
