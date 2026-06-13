@@ -1,13 +1,15 @@
 {
   "telegram_event": {
     "keywords": [
-      "상장"
+      "AI"
     ],
     "themes": [
-      "IPO"
+      "클라우드",
+      "AI",
+      "반도체"
     ],
     "score": 10,
-    "text": "스페이스X ‘배짱 상장’ 대박…단번에 114조원 조달 ‘역대 최대’\nhttps://www.donga.com/news/Economy/article/all/20260612/134099973/1",
-    "time": "22:24:23"
+    "text": "[AI돋보기] 젠슨 황은 왜 한국에서 닷새나 머물렀나\nhttps://naver.me/GsBWbyZq",
+    "time": "10:32:51"
   }
 }
