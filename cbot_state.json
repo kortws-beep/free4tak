@@ -4,7 +4,7 @@
   "cmd_result": "✅ KRW-BTC 즉시매도 완료",
   "last_status": {
     "krw": 202808,
-    "total_profit": 10709,
+    "total_profit": 9704,
     "daily_pnl": 2820,
     "positions": 3,
     "positions_detail": {
@@ -21,15 +21,15 @@
         "rate": 1.71
       },
       "KRW-WLFI": {
-        "current": 90,
+        "current": 89,
         "entry_price": 89,
         "qty": 3351.95530726,
-        "rate": 0.78
+        "rate": 0.45
       }
     },
     "daily_loss": 0,
     "market_status": "normal",
-    "btc_rate": 0.07706005,
+    "btc_rate": 0.12808631,
     "fear_greed": 13,
     "is_night": false,
     "coin_pool": [
@@ -44,8 +44,8 @@
       "KRW-WAVES",
       "KRW-SOPH",
       "KRW-ORCA",
-      "KRW-ENSO",
       "KRW-AXL",
+      "KRW-ENSO",
       "KRW-ID",
       "KRW-ONDO",
       "KRW-SAHARA",
@@ -76,8 +76,8 @@
       "KRW-WAVES",
       "KRW-SOPH",
       "KRW-ORCA",
-      "KRW-ENSO",
       "KRW-AXL",
+      "KRW-ENSO",
       "KRW-ID",
       "KRW-ONDO",
       "KRW-SAHARA",
@@ -98,7 +98,7 @@
     ],
     "seed": "30만원 소액 모드"
   },
-  "last_update": "16:00:33",
+  "last_update": "16:01:37",
   "daily_loss": 0,
   "loss_date": "2026-06-13",
   "positions": {
@@ -115,7 +115,7 @@
     "KRW-WLFI": {
       "entry_price": 89.5,
       "qty": 3351.95530726,
-      "current": 90.2
+      "current": 89.9
     }
   },
   "peak_tracker": {
