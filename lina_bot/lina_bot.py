@@ -604,46 +604,6 @@ async def daily_master_report():
 async def before_daily_master_report():
     await client.wait_until_ready()
 
-# 07:50 텔레스윙 리포트
-@tasks.loop(minutes=1)
-async def daily_tele_swing_report():
-    kst_now = datetime.datetime.now(KST)
-    if kst_now.hour != 7 or kst_now.minute != 50:
-        return
-    print(f"\n📡 [{kst_now.strftime('%H:%M')}] 텔레스윙 리포트 가동!")
-    try:
-        channel = await client.fetch_channel(REPORT_CHANNEL_ID)
-        from tele_swing_analyzer import get_tele_swing_report
-        report = await asyncio.to_thread(get_tele_swing_report, 3)
-        await send_safe_message(channel, f"📡 **[대장! 07:50 텔레스윙 리포트야]** 📡\n\n{report}")
-        print("✅ 07:50 텔레스윙 전송 완료!")
-    except Exception as e:
-        print(f"❌ 텔레스윙 오류: {e}")
-
-@daily_tele_swing_report.before_loop
-async def before_daily_tele_swing_report():
-    await client.wait_until_ready()
-
-# 14:40 텔레스윙 오후 재기동 (생쇼 반영)
-@tasks.loop(minutes=1)
-async def daily_tele_swing_afternoon():
-    kst_now = datetime.datetime.now(KST)
-    if kst_now.hour != 14 or kst_now.minute != 40:
-        return
-    print(f"\n📡 [{kst_now.strftime('%H:%M')}] 텔레스윙 오후 재기동!")
-    try:
-        channel = await client.fetch_channel(REPORT_CHANNEL_ID)
-        from tele_swing_analyzer import get_tele_swing_report
-        report = await asyncio.to_thread(get_tele_swing_report, 3)
-        await send_safe_message(channel, f"📡 **[대장! 14:40 텔레스윙 업데이트 — 생쇼 반영]** 📡\n\n{report}")
-        print("✅ 14:40 텔레스윙 전송 완료!")
-    except Exception as e:
-        print(f"❌ 텔레스윙 오후 오류: {e}")
-
-@daily_tele_swing_afternoon.before_loop
-async def before_daily_tele_swing_afternoon():
-    await client.wait_until_ready()
-
 # ==========================================
 # [메인 디스코드 코어 핸들러]
 # ==========================================
@@ -680,16 +640,6 @@ async def on_ready():
         daily_master_report.start()
         print("✅ [시스템] 07:20 마스터 리포트 스케줄러 가동 성공!")
     except Exception as e: print(f"⚠️ [에러] 마스터 스케줄러: {e}")
-
-    try:
-        daily_tele_swing_report.start()
-        print("✅ [시스템] 07:50 텔레스윙 스케줄러 가동 성공!")
-    except Exception as e: print(f"⚠️ [에러] 텔레스윙 스케줄러: {e}")
-
-    try:
-        daily_tele_swing_afternoon.start()
-        print("✅ [시스템] 14:40 텔레스윙 오후 스케줄러 가동 성공!")
-    except Exception as e: print(f"⚠️ [에러] 텔레스윙 오후 스케줄러: {e}")
 
 @client.event
 async def on_message(message):
@@ -797,6 +747,102 @@ async def on_message(message):
             from tele_swing_analyzer import get_tele_swing_report
             report = await asyncio.to_thread(get_tele_swing_report, 3)
             await send_safe_message(message.channel, report)
+        return
+
+    # ── !상태 (sbo2 현재 보유종목) ─────────────────────────────
+    if message.content.startswith("!상태"):
+        async with message.channel.typing():
+            try:
+                import json
+                state_file = os.path.join(base_dir, 'lina_bot', 'sbo2_state.json')
+                if not os.path.exists(state_file):
+                    await send_safe_message(message.channel, "⚠️ sbo2 상태파일 없어.")
+                    return
+                with open(state_file, 'r', encoding='utf-8') as f:
+                    state = json.load(f)
+                positions = state.get("positions", {})
+
+                from kis_api import KisAPI
+                api = KisAPI()
+                psbl = api.get_psbl_order_cash("005930")
+
+                lines = [f"📊 **[sbo2 현재 상태]** [{datetime.datetime.now(KST).strftime('%H:%M:%S')}]"]
+                lines.append(f"   💰 주문가능: {psbl:,}원")
+                lines.append(f"   📦 보유종목: {len(positions)}개")
+
+                total_pnl = 0
+                for code, pos in positions.items():
+                    mdata = api.get_market_data(code)
+                    curr  = float(mdata.get("stck_prpr", 0)) if mdata else pos.get("entry_price", 0)
+                    entry = pos.get("entry_price", 0)
+                    qty   = pos.get("qty", 0)
+                    rate  = (curr - entry) / entry * 100 if entry > 0 else 0
+                    pnl   = (curr - entry) * qty
+                    total_pnl += pnl
+                    emoji = "📈" if rate > 0 else "📉"
+                    lines.append(
+                        f"   {emoji} {pos.get('name', code)}({code}) [{pos.get('grade','?')}] "
+                        f"{rate:+.1f}% | {entry:,}→{curr:,}원 | {qty}주 | 손익:{int(pnl):,}원 "
+                        f"🛑{pos.get('stop_price',0):,.0f} 🎯{pos.get('tgt_price',0):,.0f}"
+                    )
+                lines.append(f"   💵 총 평가손익: {int(total_pnl):,}원")
+                await send_safe_message(message.channel, "\n".join(lines))
+            except Exception as e:
+                await send_safe_message(message.channel, f"❌ 상태 조회 오류: {e}")
+        return
+
+    # ── !성과 (sbo2 매매 이력) ─────────────────────────────────
+    if message.content.startswith("!성과"):
+        async with message.channel.typing():
+            try:
+                from sbo2 import get_trade_review
+                days = 30
+                parts = message.content.split()
+                if len(parts) > 1 and parts[1].isdigit():
+                    days = int(parts[1])
+                report = get_trade_review(days)
+                await send_safe_message(message.channel, f"📊 **[sbo2 성과]**\n\n{report}")
+            except Exception as e:
+                await send_safe_message(message.channel, f"❌ 성과 조회 오류: {e}")
+        return
+
+    # ── !전체성과 ─────────────────────────────────────────────
+    if message.content.startswith("!전체성과"):
+        async with message.channel.typing():
+            try:
+                import sqlite3
+                master_db = os.path.join(base_dir, 'master_trades.db')
+                if not os.path.exists(master_db):
+                    await send_safe_message(message.channel, "⚠️ master_trades.db 없어.")
+                    return
+
+                conn   = sqlite3.connect(master_db)
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT bot_type, COUNT(*) as cnt,
+                           SUM(CASE WHEN profit_rate > 0 THEN 1 ELSE 0 END) as wins,
+                           ROUND(AVG(profit_rate), 2) as avg_rate,
+                           ROUND(SUM(profit_krw), 0) as total_krw
+                    FROM master_trades
+                    GROUP BY bot_type
+                    ORDER BY total_krw DESC
+                """)
+                rows = cursor.fetchall()
+                conn.close()
+
+                lines = ["📊 **[전체 봇 성과]**"]
+                lines.append(f"{'봇':<8} {'거래':>5} {'승률':>7} {'평균':>7} {'총손익':>12}")
+                lines.append("-" * 45)
+                for bot, cnt, wins, avg, total in rows:
+                    win_rate = wins / cnt * 100 if cnt > 0 else 0
+                    emoji = "✅" if total > 0 else "❌"
+                    lines.append(
+                        f"{emoji} {bot:<6} {cnt:>5} {win_rate:>6.1f}% "
+                        f"{avg:>+6.1f}% {int(total):>11,}원"
+                    )
+                await send_safe_message(message.channel, "\n".join(lines))
+            except Exception as e:
+                await send_safe_message(message.channel, f"❌ 전체성과 조회 오류: {e}")
         return
 
     # 🚨 다중 일정 추가 로직
