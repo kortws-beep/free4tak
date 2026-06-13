@@ -1,17 +1,15 @@
 {
   "telegram_event": {
     "keywords": [
-      "엔비디아",
       "AI"
     ],
     "themes": [
-      "클라우드",
-      "AI",
       "반도체",
-      "HBM"
+      "AI",
+      "클라우드"
     ],
-    "score": 15,
-    "text": "“엔비디아? 글쎄요” 거리두는 빅테크들···세계는 지금 ‘AI깐부’ 대전 [산업이지]\nhttps://naver.me/GsBWb2mV",
-    "time": "10:54:54"
+    "score": 10,
+    "text": "애플 ‘시리 AI’ 도입에…삼전닉스, 메모리 수혜 기대\nhttps://naver.me/GO6DhA74",
+    "time": "15:08:27"
   }
 }

@@ -164,12 +164,27 @@ def check_vcp_signal(data: list, cfg: BacktestConfig) -> dict:
     if vol_avg == 0 or vol_rec >= vol_avg * cfg.vol_dry_ratio:
         return {"signal": False}
 
-    # ⑤ 스마트머니
-    f_nets = [d["f_net"] for d in data[:10]]
-    i_nets = [d["i_net"] for d in data[:10]]
-    f_pos  = sum(1 for v in f_nets if v > 0)
-    i_pos  = sum(1 for v in i_nets if v > 0)
-    if f_pos < 2 and i_pos < 2 and sum(f_nets) <= 0 and sum(i_nets) <= 0:
+    # ⑤ 스마트머니 (실제 엔진과 동일 로직)
+    f_nets_raw = [d["f_net"] for d in data]
+    i_nets_raw = [d["i_net"] for d in data]
+    supply_len = max(
+        sum(1 for v in f_nets_raw if v != 0),
+        sum(1 for v in i_nets_raw if v != 0)
+    )
+    if supply_len == 0:
+        smart_ok = True   # 수급 데이터 없으면 통과
+    else:
+        sw         = min(10, supply_len)
+        f_pos      = sum(1 for v in f_nets_raw[:sw] if v > 0)
+        i_pos      = sum(1 for v in i_nets_raw[:sw] if v > 0)
+        f_cum      = sum(f_nets_raw[:sw])
+        i_cum      = sum(i_nets_raw[:sw])
+        adj_min    = max(2, int(2 * supply_len / 10))
+        smart_ok   = (
+            f_pos >= adj_min or i_pos >= adj_min or
+            (f_cum > 0 and i_cum > 0) or f_cum > 0 or i_cum > 0
+        )
+    if not smart_ok:
         return {"signal": False}
 
     # ATR 계산
@@ -233,11 +248,12 @@ def check_trend_signal(data: list, cfg: BacktestConfig) -> dict:
     rsi = _rsi(closes)
     if not (cfg.rsi_low <= rsi <= cfg.rsi_high): return {"signal": False}
 
-    # ⑥ 거래량
-    if len(volumes) < 10: return {"signal": False}
-    vol_avg = sum(volumes) / len(volumes)
-    vol_rec = sum(volumes[:5]) / 5
-    if vol_avg > 0 and vol_rec >= vol_avg * 0.7: return {"signal": False}
+    # ⑥ 거래량 마름 (추세는 좀 더 느슨하게)
+    if len(volumes) >= 10:
+        vol_avg = sum(volumes) / len(volumes)
+        vol_rec = sum(volumes[:5]) / 5
+        if vol_avg > 0 and vol_rec >= vol_avg * 0.8:
+            return {"signal": False}
 
     # ATR
     atr  = _atr(closes)
@@ -297,13 +313,15 @@ class LinaBacktest:
 
     # ── 특정 날짜 기준 데이터 슬라이싱 ───────────────────────
     def _get_data_as_of(self, stock_name: str, as_of_date: str) -> list:
-        """as_of_date 이전 데이터만 반환 (미래 데이터 누출 방지)"""
+        """캐시에서 as_of_date 이전 데이터만 반환"""
+        if hasattr(self, '_data_cache') and stock_name in self._data_cache:
+            return [d for d in self._data_cache[stock_name] if d["date"] <= as_of_date]
+        # 캐시 없으면 DB 직접 조회
         rows = self.conn.execute("""
             SELECT date, close_price, volume, foreign_net_buy, institution_net_buy
             FROM kr_stock_daily_data
             WHERE stock_name = ? AND date <= ?
-            ORDER BY date DESC
-            LIMIT 220
+            ORDER BY date DESC LIMIT 220
         """, (stock_name, as_of_date)).fetchall()
         return [{"date": r[0], "close": r[1] or 0, "volume": r[2] or 0,
                  "f_net": r[3] or 0, "i_net": r[4] or 0} for r in rows]
@@ -430,6 +448,27 @@ class LinaBacktest:
             }
 
     # ── 메인 실행 ─────────────────────────────────────────────
+    def _preload_data(self, all_stocks: list) -> dict:
+        """전체 데이터 미리 메모리에 로드 (속도 개선)"""
+        print("   📥 데이터 사전 로딩 중...")
+        cache = {}
+        for stock_name in all_stocks:
+            rows = self.conn.execute("""
+                SELECT date, close_price, volume, foreign_net_buy, institution_net_buy
+                FROM kr_stock_daily_data
+                WHERE stock_name = ?
+                ORDER BY date DESC
+                LIMIT 220
+            """, (stock_name,)).fetchall()
+            if rows:
+                cache[stock_name] = [
+                    {"date": r[0], "close": r[1] or 0, "volume": r[2] or 0,
+                     "f_net": r[3] or 0, "i_net": r[4] or 0}
+                    for r in rows
+                ]
+        print(f"   ✅ {len(cache)}종목 로딩 완료")
+        return cache
+
     def run(self) -> dict:
         all_stocks  = get_all_stocks(self.conn)
         trade_dates = self._get_trade_dates()
@@ -438,6 +477,9 @@ class LinaBacktest:
         print(f"   기간: {self.cfg.start_date} ~ {self.end_date}")
         print(f"   종목: {len(all_stocks)}개 | 거래일: {len(trade_dates)}일")
         print(f"   시드: {self.cfg.initial_cash:,}원 | 1종목: {self.cfg.base_buy_amt:,}원")
+
+        # 전체 데이터 사전 로딩
+        self._data_cache = self._preload_data(all_stocks)
 
         for i, date in enumerate(trade_dates):
             # 매도 체크 먼저
