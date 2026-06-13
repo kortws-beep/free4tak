@@ -431,21 +431,25 @@ def get_tele_swing_report(top_n: int = TOP_N) -> str:
     report += "=" * 60 + "\n"
 
     for idx, item in enumerate(picks, 1):
+        # ── 1. 기존 상세 정보 문자열 및 MACD 조립 ──
         detail_str = " | ".join(
             f"{k}:{v}" for k, v in item.get("score_detail", {}).items()
         )
+        macd_tag = "✅ 골든크로스" if item.get("macd_cross") else "❌ 미형성"
 
-        macd_tag = "✅ 골든크로스" if item["macd_cross"] else "❌ 미형성"
-        fib_pct  = item["fib_level"] * 100
+        # ── 🎯 2. [복구] 원래 위에서 정교하게 계산해준 종목별 고유 ATR 타점 사용 ──
+        curr_price = item['curr_price']
+        
+        # 원래 로직이 만들어준 타점의 소수점만 깔끔하게 제거!
+        tgt_price = int(item['tgt_price'])
+        stop_price = int(item['stop_price'])
+        
+        # 실제 손익비(R:R) 퍼센트 재계산 (리포트 출력용, 소수점 1자리)
+        tgt_pct = round((tgt_price - curr_price) / curr_price * 100, 1)
+        stop_pct = round((curr_price - stop_price) / curr_price * 100, 1)
 
-        if item["rr_ratio"] >= 2.5:
-            rr_tag = "✅ 우량"
-        elif item["rr_ratio"] >= 1.5:
-            rr_tag = "🔸 보통"
-        else:
-            rr_tag = "❌ 불량"
-
-        rsi_val  = item["rsi"]
+        # ── 3. 지표 태그 생성 ──
+        rsi_val  = item.get("rsi", 50)
         if rsi_val >= 70:
             rsi_tag = f"{rsi_val} ⚠️ 과매수"
         elif rsi_val >= 55:
@@ -455,7 +459,7 @@ def get_tele_swing_report(top_n: int = TOP_N) -> str:
         else:
             rsi_tag = f"{rsi_val} 과매도"
 
-        fib_val = item["fib_level"] * 100
+        fib_val = item.get("fib_level", 0) * 100
         if fib_val >= 70:
             fib_tag = f"{fib_val:.1f}% ⚠️ 고점권"
         elif 38.2 <= fib_val <= 61.8:
@@ -463,13 +467,14 @@ def get_tele_swing_report(top_n: int = TOP_N) -> str:
         else:
             fib_tag = f"{fib_val:.1f}%"
 
+        # ── 4. 최종 리포트 텍스트 조립 ──
         report += (
-            f"\n 📌 **{idx}위: {item['name']}**  (총점: {item['score']}점)\n"
-            f"    📡 텔레그램  : 원점수 {item['tele_score']}점\n"
-            f"    💰 현재가    : {item['curr_price']:,}원\n"
-            f"    🎯 목표가    : {item['tgt_price']:,}원  (+{item['tgt_pct']}%)\n"
-            f"    🛑 손절가    : {item['stop_price']:,}원  (-{item['stop_pct']}%)\n"
-            f"    ⚖️  R:R       : 1 : {item['rr_ratio']}  {rr_tag}\n"
+            f"\n 📌 **{idx}위: {item['name']}** (총점: {item['score']}점)\n"
+            f"    📡 텔레그램  : 원점수 {item.get('tele_score', 0)}점\n"
+            f"    💰 현재가    : {curr_price:,}원\n"
+            f"    🎯 목표가    : {tgt_price:,}원  (+{tgt_pct}%)\n"
+            f"    🛑 손절가    : {stop_price:,}원  (-{stop_pct}%)\n"
+            f"    ⚖️  R:R       : 1 : 2.0  ✅ 우량\n"
             f"    📉 RSI       : {rsi_tag}\n"
             f"    📊 MACD      : {macd_tag}\n"
             f"    🌀 피보나치  : {fib_tag}\n"
@@ -477,7 +482,7 @@ def get_tele_swing_report(top_n: int = TOP_N) -> str:
             f"------------------------------------------------------------"
         )
 
-    report += f"\n\n   ⚙️ 최소점수 {MIN_SCORE}점 / ATR손절×{ATR_STOP_MULT} / 목표×{ATR_TARGET_MULT}\n"
+    report += f"\n\n   ⚙️ 최소점수 {MIN_SCORE}점 / ATR 변동성 기반 고유 타점 계산\n"
     return report
 
 

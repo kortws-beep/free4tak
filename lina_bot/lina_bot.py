@@ -604,6 +604,46 @@ async def daily_master_report():
 async def before_daily_master_report():
     await client.wait_until_ready()
 
+# 07:50 텔레스윙 리포트
+@tasks.loop(minutes=1)
+async def daily_tele_swing_report():
+    kst_now = datetime.datetime.now(KST)
+    if kst_now.hour != 7 or kst_now.minute != 50:
+        return
+    print(f"\n📡 [{kst_now.strftime('%H:%M')}] 텔레스윙 리포트 가동!")
+    try:
+        channel = await client.fetch_channel(REPORT_CHANNEL_ID)
+        from tele_swing_analyzer import get_tele_swing_report
+        report = await asyncio.to_thread(get_tele_swing_report, 3)
+        await send_safe_message(channel, f"📡 **[대장! 07:50 텔레스윙 리포트야]** 📡\n\n{report}")
+        print("✅ 07:50 텔레스윙 전송 완료!")
+    except Exception as e:
+        print(f"❌ 텔레스윙 오류: {e}")
+
+@daily_tele_swing_report.before_loop
+async def before_daily_tele_swing_report():
+    await client.wait_until_ready()
+
+# 14:40 텔레스윙 오후 재기동 (생쇼 반영)
+@tasks.loop(minutes=1)
+async def daily_tele_swing_afternoon():
+    kst_now = datetime.datetime.now(KST)
+    if kst_now.hour != 14 or kst_now.minute != 40:
+        return
+    print(f"\n📡 [{kst_now.strftime('%H:%M')}] 텔레스윙 오후 재기동!")
+    try:
+        channel = await client.fetch_channel(REPORT_CHANNEL_ID)
+        from tele_swing_analyzer import get_tele_swing_report
+        report = await asyncio.to_thread(get_tele_swing_report, 3)
+        await send_safe_message(channel, f"📡 **[대장! 14:40 텔레스윙 업데이트 — 생쇼 반영]** 📡\n\n{report}")
+        print("✅ 14:40 텔레스윙 전송 완료!")
+    except Exception as e:
+        print(f"❌ 텔레스윙 오후 오류: {e}")
+
+@daily_tele_swing_afternoon.before_loop
+async def before_daily_tele_swing_afternoon():
+    await client.wait_until_ready()
+
 # ==========================================
 # [메인 디스코드 코어 핸들러]
 # ==========================================
@@ -640,6 +680,16 @@ async def on_ready():
         daily_master_report.start()
         print("✅ [시스템] 07:20 마스터 리포트 스케줄러 가동 성공!")
     except Exception as e: print(f"⚠️ [에러] 마스터 스케줄러: {e}")
+
+    try:
+        daily_tele_swing_report.start()
+        print("✅ [시스템] 07:50 텔레스윙 스케줄러 가동 성공!")
+    except Exception as e: print(f"⚠️ [에러] 텔레스윙 스케줄러: {e}")
+
+    try:
+        daily_tele_swing_afternoon.start()
+        print("✅ [시스템] 14:40 텔레스윙 오후 스케줄러 가동 성공!")
+    except Exception as e: print(f"⚠️ [에러] 텔레스윙 오후 스케줄러: {e}")
 
 @client.event
 async def on_message(message):

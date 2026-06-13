@@ -464,9 +464,9 @@
   ],
   "sector_updated_at": "2026-06-11 12:10",
   "loss_date": "2026-06-11",
-  "am_score_recommend": 82,
-  "pm_score_recommend": 78,
-  "market_forecast": "필라델피아 반도체 급락으로 국내 반도체 하락 예상",
-  "forecast_date": "2026-06-11",
+  "am_score_recommend": 78,
+  "pm_score_recommend": 75,
+  "market_forecast": "미국 휴장으로 거래량 부족, 보합권 예상",
+  "forecast_date": "2026-06-13",
   "daily_loss_count": 0
 }
