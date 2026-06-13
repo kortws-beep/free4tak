@@ -337,8 +337,10 @@ def _calc_swing_score(stock_name: str, tele_score: int) -> dict:
         if ma200_check > 0 and curr < ma200_check:
             return result
 
-        # 피보나치 고점권(0.7 이상) 감점
-        if fib > 0.7:
+        # 피보나치 고점권(0.7 이상) 감점 — 생쇼 종목 제외 (돌파 매매 전략)
+        from sshow_db import get_sshow_stocks
+        _sshow = get_sshow_stocks(days=7)
+        if fib > 0.7 and stock_name not in _sshow:
             score -= 10
             detail["피보나치고점감점"] = "-10 (고점권 진입 위험)"
 
