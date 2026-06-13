@@ -754,7 +754,7 @@ async def on_message(message):
         async with message.channel.typing():
             try:
                 import json
-                state_file = os.path.join(base_dir, 'lina_bot', 'sbo2_state.json')
+                state_file = os.path.join(base_dir, 'sbo2_state.json')
                 if not os.path.exists(state_file):
                     await send_safe_message(message.channel, "⚠️ sbo2 상태파일 없어.")
                     return
