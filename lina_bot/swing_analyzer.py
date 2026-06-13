@@ -23,8 +23,8 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH  = os.path.join(BASE_DIR, "kr_theme_finance.db")
 
 # ── 튜닝 파라미터 ────────────────────────────────────────────
-MA20_BAND        = 0.07   # 20일선 ±7% 이내 밀집
-VCP_RATIO        = 0.60   # 최근 진폭 < 이전 진폭 × 60%
+MA20_BAND        = 0.10   # 20일선 ±10% 이내 밀집
+VCP_RATIO        = 0.70   # 최근 진폭 < 이전 진폭 × 70%
 VOL_DRY_RATIO    = 0.50   # 최근 5일 평균 거래량 < 전체 평균 × 50%
 SMART_DAYS       = 10     # 스마트머니 확인 기간 (일)
 SMART_MIN_DAYS   = 2      # 최소 순매수 일수
