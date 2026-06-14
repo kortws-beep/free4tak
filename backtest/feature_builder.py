@@ -47,7 +47,7 @@ class DataLoader:
             return self._ohlcv_cache[code]
         conn = sqlite3.connect(self.db_path, timeout=10)
         df = pd.read_sql(
-            "SELECT date, open, high, low, close, volume, value, change_rate as change "
+            "SELECT date, open, high, low, close, volume, value, change "
             "FROM daily_ohlcv WHERE code = ? ORDER BY date",
             conn, params=(code,))
         conn.close()
