@@ -223,6 +223,63 @@ def check_vcp_signal(data: list, cfg: BacktestConfig) -> dict:
     }
 
 
+
+def check_track_b(data: list, cfg: BacktestConfig, vol_mult: float = 3.0, dry_ratio: float = 0.25) -> dict:
+    """Track B: 200일선 돌파 기준봉 + 마른 눌림목"""
+    if len(data) < 30: return {"signal": False}
+    closes  = [d["close"]  for d in data if d["close"]  > 0]
+    volumes = [d["volume"] for d in data if d["volume"] > 0]
+    if len(closes) < 30 or len(volumes) < 21: return {"signal": False}
+
+    curr  = closes[0]
+    ma200 = _ma(closes, 200)
+    if ma200 > 0 and curr < ma200: return {"signal": False}
+
+    # 최근 10거래일 내 200일선 돌파 기준봉
+    breakout_idx = -1
+    breakout_vol = 0
+    for i in range(min(10, len(closes)-1)):
+        prev_c = closes[i+1]; curr_c = closes[i]; vol_i = volumes[i]
+        ma200_i = _ma(closes[i:], 200) if len(closes[i:]) >= 200 else _ma(closes[i:], len(closes[i:]))
+        if ma200_i == 0: continue
+        if prev_c < ma200_i and curr_c > ma200_i:
+            vol_avg = _ma(volumes[i+1:i+21], 20) if len(volumes) > i+20 else 0
+            if vol_avg > 0 and vol_i >= vol_avg * vol_mult:
+                breakout_idx = i; breakout_vol = vol_i; break
+
+    if breakout_idx < 0: return {"signal": False}
+
+    # 기준봉 이후 거래량 급감
+    if breakout_idx > 0:
+        recent_vols = volumes[:breakout_idx]
+        if recent_vols:
+            avg_recent = sum(recent_vols) / len(recent_vols)
+            if avg_recent > breakout_vol * dry_ratio:
+                return {"signal": False}
+
+    # 가격 방어
+    if breakout_idx > 0:
+        recent_low = min(closes[:breakout_idx])
+        b_close = closes[breakout_idx]
+        b_prev  = closes[breakout_idx+1] if breakout_idx+1 < len(closes) else b_close
+        support = b_prev + (b_close - b_prev) * 0.33
+        ma200_now = _ma(closes, 200)
+        if recent_low < support and recent_low < ma200_now * 0.98:
+            return {"signal": False}
+
+    atr  = _atr(closes)
+    stop = round(curr - atr * cfg.atr_stop_mult, 0)
+    tgt  = round(curr + atr * cfg.atr_target_mult, 0)
+    if stop <= 0: return {"signal": False}
+    stop_pct = (curr - stop) / curr * 100
+    tgt_pct  = (tgt - curr) / curr * 100
+    if stop_pct > 20 or tgt_pct < 8: return {"signal": False}
+    rr = round(tgt_pct / stop_pct, 1) if stop_pct > 0 else 0
+    if rr < cfg.min_rr: return {"signal": False}
+
+    return {"signal": True, "type": "TRACK_B", "vcp_type": "200MA_Breakout",
+            "curr": curr, "stop": stop, "tgt": tgt, "rr": rr, "score": 85}
+
 def check_trend_signal(data: list, cfg: BacktestConfig) -> dict:
     """
     상승추세 눌림목 신호 체크
@@ -427,21 +484,32 @@ class LinaBacktest:
             data = self._get_data_as_of(stock_name, date)
             if len(data) < 30: continue
 
-            # VCP + 추세 둘 다 체크 → 높은 점수로
-            vcp_sig   = check_vcp_signal(data, self.cfg)
-            trend_sig = check_trend_signal(data, self.cfg)
-
-            if vcp_sig["signal"] and trend_sig["signal"]:
-                # 둘 다 해당 → S급 (점수 높게)
-                sig = vcp_sig
-                sig["score"] = 90
-                sig["type"]  = "S급(VCP+추세)"
-            elif vcp_sig["signal"]:
-                sig = vcp_sig
-            elif trend_sig["signal"]:
-                sig = trend_sig
+            # Track B 시나리오 분기
+            cfg_name = getattr(self.cfg, "_name", "")
+            if "TrackBTrigger" in cfg_name:
+                vol_mult = 2.0 if "200%" in cfg_name else 2.5 if "250%" in cfg_name else 3.0
+                vcp_sig   = check_vcp_signal(data, self.cfg)
+                trend_sig = check_trend_signal(data, self.cfg)
+                tb_sig    = check_track_b(data, self.cfg, vol_mult=vol_mult)
+                if vcp_sig["signal"] and trend_sig["signal"]:
+                    sig = vcp_sig; sig["score"] = 90; sig["type"] = "S급(VCP+추세)"
+                elif vcp_sig["signal"]:   sig = vcp_sig
+                elif trend_sig["signal"]: sig = trend_sig
+                else:                     sig = {"signal": False}
+                if sig.get("signal") and tb_sig.get("signal"):
+                    sig["score"] = sig.get("score", 70) + 20
+                    sig["type"]  = "S급(TrackB승격)"
+            elif "TrackB" in cfg_name:
+                vol_mult = 2.0 if "200%" in cfg_name else 2.5 if "250%" in cfg_name else 3.0
+                sig = check_track_b(data, self.cfg, vol_mult=vol_mult)
             else:
-                sig = {"signal": False}
+                vcp_sig   = check_vcp_signal(data, self.cfg)
+                trend_sig = check_trend_signal(data, self.cfg)
+                if vcp_sig["signal"] and trend_sig["signal"]:
+                    sig = vcp_sig; sig["score"] = 90; sig["type"] = "S급(VCP+추세)"
+                elif vcp_sig["signal"]:   sig = vcp_sig
+                elif trend_sig["signal"]: sig = trend_sig
+                else:                     sig = {"signal": False}
 
             if sig["signal"]:
                 theme = _get_theme(self.conn, stock_name)
@@ -682,22 +750,23 @@ def main():
     )
 
     if args.compare:
+        def make_cfg(name, **kwargs):
+            c = BacktestConfig(**kwargs)
+            c._name = name
+            return c
+
         scenarios = [
-            ("기본(ATR×1.5/3.0)", BacktestConfig(
-                start_date=args.start, end_date=args.end,
-                atr_stop_mult=1.5, atr_target_mult=3.0)),
-            ("공격적(ATR×1.0/3.0)", BacktestConfig(
-                start_date=args.start, end_date=args.end,
-                atr_stop_mult=1.0, atr_target_mult=3.0)),
-            ("보수적(ATR×2.0/4.0)", BacktestConfig(
-                start_date=args.start, end_date=args.end,
-                atr_stop_mult=2.0, atr_target_mult=4.0)),
-            ("VCP전용(MA20±5%)", BacktestConfig(
-                start_date=args.start, end_date=args.end,
-                ma20_band=0.05)),
-            ("최대보유10일", BacktestConfig(
-                start_date=args.start, end_date=args.end,
-                max_hold_days=10)),
+            ("기본(ATR×1.5/3.0)",   make_cfg("기본",    start_date=args.start, end_date=args.end, atr_stop_mult=1.5, atr_target_mult=3.0)),
+            ("공격적(ATR×1.0/3.0)", make_cfg("공격적",  start_date=args.start, end_date=args.end, atr_stop_mult=1.0, atr_target_mult=3.0)),
+            ("보수적(ATR×2.0/4.0)", make_cfg("보수적",  start_date=args.start, end_date=args.end, atr_stop_mult=2.0, atr_target_mult=4.0)),
+            ("VCP전용(MA20±5%)",    make_cfg("VCP전용", start_date=args.start, end_date=args.end, ma20_band=0.05)),
+            ("최대보유10일",         make_cfg("최대보유10일", start_date=args.start, end_date=args.end, max_hold_days=10)),
+            ("TrackB(200%)",        make_cfg("TrackB200%",       start_date=args.start, end_date=args.end, atr_stop_mult=1.5, atr_target_mult=3.0)),
+            ("TrackB(250%)",        make_cfg("TrackB250%",       start_date=args.start, end_date=args.end, atr_stop_mult=1.5, atr_target_mult=3.0)),
+            ("TrackB(300%)",        make_cfg("TrackB300%",       start_date=args.start, end_date=args.end, atr_stop_mult=1.5, atr_target_mult=3.0)),
+            ("TrackB트리거(200%)",  make_cfg("TrackBTrigger200%", start_date=args.start, end_date=args.end, atr_stop_mult=1.5, atr_target_mult=3.0)),
+            ("TrackB트리거(250%)",  make_cfg("TrackBTrigger250%", start_date=args.start, end_date=args.end, atr_stop_mult=1.5, atr_target_mult=3.0)),
+            ("TrackB트리거(300%)",  make_cfg("TrackBTrigger300%", start_date=args.start, end_date=args.end, atr_stop_mult=1.5, atr_target_mult=3.0)),
         ]
         results = []
         for name, cfg in scenarios:
