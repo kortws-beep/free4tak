@@ -43,7 +43,7 @@ $VENV lina_backtest.py \
     2>&1 | grep -E "시나리오|수익률|승률|MDD|PF|거래|─|═|저장|판단|최종"
 
 sleep 2
-SBO2_LATEST=$(ls -t results/lina_backtest_*.json 2>/dev/null | head -1)
+SBO2_LATEST=$(ls -t $LINA_BACKTEST_DIR/results/lina_backtest_*.json 2>/dev/null | head -1)
 echo "📋 sbo2 결과: ${SBO2_LATEST:-없음}"
 
 # ── Step 3: 통합 리포트 ──────────────────────────────────
