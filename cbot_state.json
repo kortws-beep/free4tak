@@ -29,7 +29,7 @@
     },
     "daily_loss": 0,
     "market_status": "normal",
-    "btc_rate": 0.36624776000000003,
+    "btc_rate": 0.32521159,
     "fear_greed": 18,
     "is_night": false,
     "coin_pool": [
@@ -37,8 +37,8 @@
       "KRW-ETH",
       "KRW-XRP",
       "KRW-SOL",
-      "KRW-TRUMP",
       "KRW-WLD",
+      "KRW-TRUMP",
       "KRW-MEGA",
       "KRW-USDT",
       "KRW-AXL",
@@ -69,8 +69,8 @@
       "KRW-ETH",
       "KRW-XRP",
       "KRW-SOL",
-      "KRW-TRUMP",
       "KRW-WLD",
+      "KRW-TRUMP",
       "KRW-MEGA",
       "KRW-USDT",
       "KRW-AXL",
@@ -98,7 +98,7 @@
     ],
     "seed": "30만원 소액 모드"
   },
-  "last_update": "11:20:55",
+  "last_update": "11:25:00",
   "daily_loss": 0,
   "loss_date": "2026-06-14",
   "positions": {
