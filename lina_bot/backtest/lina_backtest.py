@@ -427,11 +427,21 @@ class LinaBacktest:
             data = self._get_data_as_of(stock_name, date)
             if len(data) < 30: continue
 
-            # VCP 신호
-            sig = check_vcp_signal(data, self.cfg)
-            if not sig["signal"]:
-                # 추세 신호
-                sig = check_trend_signal(data, self.cfg)
+            # VCP + 추세 둘 다 체크 → 높은 점수로
+            vcp_sig   = check_vcp_signal(data, self.cfg)
+            trend_sig = check_trend_signal(data, self.cfg)
+
+            if vcp_sig["signal"] and trend_sig["signal"]:
+                # 둘 다 해당 → S급 (점수 높게)
+                sig = vcp_sig
+                sig["score"] = 90
+                sig["type"]  = "S급(VCP+추세)"
+            elif vcp_sig["signal"]:
+                sig = vcp_sig
+            elif trend_sig["signal"]:
+                sig = trend_sig
+            else:
+                sig = {"signal": False}
 
             if sig["signal"]:
                 theme = _get_theme(self.conn, stock_name)

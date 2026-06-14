@@ -1,15 +1,15 @@
 {
   "telegram_event": {
     "keywords": [
-      "AI"
+      "트럼프"
     ],
     "themes": [
-      "반도체",
-      "AI",
-      "클라우드"
+      "철강",
+      "에너지",
+      "방산"
     ],
-    "score": 10,
-    "text": "애플 ‘시리 AI’ 도입에…삼전닉스, 메모리 수혜 기대\nhttps://naver.me/GO6DhA74",
-    "time": "15:08:27"
+    "score": 15,
+    "text": "[속보] 트럼프 \"이란과 합의 14일에 서명 예정\" | 연합뉴스\nhttps://www.yna.co.kr/view/AKR20260614001100071?input=1195m",
+    "time": "07:50:24"
   }
 }

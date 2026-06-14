@@ -812,7 +812,14 @@ async def on_message(message):
 
                 from kis_api import KisAPI
                 api = KisAPI()
-                psbl = api.get_psbl_order_cash("005930")
+                # 보유종목 기준 주문가능금액 조회
+                psbl = 0
+                for _code in list(positions.keys()):
+                    psbl = api.get_psbl_order_cash(_code)
+                    if psbl > 0:
+                        break
+                if psbl == 0:
+                    psbl = api.get_buyable_cash() if hasattr(api, 'get_buyable_cash') else 0
 
                 lines = [f"📊 **[sbo2 현재 상태]** [{datetime.datetime.now(KST).strftime('%H:%M:%S')}]"]
                 lines.append(f"   💰 주문가능: {psbl:,}원")
