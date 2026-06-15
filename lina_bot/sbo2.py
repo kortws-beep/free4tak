@@ -90,8 +90,24 @@ except Exception:
 # ============================================================
 SEED_MONEY       = 5_000_000   # 시드머니 500만원
 BASE_BUY_AMT     = 1_500_000   # 1종목 기본 매수금액 150만원
-MAX_POSITIONS    = 4            # 최대 보유 종목
+MAX_POSITIONS    = 4            # 최대 보유 종목 (교집합1+스윙1+추세1+텔레1)
 A_GRADE_RATIO    = 0.7          # A급 상위 70%만 매수
+
+# 슬롯 전략 구분
+SLOT_INTER  = "inter"   # 교집합 (VCP+추세+촉매)
+SLOT_SWING  = "swing"   # 스윙 (VCP only)
+SLOT_TREND  = "trend"   # 추세 (trend only)
+SLOT_TELE   = "tele"    # 텔레스윙
+
+SLOT_LABEL = {
+    SLOT_INTER: "교집합",
+    SLOT_SWING: "스윙",
+    SLOT_TREND: "추세",
+    SLOT_TELE:  "텔레",
+    "실계좌":   "실계좌",
+    "S":        "S급",
+    "A":        "A급",
+}
 LOOP_SLEEP       = 30           # 루프 간격 (초)
 BUY_START_TIME   = "0910"       # 매수 시작
 BUY_END_TIME     = "1520"       # 매수 마감
@@ -142,7 +158,7 @@ def init_sbo2_db():
             scan_date   TEXT    NOT NULL,
             scan_time   TEXT    NOT NULL,
             stock_name  TEXT    NOT NULL,
-            grade       TEXT    NOT NULL,   -- S / A
+            grade       TEXT    NOT NULL,   -- inter/swing/trend/tele/실계좌
             score       INTEGER DEFAULT 0,
             vcp_hit     INTEGER DEFAULT 0,  -- VCP 해당 여부
             trend_hit   INTEGER DEFAULT 0,  -- 추세 해당 여부
@@ -162,7 +178,7 @@ def init_sbo2_db():
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
             code         TEXT    NOT NULL,
             stock_name   TEXT    DEFAULT '',
-            grade        TEXT    DEFAULT '',   -- S / A
+            grade        TEXT    DEFAULT '',   -- inter/swing/trend/tele/실계좌
             vcp_hit      INTEGER DEFAULT 0,
             trend_hit    INTEGER DEFAULT 0,
             catalyst_hit INTEGER DEFAULT 0,
@@ -357,15 +373,18 @@ def _save_cand_date(date: str):
 # ============================================================
 def calc_buy_amount(grade: str, psbl_cash: int) -> int:
     """
-    등급별 매수금액:
-    - S급 → 150만원 전액 (100%)
-    - A급 → 105만원 (150만 × 70%)
+    전략별 매수금액:
+    - inter (교집합) → 150만원 (100%)
+    - swing/trend    → 125만원 (83%)
+    - tele (텔레)    → 100만원 (67%)
     - 주문가능금액 초과 시 조정
     """
-    if grade == 'S':
-        amount = BASE_BUY_AMT              # 150만원
-    else:                                   # A급
-        amount = int(BASE_BUY_AMT * 0.7)   # 105만원
+    if grade == SLOT_INTER:
+        amount = BASE_BUY_AMT               # 150만원
+    elif grade in (SLOT_SWING, SLOT_TREND):
+        amount = int(BASE_BUY_AMT * 0.83)   # 125만원
+    else:                                    # tele
+        amount = int(BASE_BUY_AMT * 0.67)   # 100만원
 
     amount = min(amount, psbl_cash)
     return amount
@@ -376,8 +395,11 @@ def calc_buy_amount(grade: str, psbl_cash: int) -> int:
 # ============================================================
 def get_candidates() -> list:
     """
-    swing_data + trend_data 직접 호출 → S/A급 후보 반환
-    텍스트 파싱 없이 100% 정확한 딕셔너리 데이터 사용
+    4슬롯 전략별 후보 반환
+    - inter (교집합): VCP + 추세 + 촉매 동시 통과 → 슬롯1 최우선
+    - swing        : VCP only                     → 슬롯2
+    - trend        : 추세 only                    → 슬롯3
+    - tele         : 텔레스윙 (07:50/14:40)       → 슬롯4
     """
     from swing_analyzer import get_swing_data
     from trend_analyzer import get_trend_data
@@ -397,25 +419,19 @@ def get_candidates() -> list:
         if d["name"] not in detail_map:
             detail_map[d["name"]] = d
 
-    s_grade = swing_names & trend_names & catalyst_set
-    a_grade = (
-        ((swing_names & trend_names)  - catalyst_set) |
-        ((swing_names & catalyst_set) - trend_names)  |
-        ((trend_names & catalyst_set) - swing_names)
-    )
-
     candidates = []
 
-    # S급 — 무조건 추가
-    for name in s_grade:
+    # ── 슬롯1: 교집합 (VCP + 추세 + 촉매) ──────────────────────
+    inter_names = swing_names & trend_names & catalyst_set
+    for name in inter_names:
         d = detail_map.get(name, {})
         candidates.append({
             "name":     name,
-            "grade":    "S",
-            "score":    d.get("score", 0),
-            "vcp":      name in swing_names,
-            "trend":    name in trend_names,
-            "catalyst": name in catalyst_set,
+            "grade":    SLOT_INTER,
+            "score":    d.get("score", 100),  # 교집합 최고 우선순위
+            "vcp":      True,
+            "trend":    True,
+            "catalyst": True,
             "curr":     d.get("curr_price", 0),
             "stop":     d.get("stop_price", 0),
             "tgt":      d.get("tgt_price", 0),
@@ -423,16 +439,17 @@ def get_candidates() -> list:
             "themes":   d.get("themes", []),
         })
 
-    # A급 — 점수 상위 70%만
-    a_list = []
-    for name in a_grade:
+    # ── 슬롯2: 스윙 (VCP only, 교집합 제외) ────────────────────
+    swing_only = swing_names - trend_names
+    swing_list = []
+    for name in swing_only:
         d = detail_map.get(name, {})
-        a_list.append({
+        swing_list.append({
             "name":     name,
-            "grade":    "A",
+            "grade":    SLOT_SWING,
             "score":    d.get("score", 0),
-            "vcp":      name in swing_names,
-            "trend":    name in trend_names,
+            "vcp":      True,
+            "trend":    False,
             "catalyst": name in catalyst_set,
             "curr":     d.get("curr_price", 0),
             "stop":     d.get("stop_price", 0),
@@ -440,12 +457,58 @@ def get_candidates() -> list:
             "rr":       d.get("rr_ratio", 0),
             "themes":   d.get("themes", []),
         })
+    swing_list.sort(key=lambda x: x["score"], reverse=True)
+    candidates += swing_list[:3]  # 상위 3개만 후보
 
-    a_list.sort(key=lambda x: x["score"], reverse=True)
-    cutoff = max(1, int(len(a_list) * A_GRADE_RATIO))
-    candidates += a_list[:cutoff]
+    # ── 슬롯3: 추세 (trend only, 교집합 제외) ──────────────────
+    trend_only = trend_names - swing_names
+    trend_list = []
+    for name in trend_only:
+        d = detail_map.get(name, {})
+        trend_list.append({
+            "name":     name,
+            "grade":    SLOT_TREND,
+            "score":    d.get("score", 0),
+            "vcp":      False,
+            "trend":    True,
+            "catalyst": name in catalyst_set,
+            "curr":     d.get("curr_price", 0),
+            "stop":     d.get("stop_price", 0),
+            "tgt":      d.get("tgt_price", 0),
+            "rr":       d.get("rr_ratio", 0),
+            "themes":   d.get("themes", []),
+        })
+    trend_list.sort(key=lambda x: x["score"], reverse=True)
+    candidates += trend_list[:3]  # 상위 3개만 후보
 
     return candidates
+
+
+def get_tele_candidates() -> list:
+    """
+    슬롯4: 텔레스윙 후보 반환 (07:50, 14:40 갱신용)
+    """
+    try:
+        tele_data = get_tele_swing_picks(top_n=5)
+        result = []
+        for d in tele_data:
+            result.append({
+                "name":     d.get("name", ""),
+                "grade":    SLOT_TELE,
+                "score":    d.get("score", 0),
+                "vcp":      False,
+                "trend":    False,
+                "catalyst": False,
+                "curr":     d.get("curr_price", 0),
+                "stop":     d.get("stop_price", 0),
+                "tgt":      d.get("tgt_price", 0),
+                "rr":       d.get("rr_ratio", 0),
+                "themes":   [],
+            })
+        return result
+    except Exception as e:
+        print(f"⚠️ 텔레스윙 후보 오류: {e}")
+        return []
 
 
 # ============================================================
@@ -527,7 +590,8 @@ class Sbo2:
         self.sold_today = st.get("sold_today", {})
         self.candidates = st.get("candidates", [])
         self._cand_date = ""   # 재시작시 무조건 재스캔
-        self._cand_tele_refreshed = False  # 14:40 텔레스윙 갱신 플래그
+        self._tele_refreshed_am = False  # 07:50 텔레스윙 갱신 플래그
+        self._tele_refreshed_pm = False  # 14:40 텔레스윙 갱신 플래그
         if st.get("sold_today_date") != today_str():
             self.sold_today = {}
 
@@ -556,43 +620,68 @@ class Sbo2:
 
     # ── 후보 갱신 ─────────────────────────────────────────────
     def _refresh_candidates(self):
-        now = time.time()
-        # 하루 1회 갱신 (날짜 바뀌거나 처음 실행시)
+        now   = time.time()
         today = today_str()
         now_t = now_hhmm()
-        # 14:40 이후엔 텔레스윙 반영을 위해 재갱신 허용 (1회만)
-        if hasattr(self, '_cand_date') and self._cand_date == today and self.candidates:
-            if now_t < "1440":
-                return
-            if getattr(self, '_cand_tele_refreshed', False):
-                return
-        # 장 시작 전(~08:50)에만 갱신 (장중 재시작 시엔 이전 캐시 유지)
-        if hasattr(self, '_cand_date') and self._cand_date == today and "0850" < now_t < "1440":
-            return
-        print(f"\n🔄 [sbo2] 후보 갱신 중...")
-        try:
-            all_cands = get_candidates()
-            # 이미 보유 중인 종목 제외 (코드 및 종목명 둘 다 체크)
-            held_codes = set(self.positions.keys())
-            held_names = {p.get("name") for p in self.positions.values()}
-            self.candidates = [
-                c for c in all_cands
-                if get_stock_code(c["name"]) not in held_codes
-                and c["name"] not in held_names
-            ]
-            if len(all_cands) != len(self.candidates):
-                excluded = [c["name"] for c in all_cands if c not in self.candidates]
-                print(f"   ⏭️ 보유중 제외: {', '.join(excluded)}")
-            self._cand_ts   = now
-            self._cand_date = today_str()
-            if now_t >= "1440":
-                self._cand_tele_refreshed = True
-            _save_cand_date(self._cand_date)
 
+        held_codes = set(self.positions.keys())
+        held_names = {p.get("name") for p in self.positions.values()}
+
+        def _filter(cands):
+            result = [c for c in cands
+                      if get_stock_code(c["name"]) not in held_codes
+                      and c["name"] not in held_names]
+            excluded = [c["name"] for c in cands if c not in result]
+            if excluded:
+                print(f"   ⏭️ 보유중 제외: {', '.join(excluded)}")
+            return result
+
+        # ── 07:50 텔레스윙 갱신 ────────────────────────────────
+        if now_t >= "0750" and not getattr(self, '_tele_refreshed_am', False):
+            print(f"\n📡 [sbo2] 07:50 텔레스윙 갱신...")
+            try:
+                tele_cands = _filter(get_tele_candidates())
+                # 기존 tele 슬롯 교체
+                self.candidates = [c for c in self.candidates if c["grade"] != SLOT_TELE]
+                self.candidates += tele_cands
+                self._tele_refreshed_am = True
+                print(f"   텔레스윙: {len(tele_cands)}개")
+            except Exception as e:
+                print(f"⚠️ 텔레스윙 갱신 오류: {e}")
+
+        # ── 14:40 텔레스윙 재갱신 ──────────────────────────────
+        if now_t >= "1440" and not getattr(self, '_tele_refreshed_pm', False):
+            print(f"\n📡 [sbo2] 14:40 텔레스윙 재갱신...")
+            try:
+                tele_cands = _filter(get_tele_candidates())
+                self.candidates = [c for c in self.candidates if c["grade"] != SLOT_TELE]
+                self.candidates += tele_cands
+                self._tele_refreshed_pm = True
+                print(f"   텔레스윙: {len(tele_cands)}개")
+            except Exception as e:
+                print(f"⚠️ 텔레스윙 재갱신 오류: {e}")
+
+        # ── 전체 갱신 (하루 1회, 날짜 바뀌거나 처음 실행 시) ──
+        if hasattr(self, '_cand_date') and self._cand_date == today:
+            return
+        print(f"\n🔄 [sbo2] 후보 전체 갱신 중...")
+        try:
+            all_cands = _filter(get_candidates())
+            # tele 슬롯은 유지하고 나머지만 교체
+            tele_slot = [c for c in self.candidates if c["grade"] == SLOT_TELE]
+            self.candidates = all_cands + tele_slot
+            self._cand_date = today
+            self._tele_refreshed_am = False
+            self._tele_refreshed_pm = False
+            _save_cand_date(self._cand_date)
         except Exception as e:
             print(f"⚠️ 후보 갱신 오류: {e}")
-        print(f"   S급: {sum(1 for c in self.candidates if c['grade']=='S')}개 "
-              f"A급: {sum(1 for c in self.candidates if c['grade']=='A')}개")
+
+        inter = sum(1 for c in self.candidates if c["grade"] == SLOT_INTER)
+        swing = sum(1 for c in self.candidates if c["grade"] == SLOT_SWING)
+        trend = sum(1 for c in self.candidates if c["grade"] == SLOT_TREND)
+        tele  = sum(1 for c in self.candidates if c["grade"] == SLOT_TELE)
+        print(f"   교집합:{inter}개 스윙:{swing}개 추세:{trend}개 텔레:{tele}개")
         for c in self.candidates:
             save_candidate(
                 name=c["name"], grade=c["grade"], score=c["score"],
@@ -643,12 +732,36 @@ class Sbo2:
             print("⚠️ [sbo2] 주문가능금액 없음 — 매수 스킵")
             return
 
-        # 보유 중인 종목 실시간 제외
+        # ── 4슬롯 전략별 매수 후보 구성 ────────────────────────
         held_codes = set(self.positions.keys())
         held_names = {p.get("name") for p in self.positions.values()}
-        buyable = [c for c in self.candidates
-                   if c["name"] not in held_names
-                   and get_stock_code(c["name"]) not in held_codes]
+        held_grades = {p.get("grade", "") for p in self.positions.values()}
+
+        def _buyable(grade):
+            return [c for c in self.candidates
+                    if c["grade"] == grade
+                    and c["name"] not in held_names
+                    and get_stock_code(c["name"]) not in held_codes]
+
+        # 슬롯별 이미 보유 여부 확인
+        has_inter = SLOT_INTER in held_grades
+        has_swing = SLOT_SWING in held_grades
+        has_trend = SLOT_TREND in held_grades
+        has_tele  = SLOT_TELE  in held_grades
+
+        # 우선순위: 교집합 → 점수 높은 순 (스윙/추세/텔레)
+        buyable = []
+        if not has_inter:
+            buyable += sorted(_buyable(SLOT_INTER), key=lambda x: x["score"], reverse=True)
+        if not has_swing:
+            buyable += sorted(_buyable(SLOT_SWING), key=lambda x: x["score"], reverse=True)
+        if not has_trend:
+            buyable += sorted(_buyable(SLOT_TREND), key=lambda x: x["score"], reverse=True)
+        if not has_tele:
+            buyable += sorted(_buyable(SLOT_TELE),  key=lambda x: x["score"], reverse=True)
+
+        print(f"   매수후보: 교집합{len(_buyable(SLOT_INTER))} 스윙{len(_buyable(SLOT_SWING))} "
+              f"추세{len(_buyable(SLOT_TREND))} 텔레{len(_buyable(SLOT_TELE))}")
 
         for cand in buyable:
             if slots <= 0:
@@ -1004,7 +1117,9 @@ class Sbo2:
                     mdata = self.api.get_market_data(code)
                     curr  = float(mdata.get("stck_prpr", 0)) if mdata else pos["entry_price"]
                     rate  = (curr - pos["entry_price"]) / pos["entry_price"] * 100
-                    print(f"   💼 {pos.get('name', code)}({pos.get('grade','')}) "
+                    grade = pos.get('grade', '')
+                    label = SLOT_LABEL.get(grade, grade)
+                    print(f"   💼 {pos.get('name', code)}({label}) "
                           f"{rate:+.1f}% | 손절:{pos['stop_price']:,.0f} 목표:{pos['tgt_price']:,.0f}")
 
             except KeyboardInterrupt:

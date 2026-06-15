@@ -4,13 +4,13 @@
   "pending_cmd": null,
   "cmd_result": null,
   "last_status": {
-    "cash": 0,
-    "total_profit": -37499,
+    "cash": 1898045,
+    "total_profit": -24999,
     "positions": 4,
     "score_enter": 70,
-    "last_update": "15:14:51",
+    "last_update": "20:00:11",
     "market_status": "normal",
-    "market_rate": 5.23,
+    "market_rate": 5.2,
     "daily_loss": 0,
     "code_name_map": {
       "204320": "HL만도",
@@ -154,7 +154,15 @@
       "347850": "디앤디파마텍",
       "086790": "하나금융지주",
       "000990": "DB하이텍",
-      "023530": "롯데쇼핑"
+      "023530": "롯데쇼핑",
+      "005490": "POSCO홀딩스",
+      "000810": "삼성화재",
+      "001440": "대한전선",
+      "009540": "HD한국조선해양",
+      "086520": "에코프로",
+      "096770": "SK이노베이션",
+      "247540": "에코프로비엠",
+      "316140": "우리금융지주"
     },
     "new_codes": [
       "028050",
@@ -204,30 +212,30 @@
       "035420": {
         "name": "NAVER",
         "entry_price": 251000,
-        "current": 249000,
-        "rate": -0.8,
+        "current": 248000,
+        "rate": -1.2,
         "qty": 4,
         "buy_tag": ""
       },
       "067310": {
         "name": "하나마이크론",
         "entry_price": 50800,
-        "current": 50600,
-        "rate": -0.39,
+        "current": 50900,
+        "rate": 0.2,
         "qty": 20,
         "buy_tag": ""
       },
       "278470": {
         "name": "에이피알",
         "entry_price": 414333,
-        "current": 412500,
-        "rate": -0.44,
+        "current": 416000,
+        "rate": 0.4,
         "qty": 3,
         "buy_tag": ""
       }
     }
   },
-  "last_update": "15:14:58",
+  "last_update": "20:00:12",
   "sold_today": {
     "089030": "09:17:16",
     "035420": "09:12:02"
