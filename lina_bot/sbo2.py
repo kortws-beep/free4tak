@@ -525,7 +525,8 @@ class Sbo2:
         st = _read_state()
         self.positions  = st.get("positions", {})
         self.sold_today = st.get("sold_today", {})
-        self._cand_date = st.get("cand_date", "")   # 후보 갱신 날짜 복원
+        self.candidates = st.get("candidates", [])
+        self._cand_date = ""   # 재시작시 무조건 재스캔
         if st.get("sold_today_date") != today_str():
             self.sold_today = {}
 
@@ -542,6 +543,7 @@ class Sbo2:
             "positions":       self.positions,
             "sold_today":      self.sold_today,
             "sold_today_date": today_str(),
+            "candidates":      self.candidates,
             "cand_date":       getattr(self, "_cand_date", ""),
         })
 
@@ -568,18 +570,18 @@ class Sbo2:
             self._cand_ts   = now
             self._cand_date = today_str()
             _save_cand_date(self._cand_date)
-            print(f"   S급: {sum(1 for c in self.candidates if c['grade']=='S')}개 "
-                  f"A급: {sum(1 for c in self.candidates if c['grade']=='A')}개")
 
-            # 후보 DB 저장
-            for c in self.candidates:
-                save_candidate(
-                    name=c["name"], grade=c["grade"], score=c["score"],
-                    vcp=c["vcp"], trend=c["trend"], catalyst=c["catalyst"],
-                    curr=c["curr"], stop=c["stop"], tgt=c["tgt"], rr=c["rr"],
-                )
         except Exception as e:
-            print(f"❌ 후보 갱신 오류: {e}")
+            print(f"⚠️ 후보 갱신 오류: {e}")
+        print(f"   S급: {sum(1 for c in self.candidates if c['grade']=='S')}개 "
+              f"A급: {sum(1 for c in self.candidates if c['grade']=='A')}개")
+        for c in self.candidates:
+            save_candidate(
+                name=c["name"], grade=c["grade"], score=c["score"],
+                vcp=c["vcp"], trend=c["trend"], catalyst=c["catalyst"],
+                curr=c["curr"], stop=c["stop"], tgt=c["tgt"], rr=c["rr"],
+            )
+
 
     # ── 매수 체크 ─────────────────────────────────────────────
     def _check_buy(self):
@@ -592,46 +594,32 @@ class Sbo2:
             print("📦 [sbo2] 포지션 FULL")
             return
 
-        # ── 텔레스윙 후보 병합 (최대 TELE_SWING_SLOTS개) ────
-        # 14:40 이후엔 생쇼 반영 텔레스윙 재스캔
-        tele_cands = get_tele_swing_picks(top_n=TELE_SWING_SLOTS)
-        for tc in tele_cands:
-            # 이미 3단콤보 후보에 없는 종목만 추가
-            if not any(c["name"] == tc["name"] for c in self.candidates):
-                self.candidates.append({
-                    "name":     tc["name"],
-                    "grade":    "T",   # T = 텔레스윙
-                    "score":    tc["score"],
-                    "vcp":      False,
-                    "trend":    False,
-                    "catalyst": True,
-                    "curr":     tc["curr_price"],
-                    "stop":     tc["stop_price"],
-                    "tgt":      tc["tgt_price"],
-                    "rr":       tc["rr_ratio"],
-                    "themes":   [],
-                })
-                print(f"   📡 텔레스윙 후보 추가: {tc['name']} ({tc['score']}점)")
-            else:
-                # 기존 후보 점수 업데이트
-                for c in self.candidates:
-                    if c["name"] == tc["name"]:
-                        c["score"] = max(c["score"], tc["score"])
+        # 텔레스윙은 _refresh_candidates에서 처리
 
-        # 주문가능금액 조회 — 보유종목 기준 (진짜 주문가능금액)
-        psbl_cash = 0
-        for _code in list(self.positions.keys()):
-            psbl_cash = self.api.get_psbl_order_cash(_code)
-            if psbl_cash > 0:
-                break
-        # 보유종목 없으면 후보 종목으로 조회
-        if psbl_cash <= 0 and self.candidates:
-            for cand in self.candidates:
-                _code = get_stock_code(cand["name"])
-                if _code:
-                    psbl_cash = self.api.get_psbl_order_cash(_code)
-                    if psbl_cash > 0:
-                        break
+        # 주문가능금액 조회 — 삼성전자로 조회 (sbot 방식)
+        psbl_cash = self.api.get_psbl_order_cash("005930")
+        # API 조회 실패시 예수금 직접 조회
+        if psbl_cash <= 0:
+            try:
+                import requests as _rq
+                url = f"{self.api.base_url}/uapi/domestic-stock/v1/trading/inquire-balance"
+                headers = {"authorization": f"Bearer {self.api.token}",
+                           "appkey": self.api.appkey, "appsecret": self.api.secret,
+                           "tr_id": "TTTC8434R"}
+                params = {"CANO": self.api.cano, "ACNT_PRDT_CD": self.api.acnt,
+                          "AFHR_FLPR_YN": "N", "OFL_YN": "", "INQR_DVSN": "02",
+                          "UNPR_DVSN": "01", "FUND_STTL_ICLD_YN": "N",
+                          "FNCG_AMT_AUTO_RDPT_YN": "N", "PRCS_DVSN": "00",
+                          "CTX_AREA_FK100": "", "CTX_AREA_NK100": ""}
+                res = _rq.get(url, headers=headers, params=params, timeout=5).json()
+                o2 = res.get("output2", [{}])
+                if o2:
+                    psbl_cash = int(float(o2[0].get("ord_psbl_cash") or
+                                         o2[0].get("prvs_rcdl_excc_amt") or 0))
+                    print(f"   💰 주문가능(폴백): {psbl_cash:,}원")
+            except Exception as e:
+                print(f"⚠️ 예수금 폴백 조회 오류: {e}")
+
         print(f"   💰 주문가능: {psbl_cash:,}원")
         if psbl_cash <= 0:
             print("⚠️ [sbo2] 주문가능금액 없음 — 매수 스킵")
@@ -650,6 +638,14 @@ class Sbo2:
             if code in self.positions:
                 continue
 
+            # 코드 or 종목명으로 이중 체크
+            already_held = (
+                code in self.positions or
+                any(p.get("name") == name for p in self.positions.values())
+            )
+            if already_held:
+                print(f"⏭️ 이미 보유중: {name}({code}) - 스킵")
+                continue
             if code in self.sold_today:
                 print(f"🚫 재매수 금지: {name}")
                 save_candidate(name=name, grade=cand["grade"], score=cand["score"],
@@ -770,6 +766,8 @@ class Sbo2:
             if curr <= 0:
                 continue
 
+            if entry <= 0 or curr <= 0:
+                continue
             rate = (curr - entry) / entry * 100
             reason = None
 

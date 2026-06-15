@@ -171,7 +171,7 @@ def get_swing_theme_bonus(code: str, theme_group_map: dict) -> tuple:
 MAX_POSITIONS    = 5              # 최대 보유 종목 (3→5)
 BUY_1ST_AMT_BASE = 1_000_000    # 1차 매수 기본 금액 (330K→100만, 5종목)
 BUY_SCORE_MIN    = 45             # 후보 최소 점수
-BUY_SCORE_ENTER  = 60             # 매수 진입 기준점
+BUY_SCORE_ENTER  = 55             # 매수 진입 기준점
 LOOP_SLEEP       = 60
 POOL_SIZE        = 100
 
@@ -1364,6 +1364,8 @@ class SBot:
                 # ★ 09:10 이전이면 매수 스킵 (매도 체크만)
                 if not is_buy_ok:
                     print(f"⏳ [SWING] {BUY_START_TIME} 이전 — 매도 체크만")
+                    self._check_all_sells(pos_mkt_cache)
+                    self._save_status(cash, total_profit, score_enter, now, pos_mkt_cache)
                     time.sleep(LOOP_SLEEP); continue
 
                 codes = self._get_pool()

@@ -1,14 +1,15 @@
 {
   "telegram_event": {
     "keywords": [
-      "HBM"
+      "AI"
     ],
     "themes": [
       "반도체",
-      "HBM"
+      "AI",
+      "클라우드"
     ],
-    "score": 15,
-    "text": "HBM 특수에 '귀하신 몸' … 하닉보다 뜨거운 장비株\nhttps://naver.me/FEgmO0W2",
-    "time": "19:44:54"
+    "score": 10,
+    "text": "AI 인프라 투자, 내년 ‘1조달러 돌파’ 전망…3대 반도체주 수혜 가능성 - 글로벌이코노믹\nhttps://www.g-enews.com/view.php?ud=2026061423293245089a1f309431_1",
+    "time": "10:00:28"
   }
 }
