@@ -4,13 +4,13 @@
   "pending_cmd": null,
   "cmd_result": null,
   "last_status": {
-    "cash": 1898045,
+    "cash": 0,
     "total_profit": -37499,
     "positions": 4,
     "score_enter": 70,
-    "last_update": "15:06:37",
+    "last_update": "15:14:51",
     "market_status": "normal",
-    "market_rate": 5.04,
+    "market_rate": 5.23,
     "daily_loss": 0,
     "code_name_map": {
       "204320": "HL만도",
@@ -196,8 +196,8 @@
       "028050": {
         "name": "삼성E&A",
         "entry_price": 53100,
-        "current": 52300,
-        "rate": -1.51,
+        "current": 52100,
+        "rate": -1.88,
         "qty": 20,
         "buy_tag": ""
       },
@@ -212,8 +212,8 @@
       "067310": {
         "name": "하나마이크론",
         "entry_price": 50800,
-        "current": 50400,
-        "rate": -0.79,
+        "current": 50600,
+        "rate": -0.39,
         "qty": 20,
         "buy_tag": ""
       },
@@ -227,7 +227,7 @@
       }
     }
   },
-  "last_update": "15:06:51",
+  "last_update": "15:14:58",
   "sold_today": {
     "089030": "09:17:16",
     "035420": "09:12:02"

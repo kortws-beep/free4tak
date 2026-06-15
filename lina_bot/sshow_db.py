@@ -78,10 +78,9 @@ def _parse_stock_name(text: str) -> str:
 def _parse_sshow_block(block: str) -> dict:
     """
     생쇼 텍스트 블록에서 종목명/매수가/손절가 파싱
-    예시:
-      📌 한미반도체
-      매수가 85,000원 / 손절 78,000원 / 목표 98,000원
-      [사유]: AI반도체 수혜 지속
+    새 포맷:
+      📌 현대건설기계(267270) [매수: 156,300원 / 목표: 172,000원 / 손절: 130,000원]
+      [사유]: ...
     """
     result = {
         "stock_name": "",
@@ -93,30 +92,37 @@ def _parse_sshow_block(block: str) -> dict:
 
     lines = [l.strip() for l in block.split('\n') if l.strip()]
 
-    for line in lines:
-        # 종목명
-        if not result["stock_name"]:
-            name = _parse_stock_name(line)
-            if name:
-                result["stock_name"] = name
+    # 📌 줄과 다음 줄을 합쳐서 파싱 (종목명/코드/가격이 줄바꿈으로 분리될 수 있음)
+    for i, line in enumerate(lines):
+        if "📌" in line:
+            # 다음 줄과 합치기
+            combined = line
+            if i + 1 < len(lines) and "📌" not in lines[i+1] and "[사유]" not in lines[i+1]:
+                combined = line + " " + lines[i+1]
 
-        # 매수가
-        if any(kw in line for kw in ["매수", "진입", "매수가"]):
-            price = _parse_price(line)
-            if price > 0:
-                result["buy_price"] = price
+            # 종목명: 📌 다음, 괄호 또는 [ 앞까지
+            m = re.search(r'📌\s*([가-힣A-Za-z0-9·\-&\s]+?)(?:\s*[\(\[])', combined)
+            if m:
+                result["stock_name"] = m.group(1).strip()
+            else:
+                m = re.search(r'📌\s*([가-힣A-Za-z0-9·\-&]+)', combined)
+                if m:
+                    result["stock_name"] = m.group(1).strip()
 
-        # 손절가
-        if any(kw in line for kw in ["손절", "스탑", "손절가"]):
-            price = _parse_price(line)
-            if price > 0:
-                result["stop_price"] = price
+            # 매수가
+            m = re.search(r'매수\s*:\s*([\d,]+)원', combined)
+            if m:
+                result["buy_price"] = float(m.group(1).replace(',', ''))
 
-        # 목표가
-        if any(kw in line for kw in ["목표", "타겟", "목표가"]):
-            price = _parse_price(line)
-            if price > 0:
-                result["tgt_price"] = price
+            # 목표가
+            m = re.search(r'목표\s*:\s*([\d,]+)원', combined)
+            if m:
+                result["tgt_price"] = float(m.group(1).replace(',', ''))
+
+            # 손절가
+            m = re.search(r'손절\s*:\s*([\d,]+)원', combined)
+            if m:
+                result["stop_price"] = float(m.group(1).replace(',', ''))
 
     return result
 
@@ -128,7 +134,7 @@ def _parse_sshow_block(block: str) -> dict:
 def save_sshow_picks(raw_text: str) -> int:
     """
     생쇼 raw_text 파싱 후 DB 저장
-    포맷: "종목명\n\n* 핵심 공략 사유: ..."
+    새 포맷: "📌 종목명(코드) [매수: X원 / 목표: X원 / 손절: X원]\n  [사유]: ..."
     반환: 저장된 건수
     """
     init_db()
@@ -139,40 +145,36 @@ def save_sshow_picks(raw_text: str) -> int:
     conn = sqlite3.connect(DB_PATH, timeout=10)
     conn.execute("PRAGMA journal_mode=WAL")
 
-    # 줄 단위 파싱 — "핵심 공략 사유:" 위 줄이 종목명
-    # 제외 키워드 (종목명이 아닌 것)
-    SKIP_WORDS = {"핵심", "공략", "사유", "매수", "손절", "목표", "분석", "추천"}
+    # 블록 분리 (📌 기준)
+    blocks = [b.strip() for b in raw_text.split("\n\n") if b.strip()]
 
-    matches = []
-    lines = [l.strip() for l in raw_text.split("\n") if l.strip()]
-    for i, line in enumerate(lines):
-        if "핵심 공략 사유" in line:
-            for j in range(i-1, max(i-4, -1), -1):
-                candidate = re.sub(r"[\s\*\-\.\d]", "", lines[j])
-                # 종목명 조건: 2자 이상 한글 포함, 스킵 단어 아님
-                if (len(candidate) >= 2
-                        and (re.search(r"[가-힣]", candidate) or re.match(r"^[A-Za-z0-9]+$", candidate))
-                        and candidate not in SKIP_WORDS
-                        and "사유" not in candidate
-                        and "공략" not in candidate):
-                    reason = re.sub(r"\*\s*핵심 공략 사유\s*:\s*", "", line).strip()
-                    matches.append((candidate, reason))
-                    break
+    for block in blocks:
+        if "📌" not in block:
+            continue
 
-    for name, reason in matches:
-        name = name.strip()
+        parsed = _parse_sshow_block(block)
+        name = parsed["stock_name"]
         if not name or len(name) < 2:
             continue
+
+        # [사유] 추출
+        reason = ""
+        for line in block.split("\n"):
+            if "[사유]" in line:
+                reason = re.sub(r"\[사유\]\s*:?\s*", "", line).strip()
+                break
 
         try:
             conn.execute("""
                 INSERT OR IGNORE INTO sshow_picks
                     (date, stock_name, buy_price, stop_price, tgt_price, raw_text)
                 VALUES (?, ?, ?, ?, ?, ?)
-            """, (today, name, 0, 0, 0, reason[:300]))
+            """, (today, name, parsed["buy_price"], parsed["stop_price"],
+                  parsed["tgt_price"], reason[:300]))
             if conn.execute("SELECT changes()").fetchone()[0] > 0:
                 saved += 1
-                print(f"   💾 생쇼 저장: {name}")
+                print(f"   💾 생쇼 저장: {name} 매수:{parsed['buy_price']:,.0f} "
+                      f"손절:{parsed['stop_price']:,.0f} 목표:{parsed['tgt_price']:,.0f}")
         except Exception as e:
             print(f"⚠️ 생쇼 저장 오류 {name}: {e}")
 
