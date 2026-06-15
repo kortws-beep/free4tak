@@ -36,8 +36,8 @@ MODEL_NAME = os.getenv("MODEL_NAME", "gemma4:e4b")
 # 🚨 대한민국 표준시(KST) 타임존
 KST = datetime.timezone(datetime.timedelta(hours=9))
 
-# 💡 리나의 텔레그램 중복 방지용 단기 기억 장치
-LAST_TELEGRAM_CONTEXT = ""
+# 💡 리나의 텔레그램 중복 방지용 단기 기억 장치 (마지막 처리한 ID 기억)
+LAST_TELEGRAM_ID = 0
 
 # 🚨 리포트 전송할 디스코드 채널 ID 및 DB 경로
 REPORT_CHANNEL_ID = 1508487747508240525 
@@ -296,28 +296,43 @@ async def fetch_mbngold_async(service_id="10001", limit=5):
     return "텅 비어 있어. (MBN골드 사이트 지연 또는 오늘자 업데이트 없음)"
 
 def fetch_recent_telegram_events(limit_count=4):
+    """마지막 브리핑 이후 새로 들어온 메시지만 반환 (중복 방지)"""
+    global LAST_TELEGRAM_ID
     try:
         conn = sqlite3.connect(DB_PATH_TELEGRAM, timeout=10)
         cursor = conn.cursor()
+        # 마지막 처리 ID 이후 새 메시지만 조회
         query = """
-            SELECT channel, message, keywords, themes, score 
+            SELECT id, channel, message, keywords, themes, score 
             FROM telegram_events 
-            ORDER BY id DESC 
-            LIMIT ?
+            WHERE id > ?
+            ORDER BY id ASC
         """
-        cursor.execute(query, (limit_count,))
+        cursor.execute(query, (LAST_TELEGRAM_ID,))
         rows = cursor.fetchall()
         conn.close()
-        
-        if not rows: return "대장, 데이터베이스에 수집된 속보가 아예 비어있네!"
-            
+
+        if not rows: return ""
+
         raw_context = ""
+        max_id = LAST_TELEGRAM_ID
+        seen = set()
         for r in rows:
-            msg = str(r[1] or "").strip().replace("<0xED><0x8C><0xB9>리스", "팹리스")
-            kw = ", ".join(json.loads(r[2])) if r[2] else "없음"
-            raw_context += f"채널: [{r[0]}] | 내용: {msg} | 키워드: {kw} | 가산점: +{r[4] or 10}점\n\n"
+            row_id, channel, msg, keywords, themes, score = r
+            msg = str(msg or "").strip().replace("\xed\x8c\xb9리스", "팹리스")
+            if not msg or msg in seen:
+                continue
+            seen.add(msg)
+            kw = ", ".join(json.loads(keywords)) if keywords else "없음"
+            raw_context += f"채널: [{channel}] | 내용: {msg} | 키워드: {kw} | 가산점: +{score or 10}점\n\n"
+            if row_id > max_id:
+                max_id = row_id
+
+        if raw_context:
+            LAST_TELEGRAM_ID = max_id  # 처리한 마지막 ID 업데이트
+
         return raw_context
-    except Exception as e: 
+    except Exception as e:
         return f"디비 접근 오류: {str(e)}"
 
 # 💡 [신규 엔진 기능] 아침 브리핑에 주입할 최고 우량 수급 종목 발굴 엔진
@@ -475,7 +490,7 @@ async def before_daily_afternoon_report():
 # 3. 매 시간 30분 텔레그램 속보 루프 
 @tasks.loop(minutes=1)
 async def hourly_telegram_event_report():
-    global LAST_TELEGRAM_CONTEXT
+    global LAST_TELEGRAM_ID
     kst_now = datetime.datetime.now(KST)
     
     if kst_now.minute != 30:
@@ -489,14 +504,14 @@ async def hourly_telegram_event_report():
         print(f"❌ [디버그 에러] 텔레그램 채널 접속 실패: {e}")
         return
 
-    raw_context = fetch_recent_telegram_events(limit_count=4)
-    if not raw_context.strip() or "비어있네" in raw_context: return
-
-    if raw_context == LAST_TELEGRAM_CONTEXT:
+    raw_context = fetch_recent_telegram_events()
+    if not raw_context.strip():
         print(f"💤 [디버그] 새로운 텔레그램 속보가 없어서 브리핑을 건너뜁니다! (중복 방지)")
         return
-        
-    LAST_TELEGRAM_CONTEXT = raw_context
+
+
+
+
 
     prompt = (
         f"너는 1시간 동안 발생한 텔레그램 주식/시황 속보를 정밀 요약하는 참모 리나야.\n"
