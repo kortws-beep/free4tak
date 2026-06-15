@@ -1,13 +1,15 @@
 {
   "telegram_event": {
     "keywords": [
-      "상장"
+      "트럼프"
     ],
     "themes": [
-      "IPO"
+      "에너지",
+      "철강",
+      "방산"
     ],
-    "score": 10,
-    "text": "[美특징주]파이어플라이·로켓랩, 월가 투자의견 상향·스페이스X 상장發 주가 반등\nhttps://naver.me/FM9GCWQ0",
-    "time": "06:40:28"
+    "score": 15,
+    "text": "트럼프 “19일부터 호르무즈 통행료 없다”...MOU엔 “60일만 무료”\nhttps://naver.me/5FDKft4B",
+    "time": "07:04:21"
   }
 }

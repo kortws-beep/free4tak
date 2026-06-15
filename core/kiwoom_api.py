@@ -60,11 +60,13 @@ class KiwoomAPI:
     # ============================================================
     async def get_condition_codes(self, use_keywords: list = None,
                                    code_name_map: dict = None,
-                                   skip_keywords: list = None) -> list:
+                                   skip_keywords: list = None,
+                                   code_tag_map: dict = None) -> list:
         """
         키움 조건검색식으로 종목 조회.
         use_keywords:  이 키워드 포함된 검색식만 사용 (None이면 전체)
         skip_keywords: 이 키워드 포함된 검색식 제외 (단타봇 조건식 제외 등)
+        code_tag_map:  {code: cond_name} — 종목별 검색식명 저장 (buy_tag 추적용)
         """
         import websockets as _ws
         token = self.get_token()
@@ -124,6 +126,9 @@ class KiwoomAPI:
                                     seen.add(code); codes.append(code)
                                     if code_name_map is not None:
                                         code_name_map[code] = iname
+                                    # ★ 검색식명 태그 저장 (첫 번째 검색식 우선)
+                                    if code_tag_map is not None and code not in code_tag_map:
+                                        code_tag_map[code] = name
                                     fetched += 1
                             if res.get("cont_yn") != "Y": break
                         except asyncio.TimeoutError: break

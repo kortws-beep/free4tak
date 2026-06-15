@@ -280,6 +280,7 @@ class SBot:
         self.market_rate       = 0.0
         self.daily_loss_count  = 0
         self.new_codes_list    = []
+        self.code_tag_map      = {}   # {code: 검색식명} buy_tag 추적용
         self._last_market_check = 0
 
         if self.kiwoom.enabled:
@@ -373,6 +374,7 @@ class SBot:
                     use_keywords=None,           # 모든 조건검색식 가져옴
                     skip_keywords=SKIP_COND_KEYWORDS,  # 단타 제외
                     code_name_map=self.code_name_map,
+                    code_tag_map=self.code_tag_map,   # ★ 검색식명 태그 저장
                 )
             )
             loop.close()
@@ -391,6 +393,8 @@ class SBot:
                     for nc in self.new_codes_list:
                         if nc not in codes:
                             codes.append(nc); added += 1
+                            if nc not in self.code_tag_map:
+                                self.code_tag_map[nc] = "expert"  # new그룹=전문가추천
                     if added:
                         print(f"  🆕 new 종목 {added}개 풀 추가")
                 except Exception as e:
@@ -449,6 +453,7 @@ class SBot:
             ai_score  = ctx.get("ai_score", 0),
             ai_reason = ctx.get("ai_reason", ""),
             stock_name= self._name(code),
+            buy_tag   = self.code_tag_map.get(code, "unknown"),  # ★ 검색식명
         )
 
         # ★ master_positions 등록
@@ -600,6 +605,7 @@ class SBot:
         self._tech_cache       = {}
         self._flow_cache       = {}
         self.new_codes_list    = []
+        self.code_tag_map      = {}   # {code: 검색식명} buy_tag 추적용
         self.atr_cache         = {}
         self.api._mkt_cache    = {}
         _update_state(

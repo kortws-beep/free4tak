@@ -48,7 +48,9 @@ class SwingDB:
                     profit_rate REAL,
                     sell_reason TEXT,
                     ai_score    INTEGER,
-                    ai_reason   TEXT
+                    ai_reason   TEXT,
+                    buy_tag     TEXT    DEFAULT '',  -- 검색식명 (momentum/profit/growth/value/earnings/expert)
+                    hold_days   INTEGER DEFAULT 0
                 )
             """)
             conn.execute("CREATE INDEX IF NOT EXISTS idx_sbot_code ON trades(code, sell_time)")
@@ -59,15 +61,27 @@ class SwingDB:
             print(f"❌ 스윙 DB 오류: {e}")
 
     def save_buy(self, code: str, buy_price: float, qty: int,
-                 ai_score: int, ai_reason: str, stock_name: str = ""):
+                 ai_score: int, ai_reason: str, stock_name: str = "",
+                 buy_tag: str = ""):
         try:
             now  = datetime.datetime.now().isoformat(timespec="seconds")
             conn = _connect()
+            # buy_tag 컬럼 없는 구버전 DB 대응
+            try:
+                conn.execute("ALTER TABLE trades ADD COLUMN buy_tag TEXT DEFAULT ''")
+                conn.commit()
+            except Exception:
+                pass
+            try:
+                conn.execute("ALTER TABLE trades ADD COLUMN hold_days INTEGER DEFAULT 0")
+                conn.commit()
+            except Exception:
+                pass
             conn.execute("""
                 INSERT INTO trades
-                    (code, stock_name, buy_price, buy_time, qty, ai_score, ai_reason)
-                VALUES (?,?,?,?,?,?,?)
-            """, (code, stock_name, buy_price, now, qty, ai_score, ai_reason))
+                    (code, stock_name, buy_price, buy_time, qty, ai_score, ai_reason, buy_tag)
+                VALUES (?,?,?,?,?,?,?,?)
+            """, (code, stock_name, buy_price, now, qty, ai_score, ai_reason, buy_tag))
             conn.commit(); conn.close()
         except Exception as e:
             print(f"⚠️ 스윙 매수 저장 오류 {code}: {e}")
@@ -119,7 +133,7 @@ class SwingDB:
         try:
             conn = _connect()
             rows = conn.execute("""
-                SELECT profit_rate FROM trades
+                SELECT profit_rate, buy_tag FROM trades
                 WHERE sell_price IS NOT NULL
                 ORDER BY id DESC LIMIT ?
             """, (limit,)).fetchall()
@@ -130,10 +144,30 @@ class SwingDB:
             if not profits:
                 return None
             wins = [p for p in profits if p >= 0]
+            # buy_tag별 통계
+            tag_stats = {}
+            for profit_rate, tag in rows:
+                if profit_rate is None: continue
+                t = tag or "unknown"
+                if t not in tag_stats:
+                    tag_stats[t] = {"total": 0, "wins": 0, "profits": []}
+                tag_stats[t]["total"] += 1
+                tag_stats[t]["profits"].append(profit_rate)
+                if profit_rate >= 0:
+                    tag_stats[t]["wins"] += 1
+            tag_summary = {
+                t: {
+                    "win_rate":   round(v["wins"] / v["total"] * 100, 1),
+                    "avg_profit": round(sum(v["profits"]) / v["total"], 2),
+                    "total":      v["total"],
+                }
+                for t, v in tag_stats.items()
+            }
             return {
                 "total":      len(profits),
                 "win_rate":   round(len(wins) / len(profits) * 100, 1),
                 "avg_profit": round(sum(profits) / len(profits), 2),
+                "by_tag":     tag_summary,
             }
         except Exception:
             return None
