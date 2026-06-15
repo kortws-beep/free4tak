@@ -29,7 +29,7 @@
     },
     "daily_loss": 0,
     "market_status": "normal",
-    "btc_rate": -0.48996875000000006,
+    "btc_rate": -0.48896058000000003,
     "fear_greed": 20,
     "is_night": false,
     "coin_pool": [
@@ -48,12 +48,12 @@
       "KRW-SLX",
       "KRW-NEAR",
       "KRW-XLM",
-      "KRW-SKR",
       "KRW-DOGE",
-      "KRW-ZKP",
       "KRW-CHIP",
-      "KRW-TAO",
+      "KRW-SKR",
+      "KRW-ZKP",
       "KRW-KERNEL",
+      "KRW-TAO",
       "KRW-SUI",
       "KRW-ADA",
       "KRW-IP",
@@ -62,7 +62,7 @@
       "KRW-VIRTUAL",
       "KRW-AKT",
       "KRW-ONT",
-      "KRW-OPEN"
+      "KRW-JTO"
     ],
     "coins": [
       "KRW-BTC",
@@ -80,12 +80,12 @@
       "KRW-SLX",
       "KRW-NEAR",
       "KRW-XLM",
-      "KRW-SKR",
       "KRW-DOGE",
-      "KRW-ZKP",
       "KRW-CHIP",
-      "KRW-TAO",
+      "KRW-SKR",
+      "KRW-ZKP",
       "KRW-KERNEL",
+      "KRW-TAO",
       "KRW-SUI",
       "KRW-ADA",
       "KRW-IP",
@@ -94,11 +94,11 @@
       "KRW-VIRTUAL",
       "KRW-AKT",
       "KRW-ONT",
-      "KRW-OPEN"
+      "KRW-JTO"
     ],
     "seed": "30만원 소액 모드"
   },
-  "last_update": "14:38:59",
+  "last_update": "15:07:02",
   "daily_loss": 0,
   "loss_date": "2026-06-15",
   "positions": {

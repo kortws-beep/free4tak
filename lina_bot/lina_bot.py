@@ -229,68 +229,84 @@ def get_weather_kma_pure() -> str:
     except Exception as e: return f"기상청 수신 지연 중 ({e})"
 
 async def fetch_mbngold_async(service_id="10001", limit=5):
-    search_results = []
+    """MBN골드 로그인 후 생쇼/뉴스 크롤링 (새 URL 구조)"""
+    import requests as _req
+    from dotenv import load_dotenv as _load
+    _load(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
+
     base_url = "https://www.mbngold.com"
-    list_url = f"{base_url}/st/news/news.ls?news_service_id={service_id}"
-    headers = {"User-Agent": "Mozilla/5.0", "Referer": "https://www.mbngold.com/"}
-    
+    headers = {"User-Agent": "Mozilla/5.0", "Referer": f"{base_url}/mg/mypage/login.php"}
+    sess = _req.Session()
+
+    # 로그인
     try:
-        async with AsyncSession() as session:
-            res = await session.get(list_url, headers=headers, impersonate="chrome", timeout=10)
-        
-        if res.status_code == 200:
-            html_text = res.content.decode('euc-kr', errors='ignore')
-            soup = BeautifulSoup(html_text, 'html.parser')
-            
-            links = []
-            for a in soup.find_all("a", href=True):
-                href = a["href"]
-                if "newsview.ls" in href:
-                    m = re.search(r"news_no=(MM\d+)", href)
-                    if m:
-                        news_no = m.group(1)
-                        if news_no not in [l[0] for l in links]:
-                            title = a.get_text(strip=True)
+        sess.post(f"{base_url}/mg/mypage/login_action.php", headers=headers, data={
+            "mode": "login",
+            "rURL": f"{base_url}/mg/news/",
+            "mID":  os.getenv("MBNGOLD_ID", ""),
+            "mPWD": os.getenv("MBNGOLD_PW", ""),
+        }, timeout=10)
+    except Exception as e:
+        print(f"❌ MBN골드 로그인 에러: {e}")
+        return "텅 비어 있어. (MBN골드 로그인 실패)"
+
+    # 목록 페이지
+    try:
+        list_url = f"{base_url}/mg/news/index.php?news_service_id={service_id}"
+        res = sess.get(list_url, headers=headers, timeout=10)
+        soup = BeautifulSoup(res.content.decode('utf-8', errors='ignore'), 'html.parser')
+
+        links = []
+        for a in soup.find_all("a", href=True):
+            href = a["href"]
+            if "view.php" in href and "news_no=MM" in href:
+                m = re.search(r"news_no=(MM\d+)", href)
+                if m:
+                    news_no = m.group(1)
+                    if news_no not in [l[0] for l in links]:
+                        title = a.get_text(strip=True)
+                        if title:
                             links.append((news_no, title))
                             if len(links) >= limit: break
-            
-            async with AsyncSession() as session:
-                for news_no, title in links:
-                    full_url = f"{base_url}/st/news/newsview.ls?news_no={news_no}&news_service_id={service_id}"
-                    try:
-                        sub_res = await session.get(full_url, headers=headers, impersonate="chrome", timeout=5)
-                        sub_soup = BeautifulSoup(sub_res.content.decode('euc-kr', errors='ignore'), "html.parser")
-                        
-                        if service_id == "10001":
-                            content = sub_soup.get_text(separator=" ")
-                            clean_content = re.sub(r'\s+', ' ', content).strip()
-                            snippet = clean_content[:150] if len(clean_content) > 150 else clean_content
-                            search_results.append(f"📰 [기사] {title}\n    └ [내용] {snippet}...")
-                        else:
-                            content = sub_soup.get_text(separator="\n")
-                            lines = [line.strip() for line in content.split("\n") if len(line.strip()) > 1]
-                            found = False
-                            
-                            for idx, line in enumerate(lines):
-                                if "손절" in line and ("매수" in line or "목표" in line or "원" in line):
-                                    target_block = []
-                                    if idx - 1 >= 0: target_block.append(f"📌 {lines[idx-1]}")
-                                    target_block.append(line)
-                                    if idx + 1 < len(lines): target_block.append(f"  [사유]: {lines[idx+1]}")
-                                    search_results.append("\n".join(target_block))
-                                    found = True
-                                    break
-                            
-                            if not found:
-                                search_results.append(f"📌 [생쇼 등록됨] {title} (게시글 내 매수가 양식 다름)")
-                                
-                    except Exception as e:
-                        print(f"상세 페이지 에러: {e}")
-                        
-            if search_results:
-                return "\n\n".join(search_results)
-                
-    except Exception as e: 
+
+        if not links:
+            return "텅 비어 있어. (MBN골드 사이트 지연 또는 오늘자 업데이트 없음)"
+
+        search_results = []
+        for news_no, title in links:
+            full_url = f"{base_url}/mg/news/view.php?news_no={news_no}&news_service_id={service_id}&page=1"
+            try:
+                sub_res = sess.get(full_url, headers=headers, timeout=5)
+                sub_soup = BeautifulSoup(sub_res.content.decode('utf-8', errors='ignore'), "html.parser")
+
+                if service_id == "10001":
+                    content = sub_soup.get_text(separator=" ")
+                    clean_content = re.sub(r'\s+', ' ', content).strip()
+                    snippet = clean_content[:150] if len(clean_content) > 150 else clean_content
+                    search_results.append(f"📰 [기사] {title}\n    └ [내용] {snippet}...")
+                else:
+                    content = sub_soup.get_text(separator="\n")
+                    lines = [line.strip() for line in content.split("\n") if len(line.strip()) > 1]
+                    found = False
+                    for idx, line in enumerate(lines):
+                        if "손절" in line and ("매수" in line or "목표" in line or "원" in line):
+                            target_block = []
+                            if idx - 1 >= 0: target_block.append(f"📌 {lines[idx-1]}")
+                            target_block.append(line)
+                            if idx + 1 < len(lines): target_block.append(f"  [사유]: {lines[idx+1]}")
+                            search_results.append("\n".join(target_block))
+                            found = True
+                            break
+                    if not found:
+                        search_results.append(f"📌 [생쇼 등록됨] {title} (게시글 내 매수가 양식 다름)")
+            except Exception as e:
+                print(f"상세 페이지 에러: {e}")
+
+        if search_results:
+            return "\n\n".join(search_results)
+        return "텅 비어 있어. (MBN골드 사이트 지연 또는 오늘자 업데이트 없음)"
+
+    except Exception as e:
         print(f"❌ MBN골드 접속 에러: {e}")
         
     return "텅 비어 있어. (MBN골드 사이트 지연 또는 오늘자 업데이트 없음)"
