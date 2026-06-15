@@ -566,7 +566,18 @@ class Sbo2:
             return
         print(f"\n🔄 [sbo2] 후보 갱신 중...")
         try:
-            self.candidates = get_candidates()
+            all_cands = get_candidates()
+            # 이미 보유 중인 종목 제외 (코드 및 종목명 둘 다 체크)
+            held_codes = set(self.positions.keys())
+            held_names = {p.get("name") for p in self.positions.values()}
+            self.candidates = [
+                c for c in all_cands
+                if get_stock_code(c["name"]) not in held_codes
+                and c["name"] not in held_names
+            ]
+            if len(all_cands) != len(self.candidates):
+                excluded = [c["name"] for c in all_cands if c not in self.candidates]
+                print(f"   ⏭️ 보유중 제외: {', '.join(excluded)}")
             self._cand_ts   = now
             self._cand_date = today_str()
             _save_cand_date(self._cand_date)
@@ -625,7 +636,14 @@ class Sbo2:
             print("⚠️ [sbo2] 주문가능금액 없음 — 매수 스킵")
             return
 
-        for cand in self.candidates:
+        # 보유 중인 종목 실시간 제외
+        held_codes = set(self.positions.keys())
+        held_names = {p.get("name") for p in self.positions.values()}
+        buyable = [c for c in self.candidates
+                   if c["name"] not in held_names
+                   and get_stock_code(c["name"]) not in held_codes]
+
+        for cand in buyable:
             if slots <= 0:
                 break
 

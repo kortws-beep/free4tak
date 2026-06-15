@@ -5,12 +5,12 @@
   "cmd_result": null,
   "last_status": {
     "cash": 1898045,
-    "total_profit": -2000,
+    "total_profit": -6000,
     "positions": 1,
     "score_enter": 80,
-    "last_update": "10:18:47",
+    "last_update": "10:39:12",
     "market_status": "normal",
-    "market_rate": 5.31,
+    "market_rate": 4.94,
     "daily_loss": 0,
     "code_name_map": {
       "010170": "대한광통신",
@@ -214,14 +214,14 @@
       "035420": {
         "name": "NAVER",
         "entry_price": 251000,
-        "current": 250500,
-        "rate": -0.2,
+        "current": 249500,
+        "rate": -0.6,
         "qty": 4,
         "buy_tag": ""
       }
     }
   },
-  "last_update": "10:18:55",
+  "last_update": "10:39:27",
   "sold_today": {
     "089030": "09:17:16",
     "035420": "09:12:02"
