@@ -164,35 +164,46 @@ class KisAPI:
             "FUND_STTL_ICLD_YN": "N", "FNCG_AMT_AUTO_RDPT_YN": "N",
             "PRCS_DVSN": "00", "CTX_AREA_FK100": "", "CTX_AREA_NK100": "",
         }
-        try:
-            res = requests.get(url, headers=headers, params=params).json()
-            pos = {}
-            _etf_skip = ["KODEX","TIGER","KBSTAR","ARIRANG","HANARO",
-                         "KOSEF","TREX","SOL","ACE","PLUS","RISE"]
-            for item in res.get("output1", []):
-                qty = int(item.get("hldg_qty", 0))
-                if qty <= 0: continue
-                code = item.get("pdno")
-                name = item.get("prdt_name", "")
-                # ETF 필터 (코드 6자리 숫자 아니면 제외)
-                if not code.isdigit() or any(s in name for s in _etf_skip):
-                    print(f'⚠️ 포지션 제외 (ETF/기타): {code} {name}')
-                    continue
-                avg  = float(item.get("pchs_avg_pric", 0))
-                pos[code] = {"entry_price": avg, "qty": qty}
-            if pos:
-                # ★ 정상값만 캐시 갱신 (빈값이면 이전 캐시 유지)
-                self._pos_cache = pos
-                self._pos_cache_ts = time.time()
-            elif hasattr(self, '_pos_cache') and self._pos_cache:
-                print(f"⚠️ 잔고 빈값 — 이전 캐시 유지 ({len(self._pos_cache)}종목)")
-                return self._pos_cache
-            return pos
-        except Exception as e:
-            print(f"❌ 보유종목 조회 오류: {e}")
-            if hasattr(self, '_pos_cache') and self._pos_cache:
-                return self._pos_cache
-            return {}
+        _etf_skip = ["KODEX","TIGER","KBSTAR","ARIRANG","HANARO",
+                     "KOSEF","TREX","SOL","ACE","PLUS","RISE"]
+        for _retry in range(3):
+            try:
+                res = requests.get(url, headers=headers, params=params, timeout=10).json()
+                pos = {}
+                for item in res.get("output1", []):
+                    qty = int(item.get("hldg_qty", 0))
+                    if qty <= 0: continue
+                    code = item.get("pdno")
+                    name = item.get("prdt_name", "")
+                    # ETF 필터 (코드 6자리 숫자 아니면 제외)
+                    if not code.isdigit() or any(s in name for s in _etf_skip):
+                        print(f'⚠️ 포지션 제외 (ETF/기타): {code} {name}')
+                        continue
+                    avg  = float(item.get("pchs_avg_pric", 0))
+                    pos[code] = {"entry_price": avg, "qty": qty}
+                if pos:
+                    # ★ 정상값만 캐시 갱신
+                    self._pos_cache = pos
+                    self._pos_cache_ts = time.time()
+                    return pos
+                else:
+                    if _retry < 2:
+                        print(f"⚠️ 잔고 빈값 — 재시도 {_retry+1}/3")
+                        time.sleep(1)
+                    else:
+                        if hasattr(self, '_pos_cache') and self._pos_cache:
+                            print(f"⚠️ 잔고 빈값 — 이전 캐시 유지 ({len(self._pos_cache)}종목)")
+                            return self._pos_cache
+                        return {}
+            except Exception as e:
+                print(f"❌ 보유종목 조회 오류({_retry+1}/3): {e}")
+                if _retry < 2:
+                    time.sleep(1)
+                else:
+                    if hasattr(self, '_pos_cache') and self._pos_cache:
+                        return self._pos_cache
+                    return {}
+        return {}
 
     # ============================================================
     # 시세 조회

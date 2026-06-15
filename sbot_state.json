@@ -5,10 +5,10 @@
   "cmd_result": null,
   "last_status": {
     "cash": 1898045,
-    "total_profit": -4499,
+    "total_profit": -25999,
     "positions": 4,
     "score_enter": 70,
-    "last_update": "14:18:23",
+    "last_update": "14:29:01",
     "market_status": "normal",
     "market_rate": 5.5,
     "daily_loss": 0,
@@ -150,7 +150,8 @@
       "000720": "현대건설",
       "373220": "LG에너지솔루션",
       "178320": "서진시스템",
-      "080220": "제주반도체"
+      "080220": "제주반도체",
+      "347850": "디앤디파마텍"
     },
     "new_codes": [
       "028050",
@@ -192,8 +193,8 @@
       "028050": {
         "name": "삼성E&A",
         "entry_price": 53100,
-        "current": 52400,
-        "rate": -1.32,
+        "current": 52000,
+        "rate": -2.07,
         "qty": 20,
         "buy_tag": ""
       },
@@ -208,22 +209,22 @@
       "067310": {
         "name": "하나마이크론",
         "entry_price": 50800,
-        "current": 50800,
-        "rate": 0.0,
+        "current": 50500,
+        "rate": -0.59,
         "qty": 20,
         "buy_tag": ""
       },
       "278470": {
         "name": "에이피알",
         "entry_price": 414333,
-        "current": 419500,
-        "rate": 1.25,
+        "current": 417000,
+        "rate": 0.64,
         "qty": 3,
         "buy_tag": ""
       }
     }
   },
-  "last_update": "14:18:30",
+  "last_update": "14:29:08",
   "sold_today": {
     "089030": "09:17:16",
     "035420": "09:12:02"
