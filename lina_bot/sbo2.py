@@ -527,6 +527,7 @@ class Sbo2:
         self.sold_today = st.get("sold_today", {})
         self.candidates = st.get("candidates", [])
         self._cand_date = ""   # 재시작시 무조건 재스캔
+        self._cand_tele_refreshed = False  # 14:40 텔레스윙 갱신 플래그
         if st.get("sold_today_date") != today_str():
             self.sold_today = {}
 
@@ -558,11 +559,15 @@ class Sbo2:
         now = time.time()
         # 하루 1회 갱신 (날짜 바뀌거나 처음 실행시)
         today = today_str()
-        if hasattr(self, '_cand_date') and self._cand_date == today and self.candidates:
-            return
-        # 장 시작 전(~08:50)에만 갱신 (장중 재시작 시엔 이전 캐시 유지)
         now_t = now_hhmm()
-        if hasattr(self, '_cand_date') and self._cand_date == today and now_t > "0850":
+        # 14:40 이후엔 텔레스윙 반영을 위해 재갱신 허용 (1회만)
+        if hasattr(self, '_cand_date') and self._cand_date == today and self.candidates:
+            if now_t < "1440":
+                return
+            if getattr(self, '_cand_tele_refreshed', False):
+                return
+        # 장 시작 전(~08:50)에만 갱신 (장중 재시작 시엔 이전 캐시 유지)
+        if hasattr(self, '_cand_date') and self._cand_date == today and "0850" < now_t < "1440":
             return
         print(f"\n🔄 [sbo2] 후보 갱신 중...")
         try:
@@ -580,6 +585,8 @@ class Sbo2:
                 print(f"   ⏭️ 보유중 제외: {', '.join(excluded)}")
             self._cand_ts   = now
             self._cand_date = today_str()
+            if now_t >= "1440":
+                self._cand_tele_refreshed = True
             _save_cand_date(self._cand_date)
 
         except Exception as e:

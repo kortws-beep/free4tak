@@ -8,9 +8,9 @@
     "total_profit": -6000,
     "positions": 1,
     "score_enter": 80,
-    "last_update": "10:39:12",
+    "last_update": "10:43:58",
     "market_status": "normal",
-    "market_rate": 4.94,
+    "market_rate": 5.09,
     "daily_loss": 0,
     "code_name_map": {
       "010170": "대한광통신",
@@ -221,7 +221,7 @@
       }
     }
   },
-  "last_update": "10:39:27",
+  "last_update": "10:44:07",
   "sold_today": {
     "089030": "09:17:16",
     "035420": "09:12:02"

@@ -29,7 +29,7 @@
     },
     "daily_loss": 0,
     "market_status": "normal",
-    "btc_rate": -1.04345196,
+    "btc_rate": -0.68555298,
     "fear_greed": 20,
     "is_night": false,
     "coin_pool": [
@@ -53,8 +53,8 @@
       "KRW-TAO",
       "KRW-NEAR",
       "KRW-CHIP",
-      "KRW-IRYS",
       "KRW-SUI",
+      "KRW-IRYS",
       "KRW-AKT",
       "KRW-ADA",
       "KRW-BABY",
@@ -85,8 +85,8 @@
       "KRW-TAO",
       "KRW-NEAR",
       "KRW-CHIP",
-      "KRW-IRYS",
       "KRW-SUI",
+      "KRW-IRYS",
       "KRW-AKT",
       "KRW-ADA",
       "KRW-BABY",
@@ -98,7 +98,7 @@
     ],
     "seed": "30만원 소액 모드"
   },
-  "last_update": "10:40:29",
+  "last_update": "10:45:06",
   "daily_loss": 0,
   "loss_date": "2026-06-15",
   "positions": {
