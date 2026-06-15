@@ -904,6 +904,12 @@ class Sbo2:
         """
         try:
             new_pos = self.api.get_current_positions()
+            if not new_pos:
+                # 캐시 무효화 후 재시도
+                if hasattr(self.api, '_pos_cache'):
+                    self.api._pos_cache = {}
+                    self.api._pos_cache_ts = 0
+                new_pos = self.api.get_current_positions()
             if not new_pos and self.positions:
                 print("⚠️ 실계좌 잔고 빈값 — 동기화 스킵 (캐시 유지)")
                 return
