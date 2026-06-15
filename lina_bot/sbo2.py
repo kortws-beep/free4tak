@@ -920,7 +920,7 @@ class Sbo2:
             # ⚠️ 장마감 청산 없음 — 스윙봇은 목표가/손절가만 반응
 
             if reason:
-                ok = self.api.sell(code, qty)
+                ok = self.api.sell(code, qty, price=int(curr))
                 if not ok:
                     continue
 

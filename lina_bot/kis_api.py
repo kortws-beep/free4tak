@@ -27,13 +27,57 @@ class KisAPI:
     # ============================================================
     # 토큰
     # ============================================================
+    def _token_dat_path(self) -> str:
+        """계좌별 토큰 캐시 파일 경로"""
+        _base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        return os.path.join(_base, f"token_{self.cano}.dat")
+
     def _issue_token(self) -> str:
+        # 1) 계좌별 token.dat 캐시 확인
+        try:
+            import pickle as _pk
+            _tdat = self._token_dat_path()
+            if os.path.exists(_tdat):
+                _d = _pk.load(open(_tdat, "rb"))
+                _ok = (
+                    _d.get("api_key", "") == self.appkey
+                    and "access_token_token_expired" in _d
+                    and datetime.datetime.now() <
+                        datetime.datetime.strptime(
+                            _d["access_token_token_expired"], "%Y-%m-%d %H:%M:%S")
+                        - datetime.timedelta(hours=1)
+                )
+                if _ok and _d.get("access_token"):
+                    print(f"✅ 토큰 캐시 사용 [{self.cano}] (만료:{_d['access_token_token_expired']})")
+                    return _d["access_token"]
+                else:
+                    os.remove(_tdat)
+                    print(f"⚠️ 토큰 캐시 만료/불일치 [{self.cano}] - 재발급")
+        except Exception:
+            pass
+
+        # 2) 신규 발급
         url  = f"{self.base_url}/oauth2/tokenP"
         body = {"grant_type": "client_credentials",
                 "appkey": self.appkey, "appsecret": self.secret}
         try:
-            token = requests.post(url, json=body).json().get("access_token", "")
-            print("✅ 한투 토큰 발급 완료")
+            res = requests.post(url, json=body).json()
+            if "error_code" in res:
+                print(f"❌ 토큰 발급 오류 [{self.cano}]: {res.get('error_description', res['error_code'])}")
+                return ""
+            token = res.get("access_token", "")
+            exp   = res.get("access_token_token_expired", "")
+            if token:
+                try:
+                    import pickle as _pk2
+                    _pk2.dump({"access_token": token,
+                               "access_token_token_expired": exp,
+                               "api_key": self.appkey,
+                               "timestamp": int(time.time())},
+                              open(self._token_dat_path(), "wb"))
+                except Exception:
+                    pass
+                print(f"✅ 한투 토큰 발급 완료 [{self.cano}]")
             return token
         except Exception as e:
             print(f"❌ 토큰 발급 실패: {e}"); return ""
@@ -41,6 +85,10 @@ class KisAPI:
     def refresh_token_if_needed(self):
         if time.time() - self.token_issued_at > TOKEN_TTL - 3600:
             print("🔄 토큰 갱신 중...")
+            try:
+                _tdat = self._token_dat_path()
+                if os.path.exists(_tdat): os.remove(_tdat)
+            except Exception: pass
             self.token           = self._issue_token()
             self.token_issued_at = time.time()
 
@@ -62,7 +110,13 @@ class KisAPI:
         headers = {"authorization": f"Bearer {self.token}",
                    "appkey": self.appkey, "appsecret": self.secret,
                    "tr_id": "TTTC8434R"}
-        params  = {"CANO": self.cano, "ACNT_PRDT_CD": self.acnt, "INQR_DVSN": "01"}
+        params  = {
+            "CANO": self.cano, "ACNT_PRDT_CD": self.acnt,
+            "AFHR_FLPR_YN": "N", "OFL_YN": "",
+            "INQR_DVSN": "01", "UNPR_DVSN": "01",
+            "FUND_STTL_ICLD_YN": "N", "FNCG_AMT_AUTO_RDPT_YN": "N",
+            "PRCS_DVSN": "00", "CTX_AREA_FK100": "", "CTX_AREA_NK100": "",
+        }
         try:
             res     = requests.get(url, headers=headers, params=params).json()
             output2 = res.get("output2", [{}])[0] if res.get("output2") else {}
@@ -95,23 +149,61 @@ class KisAPI:
             print(f"❌ 주문가능금액 조회 오류: {e}"); return 0
 
     def get_current_positions(self) -> dict:
+        # ★ 30초 캐시 (API 호출 횟수 제한 대응)
+        _now = time.time()
+        if hasattr(self, '_pos_cache') and self._pos_cache and _now - self._pos_cache_ts < 60:
+            return self._pos_cache
         url = f"{self.base_url}/uapi/domestic-stock/v1/trading/inquire-balance"
         headers = {"authorization": f"Bearer {self.token}",
                    "appkey": self.appkey, "appsecret": self.secret,
                    "tr_id": "TTTC8434R"}
-        params  = {"CANO": self.cano, "ACNT_PRDT_CD": self.acnt, "INQR_DVSN": "01"}
-        try:
-            res = requests.get(url, headers=headers, params=params).json()
-            pos = {}
-            for item in res.get("output1", []):
-                qty = int(item.get("hldg_qty", 0))
-                if qty <= 0: continue
-                code = item.get("pdno")
-                avg  = float(item.get("pchs_avg_pric", 0))
-                pos[code] = {"entry_price": avg, "qty": qty}
-            return pos
-        except Exception as e:
-            print(f"❌ 보유종목 조회 오류: {e}"); return {}
+        params  = {
+            "CANO": self.cano, "ACNT_PRDT_CD": self.acnt,
+            "AFHR_FLPR_YN": "N", "OFL_YN": "",
+            "INQR_DVSN": "01", "UNPR_DVSN": "01",
+            "FUND_STTL_ICLD_YN": "N", "FNCG_AMT_AUTO_RDPT_YN": "N",
+            "PRCS_DVSN": "00", "CTX_AREA_FK100": "", "CTX_AREA_NK100": "",
+        }
+        _etf_skip = ["KODEX","TIGER","KBSTAR","ARIRANG","HANARO",
+                     "KOSEF","TREX","SOL","ACE","PLUS","RISE"]
+        for _retry in range(3):
+            try:
+                res = requests.get(url, headers=headers, params=params, timeout=10).json()
+                pos = {}
+                for item in res.get("output1", []):
+                    qty = int(item.get("hldg_qty", 0))
+                    if qty <= 0: continue
+                    code = item.get("pdno")
+                    name = item.get("prdt_name", "")
+                    # ETF 필터 (코드 6자리 숫자 아니면 제외)
+                    if not code.isdigit() or any(s in name for s in _etf_skip):
+                        print(f'⚠️ 포지션 제외 (ETF/기타): {code} {name}')
+                        continue
+                    avg  = float(item.get("pchs_avg_pric", 0))
+                    pos[code] = {"entry_price": avg, "qty": qty}
+                if pos:
+                    # ★ 정상값만 캐시 갱신
+                    self._pos_cache = pos
+                    self._pos_cache_ts = time.time()
+                    return pos
+                else:
+                    if _retry < 2:
+                        print(f"⚠️ 잔고 빈값 — 재시도 {_retry+1}/3")
+                        time.sleep(1)
+                    else:
+                        if hasattr(self, '_pos_cache') and self._pos_cache:
+                            print(f"⚠️ 잔고 빈값 — 이전 캐시 유지 ({len(self._pos_cache)}종목)")
+                            return self._pos_cache
+                        return {}
+            except Exception as e:
+                print(f"❌ 보유종목 조회 오류({_retry+1}/3): {e}")
+                if _retry < 2:
+                    time.sleep(1)
+                else:
+                    if hasattr(self, '_pos_cache') and self._pos_cache:
+                        return self._pos_cache
+                    return {}
+        return {}
 
     # ============================================================
     # 시세 조회
@@ -254,7 +346,7 @@ class KisAPI:
                    "appKey": self.appkey, "appSecret": self.secret,
                    "tr_id": "FHKST03010100"}
         end_date   = datetime.datetime.now().strftime("%Y%m%d")
-        start_date = (datetime.datetime.now() - datetime.timedelta(days=200)).strftime("%Y%m%d")
+        start_date = (datetime.datetime.now() - datetime.timedelta(days=290)).strftime("%Y%m%d")  # ★ 200 MA 확보위해 290일 (영업일 ~200일)
         params = {"fid_cond_mrkt_div_code": "J", "fid_input_iscd": code,
                   "fid_input_date_1": start_date, "fid_input_date_2": end_date,
                   "fid_period_div_code": "D", "fid_org_adj_prc": "0"}
@@ -345,6 +437,8 @@ class KisAPI:
                 "ma10":          ma(10),
                 "ma20":          ma(20),
                 "ma60":          ma(60),
+                "ma120":         ma(120),   # ★ 추가
+                "ma200":         ma(200),   # ★ sbot2 추세추종 핵심
                 "rsi":           round(rsi(), 1),
                 # ★ 신규
                 "macd":          round(macd, 2),
@@ -500,8 +594,9 @@ class KisAPI:
             res = requests.post(url, headers=headers, data=json.dumps(data), timeout=10).json()
             if res.get("rt_cd") == "0":
                 out = res.get("output", {})
-                odno = out.get("KRX_FWDG_ORD_ORGNO","") + out.get("ODNO","")
-                return True, odno
+                orgno = out.get("KRX_FWDG_ORD_ORGNO", "")
+                odno  = out.get("ODNO", "")
+                return True, orgno, odno
             else:
                 print(f"❌ 매수 실패 {code}: {res.get('msg1', '알 수 없는 오류')}"); return False, ""
         except Exception as e:
@@ -605,103 +700,45 @@ class KisAPI:
     # ============================================================
     # 일봉 OHLC (ATR 계산용)
     # ============================================================
-    def get_daily_ohlc(self, code: str, days: int = 20,
-                       start_date: str = "", end_date: str = "") -> list:
+    def get_daily_ohlc(self, code: str, days: int = 20) -> list:
         """
-        일봉 OHLC 데이터 조회.
+        일봉 OHLC 데이터 조회 (ATR 변동성 계산용).
 
         반환: [{"high": int, "low": int, "close": int, "open": int, "volume": int}, ...]
         - 최신 → 과거 순서 (index 0이 가장 최근 일봉)
-        - 한투 API 최대 100일 제한 → days > 100 이면 자동 분할 요청
-
-        Args:
-            code      : 종목코드
-            days      : 가져올 영업일 수 (start_date/end_date 미지정 시 오늘 기준 역산)
-            start_date: 시작일 YYYYMMDD (지정 시 days 무시)
-            end_date  : 종료일 YYYYMMDD (지정 시 days 무시)
+        - risk_manager.calc_atr_rate()에 그대로 전달 가능
         """
         url = f"{self.base_url}/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice"
         headers = {"Content-Type": "application/json",
                    "authorization": f"Bearer {self.token}",
                    "appKey": self.appkey, "appSecret": self.secret,
                    "tr_id": "FHKST03010100"}
-
-        def _fetch_chunk(s: str, e: str) -> list:
-            params = {"fid_cond_mrkt_div_code": "J", "fid_input_iscd": code,
-                      "fid_input_date_1": s, "fid_input_date_2": e,
-                      "fid_period_div_code": "D", "fid_org_adj_prc": "0"}
-            try:
-                res     = requests.get(url, headers=headers, params=params, timeout=5).json()
-                candles = res.get("output2", [])
-                result  = []
-                for c in candles:
-                    try:
-                        result.append({
-                            "date":   c.get("stck_bsop_date", ""),   # YYYYMMDD
-                            "high":   int(c.get("stck_hgpr",  0) or 0),
-                            "low":    int(c.get("stck_lwpr",  0) or 0),
-                            "close":  int(c.get("stck_clpr",  0) or 0),
-                            "open":   int(c.get("stck_oprc",  0) or 0),
-                            "volume": int(c.get("acml_vol",   0) or 0),
-                        })
-                    except Exception:
-                        continue
-                return result
-            except Exception as ex:
-                print(f"⚠️ 일봉 조회 오류 {code}: {ex}"); return []
-
-        # ── 날짜 범위 지정 모드 ──────────────────────────────────
-        if start_date and end_date:
-            s = datetime.datetime.strptime(start_date, "%Y%m%d")
-            e = datetime.datetime.strptime(end_date,   "%Y%m%d")
-            ohlc = []
-            # 100일씩 역방향 분할
-            chunk_end = e
-            while chunk_end >= s:
-                chunk_start = max(s, chunk_end - datetime.timedelta(days=139))  # 100영업일 ≈ 140일
-                ohlc.extend(_fetch_chunk(
-                    chunk_start.strftime("%Y%m%d"),
-                    chunk_end.strftime("%Y%m%d"),
-                ))
-                chunk_end = chunk_start - datetime.timedelta(days=1)
-                if chunk_end < s:
-                    break
-                time.sleep(0.3)
-            # 중복 제거 후 최신순 정렬
-            seen = set()
-            deduped = []
-            for c in ohlc:
-                if c["date"] not in seen:
-                    seen.add(c["date"])
-                    deduped.append(c)
-            return sorted(deduped, key=lambda x: x["date"], reverse=True)
-
-        # ── days 기준 모드 (기존 호환) ───────────────────────────
+        end_date   = datetime.datetime.now().strftime("%Y%m%d")
+        # ATR period=14 + 여유분 → 30일 정도 가져옴
         fetch_days = max(days + 15, 30)
-        e_dt = datetime.datetime.now()
-        ohlc = []
-        collected = 0
-        while collected < days:
-            chunk_days = min(100, days - collected)
-            s_dt = e_dt - datetime.timedelta(days=int(chunk_days * 1.5))
-            chunk = _fetch_chunk(s_dt.strftime("%Y%m%d"), e_dt.strftime("%Y%m%d"))
-            if not chunk:
-                break
-            ohlc.extend(chunk)
-            collected += len(chunk)
-            e_dt = s_dt - datetime.timedelta(days=1)
-            if len(chunk) < chunk_days:
-                break
-            time.sleep(0.3)
-
-        # 중복 제거 후 최신순, days개 제한
-        seen = set()
-        deduped = []
-        for c in ohlc:
-            if c["date"] not in seen:
-                seen.add(c["date"])
-                deduped.append(c)
-        return sorted(deduped, key=lambda x: x["date"], reverse=True)[:days]
+        start_date = (datetime.datetime.now()
+                      - datetime.timedelta(days=fetch_days * 2)).strftime("%Y%m%d")
+        params = {"fid_cond_mrkt_div_code": "J", "fid_input_iscd": code,
+                  "fid_input_date_1": start_date, "fid_input_date_2": end_date,
+                  "fid_period_div_code": "D", "fid_org_adj_prc": "0"}
+        try:
+            res     = requests.get(url, headers=headers, params=params, timeout=5).json()
+            candles = res.get("output2", [])
+            ohlc    = []
+            for c in candles[:days]:
+                try:
+                    ohlc.append({
+                        "high":   int(c.get("stck_hgpr",  0) or 0),
+                        "low":    int(c.get("stck_lwpr",  0) or 0),
+                        "close":  int(c.get("stck_clpr",  0) or 0),
+                        "open":   int(c.get("stck_oprc",  0) or 0),
+                        "volume": int(c.get("acml_vol",   0) or 0),
+                    })
+                except Exception:
+                    continue
+            return ohlc
+        except Exception as e:
+            print(f"⚠️ 일봉 조회 오류 {code}: {e}"); return []
 
     # ============================================================
     # 거래량 순위 (폴백)

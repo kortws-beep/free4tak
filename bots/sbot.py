@@ -485,7 +485,7 @@ class SBot:
         if qty <= 0:
             return
 
-        ok = self.api.sell(code, qty)
+        ok = self.api.sell(code, qty, price=int(sell_price))
         if not ok:
             return
 

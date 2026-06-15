@@ -1,15 +1,15 @@
 {
   "telegram_event": {
     "keywords": [
-      "트럼프"
+      "AI"
     ],
     "themes": [
-      "에너지",
-      "철강",
-      "방산"
+      "반도체",
+      "AI",
+      "클라우드"
     ],
-    "score": 15,
-    "text": "트럼프 “19일부터 호르무즈 통행료 없다”...MOU엔 “60일만 무료”\nhttps://naver.me/5FDKft4B",
-    "time": "07:04:21"
+    "score": 10,
+    "text": "AI 데이터 센터발 MLCC 공급 대공황… 사상 최악 병목 - 글로벌이코노믹\nhttps://www.g-enews.com/article/Global-Biz/2026/06/2026061518012694140c8c1c064d_1",
+    "time": "08:04:49"
   }
 }
