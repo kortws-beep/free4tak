@@ -560,7 +560,10 @@ class SBot:
                     stage=self.peak_tracker.get(code, {}).get("stage", 0),
                 )
 
-        self.sold_today[code] = now_hms()
+        # ★ 손절/본절만 당일 재매수 금지 — 익절/수동매도는 재진입 허용
+        if is_loss:
+            self.sold_today[code] = now_hms()
+            print(f"🚫 [SWING] {code} 손절/본절 → 당일 재매수 금지")
 
         # 상태 파일에도 sold_today 저장
         st = _read_state()
@@ -1238,11 +1241,11 @@ class SBot:
                 # ── 계좌 ─────────────────────────────────
                 cash           = (self._ws.cash if self._ws and self._ws.cash > 0 else self.api.get_buyable_cash())
                 new_pos = self.api.get_current_positions()
-                # ★ 수동매도 감지 — 이전 포지션에 있었는데 실계좌에 없으면 sold_today 추가
+                # ★ 수동매도 감지 — 이전 포지션에 있었는데 실계좌에 없으면 감지
+                # ★ 수동매도는 재매수 허용 — sold_today 등록 안 함
                 for _code in list(self.positions.keys()):
                     if _code not in new_pos and _code not in self.sold_today:
-                        self.sold_today[_code] = now_hms()
-                        print(f"🔍 수동매도 감지: {_code} → sold_today 추가")
+                        print(f"🔍 수동매도 감지: {_code} → 재매수 허용")
                 self.positions.clear()
                 self.positions.update(new_pos)
                 psbl_cash      = self.api.get_psbl_order_cash("005930")
