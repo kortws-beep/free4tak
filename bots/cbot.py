@@ -133,28 +133,29 @@ MIN_CHANGE_RATE   = -20.0           # 폭락 (-20% 이하) 제외
 # 레버리지/ETF 제외 키워드
 EXCLUDE_KEYWORDS = ["UP", "DOWN", "BEAR", "BULL"]
 
-# 매수/매도 금액 (30만원 시드 기준)
-BUY_1ST_AMT       = 300_000     # 1차 매수 30만원
-BUY_2ND_AMT       = 150_000      # 2차 매수 15만원 (물타기)
-BUY_2ND_THRESHOLD = -0.03       # 1차 대비 -3% 하락 시 2차
+# 매수/매도 금액 (40만원 단일 매수 — 추매 없음)
+BUY_1ST_AMT       = 400_000     # 1차 매수 40만원 (단일, 추매 없음)
+BUY_2ND_AMT       = 0           # 추매 비활성화
+BUY_2ND_THRESHOLD = -9999       # 추매 비활성화 (절대 도달 안 하는 값)
 MAX_POSITIONS     = 3           # 최대 3코인
 MAX_ALT_POSITIONS = 3           # BTC/ETH 외 알트 동시 보유 최대 3개
 MIN_ORDER_AMT     = 5_000       # 업비트 최소 주문 금액
 
-# ── 매도 전략 ───────────────────────────────────────────────
-SELL_1ST_RATE   = 0.05    # 1차 익절: +5%
-SELL_1ST_QTY    = 0.30    # 30% 매도
-SELL_2ND_RATE   = 0.10    # 2차 익절: +10%
-SELL_2ND_QTY    = 0.40    # 잔량의 40%
-TRAIL_STOP      = 0.05    # 트레일링: 고점 -5%
+# ── 매도 전략 (v3 — ATR 추세추종) ─────────────────────────
+# 분할 익절 제거 — 전량 보유하며 목표가/손절가 상향
+ATR_STOP_MULT    = 2.0    # 손절: 매수가 - ATR × 2
+ATR_TARGET_MULT  = 3.0    # 목표: 매수가 + ATR × 3
+ATR_RAISE_MULT   = 1.0    # 목표1 달성 후 손절: 매수가 + ATR × 1
+ATR_TRAIL_MULT   = 1.5    # 트레일링: 고점 - ATR × 1.5
 
-# ★ 손절선 (단계별 + 시장 상태별)
-STOP_LOSS_BASIC     = -0.07   # 기본
-STOP_LOSS_WEAK      = -0.05   # 약세장
-STOP_LOSS_STOP      = -0.03   # BTC 중단 모드
-STOP_LOSS_NIGHT     = -0.05   # 야간 (00~06시) — 반등 대기
-STOP_LOSS_CRASH     = -0.05   # 직전봉 급락 즉시 손절
-STOP_LOSS_AFTER_1ST = -0.03   # ★ 1차 익절 후 본절 보호 (-2%→-3%, 코인 노이즈 대응)
+# 폴백 (ATR 없을 때)
+FALLBACK_STOP    = -0.07   # -7%
+FALLBACK_TARGET  = 0.15    # +15%
+FALLBACK_TRAIL   = 0.05    # 고점 대비 -5%
+
+# 급락 즉시 손절 (유지)
+STOP_LOSS_CRASH  = -0.05   # 직전봉 -5% 급락
+STOP_LOSS_WEAK   = -0.05   # 약세장 손절 (폴백용)
 
 # ── 매수 신호 기준 ──────────────────────────────────────────
 RSI_MIN  = 40    # 45→40, 눌림목 진입 허용
@@ -169,8 +170,8 @@ FEAR_GREED_MIN   = 20
 DAILY_LOSS_LIMIT = -45_000      # 일일 손실 한도 (한도 내에서만 거래)
 MAX_DAILY_LOSS   = 5            # 당일 손절 최대 5회
 
-NIGHT_START = 1
-NIGHT_END   = 5
+NIGHT_START = 23   # 밤 11시 ~ 오전 6시
+NIGHT_END   = 6
 
 LOOP_SLEEP  = 30                # 30초마다 루프 (WebSocket 실시간 현재가 연동)
 CANDLE_UNIT = 240               # 4시간봉
@@ -269,6 +270,7 @@ class CBot:
         self._ws_running           = False # WebSocket 실행 여부
         self._ws_markets           = set() # 현재 구독 중인 종목
         self._candle_cache_1h      = {}   # ★ 1시간봉 캐시
+        self.atr_cache             = {}   # {market: (atr_rate, ts)}
         self._tech_cache           = {}
         self._last_market_check    = 0
         self._last_feargreed_check = 0
@@ -524,16 +526,23 @@ class CBot:
         """
         perf = self._get_recent_performance(limit=20)
         if not perf or perf["total"] < 10:
-            return AI_SCORE_MIN_BASE
+            base = AI_SCORE_MIN_BASE
+        else:
+            win_rate = perf["win_rate"]
+            if win_rate < 40:
+                print(f"   📉 최근승률 {win_rate}% 낮음 → AI기준 +5")
+                base = AI_SCORE_MIN_BASE + 5
+            elif win_rate > 60:
+                print(f"   📈 최근승률 {win_rate}% 높음 → AI기준 -3")
+                base = max(50, AI_SCORE_MIN_BASE - 3)
+            else:
+                base = AI_SCORE_MIN_BASE
 
-        win_rate = perf["win_rate"]
-        if win_rate < 40:
-            print(f"   📉 최근승률 {win_rate}% 낮음 → AI기준 +5")
-            return AI_SCORE_MIN_BASE + 5
-        elif win_rate > 60:
-            print(f"   📈 최근승률 {win_rate}% 높음 → AI기준 -3")
-            return max(50, AI_SCORE_MIN_BASE - 3)
-        return AI_SCORE_MIN_BASE
+        # ★ 야간은 AI 기준 +10점 (더 까다롭게)
+        if self._is_night():
+            base = max(base, AI_SCORE_MIN_BASE + 10)
+            print(f"   🌙 야간 AI 기준 상향: {base}점")
+        return base
 
     # ============================================================
     # 업비트 API — 잔고/현재가/포지션
@@ -805,7 +814,8 @@ class CBot:
     # 야간 / 손절선
     # ============================================================
     def _is_night(self) -> bool:
-        return NIGHT_START <= datetime.datetime.now().hour < NIGHT_END
+        h = datetime.datetime.now().hour
+        return h >= NIGHT_START or h < NIGHT_END
 
     def _get_stop_loss(self, stage: int = 0) -> float:
         """
@@ -1018,18 +1028,46 @@ class CBot:
         self._tech_cache[market] = (result, time.time())
         return result
 
+    def get_atr_rate(self, market: str) -> float:
+        """ATR/현재가 비율 (14봉 기준, 4시간봉)"""
+        if market in self.atr_cache:
+            rate, ts = self.atr_cache[market]
+            if time.time() - ts < 1800:
+                return rate
+        try:
+            candles = self.get_candles(market, 20)
+            if len(candles) < 15:
+                return 0.0
+            highs  = [safe_float(c.get("high_price",  0)) for c in candles]
+            lows   = [safe_float(c.get("low_price",   0)) for c in candles]
+            closes = [safe_float(c.get("trade_price", 0)) for c in candles]
+            trs = []
+            for i in range(1, 15):
+                tr = max(highs[i] - lows[i],
+                         abs(highs[i] - closes[i-1]),
+                         abs(lows[i]  - closes[i-1]))
+                trs.append(tr)
+            atr      = sum(trs) / len(trs) if trs else 0
+            cur_p    = closes[0] if closes[0] > 0 else 1
+            atr_rate = atr / cur_p
+            self.atr_cache[market] = (atr_rate, time.time())
+            return atr_rate
+        except Exception as e:
+            print(f"⚠️ ATR 조회 오류 {market}: {e}")
+            return 0.0
+
     # ============================================================
     # 매수 신호 판단
     # ============================================================
     def check_buy_signal(self, market: str) -> tuple:
         """반환: (매수 여부, 지표, 사유)"""
-        # ★ 야간 신규 매수 — 기본 금지, 단 BTC +1% 이상 OR 공포탐욕 50 이상 시 허용
+        # ★ 야간 신규 매수 (23시~06시) — BTC +2% AND 탐욕 50 이상 둘 다 충족해야 허용
         if self._is_night():
-            btc_surge = self.btc_rate >= 1.0
+            btc_surge = self.btc_rate >= 2.0    # BTC +2% 이상 (기존 +1%)
             greed_ok  = self.fear_greed >= 50
-            if not (btc_surge or greed_ok):
+            if not (btc_surge and greed_ok):    # OR → AND (둘 다 충족)
                 reason = []
-                if not btc_surge: reason.append(f"BTC {self.btc_rate:+.1f}%<1%")
+                if not btc_surge: reason.append(f"BTC {self.btc_rate:+.1f}%<2%")
                 if not greed_ok:  reason.append(f"탐욕{self.fear_greed}<50")
                 return False, {}, f"야간 매수 금지 ({', '.join(reason)})"
             print(f"🌙 야간 특례 매수 허용 — BTC:{self.btc_rate:+.1f}% 탐욕:{self.fear_greed}")
@@ -1322,7 +1360,7 @@ class CBot:
             return False
 
     # ============================================================
-    # 매도 체크 (★ 본절 보호 + effective_entry)
+    # 매도 체크 (v3 — ATR 추세추종)
     # ============================================================
     def _check_sell(self, market: str, pos: dict):
         current = pos.get("current", 0)
@@ -1333,29 +1371,46 @@ class CBot:
 
         rate = (current - entry) / entry
 
-        # 트래커 초기화
+        # ── ATR 기반 tracker 초기화 ──────────────────────────
         if market not in self.peak_tracker:
+            atr_rate = self.get_atr_rate(market)
+            if atr_rate > 0:
+                atr_val  = entry * atr_rate
+                stop     = round(entry - atr_val * ATR_STOP_MULT, 0)
+                target1  = round(entry + atr_val * ATR_TARGET_MULT, 0)
+            else:
+                atr_val  = entry * abs(FALLBACK_STOP) / ATR_STOP_MULT
+                stop     = round(entry * (1 + FALLBACK_STOP), 0)
+                target1  = round(entry * (1 + FALLBACK_TARGET), 0)
             self.peak_tracker[market] = {
-                "peak_rate":       rate,
-                "stage":           0,
-                "remain_qty":      qty,
-                "buy2_done":       True,
-                "buy1_price":      entry,
-                "effective_entry": entry,  # ★ 분할익절 후 보정용
+                "peak_rate":   rate,
+                "peak_price":  current,
+                "stage":       0,
+                "stop_price":  stop,
+                "target1":     target1,
+                "target_next": target1,
+                "atr_val":     atr_val,
             }
+            print(f"   📐 ATR 타점 {market} | 손절:{stop:,.0f} | "
+                  f"목표:{target1:,.0f} | ATR:{atr_rate:.2%}")
 
-        tracker    = self.peak_tracker[market]
-        stage      = tracker["stage"]
-        buy2_done  = tracker.get("buy2_done", True)
-        buy1_price = tracker.get("buy1_price", entry)
+        tracker     = self.peak_tracker[market]
+        stage       = tracker["stage"]
+        stop_price  = tracker["stop_price"]
+        target_next = tracker["target_next"]
+        atr_val     = tracker.get("atr_val", entry * abs(FALLBACK_STOP) / ATR_STOP_MULT)
+        peak_price  = tracker.get("peak_price", current)
 
+        # 고점 갱신
+        if current > peak_price:
+            tracker["peak_price"] = current
+            peak_price = current
         if rate > tracker["peak_rate"]:
             tracker["peak_rate"] = rate
 
-        # ── 직전봉 급락 즉시 손절 ───────────────────────────
+        # ① 직전봉 급락 즉시 손절 ──────────────────────────
         ind         = self.get_indicators(market)
         candle_rate = ind.get("candle_rate", 0) if ind else 0
-        # ★ 야간(00~06시)은 급락 기준 완화 (-5% → -8%)
         crash_threshold = -0.08 if self._is_night() else STOP_LOSS_CRASH
         if candle_rate <= crash_threshold:
             self.notify(
@@ -1370,112 +1425,12 @@ class CBot:
                 self._check_daily_loss_limit()
             return
 
-        # ── 2차 추매 (조건 강화) ────────────────────────────
-        if not buy2_done and stage == 0 and not self._is_paused:
-            buy2_rate = (current - buy1_price) / buy1_price if buy1_price else 0
-            if buy2_rate <= BUY_2ND_THRESHOLD:
-                # ★ 강화 조건
-                mkt_ok = (self.market_status == "normal")
-                btc_ok = (self.btc_rate >= -1.0)   # BTC -1% 이상
-                # 24h 거래대금 100억 이상 (코인 풀 캐시 활용)
-                try:
-                    _pool_item = next(
-                        (x for x in self.coin_pool if isinstance(x, dict) and x.get('market') == market), None
-                    )
-                    amt_ok = (_pool_item is None or 
-                              _pool_item.get('trade_amt', 0) >= MIN_TRADE_AMT_B)
-                except Exception:
-                    amt_ok = True  # 조회 실패 시 통과
-                if mkt_ok and btc_ok and amt_ok:
-                    print(f"➕ 2차 추매 {market} | {buy2_rate:+.2%} | "
-                          f"BTC:{self.btc_rate:+.1f}%")
-                    if self.buy(market, BUY_2ND_AMT, is_second=True):
-                        tracker["buy2_done"] = True
-                        self.notify(f"➕ 2차 추매 {market} | {buy2_rate:+.2%}")
-                else:
-                    reasons = []
-                    if not mkt_ok: reasons.append(f"시장{self.market_status}")
-                    if not btc_ok: reasons.append(f"BTC{self.btc_rate:+.1f}%")
-                    if not amt_ok: reasons.append("거래대금부족")
-                    print(f"⛔ 추매 조건미달 {market}: {', '.join(reasons)}")
-
-        # ── 트레일링 스탑 (stage>=2) ───────────────────────
-        if stage >= 2 and rate <= tracker["peak_rate"] - TRAIL_STOP:
+        # ② 손절가 이탈 — ATR 기반 손절가로 통일 ──────────
+        if current <= stop_price:
+            label = "손절" if stage == 0 else f"손절(stage{stage})"
             self.notify(
-                f"📉 트레일링스탑 {market}\n"
-                f"고점:{tracker['peak_rate']:+.2%} → 현재:{rate:+.2%}",
-                critical=True,
-            )
-            if self.sell(market, qty, f"트레일링스탑({rate:+.2%})",
-                         sell_price=current, force_all=True):
-                self.peak_tracker.pop(market, None)
-            return
-
-        # ── 2차 익절 +10% ───────────────────────────────────
-        if stage < 2 and rate >= SELL_2ND_RATE:
-            raw_qty  = tracker["remain_qty"] * SELL_2ND_QTY / (1 - SELL_1ST_QTY)
-            sell_qty = min(max(raw_qty, 0.00001), qty)
-            if (qty - sell_qty) * current < MIN_ORDER_AMT:
-                sell_qty = qty
-                print(f"ℹ️ 2차익절 후 잔량 미달 → 전량 {market}")
-            self.notify(f"🎯 2차익절 {market} | {rate:+.2%} | {sell_qty:.6f}개")
-            if self.sell(market, sell_qty, f"2차익절({rate:+.2%})",
-                         sell_price=current,
-                         force_all=(sell_qty >= qty)):
-                if sell_qty >= qty:
-                    self.peak_tracker.pop(market, None)
-                else:
-                    tracker["stage"] = 2
-                    # ★ effective_entry 보정
-                    realized_gain = (current - entry) * sell_qty
-                    tracker["effective_entry"] = max(
-                        entry - realized_gain / max(qty - sell_qty, 1e-8),
-                        entry * 0.93,
-                    )
-            return
-
-        # ── 1차 익절 +5% ────────────────────────────────────
-        if stage < 1 and rate >= SELL_1ST_RATE:
-            sell_qty = max(qty * SELL_1ST_QTY, 0.00001)
-            # ★ 잔량/매도분 모두 최소금액 미달 시 전량 전환
-            if ((qty - sell_qty) * current < MIN_ORDER_AMT
-                    or sell_qty * current < MIN_ORDER_AMT):
-                sell_qty = qty
-                print(f"ℹ️ 1차익절 최소금액 미달 → 전량 {market}")
-            self.notify(f"✂️ 1차익절 {market} | {rate:+.2%} | {sell_qty:.6f}개")
-            if self.sell(market, sell_qty, f"1차익절({rate:+.2%})",
-                         sell_price=current, force_all=True):
-                if sell_qty >= qty:
-                    self.peak_tracker.pop(market, None)
-                else:
-                    tracker["stage"]      = 1
-                    tracker["remain_qty"] = qty - sell_qty
-                    # ★ effective_entry 보정
-                    realized_gain = (current - entry) * sell_qty
-                    tracker["effective_entry"] = max(
-                        entry - realized_gain / max(qty - sell_qty, 1e-8),
-                        entry * 0.96,
-                    )
-            return
-
-        # ── 손절 (★ stage>=1이면 본절 보호) ─────────────────
-        stop_line = self._get_stop_loss(stage=stage)
-        if rate <= stop_line:
-            is_night = self._is_night()
-            if stage >= 1:
-                label = "본절보호"
-            elif is_night:
-                label = "야간손절"
-            elif self.market_status == "stop":
-                label = "긴급손절"
-            elif self.market_status == "weak":
-                label = "약세장손절"
-            else:
-                label = "손절"
-
-            self.notify(
-                f"🛑 {label} {market} | {rate:+.2%} | 기준:{stop_line:.0%}\n"
-                f"시장:{self.market_status} | 야간:{is_night} | 탐욕:{self.fear_greed}",
+                f"🛑 {label} {market} | {rate:+.2%}\n"
+                f"현재:{current:,.0f} ≤ 손절:{stop_price:,.0f} | 시장:{self.market_status}",
                 critical=True,
             )
             if self.sell(market, qty, f"{label}({rate:+.2%})",
@@ -1483,6 +1438,57 @@ class CBot:
                 self.daily_loss_count += 1
                 self.peak_tracker.pop(market, None)
                 self._check_daily_loss_limit()
+            return
+
+        # ③ 트레일링 스탑 (목표가1 달성 이후) ──────────────
+        if stage >= 1 and atr_val > 0:
+            trail_stop = peak_price - atr_val * ATR_TRAIL_MULT
+            if current <= trail_stop:
+                self.notify(
+                    f"🔻 트레일링 {market} | {rate:+.2%}\n"
+                    f"고점:{peak_price:,.0f} → 트레일:{trail_stop:,.0f}",
+                    critical=True,
+                )
+                if self.sell(market, qty, f"트레일링({rate:+.2%})",
+                             sell_price=current, force_all=True):
+                    self.peak_tracker.pop(market, None)
+                return
+        elif stage >= 1:
+            # ATR 없을 때 폴백 트레일링
+            if rate <= tracker["peak_rate"] - FALLBACK_TRAIL:
+                if self.sell(market, qty, f"트레일링({rate:+.2%})",
+                             sell_price=current, force_all=True):
+                    self.peak_tracker.pop(market, None)
+                return
+
+        # ④ 목표가 달성 → 손절/목표가 상향 (매도 안 함) ────
+        if target_next > 0 and current >= target_next:
+            if stage == 0:
+                new_stop   = round(entry + atr_val * ATR_RAISE_MULT, 0)
+                new_target = round(current + atr_val * ATR_TARGET_MULT, 0)
+                tracker["stop_price"]  = new_stop
+                tracker["target_next"] = new_target
+                tracker["stage"]       = 1
+                print(f"🎯 목표가1 달성 {market} ({rate:+.2%}) | "
+                      f"손절↑:{new_stop:,.0f} | 새목표:{new_target:,.0f}")
+                self.notify(
+                    f"🎯 목표가1 달성 {market} ({rate:+.2%})\n"
+                    f"손절↑:{new_stop:,.0f} | 새목표:{new_target:,.0f}",
+                    critical=False,
+                )
+            else:
+                new_stop   = target_next
+                new_target = round(current + atr_val * ATR_TARGET_MULT, 0)
+                tracker["stop_price"]  = new_stop
+                tracker["target_next"] = new_target
+                tracker["stage"]       = stage + 1
+                print(f"🎯 목표가{stage+1} 달성 {market} ({rate:+.2%}) | "
+                      f"손절↑:{new_stop:,.0f} | 새목표:{new_target:,.0f}")
+                self.notify(
+                    f"🎯 목표가{stage+1} 달성 {market} ({rate:+.2%})\n"
+                    f"손절↑:{new_stop:,.0f} | 새목표:{new_target:,.0f}",
+                    critical=False,
+                )
 
     def _check_daily_loss_limit(self):
         if self.daily_pnl <= DAILY_LOSS_LIMIT:
