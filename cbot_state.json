@@ -29,7 +29,7 @@
     },
     "daily_loss": 0,
     "market_status": "normal",
-    "btc_rate": -0.69586697,
+    "btc_rate": -0.7751938,
     "fear_greed": 23,
     "is_night": false,
     "coin_pool": [
@@ -61,8 +61,8 @@
       "KRW-ZRO",
       "KRW-IP",
       "KRW-CHZ",
-      "KRW-CHIP",
-      "KRW-BCH"
+      "KRW-BCH",
+      "KRW-CHIP"
     ],
     "coins": [
       "KRW-BTC",
@@ -93,12 +93,12 @@
       "KRW-ZRO",
       "KRW-IP",
       "KRW-CHZ",
-      "KRW-CHIP",
-      "KRW-BCH"
+      "KRW-BCH",
+      "KRW-CHIP"
     ],
     "seed": "30만원 소액 모드"
   },
-  "last_update": "08:19:33",
+  "last_update": "08:23:25",
   "daily_loss": 0,
   "loss_date": "2026-06-17",
   "positions": {

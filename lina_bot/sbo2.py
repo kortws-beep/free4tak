@@ -1062,7 +1062,7 @@ class Sbo2:
                 continue
 
             # ── 매도 실행 ─────────────────────────────────────
-            ok = self.api.sell(code, qty, price=int(curr))
+            ok = self.api.sell(code, qty)
             if not ok:
                 continue
 
