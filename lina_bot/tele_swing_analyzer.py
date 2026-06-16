@@ -422,11 +422,12 @@ def get_tele_swing_picks(top_n: int = TOP_N, min_score: int = MIN_SCORE) -> list
     print(f"   텔레그램 언급 종목: {len(tele_stocks)}개")
 
     # 1-2. 생쇼 종목 병합 (텔레그램 풀에 추가)
+    # get_sshow_stocks()는 {종목명: dict} 반환 — 점수는 0으로 처리
     sshow_stocks = _get_sshow_stocks()
     sshow_names  = set(sshow_stocks.keys())
-    for name, sscore in sshow_stocks.items():
+    for name in sshow_stocks:
         if name not in tele_stocks:
-            tele_stocks[name] = sscore  # 생쇼 전용 종목 추가
+            tele_stocks[name] = 0  # 생쇼 전용 종목 — 텔레그램 점수 없음
     print(f"   생쇼 병합 후: {len(tele_stocks)}개")
 
     # 2. 정통 스윙 점수 계산
