@@ -306,8 +306,17 @@ def _calc_swing_score(stock_name: str, tele_score: int) -> dict:
                 detail["거래량수반"] = "+5 (거래량 보통)"
 
         # ── 7. 텔레그램 언급 (+10점) ─────────────────────────
-        # 30점 이상 후보만 여기까지 오므로 언급 자체에 10점 만점 부여
-        tele_pts = 10 if tele_score >= 30 else 0
+        # 원점수 구간별 차등 — 언급 강도 반영
+        if tele_score >= 90:
+            tele_pts = 10
+        elif tele_score >= 70:
+            tele_pts = 9
+        elif tele_score >= 50:
+            tele_pts = 7
+        elif tele_score >= 30:
+            tele_pts = 4
+        else:
+            tele_pts = 0
         score += tele_pts
         detail["텔레그램"] = f"+{tele_pts} (원점수:{tele_score})"
 

@@ -1,69 +1,115 @@
 {
-  "date": "2026-06-15",
-  "saved_at": "2026-06-15 20:10",
+  "date": "2026-06-16",
+  "saved_at": "2026-06-16 20:10",
   "summary": {
-    "today": "2026-06-15",
-    "trades": 2,
+    "today": "2026-06-16",
+    "trades": 6,
     "wins": 2,
-    "losses": 0,
-    "win_rate": 100.0,
-    "avg_profit": 5.72,
-    "total_pnl": 44600,
-    "avg_win": 5.72,
-    "avg_loss": 0,
+    "losses": 4,
+    "win_rate": 33.3,
+    "avg_profit": -0.64,
+    "total_pnl": -54349,
+    "avg_win": 6.31,
+    "avg_loss": -4.12,
     "by_hour": {},
     "by_reason": {
+      "즉시매도(수동)": {
+        "count": 3,
+        "avg_profit": -1.81,
+        "pct": 50.0
+      },
       "1차익절": {
         "count": 1,
-        "avg_profit": 8.02,
-        "pct": 50.0
+        "avg_profit": 8.1,
+        "pct": 16.7
+      },
+      "손절": {
+        "count": 1,
+        "avg_profit": -11.04,
+        "pct": 16.7
       },
       "트레일링": {
         "count": 1,
-        "avg_profit": 3.42,
-        "pct": 50.0
+        "avg_profit": 4.52,
+        "pct": 16.7
       }
     },
     "by_stock": [
       {
-        "code": "089030",
+        "code": "028050",
         "trades": 2,
         "win_rate": 100.0,
-        "avg_profit": 5.72,
-        "total": 11.44
+        "avg_profit": 6.31,
+        "total": 12.62
       }
     ],
     "trade_details": [
       {
-        "code": "089030",
-        "buy_price": 67300.0,
-        "sell_price": 72700.0,
-        "profit_rate": 8.02,
-        "sell_reason": "1차익절(+8.02%)",
+        "code": "028050",
+        "buy_price": 53100.0,
+        "sell_price": 57400.0,
+        "profit_rate": 8.1,
+        "sell_reason": "1차익절(+8.10%)",
         "buy_time": "",
-        "sell_time": "09:08",
+        "sell_time": "09:38",
         "ai_score": null
       },
       {
         "code": "089030",
-        "buy_price": 67300.0,
-        "sell_price": 69600.0,
-        "profit_rate": 3.42,
-        "sell_reason": "트레일링1(+3.42%)",
+        "buy_price": 71270.8333,
+        "sell_price": 63400.0,
+        "profit_rate": -11.04,
+        "sell_reason": "손절 -11.0%",
         "buy_time": "",
-        "sell_time": "09:17",
+        "sell_time": "09:47",
+        "ai_score": 0
+      },
+      {
+        "code": "028050",
+        "buy_price": 53100.0,
+        "sell_price": 55500.0,
+        "profit_rate": 4.52,
+        "sell_reason": "트레일링1(+4.52%)",
+        "buy_time": "",
+        "sell_time": "09:52",
+        "ai_score": null
+      },
+      {
+        "code": "064350",
+        "buy_price": 229000.0,
+        "sell_price": 227500.0,
+        "profit_rate": -0.66,
+        "sell_reason": "즉시매도(AI비서)",
+        "buy_time": "",
+        "sell_time": "13:13",
+        "ai_score": null
+      },
+      {
+        "code": "281820",
+        "buy_price": 95400.0,
+        "sell_price": 95200.0,
+        "profit_rate": -0.21,
+        "sell_reason": "즉시매도(AI비서)",
+        "buy_time": "",
+        "sell_time": "13:15",
+        "ai_score": null
+      },
+      {
+        "code": "105560",
+        "buy_price": 182100.0,
+        "sell_price": 173800.0,
+        "profit_rate": -4.56,
+        "sell_reason": "즉시매도(AI비서)",
+        "buy_time": "",
+        "sell_time": "13:16",
         "ai_score": null
       }
     ]
   },
   "review": {
-    "오늘평가": "100% 승률로 동일 종목 연타 성공 — 좋은 시작이지만 표본 부족",
-    "잘한점": "089030 종목에서 09:08 1차 익절 8.02%, 09:17 트레일링으로 3.42% 연속 수익 달성. 짧은 시간 내 동일 종목 재진입 성공",
-    "못한점": "총 2건만 거래로 표본 부족. 다양한 종목 분산 부족으로 종목 의존성 높음. AI 점수가 None으로 시스템 판단 기준 불분명",
-    "반복패턴": "7일 누적 데이터 없어 패턴 분석 불가",
-    "내일전략": "09시 초반 집중 매매 유지하되, 종목 다양화로 3-5개 종목 분산 진입. AI 점수 시스템 점검 및 활용도 높이기",
-    "주의종목유형": "전일 급등 후 고점 근처 종목, 거래량 급감한 테마주, 상한가 근접 과열 종목",
-    "주목시간대": "09:00-09:30 (오늘 성과 시간대 연장), 10:30-11:00 (추가 기회 탐색)",
-    "신뢰도": 2
+    "오늘평가": "복기 실패",
+    "내일전략": "",
+    "주의종목유형": "",
+    "신뢰도": 0
   }
 }
