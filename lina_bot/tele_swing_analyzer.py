@@ -203,7 +203,7 @@ def _get_sshow_stocks() -> dict:
 # 정통 스윙 점수 계산
 # ══════════════════════════════════════════════════════════════
 
-def _calc_swing_score(stock_name: str, tele_score: int) -> dict:
+def _calc_swing_score(stock_name: str, tele_score: int, is_sshow: bool = False) -> dict:
     """
     정통 스윙 트레이딩 원칙 기반 점수 산출
     """
@@ -333,6 +333,11 @@ def _calc_swing_score(stock_name: str, tele_score: int) -> dict:
         score += tele_pts
         detail["텔레그램"] = f"+{tele_pts} (원점수:{tele_score})"
 
+        # ── 8. 생쇼 추천 (+8점) ──────────────────────────────
+        if is_sshow:
+            score += 8
+            detail["생쇼추천"] = "+8 (전문가추천)"
+
         # ── ATR 손절/목표 ─────────────────────────────────────
         atr        = _atr(closes)
         stop_price = round(curr - atr * ATR_STOP_MULT, 0)
@@ -416,10 +421,19 @@ def get_tele_swing_picks(top_n: int = TOP_N, min_score: int = MIN_SCORE) -> list
 
     print(f"   텔레그램 언급 종목: {len(tele_stocks)}개")
 
+    # 1-2. 생쇼 종목 병합 (텔레그램 풀에 추가)
+    sshow_stocks = _get_sshow_stocks()
+    sshow_names  = set(sshow_stocks.keys())
+    for name, sscore in sshow_stocks.items():
+        if name not in tele_stocks:
+            tele_stocks[name] = sscore  # 생쇼 전용 종목 추가
+    print(f"   생쇼 병합 후: {len(tele_stocks)}개")
+
     # 2. 정통 스윙 점수 계산
     results = []
     for name, tele_score in tele_stocks.items():
-        data = _calc_swing_score(name, tele_score)
+        is_sshow = name in sshow_names
+        data = _calc_swing_score(name, tele_score, is_sshow=is_sshow)
         if data["curr_price"] > 0 and data["rr_ratio"] >= 1.5:
             results.append(data)
 
