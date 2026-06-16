@@ -29,7 +29,7 @@
     },
     "daily_loss": 0,
     "market_status": "normal",
-    "btc_rate": -0.28417078,
+    "btc_rate": -0.3875969,
     "fear_greed": 23,
     "is_night": false,
     "coin_pool": [
@@ -61,8 +61,8 @@
       "KRW-BCH",
       "KRW-VIRTUAL",
       "KRW-ENA",
-      "KRW-SLX",
-      "KRW-CHZ"
+      "KRW-CHZ",
+      "KRW-SLX"
     ],
     "coins": [
       "KRW-BTC",
@@ -93,12 +93,12 @@
       "KRW-BCH",
       "KRW-VIRTUAL",
       "KRW-ENA",
-      "KRW-SLX",
-      "KRW-CHZ"
+      "KRW-CHZ",
+      "KRW-SLX"
     ],
     "seed": "30만원 소액 모드"
   },
-  "last_update": "13:22:22",
+  "last_update": "13:31:36",
   "daily_loss": 0,
   "loss_date": "2026-06-16",
   "positions": {

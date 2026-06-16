@@ -258,8 +258,9 @@ def save_buy_trade(code: str, name: str, grade: str,
 
 
 def save_sell_trade(code: str, sell_price: float, reason: str,
-                    entry_price: float, qty: int, buy_time: str):
-    """매도 이력 업데이트"""
+                    entry_price: float, qty: int, buy_time: str,
+                    stock_name: str = "", grade: str = ""):
+    """매도 이력 업데이트 (매수 기록 없으면 INSERT)"""
     try:
         profit_rate = (sell_price - entry_price) / entry_price * 100 if entry_price else 0
         profit_krw  = (sell_price - entry_price) * qty
@@ -273,21 +274,46 @@ def save_sell_trade(code: str, sell_price: float, reason: str,
 
         conn = sqlite3.connect(SBO2_DB_PATH, timeout=10)
         conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("""
-            UPDATE sbo2_trades
-            SET sell_price  = ?,
-                sell_time   = ?,
-                sell_reason = ?,
-                profit_rate = ?,
-                profit_krw  = ?,
-                hold_days   = ?
+
+        # 매수 기록 확인 (서브쿼리로 ORDER BY LIMIT 대체)
+        row = conn.execute("""
+            SELECT id FROM sbo2_trades
             WHERE code = ? AND sell_time IS NULL
             ORDER BY id DESC LIMIT 1
-        """, (
-            sell_price, now_hms(), reason,
-            round(profit_rate, 2), round(profit_krw, 0),
-            hold_days, code
-        ))
+        """, (code,)).fetchone()
+
+        if row:
+            conn.execute("""
+                UPDATE sbo2_trades
+                SET sell_price  = ?,
+                    sell_time   = ?,
+                    sell_reason = ?,
+                    profit_rate = ?,
+                    profit_krw  = ?,
+                    hold_days   = ?
+                WHERE id = ?
+            """, (
+                sell_price, now_hms(), reason,
+                round(profit_rate, 2), round(profit_krw, 0),
+                hold_days, row[0]
+            ))
+            print(f"   💾 매도 저장: {stock_name or code} {profit_rate:+.2f}%")
+        else:
+            # 수동매수 등 매수 기록 없는 경우 INSERT
+            conn.execute("""
+                INSERT INTO sbo2_trades
+                    (code, stock_name, grade, buy_price, buy_time, qty,
+                     sell_price, sell_time, sell_reason,
+                     profit_rate, profit_krw, hold_days)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+            """, (
+                code, stock_name, grade or "실계좌",
+                entry_price, buy_time or today_str(), qty,
+                sell_price, now_hms(), reason,
+                round(profit_rate, 2), round(profit_krw, 0), hold_days
+            ))
+            print(f"   💾 매도 저장(신규): {stock_name or code} {profit_rate:+.2f}%")
+
         conn.commit()
         conn.close()
     except Exception as e:
@@ -927,7 +953,8 @@ class Sbo2:
                 # DB 저장
                 save_sell_trade(
                     code=code, sell_price=curr, reason=reason,
-                    entry_price=entry, qty=qty, buy_time=pos.get("buy_time", "")
+                    entry_price=entry, qty=qty, buy_time=pos.get("buy_time", ""),
+                    stock_name=name, grade=pos.get("grade", "")
                 )
 
                 # master_db 기록
@@ -1103,6 +1130,9 @@ class Sbo2:
 
                 # ★ 실계좌 동기화 (매 루프) — sbot 방식과 동일
                 self._sync_real_positions()
+
+                # ★ 미체결 주문 취소 (1루프 이상 경과된 미체결)
+                self._cancel_stale_orders()
 
                 # 후보 갱신 (30분마다)
                 self._refresh_candidates()
