@@ -1372,7 +1372,7 @@ class CBot:
         rate = (current - entry) / entry
 
         # ── ATR 기반 tracker 초기화 ──────────────────────────
-        if market not in self.peak_tracker:
+        if market not in self.peak_tracker or "stop_price" not in self.peak_tracker.get(market, {}):
             atr_rate = self.get_atr_rate(market)
             if atr_rate > 0:
                 atr_val  = entry * atr_rate
@@ -1382,13 +1382,14 @@ class CBot:
                 atr_val  = entry * abs(FALLBACK_STOP) / ATR_STOP_MULT
                 stop     = round(entry * (1 + FALLBACK_STOP), 0)
                 target1  = round(entry * (1 + FALLBACK_TARGET), 0)
+            existing = self.peak_tracker.get(market, {})
             self.peak_tracker[market] = {
-                "peak_rate":   rate,
-                "peak_price":  current,
-                "stage":       0,
+                "peak_rate":   existing.get("peak_rate", rate),
+                "peak_price":  existing.get("peak_price", current),
+                "stage":       existing.get("stage", 0),
                 "stop_price":  stop,
                 "target1":     target1,
-                "target_next": target1,
+                "target_next": existing.get("target_next", target1),
                 "atr_val":     atr_val,
             }
             print(f"   📐 ATR 타점 {market} | 손절:{stop:,.0f} | "
