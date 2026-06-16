@@ -1037,8 +1037,7 @@ class Sbo2:
                     print(f"🎯 목표가1 달성 {code} ({rate:+.1f}%) | "
                           f"손절↑:{new_stop:,.0f} | 새목표:{new_target:,.0f}")
                     _notify(
-                        f"🎯 [sbo2] 목표가1 달성 {name}({code})
-"
+                        f"🎯 [sbo2] 목표가1 달성 {name}({code})\n"
                         f"   {rate:+.1f}% | 손절↑:{new_stop:,.0f} | 새목표:{new_target:,.0f}",
                         critical=False
                     )
@@ -1053,8 +1052,7 @@ class Sbo2:
                     print(f"🎯 목표가{stage+1} 달성 {code} ({rate:+.1f}%) | "
                           f"손절↑:{new_stop:,.0f} | 새목표:{new_target:,.0f}")
                     _notify(
-                        f"🎯 [sbo2] 목표가{stage+1} 달성 {name}({code})
-"
+                        f"🎯 [sbo2] 목표가{stage+1} 달성 {name}({code})\n"
                         f"   {rate:+.1f}% | 손절↑:{new_stop:,.0f} | 새목표:{new_target:,.0f}",
                         critical=False
                     )
