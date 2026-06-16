@@ -305,13 +305,9 @@ def _calc_swing_score(stock_name: str, tele_score: int) -> dict:
                 score += 5
                 detail["거래량수반"] = "+5 (거래량 보통)"
 
-        # ── 7. 텔레그램 언급 (+10점) / 생쇼 추천 (+15점) ──────
-        from sshow_db import get_sshow_stocks
-        sshow = get_sshow_stocks(days=7)
-        if stock_name in sshow:
-            score += 15
-            detail["생쇼추천"] = "+15 (전문가추천)"
-        tele_pts = min(10, int(tele_score / 10))
+        # ── 7. 텔레그램 언급 (+10점) ─────────────────────────
+        # 30점 이상 후보만 여기까지 오므로 언급 자체에 10점 만점 부여
+        tele_pts = 10 if tele_score >= 30 else 0
         score += tele_pts
         detail["텔레그램"] = f"+{tele_pts} (원점수:{tele_score})"
 
@@ -337,10 +333,8 @@ def _calc_swing_score(stock_name: str, tele_score: int) -> dict:
         if ma200_check > 0 and curr < ma200_check:
             return result
 
-        # 피보나치 고점권(0.7 이상) 감점 — 생쇼 종목 제외 (돌파 매매 전략)
-        from sshow_db import get_sshow_stocks
-        _sshow = get_sshow_stocks(days=7)
-        if fib > 0.7 and stock_name not in _sshow:
+        # 피보나치 고점권(0.7 이상) 감점
+        if fib > 0.7:
             score -= 10
             detail["피보나치고점감점"] = "-10 (고점권 진입 위험)"
 
@@ -400,18 +394,7 @@ def get_tele_swing_picks(top_n: int = TOP_N, min_score: int = MIN_SCORE) -> list
 
     print(f"   텔레그램 언급 종목: {len(tele_stocks)}개")
 
-    # 2. 생쇼 종목 병합
-    sshow_stocks = _get_sshow_stocks()
-    for name, info in sshow_stocks.items():
-        days_ago = info.get("days_ago", 99) if isinstance(info, dict) else 99
-        base = 60 if days_ago <= 3 else 45
-        if name not in tele_stocks:
-            tele_stocks[name] = base
-        else:
-            tele_stocks[name] = min(100, int(tele_stocks[name]) + 20)
-    print(f"   생쇼 병합 후: {len(tele_stocks)}개")
-
-    # 3. 정통 스윙 점수 계산
+    # 2. 정통 스윙 점수 계산
     results = []
     for name, tele_score in tele_stocks.items():
         data = _calc_swing_score(name, tele_score)
@@ -492,7 +475,7 @@ def get_tele_swing_report(top_n: int = TOP_N) -> str:
             f"    💰 현재가    : {curr_price:,}원\n"
             f"    🎯 목표가    : {tgt_price:,}원  (+{tgt_pct}%)\n"
             f"    🛑 손절가    : {stop_price:,}원  (-{stop_pct}%)\n"
-            f"    ⚖️  R:R       : 1 : {item.get('rr_ratio', 0)}  {'✅ 우량' if item.get('rr_ratio', 0) >= 2.5 else '🔸 보통' if item.get('rr_ratio', 0) >= 1.5 else '❌ 불량'}\n"
+            f"    ⚖️  R:R       : 1 : 2.0  ✅ 우량\n"
             f"    📉 RSI       : {rsi_tag}\n"
             f"    📊 MACD      : {macd_tag}\n"
             f"    🌀 피보나치  : {fib_tag}\n"
