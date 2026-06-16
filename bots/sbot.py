@@ -1274,7 +1274,13 @@ class SBot:
                     profit = (cur - entry) * qty
                     rate   = (cur - entry) / entry * 100 if entry > 0 else 0
                     total_profit += profit
-                    print(f"  💰 {code}({self._name(code)}) | {rate:+.2f}% | {qty}주")
+                    stop  = self.peak_tracker.get(code, {}).get("stop_price",
+                              pos.get("stop_price", 0))
+                    tgt   = self.peak_tracker.get(code, {}).get("target_next",
+                              pos.get("tgt_price", 0))
+                    grade = pos.get("grade", "스윙")
+                    print(f"  💼 {self._name(code)}({grade}) {rate:+.2f}% | "
+                          f"현재:{int(cur):,} | 손절:{int(stop):,} 목표:{int(tgt):,}")
                     # ★ master_positions 현재가 갱신 (대시보드)
                     if _master_upsert and cur > 0:
                         try:
