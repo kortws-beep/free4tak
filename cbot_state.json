@@ -29,7 +29,7 @@
     },
     "daily_loss": 0,
     "market_status": "normal",
-    "btc_rate": -0.14359159999999999,
+    "btc_rate": -0.28417078,
     "fear_greed": 23,
     "is_night": false,
     "coin_pool": [
@@ -56,8 +56,8 @@
       "KRW-STRAX",
       "KRW-ZKC",
       "KRW-MIRA",
-      "KRW-IP",
       "KRW-WAVES",
+      "KRW-IP",
       "KRW-BCH",
       "KRW-VIRTUAL",
       "KRW-ENA",
@@ -88,8 +88,8 @@
       "KRW-STRAX",
       "KRW-ZKC",
       "KRW-MIRA",
-      "KRW-IP",
       "KRW-WAVES",
+      "KRW-IP",
       "KRW-BCH",
       "KRW-VIRTUAL",
       "KRW-ENA",
@@ -98,7 +98,7 @@
     ],
     "seed": "30만원 소액 모드"
   },
-  "last_update": "13:09:36",
+  "last_update": "13:22:22",
   "daily_loss": 0,
   "loss_date": "2026-06-16",
   "positions": {
