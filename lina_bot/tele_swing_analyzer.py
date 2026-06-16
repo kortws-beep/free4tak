@@ -108,8 +108,18 @@ def _get_tele_stocks() -> dict:
     """
     최근 TELE_HOURS 시간 텔레그램 언급 종목 추출
     반환: {종목명: 누적점수}
+    ★ 뉴스 피드 채널(AllStockNews, hankyung_fin 등) 제외
+      — 뉴스 헤드라인의 종목 언급은 추천이 아님
     """
     result = {}
+
+    # 종목 추천 성격 채널만 허용 (뉴스 피드 채널 제외)
+    ALLOWED_CHANNELS = (
+        "stocknewskorea",  # 주식뉴스
+        "stock0",          # 주식 정보
+        "darthacking",     # 다크해킹
+        "korea_news11",    # 한국 뉴스
+    )
 
     if not os.path.exists(DB_PATH_TELEGRAM):
         return result
@@ -121,18 +131,21 @@ def _get_tele_stocks() -> dict:
         conn   = sqlite3.connect(DB_PATH_TELEGRAM, timeout=5)
         cursor = conn.cursor()
 
-        # 최근 메시지 수집
-        cursor.execute("""
+        # 최근 메시지 수집 — 허용 채널만
+        placeholders = ",".join("?" * len(ALLOWED_CHANNELS))
+        cursor.execute(f"""
             SELECT message, score
             FROM telegram_events
             WHERE created_at >= ?
+              AND channel IN ({placeholders})
             ORDER BY id DESC
             LIMIT 200
-        """, (cutoff,))
+        """, (cutoff, *ALLOWED_CHANNELS))
         rows = cursor.fetchall()
         conn.close()
 
         if not rows:
+            print("   [텔레스윙] 허용 채널 메시지 없음 (뉴스피드 채널 제외됨)")
             return result
 
         # kr_stock_daily_data 전 종목명 로드

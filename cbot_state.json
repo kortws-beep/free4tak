@@ -29,7 +29,7 @@
     },
     "daily_loss": 0,
     "market_status": "normal",
-    "btc_rate": 0.38458449,
+    "btc_rate": 0.31529903000000004,
     "fear_greed": 23,
     "is_night": false,
     "coin_pool": [
@@ -98,7 +98,7 @@
     ],
     "seed": "30만원 소액 모드"
   },
-  "last_update": "20:12:26",
+  "last_update": "20:17:33",
   "daily_loss": 0,
   "loss_date": "2026-06-16",
   "positions": {
