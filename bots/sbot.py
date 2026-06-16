@@ -991,14 +991,20 @@ class SBot:
                 continue
             self._do_buy(code, data["current_price"], buy_amount)
 
-            # ★ peak_tracker 즉시 초기화
+            # ★ peak_tracker 즉시 초기화 (v3 — ATR 추세추종)
+            _entry    = data["current_price"]
+            _atr_rate = self._get_atr_rate(code)
+            _levels   = self.strategy.calc_atr_levels(_entry, _atr_rate)
             self.peak_tracker[code] = {
-                "peak_rate":       0.0,
-                "stage":           0,
-                "remain_qty":      max(int(buy_amount / data["current_price"]), 1),
-                "buy2_done":       False,
-                "buy1_price":      data["current_price"],
-                "effective_entry": data["current_price"],
+                "peak_rate":   0.0,
+                "peak_price":  _entry,
+                "stage":       0,
+                "buy2_done":   False,
+                "buy1_price":  _entry,
+                "stop_price":  _levels["stop_price"],
+                "target1":     _levels["target1"],
+                "target_next": _levels["target1"],
+                "atr_val":     _levels["atr_val"],
             }
             slots -= 1
             time.sleep(1)

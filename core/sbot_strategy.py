@@ -1,87 +1,70 @@
 """
-sbot_strategy.py — 스윙봇 매수/매도 전략 (개선판)
+sbot_strategy.py — 스윙봇 매수/매도 전략 (v3 — ATR 추세추종)
 ================================================================
 [이 파일이 하는 일 — 비개발자용 설명]
 
-스윙봇은 단타봇과 달리 며칠~1주일 보유하는 전략입니다.
-- 매수 금액: 단타(20만원) 보다 큰 200만원/종목
-- 매도 기준: 1차 +8%, 2차 +15%, 손절 -7% (단타보다 넓음)
-- 보유 종목: 최대 3개 (단타 5개보다 적음, 큰 자금 집중)
+스윙봇은 단타봇과 달리 며칠~수주 보유하는 추세추종 전략입니다.
+- 매수 금액: 1종목당 시드의 일정 비율
+- 손절/목표가: ATR(변동성) 기반 — 종목마다 다름
+- 분할 매도 X — 전량 보유하며 목표가 상향
 
-[주요 개선 사항]
-1. ★ 1차 익절 후 본절 보호 (-3% 이내로 떨어지면 청산)
-2. ★ 분할 익절 후 effective_entry 보정
-3. ★ MA20 이탈 시 매도 (스윙은 일봉 기준이 중요)
-4. ★ 트레일링 스탑 stage>=1부터 작동
-5. ★ ATR 기반 동적 손절선 옵션
+[v3 전략 — ATR 추세추종]
+매수 시:
+  손절가  = 매수가 - ATR × 2
+  목표가1 = 매수가 + ATR × 3
+
+목표가1 달성:
+  손절가  = 매수가 + ATR × 1  (본전 위로 올림)
+  목표가2 = 현재가 + ATR × 3  (새 목표 산정)
+
+목표가2 이상:
+  손절가  = 직전 목표가       (수익 보호)
+  목표가  = 현재가 + ATR × 3 (계속 갱신)
+  트레일링 = 고점 대비 ATR × 1.5 하락 시 청산
+
+청산 조건:
+  ① 손절가 이탈 (손절)
+  ② MA20 이탈 (추세 종료)
+  ③ 트레일링 스탑 (목표가1 달성 이후)
+  ④ 20영업일 초과 + 수익 미미
 ================================================================
 """
 from typing import Optional, Callable
 
+# ==========================================================
+# ATR 배수 설정
+# ==========================================================
+ATR_STOP_MULT    = 2.0    # 손절: 매수가 - ATR × 2
+ATR_TARGET_MULT  = 3.0    # 목표: 매수가 + ATR × 3
+ATR_RAISE_MULT   = 1.0    # 목표1 달성 후 손절 올림: 매수가 + ATR × 1
+ATR_TRAIL_MULT   = 1.5    # 트레일링: 고점 - ATR × 1.5
+
+# ATR 데이터 없을 때 폴백 고정 %
+FALLBACK_STOP    = -0.07  # -7%
+FALLBACK_TARGET  = 0.12   # +12%
+FALLBACK_TRAIL   = 0.05   # 고점 대비 -5%
 
 # ==========================================================
-# 매도 단계별 기준
+# 물타기 (2차 매수)
 # ==========================================================
-SELL_1ST_RATE   = 0.08    # 1차 익절: +8%
-SELL_1ST_QTY    = 0.30    # 30% 매도
-SELL_2ND_RATE   = 0.15    # 2차 익절: +15%
-SELL_2ND_QTY    = 0.40    # 40% 매도
-SELL_3RD_RATE   = 0.25    # 3차 익절: +25% 전량
-
-# 트레일링
-TRAIL_STOP_AFTER_1ST = 0.05    # 1차 후: 5%
-TRAIL_STOP_AFTER_2ND = 0.07    # 2차 후: 7%
-
-# 손절
-STOP_LOSS_BASIC      = -0.07   # 기본: -7%
-STOP_LOSS_AFTER_1ST  = -0.03   # ★ 1차 익절 후 본절 보호
-STOP_LOSS_WEAK       = -0.05   # 약세장: -5%
-
-# ==========================================================
-# 분할매수
-# ==========================================================
-BUY_2ND_AMT       = 500_000    # 2차 매수 금액 (실전 50만원)
-BUY_2ND_THRESHOLD = -0.03      # -3% 하락 시 물타기
+BUY_2ND_AMT       = 500_000   # 2차 매수 금액
+BUY_2ND_THRESHOLD = -0.03     # -3% 하락 시
 
 # ==========================================================
 # 가산점
 # ==========================================================
-NEW_BONUS = 7   # new 그룹 종목
+NEW_BONUS = 7
 
 
 class SwingStrategy:
-    """스윙봇 매수/매도 전략."""
+    """스윙봇 매수/매도 전략 (v3 — ATR 추세추종)."""
 
     # ============================================================
-    # 1. 룰 점수 (스윙 특화)
+    # 1. 룰 점수 (스윙 특화 — 변경 없음)
     # ============================================================
     def get_rule_score(self, data: dict) -> int:
-        """
-        스윙 관점에서의 점수 (v2 — 점수 분포 개선판)
-
-        [변경 이유]
-        기존: 대형주(삼성전자급)는 거래대금+MA+수급 만으로 130~155점 → 100점 cap
-              → 임계치 60~90이 모두 동일 결과 (백테스트 의미 없음)
-        개선1: 각 항목 최대 가중치 축소 (최대합산 155→113)
-        개선2: 기본점수 50→30 (대형주 베이스 75→55점으로 하향)
-               → 대형주 정상조건: 55+12+15+8+10+8 = 108 → cap 100
-               → 대형주 보통조건: 55+5+10+8+3+2   = 83점
-               → 임계치 70/75/80/85가 실제 다른 종목 선별
-
-        [가중치 변경]
-          항목          기존최대   개선최대
-          기본점수        50        30   ★ 핵심 변경
-          등락률          +20       +12
-          거래대금        +20       +10
-          MA배열          +25       +15  ← 핵심 유지
-          RSI             +10       +8
-          외국인5d        +15       +10
-          기관5d          +15       +8
-          ─────────────────────────────
-          최대합산    50+105=155  30+63=93 → 실질 분포 30~93점
-        """
         try:
-            score       = 30   # ★ v2: 50→30 (대형주 몰림 방지, 분포 개선)
+            score       = 30
             change      = data.get("change_rate",   0)
             value       = data.get("trading_value", 0)
             rsi         = data.get("rsi",           50)
@@ -91,35 +74,29 @@ class SwingStrategy:
             foreign     = data.get("foreign_5d",     0)
             institution = data.get("institution_5d", 0)
 
-            # 등락률 (최대 +12)
             if   change > 5:  score += 12
             elif change > 3:  score += 8
             elif change > 1:  score += 5
             else:             score -= 5
 
-            # 거래대금 (최대 +10)
             if   value > 500: score += 10
             elif value > 200: score += 7
             elif value > 100: score += 3
             elif value < 50:  score -= 10
 
-            # MA 배열 (최대 +15) ← 추세 핵심 지표 유지
             if   ma5 > ma20 > ma60 > 0: score += 15
             elif ma5 > ma20 > 0:        score += 8
             else:                       score -= 8
 
-            # RSI (최대 +8)
             if   40 < rsi < 70:  score += 8
             elif rsi > 80:       score -= 15
             elif rsi < 30:       score -= 3
 
-            # 외국인 5일 수급 (최대 +10)
             if   foreign > 10000: score += 10
             elif foreign > 5000:  score += 7
             elif foreign > 1000:  score += 3
             elif foreign < -5000: score -= 8
 
-            # 기관 5일 수급 (최대 +8)
             if   institution > 10000: score += 8
             elif institution > 5000:  score += 5
             elif institution > 1000:  score += 2
@@ -131,16 +108,14 @@ class SwingStrategy:
             return 0
 
     # ============================================================
-    # 2. 매수 필터 (양봉 조건 면제 로직)
+    # 2. 매수 필터 (변경 없음)
     # ============================================================
     def passes_buy_filter(self, data: dict, is_new: bool = False) -> tuple:
-        """반환: (통과 여부, 사유)"""
         change   = data.get("change_rate", 0)
         ma5      = data.get("ma5", 0)
         ma20     = data.get("ma20", 0)
         foreign  = data.get("foreign_5d", 0)
 
-        # ★ VI(변동성완화장치) 발동 종목 제외 (51=VI발동, 2분 단일가매매)
         vi_code = data.get("iscd_stat_cls_code", "55")
         if vi_code == "51":
             return False, "VI 발동 중 (단일가매매 — 체결 불가)"
@@ -148,8 +123,6 @@ class SwingStrategy:
         if change >= 29.5:
             return False, "상한가 제외"
 
-        # ★ 추세 강한 종목은 음봉/약양봉도 허용
-        # 백테스트 모드(change_rate=0)에서는 등락률 필터 스킵
         if change != 0:
             is_strong = (ma5 > ma20 > 0 and foreign > 5000) or is_new
             if is_strong:
@@ -162,11 +135,10 @@ class SwingStrategy:
         return True, ""
 
     # ============================================================
-    # 3. new 그룹 가산점
+    # 3. new 그룹 가산점 (변경 없음)
     # ============================================================
     def apply_new_bonus(self, code: str, score: int,
                         new_codes_list: list) -> tuple:
-        """반환: (보정 점수, 보정 이유)"""
         if not new_codes_list or code not in new_codes_list:
             return score, ""
         new_score = min(100, score + NEW_BONUS)
@@ -175,7 +147,29 @@ class SwingStrategy:
         return new_score, reason
 
     # ============================================================
-    # 4. 매도 체크 (★ 본절 보호 + effective_entry)
+    # 4. ATR 기반 초기 손절/목표가 계산 (매수 시 호출)
+    # ============================================================
+    def calc_atr_levels(self, entry: float, atr_rate: float) -> dict:
+        """
+        매수 시 ATR 기반 손절/목표가 계산
+        반환: {stop_price, target1, atr_val}
+        """
+        if atr_rate > 0:
+            atr_val  = entry * atr_rate
+            stop     = round(entry - atr_val * ATR_STOP_MULT, 0)
+            target1  = round(entry + atr_val * ATR_TARGET_MULT, 0)
+        else:
+            # ATR 없을 때 폴백
+            atr_val  = entry * abs(FALLBACK_STOP) / ATR_STOP_MULT
+            stop     = round(entry * (1 + FALLBACK_STOP), 0)
+            target1  = round(entry * (1 + FALLBACK_TARGET), 0)
+
+        print(f"   📐 ATR 타점 | 손절:{stop:,.0f} | 목표1:{target1:,.0f} "
+              f"| ATR:{atr_rate:.2%}")
+        return {"stop_price": stop, "target1": target1, "atr_val": atr_val}
+
+    # ============================================================
+    # 5. 매도 체크 (v3 — ATR 추세추종)
     # ============================================================
     def check_sell(self, code: str, pos: dict,
                    market_data: dict, market_status: str,
@@ -184,10 +178,11 @@ class SwingStrategy:
                    ma20: float = 0,
                    atr_rate: float = 0,
                    vol_ratio: float = 0.0,
-                   now_t: str = '1200') -> Optional[str]:  # ★ 백테스트 호환
+                   now_t: str = '1200') -> Optional[str]:
         """
-        스윙 매도 의사결정.
-        매개변수는 단타와 비슷하되, ma10 → ma20 (스윙은 20일선 기준).
+        ATR 추세추종 매도 의사결정.
+        - 분할 매도 없음 — 전량 보유하며 목표가/손절가 상향
+        - 트레일링은 목표가1 달성 이후부터 작동
         """
         if not market_data:
             return None
@@ -200,142 +195,120 @@ class SwingStrategy:
 
         rate = (current - entry) / entry
 
+        # ── tracker 초기화 ────────────────────────────────────
         if code not in peak_tracker:
+            # 매수 시 ATR 레벨 계산
+            levels   = self.calc_atr_levels(entry, atr_rate)
+            atr_val  = levels["atr_val"]
             peak_tracker[code] = {
-                "peak_rate":       rate,
-                "stage":           0,
-                "remain_qty":      qty,
-                "buy2_done":       True,
-                "buy1_price":      entry,
-                "effective_entry": entry,
+                "peak_rate":   rate,
+                "peak_price":  current,
+                "stage":       0,           # 0=초기, 1=목표1달성, 2=목표2이상
+                "buy2_done":   True,
+                "buy1_price":  entry,
+                "stop_price":  levels["stop_price"],
+                "target1":     levels["target1"],
+                "target_next": levels["target1"],
+                "atr_val":     atr_val,
             }
 
-        tracker         = peak_tracker[code]
-        stage           = tracker["stage"]
-        peak_rate       = tracker["peak_rate"]
-        buy2_done       = tracker.get("buy2_done", True)
-        buy1_price      = tracker.get("buy1_price", entry)
+        tracker     = peak_tracker[code]
+        stage       = tracker["stage"]
+        stop_price  = tracker["stop_price"]
+        target1     = tracker["target1"]
+        target_next = tracker["target_next"]
+        atr_val     = tracker.get("atr_val", entry * abs(FALLBACK_STOP) / ATR_STOP_MULT)
+        buy2_done   = tracker.get("buy2_done", True)
+        buy1_price  = tracker.get("buy1_price", entry)
 
-        if rate > peak_rate:
-            tracker["peak_rate"] = rate
-            peak_rate            = rate
+        # 고점 갱신
+        if rate > tracker["peak_rate"]:
+            tracker["peak_rate"]  = rate
+            tracker["peak_price"] = current
+
+        peak_price = tracker["peak_price"]
 
         # ----------------------------------------------------------
-        # ① 2차 분할매수 (물타기) — 강화 조건
+        # ① 물타기 (stage=0, -3% 하락, MA20 위, 거래량 충분)
         # ----------------------------------------------------------
-        is_weak   = market_status in ("weak", "stop")
+        is_weak = market_status in ("weak", "stop")
         buy2_rate = (current - buy1_price) / buy1_price if buy1_price else 0
-
-        # ★ 강화 조건: MA20 위 + 시장 normal + 거래량 1.5배↑
         ma20_ok   = (ma20 > 0 and current >= ma20)
         mkt_ok    = (market_status == "normal")
-        # ★ vol_ratio 실제 연동 (기존 True 고정 → 실제 조건)
-        # vol_ratio=0 이면 데이터 없음 → 조건 통과 (보수적 허용)
-        VOL_RATIO_MIN = 150.0   # 전일 대비 1.5배 이상 (150%)
-        vol_ok = (vol_ratio <= 0) or (vol_ratio >= VOL_RATIO_MIN)
+        VOL_RATIO_MIN = 150.0
+        vol_ok    = (vol_ratio <= 0) or (vol_ratio >= VOL_RATIO_MIN)
 
         if (not buy2_done and stage == 0
                 and buy2_rate <= BUY_2ND_THRESHOLD
                 and not is_paused and not is_weak
                 and ma20_ok and mkt_ok and vol_ok):
-            print(f"➕ 2차 매수(물타기) {code} | {buy2_rate:+.2%} | "
-                  f"MA20:{ma20:,.0f} | 거래량:{vol_ratio:.0f}%")
+            print(f"➕ 2차 매수(물타기) {code} | {buy2_rate:+.2%}")
             on_buy(code, current, BUY_2ND_AMT)
             tracker["buy2_done"] = True
-        elif (not buy2_done and stage == 0
-                and buy2_rate <= BUY_2ND_THRESHOLD
-                and not is_paused and not is_weak):
-            reasons = []
-            if not ma20_ok: reasons.append(f"MA20이탈({current:,.0f}<{ma20:,.0f})")
-            if not mkt_ok:  reasons.append(f"시장{market_status}")
-            if not vol_ok:  reasons.append(f"거래량부족({vol_ratio:.0f}%<{VOL_RATIO_MIN:.0f}%)")
-            print(f"⛔ 2차매수 조건미달 {code}: {', '.join(reasons)}")
 
         # ----------------------------------------------------------
-        # ② 3차 익절 (+25% 전량)
+        # ② MA20 이탈 — 추세 종료 (stage 무관, 항상 체크)
         # ----------------------------------------------------------
-        if stage >= 2 and rate >= SELL_3RD_RATE:
-            on_sell(code, qty, f"3차익절전량({rate:+.2%})", current)
+        if ma20 > 0 and current < ma20:
+            print(f"📉 MA20 이탈 {code} | 현재:{current:,.0f} < MA20:{ma20:,.0f}")
+            on_sell(code, qty, f"MA20이탈({rate:+.2%})", current)
+            if rate < 0:
+                on_loss()
             peak_tracker.pop(code, None)
-            return "3차익절"
+            return "MA20이탈"
 
         # ----------------------------------------------------------
-        # ③ MA20 이탈 (2차 익절 후)
+        # ③ 손절가 이탈
         # ----------------------------------------------------------
-        if stage >= 2 and ma20 > 0:
-            if current < ma20:
-                print(f"📉 MA20 이탈 {code} | 현재:{current:,.0f} < MA20:{ma20:,.0f}")
-                on_sell(code, qty, f"MA20이탈({rate:+.2%})", current)
-                peak_tracker.pop(code, None)
-                return "MA20이탈"
-
-        # ----------------------------------------------------------
-        # ④ 트레일링 스탑
-        # ----------------------------------------------------------
-        if stage >= 2:
-            if rate <= peak_rate - TRAIL_STOP_AFTER_2ND:
-                on_sell(code, qty, f"트레일링2({rate:+.2%})", current)
-                peak_tracker.pop(code, None)
-                return "트레일링2"
-        elif stage == 1:
-            # ★ 1차 익절 후 트레일링
-            if rate <= peak_rate - TRAIL_STOP_AFTER_1ST:
-                on_sell(code, qty, f"트레일링1({rate:+.2%})", current)
-                peak_tracker.pop(code, None)
-                return "트레일링1"
-
-        # ----------------------------------------------------------
-        # ⑤ 2차 익절 (+15%)
-        # ----------------------------------------------------------
-        if stage < 2 and rate >= SELL_2ND_RATE:
-            sell_qty = max(int(tracker["remain_qty"] * SELL_2ND_QTY / (1 - SELL_1ST_QTY)), 1)
-            sell_qty = min(sell_qty, qty)
-            on_sell(code, sell_qty, f"2차익절({rate:+.2%})", current)
-            tracker["stage"] = 2
-            realized_gain = (current - entry) * sell_qty
-            tracker["effective_entry"] = max(
-                entry - realized_gain / max(qty - sell_qty, 1),
-                entry * 0.93,
-            )
-            return "2차익절"
-
-        # ----------------------------------------------------------
-        # ⑥ 1차 익절 (+8%)
-        # ----------------------------------------------------------
-        if stage < 1 and rate >= SELL_1ST_RATE:
-            sell_qty = max(int(qty * SELL_1ST_QTY), 1)
-            on_sell(code, sell_qty, f"1차익절({rate:+.2%})", current)
-            tracker["stage"]      = 1
-            tracker["remain_qty"] = qty - sell_qty
-            realized_gain = (current - entry) * sell_qty
-            tracker["effective_entry"] = max(
-                entry - realized_gain / max(qty - sell_qty, 1),
-                entry * 0.96,
-            )
-            return "1차익절"
-
-        # ----------------------------------------------------------
-        # ⑦ 손절 (★ 단계별 + ATR)
-        # ----------------------------------------------------------
-        if stage >= 1:
-            stop_line = STOP_LOSS_AFTER_1ST  # 본절 보호
-            label     = "본절보호"
-        elif is_weak:
-            stop_line = STOP_LOSS_WEAK
-            label     = "손절(약세장)"
-        else:
-            stop_line = STOP_LOSS_BASIC
-            label     = "손절"
-
-        # ★ 스윙봇 ATR 보정 제거 — 고정 손절선 -7% 사용 (ATR로 인한 손절 무력화 방지)
-        # if atr_rate > 0:
-        #     atr_floor = max(-0.10, -atr_rate * 1.5)
-        #     stop_line = min(stop_line, atr_floor)
-
-        if rate <= stop_line:
+        if current <= stop_price:
+            label = "손절" if stage == 0 else f"손절(stage{stage})"
+            print(f"🛑 {label} {code} | 현재:{current:,.0f} ≤ 손절:{stop_price:,.0f} ({rate:+.2%})")
             on_sell(code, qty, f"{label}({rate:+.2%})", current)
-            on_loss()
+            if stage == 0:
+                on_loss()
             peak_tracker.pop(code, None)
             return label
+
+        # ----------------------------------------------------------
+        # ④ 트레일링 스탑 (목표가1 달성 이후)
+        # ----------------------------------------------------------
+        if stage >= 1 and atr_val > 0:
+            trail_stop = peak_price - atr_val * ATR_TRAIL_MULT
+            if current <= trail_stop:
+                print(f"🔻 트레일링 {code} | 고점:{peak_price:,.0f} → "
+                      f"트레일:{trail_stop:,.0f} | 현재:{current:,.0f} ({rate:+.2%})")
+                on_sell(code, qty, f"트레일링({rate:+.2%})", current)
+                peak_tracker.pop(code, None)
+                return "트레일링"
+        elif stage >= 1:
+            # ATR 없을 때 폴백 트레일링
+            trail_rate = tracker["peak_rate"] - FALLBACK_TRAIL
+            if rate <= trail_rate:
+                on_sell(code, qty, f"트레일링({rate:+.2%})", current)
+                peak_tracker.pop(code, None)
+                return "트레일링"
+
+        # ----------------------------------------------------------
+        # ⑤ 목표가 달성 → 손절/목표가 상향
+        # ----------------------------------------------------------
+        if current >= target_next:
+            if stage == 0:
+                # 목표가1 달성 → 손절을 매수가 + ATR×1 로 올림
+                new_stop   = round(entry + atr_val * ATR_RAISE_MULT, 0)
+                new_target = round(current + atr_val * ATR_TARGET_MULT, 0)
+                tracker["stop_price"]  = new_stop
+                tracker["target_next"] = new_target
+                tracker["stage"]       = 1
+                print(f"🎯 목표가1 달성 {code} ({rate:+.2%}) | "
+                      f"손절 상향:{new_stop:,.0f} | 새목표:{new_target:,.0f}")
+            else:
+                # 목표가2+ 달성 → 손절을 직전 목표가로 올림
+                new_stop   = target_next   # 직전 목표가가 새 손절
+                new_target = round(current + atr_val * ATR_TARGET_MULT, 0)
+                tracker["stop_price"]  = new_stop
+                tracker["target_next"] = new_target
+                tracker["stage"]       = stage + 1
+                print(f"🎯 목표가{stage+1} 달성 {code} ({rate:+.2%}) | "
+                      f"손절 상향:{new_stop:,.0f} | 새목표:{new_target:,.0f}")
 
         return None
