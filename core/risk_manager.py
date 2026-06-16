@@ -226,10 +226,12 @@ class RiskManager:
 
         amount = int(self.base_buy_amt * multiplier)
 
-        # ── 5. 자금 한도: 가용 자금의 30% 초과 금지 ─────────
-        if psbl_cash > 0:
-            cap    = int(psbl_cash * 0.5)  # 50%로 상향 (기존 30%)
-            amount = min(amount, cap)
+        # ── 5. 자금 한도: psbl_cash가 부족할 때만 깎기 ──────
+        # ★ 기존: psbl_cash × 0.5 cap → 보유종목 많을수록 주문가능이 줄어
+        #         base_buy_amt보다 cap이 작아지는 역효과 발생
+        # ★ 수정: 있는 돈보다 많이 사려 할 때만 psbl_cash로 제한
+        if psbl_cash > 0 and psbl_cash < amount:
+            amount = psbl_cash
 
         return amount
 

@@ -1,15 +1,15 @@
 {
   "telegram_event": {
     "keywords": [
-      "수주"
+      "AI"
     ],
     "themes": [
-      "조선",
-      "건설",
-      "방산"
+      "반도체",
+      "AI",
+      "클라우드"
     ],
-    "score": 15,
-    "text": "미·이란 종전에 건설株 강세…증권가 \"재건 수주 기대\"[특징주]\nhttps://naver.me/5K6t7qLc",
-    "time": "10:04:37"
+    "score": 10,
+    "text": "[단독] SK, 美서 AI 데이터센터 구축 검토…하이닉스 앞세워 인프라 확장 추진\nhttps://zdnet.co.kr/view/?no=20260615155152",
+    "time": "10:32:47"
   }
 }
