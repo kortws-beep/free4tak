@@ -823,11 +823,11 @@ class CBot:
         ★ stage>=1 (1차 익절 후): 본절 보호 우선 적용
         """
         if stage >= 1:
-            return STOP_LOSS_AFTER_1ST  # ★ 본절 보호
-        if self.market_status == "stop":  return STOP_LOSS_STOP
-        if self._is_night():              return STOP_LOSS_NIGHT
+            return -0.03  # 본절 보호 (폴백)
+        if self.market_status == "stop":  return -0.03
+        if self._is_night():              return -0.05
         if self.market_status == "weak":  return STOP_LOSS_WEAK
-        return STOP_LOSS_BASIC
+        return -0.07
 
     # ============================================================
     # 캔들 / 기술 지표 (5분 캐시)
@@ -1569,12 +1569,10 @@ class CBot:
     # ============================================================
     def run(self):
         self.notify(
-            f"🚀 [영암9 COIN v2.3] 종목 풀 자동확장 + 본절보호\n"
+            f"🚀 [영암9 COIN v3] ATR 추세추종 + 단일매수\n"
             f"🪙 거래대금 상위 {POOL_SIZE}개 자동 + 고정 {len(FIXED_COINS)}개\n"
-            f"💰 1차:{BUY_1ST_AMT:,}원 / 2차:{BUY_2ND_AMT:,}원 | "
-            f"최대:{MAX_POSITIONS}코인\n"
-            f"🎯 익절:+{SELL_1ST_RATE*100:.0f}%/+{SELL_2ND_RATE*100:.0f}% | "
-            f"손절:{STOP_LOSS_BASIC*100:.0f}% | 본절보호:{STOP_LOSS_AFTER_1ST*100:.0f}%\n"
+            f"💰 단일매수:{BUY_1ST_AMT:,}원 | 최대:{MAX_POSITIONS}코인\n"
+            f"🎯 ATR 추세추종 | 손절:ATR×2 | 목표:ATR×3 | 트레일:ATR×1.5\n"
             f"🛡️ BTC약세:{BTC_WEAK_THRESH:.0f}% | 탐욕MIN:{FEAR_GREED_MIN} | "
             f"일손실:{DAILY_LOSS_LIMIT:,}원",
             critical=True,
