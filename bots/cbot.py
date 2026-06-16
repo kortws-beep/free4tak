@@ -1663,13 +1663,16 @@ class CBot:
                     f"당일PNL:{self.daily_pnl:+,.0f}원"
                 )
                 for market, pos in self.positions.items():
-                    rate  = (pos["current"] - pos["entry_price"]) / pos["entry_price"] * 100
-                    emoji = "📈" if rate >= 0 else "📉"
-                    stage = self.peak_tracker.get(market, {}).get("stage", 0)
-                    stage_tag = f"|stage{stage}" if stage > 0 else ""
+                    rate      = (pos["current"] - pos["entry_price"]) / pos["entry_price"] * 100
+                    emoji     = "📈" if rate >= 0 else "📉"
+                    tracker   = self.peak_tracker.get(market, {})
+                    stage     = tracker.get("stage", 0)
+                    stop_p    = tracker.get("stop_price", 0)
+                    target_p  = tracker.get("target_next", 0)
+                    stage_tag = f"(stage{stage})" if stage > 0 else ""
                     print(
-                        f"  {emoji} {market} | {rate:+.2f}%{stage_tag} | "
-                        f"{pos['qty']:.6f}개 | {pos['current']:,}원"
+                        f"  {emoji} {market}{stage_tag} {rate:+.2f}% | "
+                        f"현재:{pos['current']:,} | 손절:{int(stop_p):,} 목표:{int(target_p):,}"
                     )
                 print(f"📈 평가손익: {total_profit:+,.0f}원")
 
