@@ -612,6 +612,7 @@ class Sbo2:
         self.sold_today = {}       # {code: time}
         self.candidates  = []       # 현재 후보 리스트
         self.api_fail_count = 0         # API 연속 실패 카운터
+        self.atr_cache      = {}         # {code: (atr_rate, ts)}
         self._cand_ts    = 0        # 후보 마지막 갱신 시각
         self._cand_date  = ""       # 후보 마지막 갱신 날짜
         self._pending_orders = {}   # 미체결 주문 {code: (orgno, odno, qty)}
@@ -859,20 +860,36 @@ class Sbo2:
             # 미체결 추적 등록
             self._pending_orders[code] = (orgno or "", odno or "", qty)
 
+            # ★ ATR 기반 손절/목표가 계산 (추세추종 방식)
+            _atr_rate = self._get_atr_rate(code)
+            if _atr_rate > 0:
+                _atr_val  = curr_price * _atr_rate
+                _stop     = round(curr_price - _atr_val * 2.0, 0)
+                _tgt      = round(curr_price + _atr_val * 3.0, 0)
+            else:
+                # ATR 없을 때 후보에서 제공한 값 or 폴백
+                _stop = cand["stop"] or round(curr_price * 0.93, 0)
+                _tgt  = cand["tgt"]  or round(curr_price * 1.12, 0)
+                _atr_val = 0
+
             # 포지션 등록
             self.positions[code] = {
-                "code":       code,
-                "name":       name,
-                "grade":      cand["grade"],
+                "code":        code,
+                "name":        name,
+                "grade":       cand["grade"],
                 "entry_price": curr_price,
-                "qty":        qty,
-                "buy_time":   today_str(),
-                "stop_price": cand["stop"] or curr_price * 0.93,
-                "tgt_price":  cand["tgt"]  or curr_price * 1.15,
-                "score":      cand["score"],
-                "vcp":        cand["vcp"],
-                "trend":      cand["trend"],
-                "catalyst":   cand["catalyst"],
+                "qty":         qty,
+                "buy_time":    today_str(),
+                "stop_price":  _stop,
+                "tgt_price":   _tgt,
+                "target_next": _tgt,       # ★ 다음 목표가 (상향 추적)
+                "atr_val":     _atr_val,   # ★ ATR 절대값 (목표가 상향 시 사용)
+                "peak_price":  curr_price, # ★ 고점 추적 (트레일링용)
+                "stage":       0,          # ★ 0=초기, 1=목표1달성, 2+=계속
+                "score":       cand["score"],
+                "vcp":         cand["vcp"],
+                "trend":       cand["trend"],
+                "catalyst":    cand["catalyst"],
             }
             self._save_state()
 
@@ -916,6 +933,39 @@ class Sbo2:
             time.sleep(1)
 
     # ── 매도 체크 ─────────────────────────────────────────────
+    def _get_atr_rate(self, code: str) -> float:
+        """ATR/현재가 비율 (30분 캐시)"""
+        import time as _time
+        now_ts = _time.time()
+        if code in self.atr_cache:
+            cached_rate, ts = self.atr_cache[code]
+            if now_ts - ts < 1800:
+                return cached_rate
+        try:
+            ohlc = self.api.get_daily_ohlc(code, days=20) if hasattr(self.api, 'get_daily_ohlc') else []
+            if not ohlc:
+                self.atr_cache[code] = (0.0, now_ts)
+                return 0.0
+            # ATR 계산 (14일)
+            highs  = [float(o.get("stck_hgpr", 0)) for o in ohlc]
+            lows   = [float(o.get("stck_lwpr", 0)) for o in ohlc]
+            closes = [float(o.get("stck_clpr", 0)) for o in ohlc]
+            trs = []
+            for i in range(1, min(15, len(ohlc))):
+                tr = max(highs[i] - lows[i],
+                         abs(highs[i] - closes[i-1]),
+                         abs(lows[i]  - closes[i-1]))
+                trs.append(tr)
+            atr     = sum(trs) / len(trs) if trs else 0
+            cur_p   = closes[0] if closes else 1
+            atr_rate = atr / cur_p if cur_p > 0 else 0
+            self.atr_cache[code] = (atr_rate, now_ts)
+            return atr_rate
+        except Exception as e:
+            print(f"⚠️ ATR 조회 오류 {code}: {e}")
+            self.atr_cache[code] = (0.0, now_ts)
+            return 0.0
+
     def _check_sell(self):
         now_t = now_hhmm()
         if not (SELL_START_TIME <= now_t <= SELL_END_TIME):
@@ -930,62 +980,127 @@ class Sbo2:
             entry = pos["entry_price"]
             qty   = pos["qty"]
             stop  = pos["stop_price"]
-            tgt   = pos["tgt_price"]
             name  = pos.get("name", code)
+            atr_val    = pos.get("atr_val", 0)
+            peak_price = pos.get("peak_price", curr)
+            stage      = pos.get("stage", 0)
+            target_next = pos.get("target_next", pos.get("tgt_price", 0))
 
-            if curr <= 0:
+            if curr <= 0 or entry <= 0 or qty <= 0:
                 continue
 
-            if entry <= 0 or curr <= 0:
-                continue
             rate = (curr - entry) / entry * 100
+
+            # 고점 갱신
+            if curr > peak_price:
+                pos["peak_price"] = curr
+                peak_price = curr
+
             reason = None
 
-            # 손절 체크 (0원 방어)
-            if stop > 0 and curr <= stop:
-                reason = f"손절 {rate:+.1f}%"
+            # ① MA20 이탈 — 추세 종료
+            try:
+                tech = self.api.get_technical_indicators(code, {})
+                ma20 = float(tech.get("ma20", 0) or 0)
+                if ma20 > 0 and curr < ma20:
+                    reason = f"MA20이탈({rate:+.1f}%)"
+                    print(f"📉 MA20 이탈 {code} | 현재:{curr:,.0f} < MA20:{ma20:,.0f}")
+            except Exception:
+                ma20 = 0
 
-            # 목표가 체크 (0원 방어)
-            elif tgt > 0 and curr >= tgt:
-                reason = f"목표달성 {rate:+.1f}%"
+            # ② 손절가 이탈
+            if not reason and stop > 0 and curr <= stop:
+                reason = f"손절({rate:+.1f}%)"
 
-            # ⚠️ 장마감 청산 없음 — 스윙봇은 목표가/손절가만 반응
+            # ③ 트레일링 스탑 (목표가1 달성 이후)
+            if not reason and stage >= 1 and atr_val > 0:
+                trail_stop = peak_price - atr_val * 1.5
+                if curr <= trail_stop:
+                    reason = f"트레일링({rate:+.1f}%)"
+                    print(f"🔻 트레일링 {code} | 고점:{peak_price:,.0f} → "
+                          f"트레일:{trail_stop:,.0f} | 현재:{curr:,.0f}")
+            elif not reason and stage >= 1 and atr_val == 0:
+                # ATR 없을 때 폴백 트레일링 (고점 -5%)
+                if curr <= peak_price * 0.95:
+                    reason = f"트레일링({rate:+.1f}%)"
 
-            if reason:
-                ok = self.api.sell(code, qty, price=int(curr))
-                if not ok:
-                    continue
-
-                # DB 저장
-                save_sell_trade(
-                    code=code, sell_price=curr, reason=reason,
-                    entry_price=entry, qty=qty, buy_time=pos.get("buy_time", ""),
-                    stock_name=name, grade=pos.get("grade", "")
-                )
-
-                # master_db 기록
-                if _master_record:
-                    _master_record(
-                        bot_type="sbo2", code=code, stock_name=name,
-                        buy_price=entry, sell_price=curr, qty=qty,
-                        sell_reason=reason, buy_tag=pos.get("grade", ""),
-                        ai_score=pos.get("score", 0),
+            # ④ 목표가 달성 → 손절/목표가 상향 (매도 안 함)
+            if not reason and target_next > 0 and curr >= target_next:
+                if stage == 0:
+                    new_stop   = round(entry + atr_val * 1.0, 0) if atr_val > 0 else round(entry * 1.02, 0)
+                    new_target = round(curr + atr_val * 3.0, 0) if atr_val > 0 else round(curr * 1.10, 0)
+                    pos["stop_price"]  = new_stop
+                    pos["tgt_price"]   = new_target
+                    pos["target_next"] = new_target
+                    pos["stage"]       = 1
+                    self._save_state()
+                    print(f"🎯 목표가1 달성 {code} ({rate:+.1f}%) | "
+                          f"손절↑:{new_stop:,.0f} | 새목표:{new_target:,.0f}")
+                    _notify(
+                        f"🎯 [sbo2] 목표가1 달성 {name}({code})
+"
+                        f"   {rate:+.1f}% | 손절↑:{new_stop:,.0f} | 새목표:{new_target:,.0f}",
+                        critical=False
                     )
-                if _master_remove:
-                    _master_remove("sbo2", code)
+                else:
+                    new_stop   = target_next
+                    new_target = round(curr + atr_val * 3.0, 0) if atr_val > 0 else round(curr * 1.10, 0)
+                    pos["stop_price"]  = new_stop
+                    pos["tgt_price"]   = new_target
+                    pos["target_next"] = new_target
+                    pos["stage"]       = stage + 1
+                    self._save_state()
+                    print(f"🎯 목표가{stage+1} 달성 {code} ({rate:+.1f}%) | "
+                          f"손절↑:{new_stop:,.0f} | 새목표:{new_target:,.0f}")
+                    _notify(
+                        f"🎯 [sbo2] 목표가{stage+1} 달성 {name}({code})
+"
+                        f"   {rate:+.1f}% | 손절↑:{new_stop:,.0f} | 새목표:{new_target:,.0f}",
+                        critical=False
+                    )
+                continue  # 목표가 달성은 매도 안 함
 
-                self.sold_today[code] = now_hms()
-                del self.positions[code]
-                self._save_state()
+            if not reason:
+                continue
 
-                emoji = "💰" if rate > 0 else "💔"
-                _notify(
-                    f"{emoji} [sbo2] 매도 {name}({code})\n"
-                    f"   {reason}\n"
-                    f"   {entry:,}원 → {curr:,}원 ({rate:+.1f}%)\n"
-                    f"   손익: {int((curr-entry)*qty):,}원",
-                    critical=True
+            # ── 매도 실행 ─────────────────────────────────────
+            ok = self.api.sell(code, qty, price=int(curr))
+            if not ok:
+                continue
+
+            # DB 저장
+            save_sell_trade(
+                code=code, sell_price=curr, reason=reason,
+                entry_price=entry, qty=qty, buy_time=pos.get("buy_time", ""),
+                stock_name=name, grade=pos.get("grade", "")
+            )
+
+            # master_db 기록
+            if _master_record:
+                _master_record(
+                    bot_type="sbo2", code=code, stock_name=name,
+                    buy_price=entry, sell_price=curr, qty=qty,
+                    sell_reason=reason, buy_tag=pos.get("grade", ""),
+                    ai_score=pos.get("score", 0),
                 )
+            if _master_remove:
+                _master_remove("sbo2", code)
+
+            # 손절만 sold_today 등록
+            if "손절" in reason:
+                self.sold_today[code] = now_hms()
+
+            del self.positions[code]
+            self._save_state()
+
+            emoji = "💰" if rate > 0 else "💔"
+            _notify(
+                f"{emoji} [sbo2] 매도 {name}({code})\n"
+                f"   {reason}\n"
+                f"   {entry:,}원 → {curr:,}원 ({rate:+.1f}%)\n"
+                f"   손익: {int((curr-entry)*qty):,}원",
+                critical=True
+            )
 
     # ── 메인 루프 ─────────────────────────────────────────────
     def _get_pending_orders(self) -> list:
@@ -1176,7 +1291,8 @@ class Sbo2:
                     grade = pos.get('grade', '')
                     label = SLOT_LABEL.get(grade, grade)
                     print(f"   💼 {pos.get('name', code)}({label}) "
-                          f"{rate:+.1f}% | 손절:{pos['stop_price']:,.0f} 목표:{pos['tgt_price']:,.0f}")
+                          f"{rate:+.1f}% | 현재:{int(curr):,} | "
+                          f"손절:{pos['stop_price']:,.0f} 목표:{pos['tgt_price']:,.0f}")
 
             except KeyboardInterrupt:
                 print("\n⛔ [sbo2] 중단")
