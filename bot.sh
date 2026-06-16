@@ -127,6 +127,30 @@ case "$1" in
     git push
     echo "✅ 완료"
     ;;
+
+  watchdog)
+    case "$2" in
+      start)
+        echo "🐕 watchdog 시작..."
+        sudo systemctl daemon-reload
+        sudo systemctl start yeongam9-watchdog-sbo2.timer
+        sudo systemctl enable yeongam9-watchdog-sbo2.timer
+        echo "  ✅ sbo2 watchdog 시작 (30초 간격, 5분 무응답 시 재시작)"
+        ;;
+      stop)
+        echo "🐕 watchdog 정지..."
+        sudo systemctl stop yeongam9-watchdog-sbo2.timer
+        echo "  ⏹  sbo2 watchdog 정지"
+        ;;
+      status)
+        echo "🐕 watchdog 상태"
+        systemctl status yeongam9-watchdog-sbo2.timer --no-pager
+        ;;
+      *)
+        echo "사용법: $0 watchdog {start|stop|status}"
+        ;;
+    esac
+    ;;
   *)
     echo "사용법: $0 {start|stop|restart|status|log [bot]|today [bot]|enable|disable|git [msg]|push}"
     echo ""

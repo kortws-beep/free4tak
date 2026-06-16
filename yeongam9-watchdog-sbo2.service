@@ -1,0 +1,10 @@
+[Unit]
+Description=영암9 sbo2 Watchdog
+After=yeongam9-sbo2.service
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/home/free4tak/k-bot/stock_bot/watchdog_sbo2.sh
+StandardOutput=journal
+StandardError=journal

@@ -25,6 +25,11 @@ sbo2.py — 리나 관리 스윙봇 (3단 콤보 연동 버전)
 import os
 import sys
 import time
+import pathlib
+
+# ── Heartbeat 설정 ────────────────────────────────────
+HB_FILE      = "/tmp/hb_sbo2"          # heartbeat 파일
+API_FAIL_MAX = 3                         # API 연속 실패 허용 횟수
 import json
 import datetime
 import sqlite3
@@ -606,6 +611,7 @@ class Sbo2:
         self.positions  = {}       # {code: {entry, qty, stop, tgt, name, grade, buy_time}}
         self.sold_today = {}       # {code: time}
         self.candidates  = []       # 현재 후보 리스트
+        self.api_fail_count = 0         # API 연속 실패 카운터
         self._cand_ts    = 0        # 후보 마지막 갱신 시각
         self._cand_date  = ""       # 후보 마지막 갱신 날짜
         self._pending_orders = {}   # 미체결 주문 {code: (orgno, odno, qty)}
@@ -1037,6 +1043,18 @@ class Sbo2:
             self._pending_orders.pop(code, None)
             self._save_state()
 
+    def _check_api_health(self, success: bool):
+        """API 호출 성공/실패 추적 — 연속 실패 시 재시작"""
+        if success:
+            self.api_fail_count = 0
+        else:
+            self.api_fail_count += 1
+            print(f"⚠️ [sbo2] API 실패 {self.api_fail_count}/{API_FAIL_MAX}회")
+            if self.api_fail_count >= API_FAIL_MAX:
+                print(f"🚨 [sbo2] API 연속 {API_FAIL_MAX}회 실패 → 재시작")
+                _notify("🚨 [sbo2] API 연속 실패 → 자동 재시작", critical=True)
+                import sys; sys.exit(1)  # systemd Restart=on-failure 트리거
+
     def _sync_real_positions(self):
         """
         실계좌 잔고 기준 포지션 동기화 (sbot 방식)
@@ -1052,7 +1070,9 @@ class Sbo2:
                 new_pos = self.api.get_current_positions()
             if not new_pos and self.positions:
                 print("⚠️ 실계좌 잔고 빈값 — 동기화 스킵 (캐시 유지)")
+                self._check_api_health(False)   # ★ API 실패 카운트
                 return
+            self._check_api_health(True)        # ★ API 정상
 
             # ── 수동매도/손절 감지 ─────────────────────────────
             for code in list(self.positions.keys()):
@@ -1127,6 +1147,9 @@ class Sbo2:
                     continue
 
                 print(f"\n⏰ [{now_hms()}] 루프 실행")
+
+                # ── Heartbeat 기록 ────────────────────────
+                pathlib.Path(HB_FILE).touch()
 
                 # ★ 실계좌 동기화 (매 루프) — sbot 방식과 동일
                 self._sync_real_positions()
