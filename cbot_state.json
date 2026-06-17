@@ -42,6 +42,7 @@
       "KRW-JTO",
       "KRW-USDT",
       "KRW-ONDO",
+      "KRW-ID",
       "KRW-NEAR",
       "KRW-SENT",
       "KRW-UNI",
@@ -60,9 +61,8 @@
       "KRW-XPL",
       "KRW-IP",
       "KRW-ENA",
-      "KRW-ZRO",
       "KRW-CFG",
-      "KRW-BCH"
+      "KRW-ZRO"
     ],
     "coins": [
       "KRW-BTC",
@@ -74,6 +74,7 @@
       "KRW-JTO",
       "KRW-USDT",
       "KRW-ONDO",
+      "KRW-ID",
       "KRW-NEAR",
       "KRW-SENT",
       "KRW-UNI",
@@ -92,13 +93,12 @@
       "KRW-XPL",
       "KRW-IP",
       "KRW-ENA",
-      "KRW-ZRO",
       "KRW-CFG",
-      "KRW-BCH"
+      "KRW-ZRO"
     ],
     "seed": "30만원 소액 모드"
   },
-  "last_update": "17:44:50",
+  "last_update": "17:51:27",
   "daily_loss": 0,
   "loss_date": "2026-06-17",
   "positions": {
