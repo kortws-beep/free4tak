@@ -394,6 +394,11 @@ def _write_state(state: dict):
     except Exception as e:
         print(f"⚠️ 상태 저장 오류: {e}")
 
+def _update_state(**kwargs):
+    st = _read_state()
+    st.update(kwargs)
+    _write_state(st)
+
 def _save_cand_date(date: str):
     """후보 갱신 날짜 상태파일에 저장"""
     st = _read_state()
@@ -639,13 +644,74 @@ class Sbo2:
         print(f"   보유 포지션: {list(self.positions.keys())}")
 
     def _save_state(self):
+        # 기존 pending_cmd/cmd_result는 보존 (덮어쓰기 방지)
+        _existing = _read_state()
         _write_state({
             "positions":       self.positions,
             "sold_today":      self.sold_today,
             "sold_today_date": today_str(),
             "candidates":      self.candidates,
             "cand_date":       getattr(self, "_cand_date", ""),
+            "pending_cmd":     _existing.get("pending_cmd"),
+            "cmd_result":      _existing.get("cmd_result"),
+            "paused":          _existing.get("paused", False),
         })
+
+    def _handle_pending_command(self):
+        """디스코드(키키/리나)에서 들어온 매도/정지 명령 처리"""
+        st = _read_state()
+        pending = st.get("pending_cmd")
+        if not pending:
+            return
+
+        cmd_type = pending.get("type")
+
+        if cmd_type == "sell":
+            sell_code = pending.get("code", "")
+            if sell_code in self.positions:
+                pos = self.positions[sell_code]
+                mdata = self.api.get_market_data(sell_code)
+                curr  = float(mdata.get("stck_prpr", 0)) if mdata else pos["entry_price"]
+                qty   = pos["qty"]
+                ok = self.api.sell(sell_code, qty, price=int(curr))
+                if ok:
+                    rate = (curr - pos["entry_price"]) / pos["entry_price"] * 100
+                    save_sell_trade(
+                        code=sell_code, sell_price=curr, reason="즉시매도(AI비서)",
+                        entry_price=pos["entry_price"], qty=qty,
+                        buy_time=pos.get("buy_time", ""),
+                        stock_name=pos.get("name", sell_code), grade=pos.get("grade", "")
+                    )
+                    if _master_record:
+                        _master_record(
+                            bot_type="sbo2", code=sell_code, stock_name=pos.get("name", sell_code),
+                            buy_price=pos["entry_price"], sell_price=curr, qty=qty,
+                            sell_reason="즉시매도(AI비서)", buy_tag=pos.get("grade", ""),
+                            ai_score=pos.get("score", 0),
+                        )
+                    if _master_remove:
+                        _master_remove("sbo2", sell_code)
+                    del self.positions[sell_code]
+                    _update_state(
+                        cmd_result=f"✅ [sbo2] {sell_code} 즉시매도 완료 ({rate:+.1f}%)",
+                        pending_cmd=None,
+                    )
+                    self._save_state()
+                else:
+                    _update_state(
+                        cmd_result=f"❌ [sbo2] {sell_code} 매도 실패",
+                        pending_cmd=None,
+                    )
+            else:
+                _update_state(
+                    cmd_result=f"⚠️ [sbo2] {sell_code} 보유 중이 아님",
+                    pending_cmd=None,
+                )
+
+        elif cmd_type == "pause":
+            _update_state(paused=True, cmd_result="⏸️ [sbo2] 일시중단", pending_cmd=None)
+        elif cmd_type == "resume":
+            _update_state(paused=False, cmd_result="▶️ [sbo2] 재개", pending_cmd=None)
 
     def _name(self, code: str) -> str:
         for pos in self.positions.values():
@@ -1268,6 +1334,9 @@ class Sbo2:
 
                 # ★ 실계좌 동기화 (매 루프) — sbot 방식과 동일
                 self._sync_real_positions()
+
+                # ★ 디스코드(키키/리나) 명령 처리
+                self._handle_pending_command()
 
                 # ★ 미체결 주문 취소 (1루프 이상 경과된 미체결)
                 self._cancel_stale_orders()
