@@ -49,6 +49,14 @@ elif os.path.exists(_env2):
     load_dotenv(_env2)
     print(f"✅ .env 로드: {_env2}")
 
+# ── sys.path 설정 (core/kis_api.py 등 공유 모듈 사용) ──────────
+_STOCK_BOT = os.path.dirname(os.path.abspath(__file__))
+_STOCK_BOT = os.path.dirname(_STOCK_BOT)
+for _d in ["core", "interface", "bots", ""]:
+    _p = os.path.join(_STOCK_BOT, _d)
+    if os.path.exists(_p) and _p not in sys.path:
+        sys.path.insert(0, _p)
+
 # ── 의존 모듈 ─────────────────────────────────────────────────
 from kis_api       import KisAPI
 from swing_master        import get_master_report, _get_catalyst_stocks, _extract_names_from_report
@@ -57,12 +65,6 @@ from swing_analyzer import get_swing_picks
 from trend_analyzer import get_trend_picks
 
 try:
-    import sys as _sys
-    _STOCK_BOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    for _d in ["core", "interface", "bots", ""]:
-        _p = os.path.join(_STOCK_BOT, _d)
-        if os.path.exists(_p) and _p not in _sys.path:
-            _sys.path.insert(0, _p)
     from master_db import (
         record_trade    as _master_record,
         upsert_position as _master_upsert,
@@ -409,10 +411,7 @@ def calc_buy_amount(grade: str, psbl_cash: int) -> int:
     - swing/trend    → 125만원 (83%)
     - tele (텔레)    → 100만원 (67%)
     - 주문가능금액 초과 시 조정
-    - ★ 최소 매수금액(50만원) 미달 시 0 반환 → 매수 스킵
     """
-    MIN_BUY_AMT = 500_000   # 최소 매수금액 50만원
-
     if grade == SLOT_INTER:
         amount = BASE_BUY_AMT               # 150만원
     elif grade in (SLOT_SWING, SLOT_TREND):
@@ -421,10 +420,6 @@ def calc_buy_amount(grade: str, psbl_cash: int) -> int:
         amount = int(BASE_BUY_AMT * 0.67)   # 100만원
 
     amount = min(amount, psbl_cash)
-
-    # ★ 최소 매수금액 미달 시 0 반환
-    if amount < MIN_BUY_AMT:
-        return 0
     return amount
 
 
@@ -568,23 +563,6 @@ def get_stock_name(code: str) -> str:
     except Exception:
         pass
     return code
-
-
-def _get_sector(code: str) -> str:
-    """종목코드로 섹터(테마) 조회 — kr_theme_stocks"""
-    try:
-        db = os.path.join(BASE_DIR, "kr_theme_finance.db")
-        with sqlite3.connect(db, timeout=5) as conn:
-            cur = conn.cursor()
-            cur.execute("""
-                SELECT theme FROM kr_theme_stocks
-                WHERE stock_name LIKE ?
-                LIMIT 1
-            """, (f"%{code}%",))
-            row = cur.fetchone()
-            return row[0] if row else ""
-    except Exception:
-        return ""
 
 
 def get_stock_code(name: str) -> str:
@@ -753,7 +731,7 @@ class Sbo2:
         if not (BUY_START_TIME <= now_t <= BUY_END_TIME):
             return
 
-        slots = MAX_POSITIONS - len(self.positions) - len(self._pending_orders)
+        slots = MAX_POSITIONS - len(self.positions)
         if slots <= 0:
             print("📦 [sbo2] 포지션 FULL")
             return
@@ -849,18 +827,6 @@ class Sbo2:
                                bought=False, skip_reason="재매수금지")
                 continue
 
-            # ★ 섹터 분산 제한 — 동일 섹터 최대 2종목
-            MAX_SAME_SECTOR = 2
-            sector = _get_sector(code)
-            if sector:
-                held_in_sector = sum(
-                    1 for c, p in self.positions.items()
-                    if _get_sector(c) == sector
-                )
-                if held_in_sector >= MAX_SAME_SECTOR:
-                    print(f"⛔ 섹터 초과 {name}({sector}) — 동일섹터 {held_in_sector}/{MAX_SAME_SECTOR}종목")
-                    continue
-
             # 현재가 조회
             mdata = self.api.get_market_data(code)
             if not mdata:
@@ -869,13 +835,13 @@ class Sbo2:
             if not (MIN_PRICE <= curr_price <= MAX_PRICE):
                 continue
 
-            # 매수금액 계산 — 최소금액 미달 시 0 반환
+            # 매수금액 계산 — 예수금 부족시 있는 만큼 매수
             amount = calc_buy_amount(cand["grade"], psbl_cash)
 
-            # ★ 최소 매수금액 미달 시 스킵
-            if amount == 0:
-                print(f"⛔ {name} 패스 — 주문가능({psbl_cash:,}) 최소매수금액(50만원) 미달")
-                continue
+            # 예수금이 기본금액보다 적으면 있는 만큼으로 조정
+            if psbl_cash < amount:
+                amount = psbl_cash
+                print(f"💡 {name} 예산 조정: {amount:,}원 (예수금 부족)")
 
             # 1주도 못 사면 패스
             if amount < curr_price:
@@ -1226,7 +1192,8 @@ class Sbo2:
             # ── 수동매도/손절 감지 ─────────────────────────────
             for code in list(self.positions.keys()):
                 if code not in new_pos and code not in self.sold_today:
-                    print(f"   🔍 수동매도 감지: {code} → 재매수 허용")
+                    self.sold_today[code] = now_hms()
+                    print(f"   🔍 수동매도 감지: {code} → sold_today 추가")
                     if _master_remove:
                         _master_remove("sbo2", code)
 
