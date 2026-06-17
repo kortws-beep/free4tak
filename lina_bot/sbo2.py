@@ -919,7 +919,7 @@ class Sbo2:
                 continue
 
             # 매수 실행
-            ok, orgno, odno = self.api.buy(code, curr_price, amount, {})
+            ok, orgno, odno = self.api.buy(code, curr_price, amount, {code: name})
             if not ok:
                 continue
 
