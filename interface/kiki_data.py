@@ -28,38 +28,41 @@ from common_utils import read_state as _read_state_atomic
 
 # DB 경로 상수
 _base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-TRADE_HIST_DB = os.path.join(_base, "trade_history.db")
 SBOT_HIST_DB  = os.path.join(_base, "sbot_trade_history.db")
+SBO2_HIST_DB  = os.path.join(_base, "lina_bot", "sbo2_trades.db")
 CBOT_HIST_DB  = os.path.join(_base, "cbot_trade_history.db")
 
 BOT_STATE_FILES = {
-    "nbot": "bot_state.json",
     "sbot": "sbot_state.json",
+    "sbo2": os.path.join("lina_bot", "sbo2_state.json"),
     "cbot": "cbot_state.json",
 }
 
-def read_state(bot: str = "nbot") -> dict:
+def read_state(bot: str = "sbot") -> dict:
     """봇 상태 파일 읽기 (없으면 기본값)"""
-    fname = BOT_STATE_FILES.get(bot, "bot_state.json")
+    fname = BOT_STATE_FILES.get(bot)
+    if not fname:
+        return {}
     return _read_state_atomic(fname, default={
         "paused":      False,
-        "score_enter": 55,
+        "score_enter": 70,
         "pending_cmd": None,
         "cmd_result":  None,
         "last_status": None,
     })
-
-def write_state(bot: str = "nbot", state: dict = None):
+def write_state(bot: str = "sbot", state: dict = None):
     """봇 상태 파일 쓰기 (★ atomic — 중간에 죽어도 안 깨짐)"""
     if state is None: state = {}
-    fname = BOT_STATE_FILES.get(bot, "bot_state.json")
+    fname = BOT_STATE_FILES.get(bot)
+    if not fname:
+        return
     _write_state_atomic(fname, state)
-
-def update_state(bot: str = "nbot", **kwargs):
+def update_state(bot: str = "sbot", **kwargs):
     """봇 상태 부분 업데이트"""
-    fname = BOT_STATE_FILES.get(bot, "bot_state.json")
+    fname = BOT_STATE_FILES.get(bot)
+    if not fname:
+        return
     _update_state_atomic(fname, **kwargs)
-
 def get_active_bots() -> list:
     """현재 실행 중인(상태파일이 있는) 봇 목록"""
     active = []
@@ -82,7 +85,7 @@ def _ro_connect(db_file: str) -> sqlite3.Connection:
 
 def get_recent_performance(limit: int = 20, db: str = None) -> list:
     """최근 매매 성과 (단타/스윙)"""
-    db = db or TRADE_HIST_DB
+    db = db or SBOT_HIST_DB
     try:
         conn = _ro_connect(db)
         rows = conn.execute("""
@@ -96,14 +99,16 @@ def get_recent_performance(limit: int = 20, db: str = None) -> list:
     except Exception:
         return []
 
-def get_open_positions_from_db(bot: str = "nbot") -> list:
+def get_open_positions_from_db(bot: str = "sbot") -> list:
     """DB의 미청산 매수 건"""
-    db = TRADE_HIST_DB if bot == "nbot" else SBOT_HIST_DB
+    db        = SBO2_HIST_DB if bot == "sbo2" else SBOT_HIST_DB
+    table     = "sbo2_trades" if bot == "sbo2" else "trades"
+    score_col = "score" if bot == "sbo2" else "ai_score"
     try:
         conn = _ro_connect(db)
-        rows = conn.execute("""
-            SELECT code, buy_price, qty, ai_score, buy_time
-            FROM trades WHERE sell_price IS NULL
+        rows = conn.execute(f"""
+            SELECT code, buy_price, qty, {score_col}, buy_time
+            FROM {table} WHERE sell_price IS NULL
             ORDER BY buy_time DESC
         """).fetchall()
         conn.close()
