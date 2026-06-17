@@ -29,7 +29,7 @@
     },
     "daily_loss": 0,
     "market_status": "normal",
-    "btc_rate": -1.13741193,
+    "btc_rate": -1.34320036,
     "fear_greed": 22,
     "is_night": false,
     "coin_pool": [
@@ -56,12 +56,12 @@
       "KRW-TRUMP",
       "KRW-MEGA",
       "KRW-STRAX",
-      "KRW-WAVES",
-      "KRW-CFG",
       "KRW-XPL",
-      "KRW-CHIP",
+      "KRW-CFG",
+      "KRW-WAVES",
       "KRW-ENA",
       "KRW-AERO",
+      "KRW-CHIP",
       "KRW-AKT"
     ],
     "coins": [
@@ -88,17 +88,17 @@
       "KRW-TRUMP",
       "KRW-MEGA",
       "KRW-STRAX",
-      "KRW-WAVES",
-      "KRW-CFG",
       "KRW-XPL",
-      "KRW-CHIP",
+      "KRW-CFG",
+      "KRW-WAVES",
       "KRW-ENA",
       "KRW-AERO",
+      "KRW-CHIP",
       "KRW-AKT"
     ],
     "seed": "30만원 소액 모드"
   },
-  "last_update": "19:34:55",
+  "last_update": "19:55:52",
   "daily_loss": 0,
   "loss_date": "2026-06-17",
   "positions": {

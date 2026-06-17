@@ -143,8 +143,8 @@ BOT_TOKEN  = os.getenv("DISCORD_BOT_TOKEN")
 CHANNEL_ID = int(os.getenv("DISCORD_CHANNEL_ID", "0"))
 
 # DB 파일
-TRADE_HIST_DB = "trade_history.db"
 SBOT_HIST_DB  = "sbot_trade_history.db"
+SBO2_HIST_DB  = os.path.join("lina_bot", "sbo2_trades.db")
 CBOT_HIST_DB  = "cbot_trade_history.db"
 AI_CACHE_DB   = "ai_cache.db"
 
@@ -154,8 +154,8 @@ CHAT_HISTORY_MAX  = 20
 
 # 봇 상태 파일
 BOT_STATE_FILES = {
-    "nbot": "bot_state.json",
     "sbot": "sbot_state.json",
+    "sbo2": os.path.join("lina_bot", "sbo2_state.json"),
     "cbot": "cbot_state.json",
 }
 
@@ -174,28 +174,31 @@ def now_kst_dt():
 # ============================================================
 # 상태 파일 헬퍼 (★ atomic write 적용)
 # ============================================================
-def read_state(bot: str = "nbot") -> dict:
+def read_state(bot: str = "sbot") -> dict:
     """봇 상태 파일 읽기 (없으면 기본값)"""
-    fname = BOT_STATE_FILES.get(bot, "bot_state.json")
+    fname = BOT_STATE_FILES.get(bot)
+    if not fname:
+        return {}
     return _read_state_atomic(fname, default={
         "paused":      False,
-        "score_enter": 55,
+        "score_enter": 70,
         "pending_cmd": None,
         "cmd_result":  None,
         "last_status": None,
     })
-
-def write_state(bot: str = "nbot", state: dict = None):
+def write_state(bot: str = "sbot", state: dict = None):
     """봇 상태 파일 쓰기 (★ atomic — 중간에 죽어도 안 깨짐)"""
     if state is None: state = {}
-    fname = BOT_STATE_FILES.get(bot, "bot_state.json")
+    fname = BOT_STATE_FILES.get(bot)
+    if not fname:
+        return
     _write_state_atomic(fname, state)
-
-def update_state(bot: str = "nbot", **kwargs):
+def update_state(bot: str = "sbot", **kwargs):
     """봇 상태 부분 업데이트"""
-    fname = BOT_STATE_FILES.get(bot, "bot_state.json")
+    fname = BOT_STATE_FILES.get(bot)
+    if not fname:
+        return
     _update_state_atomic(fname, **kwargs)
-
 def get_active_bots() -> list:
     """현재 실행 중인(상태파일이 있는) 봇 목록"""
     active = []
@@ -232,14 +235,16 @@ def get_recent_performance(limit: int = 20, db: str = None) -> list:
     except Exception:
         return []
 
-def get_open_positions_from_db(bot: str = "nbot") -> list:
+def get_open_positions_from_db(bot: str = "sbot") -> list:
     """DB의 미청산 매수 건"""
-    db = TRADE_HIST_DB if bot == "nbot" else SBOT_HIST_DB
+    db = SBO2_HIST_DB if bot == "sbo2" else SBOT_HIST_DB
+    table = "sbo2_trades" if bot == "sbo2" else "trades"
+    score_col = "score" if bot == "sbo2" else "ai_score"
     try:
         conn = _ro_connect(db)
-        rows = conn.execute("""
-            SELECT code, buy_price, qty, ai_score, buy_time
-            FROM trades WHERE sell_price IS NULL
+        rows = conn.execute(f"""
+            SELECT code, buy_price, qty, {score_col}, buy_time
+            FROM {table} WHERE sell_price IS NULL
             ORDER BY buy_time DESC
         """).fetchall()
         conn.close()
@@ -280,27 +285,27 @@ def get_ebot_performance(limit: int = 20) -> list:
 def get_today_realized_all() -> dict:
     """★ 신규: 모든 봇의 오늘 실현손익 합계"""
     today  = today_str()
-    result = {"nbot": 0, "sbot": 0, "cbot": 0}
+    result = {"sbot": 0, "sbo2": 0, "cbot": 0}
     db_map = {
-        "nbot": TRADE_HIST_DB,
-        "sbot": SBOT_HIST_DB,
-        "cbot": CBOT_HIST_DB,
+        "sbot": (SBOT_HIST_DB, "trades"),
+        "sbo2": (SBO2_HIST_DB, "sbo2_trades"),
+        "cbot": (CBOT_HIST_DB, "trades"),
     }
-    for bot_name, db in db_map.items():
+    for bot_name, (db, table) in db_map.items():
         if not os.path.exists(db):
             continue
         try:
             conn = _ro_connect(db)
             if bot_name == "cbot":
                 # cbot은 profit_krw 컬럼 사용
-                rows = conn.execute("""
-                    SELECT profit_krw FROM trades
+                rows = conn.execute(f"""
+                    SELECT profit_krw FROM {table}
                     WHERE sell_price IS NOT NULL AND sell_time >= ?
                 """, (today,)).fetchall()
                 result[bot_name] = sum(int(r[0] or 0) for r in rows)
             else:
-                rows = conn.execute("""
-                    SELECT buy_price, sell_price, qty FROM trades
+                rows = conn.execute(f"""
+                    SELECT buy_price, sell_price, qty FROM {table}
                     WHERE sell_price IS NOT NULL AND sell_time >= ?
                 """, (today,)).fetchall()
                 result[bot_name] = sum(
@@ -311,7 +316,7 @@ def get_today_realized_all() -> dict:
         except Exception:
             pass
     # ★ 미실현 손익 추가 (보유 중인 포지션)
-    for bot_name in ["nbot", "sbot"]:
+    for bot_name in ["sbot", "sbo2"]:
         try:
             st = read_state(bot_name)
             unrealized = st.get("last_status", {}).get("total_profit", 0)
@@ -855,9 +860,9 @@ async def wait_cmd_result(bot_name: str, max_attempts: int = 12,
 async def execute_command(ctx, cmd: str):
     cmd = cmd.strip()
 
-    # ── 단타봇 ───────────────────────────────────────────────
+    # ── 스윙봇 ───────────────────────────────────────────────
     if cmd == "!상태":
-        await cmd_status(ctx, "nbot")
+        await cmd_status(ctx, "sbot")
     elif cmd.startswith("!점수기준"):
         parts = cmd.split()
         if len(parts) == 2 and parts[1].isdigit():
@@ -872,9 +877,9 @@ async def execute_command(ctx, cmd: str):
         else:
             await ctx.send("❌ 사용법: !분석 005930")
     elif cmd == "!정지":
-        await cmd_pause(ctx, True, "nbot")
+        await cmd_pause(ctx, True, "sbot")
     elif cmd == "!시작":
-        await cmd_pause(ctx, False, "nbot")
+        await cmd_pause(ctx, False, "sbot")
 
     # ── 스윙봇 ───────────────────────────────────────────────
     elif cmd in ("!s상태", "!상태 sbot"):
@@ -969,9 +974,9 @@ async def execute_command(ctx, cmd: str):
     elif cmd.startswith("!관심"):
         parts = cmd.split()
         if len(parts) == 2:
-            await cmd_watchlist(ctx, parts[1], "nbot")
+            await cmd_watchlist(ctx, parts[1], "sbot")
         elif len(parts) == 1:
-            await cmd_watchlist_show(ctx, "nbot")
+            await cmd_watchlist_show(ctx, "sbot")
         else:
             await ctx.send("❌ 사용법: !관심 005930")
     elif cmd == "!도움말":
@@ -1051,7 +1056,7 @@ async def on_ready():
         active = get_active_bots()
         active_names = [a[0] for a in active]
         bot_status_line = []
-        if "nbot" in active_names: bot_status_line.append("📈 단타")
+        if "sbo2" in active_names: bot_status_line.append("📊 스윙2")
         if "sbot" in active_names: bot_status_line.append("📊 스윙")
         if "cbot" in active_names: bot_status_line.append("🪙 코인")
         bots_str = " | ".join(bot_status_line) if bot_status_line else "감지된 봇 없음"
@@ -1104,7 +1109,7 @@ async def on_message(message):
     elif msg_content:
         # ── ★ 자연어 처리 — AI 직통
         async with message.channel.typing():
-            state = read_state("nbot")
+            state = read_state("sbot")
             loop  = asyncio.get_event_loop()
             try:
                 reply = await asyncio.wait_for(
@@ -1221,7 +1226,7 @@ async def auto_briefing():
                 ch = bot.get_channel(CHANNEL_ID)
                 if not ch:
                     continue
-                for bot_name in ("nbot", "sbot"):
+                for bot_name in ("sbo2", "sbot"):
                     state     = read_state(bot_name)
                     watchlist = state.get("watchlist", [])
                     wl_expire = state.get("watchlist_expire", {})
@@ -1321,8 +1326,8 @@ async def status_listener():
             if not ch:
                 continue
 
-            # 단타봇
-            state  = read_state("nbot")
+            # 스윙봇
+            state  = read_state("sbot")
             status = state.get("last_status")
             if status:
                 profit = status.get("total_profit", 0)
