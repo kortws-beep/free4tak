@@ -902,7 +902,8 @@ class SBot:
                 1 for c in self.positions
                 if self.peak_tracker.get(c, {}).get("stage", 0) >= 1
             )
-            avail = MAX_POSITIONS - len(self.positions) + 익절중
+            보너스 = 익절중 if psbl_cash >= 1_000_000 else 0
+            avail = MAX_POSITIONS - len(self.positions) + 보너스
             existing_codes = set(c for c, _, _ in top10)
             existing_codes.update(self.positions.keys())
 
@@ -925,12 +926,13 @@ class SBot:
                       score_enter: int, psbl_cash: int):
         """매수 가능한 종목 실제 주문"""
 
-        # 1차 익절 후 슬롯 반환
+        # 1차 익절 후 슬롯 반환 (주문가능금액 100만원 이상일 때만)
         익절중 = sum(
             1 for c in self.positions
             if self.peak_tracker.get(c, {}).get("stage", 0) >= 1
         )
-        slots = MAX_POSITIONS - len(self.positions) + 익절중
+        보너스 = 익절중 if psbl_cash >= 1_000_000 else 0
+        slots = MAX_POSITIONS - len(self.positions) + 보너스
         if 익절중:
             print(f"  ♻️ 익절진행중 {익절중}종목 슬롯 반환 → 가용:{slots}")
 
@@ -1429,7 +1431,9 @@ class SBot:
                     1 for c in self.positions
                     if self.peak_tracker.get(c, {}).get("stage", 0) >= 1
                 )
-                avail_slots = MAX_POSITIONS - len(self.positions) + 익절중
+                # ★ 주문가능금액 100만원 이상일 때만 보너스 슬롯 적용
+                보너스 = 익절중 if psbl_cash >= 1_000_000 else 0
+                avail_slots = MAX_POSITIONS - len(self.positions) + 보너스
                 if avail_slots <= 0:
                     print(f"⛔ 슬롯 없음 ({len(self.positions)}/{MAX_POSITIONS}) — 신규 분석 스킵")
                 else:

@@ -1382,6 +1382,7 @@ class CBot:
                 atr_val  = entry * abs(FALLBACK_STOP) / ATR_STOP_MULT
                 stop     = round(entry * (1 + FALLBACK_STOP), 0)
                 target1  = round(entry * (1 + FALLBACK_TARGET), 0)
+            import datetime as _dt
             existing = self.peak_tracker.get(market, {})
             self.peak_tracker[market] = {
                 "peak_rate":   existing.get("peak_rate", rate),
@@ -1391,6 +1392,7 @@ class CBot:
                 "target1":     target1,
                 "target_next": existing.get("target_next", target1),
                 "atr_val":     atr_val,
+                "buy_date":    existing.get("buy_date", _dt.date.today().isoformat()),  # ★ 25일 기한
             }
             print(f"   📐 ATR 타점 {market} | 손절:{stop:,.0f} | "
                   f"목표:{target1:,.0f} | ATR:{atr_rate:.2%}")
@@ -1441,6 +1443,30 @@ class CBot:
                 self._check_daily_loss_limit()
             return
 
+        # ②-1 보유기한 초과 (stage==0, 목표가1 미달성만 — 25일) ──
+        if stage == 0:
+            try:
+                import datetime as _dt3
+                buy_date_str = tracker.get("buy_date", "")
+                if buy_date_str:
+                    buy_date  = _dt3.date.fromisoformat(buy_date_str)
+                    held_days = (_dt3.date.today() - buy_date).days
+                    if held_days >= 25:
+                        label = "기한초과" if rate >= 0 else "기한초과(손실)"
+                        self.notify(
+                            f"⏰ {label} {market} | 보유{held_days}일 | {rate:+.2%}",
+                            critical=True,
+                        )
+                        if self.sell(market, qty, f"{label}({rate:+.2%})",
+                                     sell_price=current, force_all=True):
+                            if rate < 0:
+                                self.daily_loss_count += 1
+                            self.peak_tracker.pop(market, None)
+                            self._check_daily_loss_limit()
+                        return
+            except Exception:
+                pass
+
         # ③ 트레일링 스탑 (목표가1 달성 이후) ──────────────
         if stage >= 1 and atr_val > 0:
             trail_stop = peak_price - atr_val * ATR_TRAIL_MULT
@@ -1465,6 +1491,12 @@ class CBot:
         # ④ 목표가 달성 → 손절/목표가 상향 (매도 안 함) ────
         if target_next > 0 and current >= target_next:
             if stage == 0:
+                # ★ 목표가1 달성 → 50% 매도(수익실현)
+                half_qty = qty if qty * current <= MIN_ORDER_AMT * 2 else qty / 2
+                if half_qty > 0 and (qty - half_qty) * current >= MIN_ORDER_AMT:
+                    if self.sell(market, half_qty, f"목표1익절50%({rate:+.2%})",
+                                 sell_price=current, force_all=False):
+                        print(f"💰 목표1 50%매도 {market} | {half_qty:.6f}개 @ {current:,.0f}")
                 new_stop   = round(entry + atr_val * ATR_RAISE_MULT, 0)
                 new_target = round(current + atr_val * ATR_TARGET_MULT, 0)
                 tracker["stop_price"]  = new_stop
@@ -1473,7 +1505,7 @@ class CBot:
                 print(f"🎯 목표가1 달성 {market} ({rate:+.2%}) | "
                       f"손절↑:{new_stop:,.0f} | 새목표:{new_target:,.0f}")
                 self.notify(
-                    f"🎯 목표가1 달성 {market} ({rate:+.2%})\n"
+                    f"🎯 목표가1 달성 {market} ({rate:+.2%}) — 50%매도\n"
                     f"손절↑:{new_stop:,.0f} | 새목표:{new_target:,.0f}",
                     critical=False,
                 )
@@ -1768,6 +1800,7 @@ class CBot:
                             buy_price = ind.get("current", 0)
                             est_qty   = BUY_1ST_AMT / buy_price if buy_price else 0
                             # ★ peak_tracker 즉시 초기화
+                            import datetime as _dt2
                             self.peak_tracker[market] = {
                                 "peak_rate":       0.0,
                                 "stage":           0,
@@ -1775,6 +1808,7 @@ class CBot:
                                 "buy2_done":       False,
                                 "buy1_price":      buy_price,
                                 "effective_entry": buy_price,
+                                "buy_date":        _dt2.date.today().isoformat(),  # ★ 25일 기한
                             }
                             self._save_buy_history(
                                 market, buy_price, est_qty, ai_score, ai_reason,

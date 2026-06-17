@@ -200,6 +200,7 @@ class SwingStrategy:
             # 매수 시 ATR 레벨 계산
             levels   = self.calc_atr_levels(entry, atr_rate)
             atr_val  = levels["atr_val"]
+            import datetime as _dt
             peak_tracker[code] = {
                 "peak_rate":   rate,
                 "peak_price":  current,
@@ -210,6 +211,7 @@ class SwingStrategy:
                 "target1":     levels["target1"],
                 "target_next": levels["target1"],
                 "atr_val":     atr_val,
+                "buy_date":    _dt.date.today().isoformat(),  # ★ 25일 기한 추적용
             }
 
         tracker     = peak_tracker[code]
@@ -270,6 +272,27 @@ class SwingStrategy:
             return label
 
         # ----------------------------------------------------------
+        # ④-0 보유기한 초과 (stage==0, 목표가1 미달성 종목만 — 25일)
+        # ----------------------------------------------------------
+        if stage == 0:
+            try:
+                import datetime as _dt
+                buy_date_str = tracker.get("buy_date", "")
+                if buy_date_str:
+                    buy_date = _dt.date.fromisoformat(buy_date_str)
+                    held_days = (_dt.date.today() - buy_date).days
+                    if held_days >= 25:
+                        label = "기한초과" if rate >= 0 else "기한초과(손실)"
+                        print(f"⏰ {label} {code} | 보유{held_days}일 | {rate:+.2%}")
+                        on_sell(code, qty, f"{label}({rate:+.2%})", current)
+                        if rate < 0:
+                            on_loss()
+                        peak_tracker.pop(code, None)
+                        return label
+            except Exception:
+                pass
+
+        # ----------------------------------------------------------
         # ④ 트레일링 스탑 (목표가1 달성 이후)
         # ----------------------------------------------------------
         if stage >= 1 and atr_val > 0:
@@ -293,13 +316,17 @@ class SwingStrategy:
         # ----------------------------------------------------------
         if current >= target_next:
             if stage == 0:
-                # 목표가1 달성 → 손절을 매수가 + ATR×1 로 올림
+                # ★ 목표가1 달성 → 50% 매도(수익실현) + 손절을 매수가+ATR×1로 올림
+                sell_qty = qty if qty <= 1 else qty // 2
+                if sell_qty > 0:
+                    on_sell(code, sell_qty, f"목표1익절50%({rate:+.2%})", current)
                 new_stop   = round(entry + atr_val * ATR_RAISE_MULT, 0)
                 new_target = round(current + atr_val * ATR_TARGET_MULT, 0)
                 tracker["stop_price"]  = new_stop
                 tracker["target_next"] = new_target
                 tracker["stage"]       = 1
-                print(f"🎯 목표가1 달성 {code} ({rate:+.2%}) | "
+                tracker["half_sold"]   = True
+                print(f"🎯 목표가1 달성 {code} ({rate:+.2%}) | 50%매도:{sell_qty}주 | "
                       f"손절 상향:{new_stop:,.0f} | 새목표:{new_target:,.0f}")
             else:
                 # 목표가2+ 달성 → 손절을 직전 목표가로 올림

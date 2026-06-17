@@ -1,108 +1,55 @@
 {
-  "date": "2026-06-16",
-  "saved_at": "2026-06-16 20:10",
+  "date": "2026-06-17",
+  "saved_at": "2026-06-17 20:10",
   "summary": {
-    "today": "2026-06-16",
-    "trades": 6,
-    "wins": 2,
-    "losses": 4,
-    "win_rate": 33.3,
-    "avg_profit": -0.64,
-    "total_pnl": -54349,
-    "avg_win": 6.31,
-    "avg_loss": -4.12,
+    "today": "2026-06-17",
+    "trades": 3,
+    "wins": 0,
+    "losses": 3,
+    "win_rate": 0.0,
+    "avg_profit": -4.01,
+    "total_pnl": -114338,
+    "avg_win": 0,
+    "avg_loss": -4.01,
     "by_hour": {},
     "by_reason": {
-      "즉시매도(수동)": {
+      "기타": {
         "count": 3,
-        "avg_profit": -1.81,
-        "pct": 50.0
-      },
-      "1차익절": {
-        "count": 1,
-        "avg_profit": 8.1,
-        "pct": 16.7
-      },
-      "손절": {
-        "count": 1,
-        "avg_profit": -11.04,
-        "pct": 16.7
-      },
-      "트레일링": {
-        "count": 1,
-        "avg_profit": 4.52,
-        "pct": 16.7
+        "avg_profit": -4.01,
+        "pct": 100.0
       }
     },
-    "by_stock": [
-      {
-        "code": "028050",
-        "trades": 2,
-        "win_rate": 100.0,
-        "avg_profit": 6.31,
-        "total": 12.62
-      }
-    ],
+    "by_stock": [],
     "trade_details": [
       {
-        "code": "028050",
-        "buy_price": 53100.0,
-        "sell_price": 57400.0,
-        "profit_rate": 8.1,
-        "sell_reason": "1차익절(+8.10%)",
+        "code": "079940",
+        "buy_price": 31872.3939,
+        "sell_price": 30750.0,
+        "profit_rate": -3.52,
+        "sell_reason": "MA20이탈(-3.5%)",
         "buy_time": "",
-        "sell_time": "09:38",
-        "ai_score": null
-      },
-      {
-        "code": "089030",
-        "buy_price": 71270.8333,
-        "sell_price": 63400.0,
-        "profit_rate": -11.04,
-        "sell_reason": "손절 -11.0%",
-        "buy_time": "",
-        "sell_time": "09:47",
+        "sell_time": "08:30",
         "ai_score": 0
       },
       {
-        "code": "028050",
-        "buy_price": 53100.0,
-        "sell_price": 55500.0,
-        "profit_rate": 4.52,
-        "sell_reason": "트레일링1(+4.52%)",
+        "code": "085910",
+        "buy_price": 28350.0,
+        "sell_price": 28150.0,
+        "profit_rate": -0.71,
+        "sell_reason": "MA20이탈(-0.7%)",
         "buy_time": "",
-        "sell_time": "09:52",
-        "ai_score": null
+        "sell_time": "08:30",
+        "ai_score": 0
       },
       {
-        "code": "064350",
-        "buy_price": 229000.0,
-        "sell_price": 227500.0,
-        "profit_rate": -0.66,
-        "sell_reason": "즉시매도(AI비서)",
+        "code": "356860",
+        "buy_price": 103800.0,
+        "sell_price": 95700.0,
+        "profit_rate": -7.8,
+        "sell_reason": "MA20이탈(-7.8%)",
         "buy_time": "",
-        "sell_time": "13:13",
-        "ai_score": null
-      },
-      {
-        "code": "281820",
-        "buy_price": 95400.0,
-        "sell_price": 95200.0,
-        "profit_rate": -0.21,
-        "sell_reason": "즉시매도(AI비서)",
-        "buy_time": "",
-        "sell_time": "13:15",
-        "ai_score": null
-      },
-      {
-        "code": "105560",
-        "buy_price": 182100.0,
-        "sell_price": 173800.0,
-        "profit_rate": -4.56,
-        "sell_reason": "즉시매도(AI비서)",
-        "buy_time": "",
-        "sell_time": "13:16",
-        "ai_score": null
+        "sell_time": "08:30",
+        "ai_score": 0
       }
     ]
   },
