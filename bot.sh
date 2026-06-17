@@ -135,16 +135,20 @@ case "$1" in
         sudo systemctl daemon-reload
         sudo systemctl start yeongam9-watchdog-sbo2.timer
         sudo systemctl enable yeongam9-watchdog-sbo2.timer
-        echo "  ✅ sbo2 watchdog 시작 (30초 간격, 5분 무응답 시 재시작)"
+        sudo systemctl start yeongam9-watchdog-sbot.timer
+        sudo systemctl enable yeongam9-watchdog-sbot.timer
+        echo "  ✅ sbo2 + sbot watchdog 시작 (30초 간격, 5분 무응답 시 재시작)"
         ;;
       stop)
         echo "🐕 watchdog 정지..."
         sudo systemctl stop yeongam9-watchdog-sbo2.timer
-        echo "  ⏹  sbo2 watchdog 정지"
+        sudo systemctl stop yeongam9-watchdog-sbot.timer
+        echo "  ⏹  sbo2 + sbot watchdog 정지"
         ;;
       status)
         echo "🐕 watchdog 상태"
         systemctl status yeongam9-watchdog-sbo2.timer --no-pager
+        systemctl status yeongam9-watchdog-sbot.timer --no-pager
         ;;
       *)
         echo "사용법: $0 watchdog {start|stop|status}"

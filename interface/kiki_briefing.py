@@ -28,29 +28,33 @@ from common_utils import now_kst
 try:
     from kiki_data import get_today_realized_all
 except Exception:
-    def get_today_realized_all(): return {'nbot':0,'sbot':0,'cbot':0}
+    def get_today_realized_all(): return {'sbot':0,'sbo2':0,'cbot':0}
 # ★ read_state/write_state — 봇 이름 기반 래퍼
 # kiki.py on_ready에서 주입받거나 자체 구현 사용
 import os as _os2
 _BOT_STATE_FILES = {
-    "nbot": "bot_state.json",
     "sbot": "sbot_state.json",
+    "sbo2": "lina_bot/sbo2_state.json",
     "cbot": "cbot_state.json",
 }
 
-def read_state(bot: str = "nbot") -> dict:
+def read_state(bot: str = "sbot") -> dict:
     from common_utils import read_state as _rs
-    fname = _BOT_STATE_FILES.get(bot, "bot_state.json")
+    fname = _BOT_STATE_FILES.get(bot)
+    if not fname:
+        return {}
     fpath = _os2.path.join(_base, fname)
     return _rs(fpath, default={})
 
-def write_state(bot: str = "nbot", state: dict = None):
+def write_state(bot: str = "sbot", state: dict = None):
     from common_utils import write_state as _ws
-    fname = _BOT_STATE_FILES.get(bot, "bot_state.json")
+    fname = _BOT_STATE_FILES.get(bot)
+    if not fname:
+        return
     fpath = _os2.path.join(_base, fname)
     _ws(fpath, state or {})
 
-def update_state(bot: str = "nbot", **kwargs):
+def update_state(bot: str = "sbot", **kwargs):
     state = read_state(bot)
     state.update(kwargs)
     write_state(bot, state)
@@ -58,8 +62,8 @@ def update_state(bot: str = "nbot", **kwargs):
 # 봇 상태 파일 경로
 _base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BOT_STATE_FILES = {
-    "nbot": os.path.join(_base, "bot_state.json"),
     "sbot": os.path.join(_base, "sbot_state.json"),
+    "sbo2": os.path.join(_base, "lina_bot", "sbo2_state.json"),
     "cbot": os.path.join(_base, "cbot_state.json"),
 }
 
@@ -67,7 +71,6 @@ BOT_STATE_FILES = {
 bot         = None   # discord.Client 인스턴스
 send_long   = None   # kiki.py에서 주입
 CHANNEL_ID  = 0
-BOT_STATE_FILES = {}
 
 # ai는 주입받거나 직접 생성
 _ai_instance = None
@@ -382,8 +385,6 @@ def _get_foreign_flow_summary() -> str:
 def _build_briefing_msg() -> str:
     """모닝 브리핑 메시지 생성"""
     now    = now_kst()
-    state  = read_state("nbot")
-    status = state.get("last_status", {})
     cbot_state  = read_state("cbot")
     cbot_status = cbot_state.get("last_status", {})
 
@@ -522,15 +523,12 @@ def _build_briefing_msg() -> str:
                 except Exception:
                     first = raw_val.split("[요약]")[-1].split("\n")[0].strip()[:80]
         msg += f"{label}: {first}\n"
-    active = state.get("active_sectors", [])
+    _sbot_state_tmp = read_state("sbot")
+    active = _sbot_state_tmp.get("active_sectors", [])
     if active:
         msg += f"🏭 강세 업종: {' | '.join(active)}\n"
 
     msg += "━━━━━━━━━━━━━━━━━━━━\n"
-    paused_str = "⏸️" if state.get("paused") else "▶️"
-    msg += f"📈 단타봇: {paused_str} | 기준:{state.get('score_enter', 55)}점"
-    if status:
-        msg += f" | 주문가능:{status.get('psbl_cash', 0):,}원"
     # ★ sbot 추가
     sbot_state2  = read_state("sbot")
     sbot_status2 = sbot_state2.get("last_status", {})
@@ -539,11 +537,19 @@ def _build_briefing_msg() -> str:
     sbot_paused2 = "⏸️" if sbot_state2.get("paused") else "▶️"
     msg += (f"\n📊 스윙봇: {sbot_paused2} | 포지션:{sbot_pos2}개"
             f"{f' | 평가손익:{sbot_profit2:+,}원' if sbot_profit2 else ''}\n")
+    # ★ sbo2 추가
+    sbo2_state  = read_state("sbo2")
+    sbo2_status = sbo2_state.get("last_status", {})
+    sbo2_pos    = sbo2_status.get("positions", 0)
+    sbo2_profit = sbo2_status.get("total_profit", 0)
+    sbo2_paused = "⏸️" if sbo2_state.get("paused") else "▶️"
+    msg += (f"\n📊 스윙봇2: {sbo2_paused} | 포지션:{sbo2_pos}개"
+            f"{f' | 평가손익:{sbo2_profit:+,}원' if sbo2_profit else ''}\n")
     msg += (f"\n🪙 코인봇: {'⏸️' if cbot_state.get('paused') else '▶️'} | "
             f"KRW:{cbot_status.get('krw', 0):,}원\n")
 
 
-    # ★ AI 종합 전망 + nbot 자동 조정
+    # ★ AI 종합 전망
     try:
         sox_rate = global_mkt.get("sox", {}).get("rate", 0) if global_mkt else 0
         ndx_rate = global_mkt.get("ndx", {}).get("rate", 0) if global_mkt else 0
@@ -566,8 +572,8 @@ def _build_briefing_msg() -> str:
                 f"수급: {foreign_str}\n\n"
                 "위 정보를 바탕으로 다음 형식으로 답해줘:\n"
                 "1. 내일 한국 반도체/증시 한줄 전망 (30자 이내)\n"
-                "2. nbot 오전(09-11시) 매수 임계치 권장: 70~85 중 숫자만\n"
-                "3. nbot 오후(11-15시) 매수 임계치 권장: 65~80 중 숫자만\n"
+                "2. sbot 오전(09-11시) 매수 임계치 권장: 70~85 중 숫자만\n"
+                "3. sbot 오후(11-15시) 매수 임계치 권장: 65~80 중 숫자만\n"
                 "4. 주의사항 한줄 (30자 이내)\n"
                 "형식 예시:\n"
                 "전망: NVDA 실적 주목, 반도체 변동성 확대\n"
@@ -599,16 +605,6 @@ def _build_briefing_msg() -> str:
         msg += f"🤖 **AI 전망**: {forecast}\n"
         if caution:
             msg += f"⚠️ **주의**: {caution}\n"
-        msg += f"⚙️ **nbot 권장**: 오전 {am_thresh}점 / 오후 {pm_thresh}점\n"
-
-        # ★ nbot 자동 조정 (bot_state.json에 권장 임계치 저장)
-        state = read_state("nbot")
-        state["am_score_recommend"] = am_thresh
-        state["pm_score_recommend"] = pm_thresh
-        state["market_forecast"]    = forecast
-        state["forecast_date"]      = today_date
-        write_state("nbot", state)
-        msg += f"✅ nbot 권장 임계치 저장 완료\n"
 
     except Exception as e:
         print(f"AI 전망 오류: {e}")
@@ -654,8 +650,6 @@ def _build_briefing_msg() -> str:
 def _build_evening_briefing_msg() -> str:
     """저녁 브리핑 메시지 생성"""
     now    = now_kst()
-    state  = read_state("nbot")
-    status = state.get("last_status", {})
     cbot_state  = read_state("cbot")
     cbot_status = cbot_state.get("last_status", {})
 
@@ -736,23 +730,27 @@ def _build_evening_briefing_msg() -> str:
 
     # ★ 모든 봇의 오늘 실현손익 합산 (단타+스윙+종가+코인)
     realized = get_today_realized_all()
-    nbot_p = realized.get("nbot", 0)
     sbot_p = realized.get("sbot", 0)
+    sbo2_p = realized.get("sbo2", 0)
     cbot_p = realized.get("cbot", 0)
-
-    if nbot_p:
-        msg += f"📈 단타봇: {int(nbot_p):+,}원\n"
     if sbot_p:
         msg += f"📊 스윙봇: {int(sbot_p):+,}원\n"
+    if sbo2_p:
+        msg += f"📊 스윙봇2: {int(sbo2_p):+,}원\n"
     if cbot_p:
         msg += f"🪙 코인봇: {int(cbot_p):+,}원\n"
-    total = nbot_p + sbot_p + cbot_p
-    if total or any([nbot_p, sbot_p, cbot_p]):
+    total = sbot_p + sbo2_p + cbot_p
+    if total or any([sbot_p, sbo2_p, cbot_p]):
         msg += f"━━━━━━━━━━━━━━━━━━━━\n"
         msg += f"💰 **오늘 합계: {int(total):+,}원**\n"
     else:
         # 평가손익 표시 (실현 매매가 없을 때)
-        msg += f"📈 단타봇 평가: {status.get('total_profit', 0):+,}원\n"
+        sbot_state3  = read_state("sbot")
+        sbot_status3 = sbot_state3.get("last_status", {})
+        sbo2_state3  = read_state("sbo2")
+        sbo2_status3 = sbo2_state3.get("last_status", {})
+        msg += f"📊 스윙봇 평가: {sbot_status3.get('total_profit', 0):+,}원\n"
+        msg += f"📊 스윙봇2 평가: {sbo2_status3.get('total_profit', 0):+,}원\n"
         msg += f"🪙 코인봇 평가: {cbot_status.get('total_profit', 0):+,}원\n"
 
     msg += "📌 내일도 좋은 장 되세요! 🌙"

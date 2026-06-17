@@ -47,11 +47,16 @@ for _d in ["core", "intelligence", "interface", "bots", ""]:
 
 import os
 import time
+import pathlib
 import json
 import asyncio
 import datetime
 from dotenv import load_dotenv
 import sqlite3 as _sqlite3
+
+# ── Heartbeat 설정 ────────────────────────────────────
+HB_FILE      = "/tmp/hb_sbot"          # heartbeat 파일
+API_FAIL_MAX = 3                        # API 연속 실패 허용 횟수
 
 from common_utils  import (
     now_kst, now_hhmm, now_hms, today_str,
@@ -260,6 +265,7 @@ class SBot:
         self.sold_today     = {}
         self.code_name_map  = {}
         self.atr_cache      = {}
+        self.api_fail_count = 0    # ★ API 연속 실패 카운터
 
         # ── 메모리 캐시 ─────────────────────────────────
         self._tech_cache = {}
@@ -596,6 +602,21 @@ class SBot:
             return atr_rate
         except Exception:
             return 0
+
+    # ============================================================
+    # API 헬스체크 (연속 실패 시 재시작)
+    # ============================================================
+    def _check_api_health(self, success: bool):
+        """API 호출 성공/실패 추적 — 연속 실패 시 재시작"""
+        if success:
+            self.api_fail_count = 0
+        else:
+            self.api_fail_count += 1
+            print(f"⚠️ [SWING] API 실패 {self.api_fail_count}/{API_FAIL_MAX}회")
+            if self.api_fail_count >= API_FAIL_MAX:
+                print(f"🚨 [SWING] API 연속 {API_FAIL_MAX}회 실패 → 재시작")
+                self._notify("🚨 [SWING] API 연속 실패 → 자동 재시작", critical=True)
+                import sys; sys.exit(1)  # systemd Restart=on-failure 트리거
 
     # ============================================================
     # 일일 초기화
@@ -1205,6 +1226,9 @@ class SBot:
 
                 print(f"\n📈 [SWING] {'정규장' if is_reg else '장전/후 매도체크'} [{now}]")
 
+                # ── Heartbeat 기록 ────────────────────────
+                pathlib.Path(HB_FILE).touch()
+
                 st              = _read_state()
                 self._is_paused = st.get("paused", False)
 
@@ -1247,6 +1271,11 @@ class SBot:
                 # ── 계좌 ─────────────────────────────────
                 cash           = (self._ws.cash if self._ws and self._ws.cash > 0 else self.api.get_buyable_cash())
                 new_pos = self.api.get_current_positions()
+                if not new_pos and self.positions:
+                    print("⚠️ 실계좌 잔고 빈값 — API 헬스체크")
+                    self._check_api_health(False)
+                else:
+                    self._check_api_health(True)
                 # ★ 수동매도 감지 — 이전 포지션에 있었는데 실계좌에 없으면 감지
                 # ★ 수동매도는 재매수 허용 — sold_today 등록 안 함
                 for _code in list(self.positions.keys()):
