@@ -58,13 +58,13 @@ SBOT_HIST_DB  = os.path.join(_base, "sbot_trade_history.db")
 CBOT_HIST_DB  = os.path.join(_base, "cbot_trade_history.db")
 BOT_STATE_DIR = _base
 
-async def cmd_status(ctx, bot_name: str = "sbot2"):
+async def cmd_status(ctx, bot_name: str = "sbot"):
     state     = read_state(bot_name)
     status    = state.get("last_status", {})
     pos_rows  = get_open_positions_from_db(bot_name)
     now       = now_kst().strftime("%H:%M:%S")
     paused    = "⏸️ 일시중단" if state.get("paused") else "▶️ 실행중"
-    bot_label = "📈 단타봇" if bot_name == "sbot2" else "📊 스윙봇" if bot_name == "sbot" else "🤖 봇"
+    bot_label = "📊 스윙봇" if bot_name == "sbot" else "📊 스윙봇2" if bot_name == "sbo2" else "🤖 봇"
 
     lines = [
         f"{bot_label} **영암9 현황** [{now}]",
@@ -79,11 +79,10 @@ async def cmd_status(ctx, bot_name: str = "sbot2"):
             f"📊 시장: {status.get('market_status', 'normal')} | "
             f"코스피: {status.get('market_rate', 0):+.2f}%",
         ]
-        # 중단기봇 손절카운터 표시
-        if bot_name == "sbot2":
-            daily_loss = status.get("daily_loss", 0)
-            if daily_loss > 0:
-                lines.append(f"🛑 당일 손절: {daily_loss}회")
+        # 당일 손절카운터 표시 (모든 봇 공통)
+        daily_loss = status.get("daily_loss", 0)
+        if daily_loss > 0:
+            lines.append(f"🛑 당일 손절: {daily_loss}회")
 
         active = status.get("active_sectors", state.get("active_sectors", []))
         if active:
@@ -115,11 +114,11 @@ async def cmd_score(ctx, score: int):
     if not 0 <= score <= 100:
         await ctx.send("❌ 점수는 0~100 사이여야 해요")
         return
-    update_state("sbot2", score_enter=score)
+    update_state("sbot", score_enter=score)
     await ctx.send(f"✅ 매수 기준 점수 변경: **{score}점**\n(다음 루프부터 적용)")
 
 
-async def cmd_sell(ctx, code: str, bot_name: str = "sbot2"):
+async def cmd_sell(ctx, code: str, bot_name: str = "sbot"):
     """단타/스윙 매도 명령. 종목명으로 검색 가능."""
     if not code.isdigit():
         # 종목명 → 코드 변환
@@ -191,35 +190,6 @@ async def cmd_sell(ctx, code: str, bot_name: str = "sbot2"):
         await ctx.send("⚠️ 응답 없음 — 봇 실행 중인지 확인하세요")
 
 
-async def cmd_buy(ctx, code: str, qty: int):
-    # ★ 종목명 → 코드 변환
-    if not code.isdigit():
-        state         = read_state("sbot2")
-        code_name_map = state.get("last_status", {}).get("code_name_map", {})
-        found = next((c for c, nm in code_name_map.items()
-                      if code in nm or nm in code), None)
-        if found:
-            await ctx.send(f"🔍 종목명 '{code}' → 코드 **{found}** 로 변환")
-            code = found
-        else:
-            await ctx.send(f"❌ '{code}' 종목코드를 찾을 수 없어요. 예: !매수 005930 10")
-            return
-    if qty <= 0:
-        await ctx.send("수량은 1 이상이어야 해요")
-        return
-
-    state = read_state("sbot2")
-    name  = state.get("last_status", {}).get("code_name_map", {}).get(code, code)
-    update_state("sbot2", pending_cmd={"type": "buy", "code": code, "qty": qty})
-    await ctx.send(f"📤 매수 명령 전달: **{code}({name})** {qty}주\n(다음 루프에서 실행)")
-
-    result = await wait_cmd_result("sbot2")
-    if result:
-        await ctx.send(f"✅ 결과: {result}")
-    else:
-        await ctx.send("⚠️ 응답 없음 — nbot.py 실행 중인지 확인하세요")
-
-
 async def cmd_analyze(ctx, code: str):
     await ctx.send(f"🔍 {code} 분석 중...")
     try:
@@ -243,8 +213,8 @@ async def cmd_analyze(ctx, code: str):
         await ctx.send(f"❌ 조회 오류: {e}")
 
 
-async def cmd_pause(ctx, pause: bool, bot_name: str = "sbot2"):
-    labels = {"sbot2": "단타봇", "sbot": "스윙봇", "cbot": "코인봇"}
+async def cmd_pause(ctx, pause: bool, bot_name: str = "sbot"):
+    labels = {"sbot": "스윙봇", "sbo2": "스윙봇2", "cbot": "코인봇"}
     label  = labels.get(bot_name, bot_name)
     if pause:
         update_state(bot_name, paused=True)
@@ -254,9 +224,9 @@ async def cmd_pause(ctx, pause: bool, bot_name: str = "sbot2"):
         update_state(bot_name, paused=False, daily_loss=0,
                     loss_date=today_str())
         # 시장 상태 확인
-        sbot2_st = read_state("sbot2")
-        mkt_status = sbot2_st.get("last_status", {}).get("market_status", "normal")
-        mkt_rate   = sbot2_st.get("last_status", {}).get("market_rate", 0)
+        sbot_st = read_state("sbot")
+        mkt_status = sbot_st.get("last_status", {}).get("market_status", "normal")
+        mkt_rate   = sbot_st.get("last_status", {}).get("market_rate", 0)
         if mkt_status == "stop":
             await ctx.send(
                 f"▶️ **{label} 재개** | 손절카운터 초기화 완료\n"
@@ -282,10 +252,10 @@ async def cmd_performance(ctx):
     today  = today_str()
     realized_all = get_today_realized_all()
 
-    sbot2_p = realized_all.get("sbot2", 0)
+    sbo2_p = realized_all.get("sbo2", 0)
     sbot_p = realized_all.get("sbot", 0)
     cbot_p = realized_all.get("cbot", 0)
-    total  = sbot2_p + sbot_p + cbot_p
+    total  = sbo2_p + sbot_p + cbot_p
 
     # ★ KDA 스타일 대시보드
     # 최근 매매 이력
@@ -320,10 +290,10 @@ async def cmd_performance(ctx):
     msg += f"💹 **Avg Win** : {avg_win:+.2f}% | **Avg Loss** : {avg_loss:+.2f}%\n"
     msg += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
     msg += "💰 **TODAY P&L**\n"
-    if sbot2_p: msg += f"  📈 중단기봇: **{sbot2_p:+,}원**\n"
     if sbot_p: msg += f"  📊 스윙봇: **{sbot_p:+,}원**\n"
+    if sbo2_p: msg += f"  📊 스윙봇2: **{sbo2_p:+,}원**\n"
     if cbot_p: msg += f"  🪙 코인봇: **{cbot_p:+,}원**\n"
-    if not (sbot2_p or sbot_p or cbot_p):
+    if not (sbo2_p or sbot_p or cbot_p):
         msg += "  오늘 실현 매매 없음\n"
     msg += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
     msg += f"{total_emoji} **합계: {total:+,}원**\n"
@@ -462,7 +432,7 @@ MDD:-{r.get('mdd',0):.1f}% | 샤프:{r.get('sharpe',0):.2f}{hour_insight}
         await ctx.send(f"❌ 분석 오류: {e}")
 
 
-async def cmd_watchlist(ctx, code: str, bot_name: str = "sbot2"):
+async def cmd_watchlist(ctx, code: str, bot_name: str = "sbot"):
     state     = read_state(bot_name)
     watchlist = state.get("watchlist", [])
     wl_expire = state.get("watchlist_expire", {})
@@ -484,14 +454,14 @@ async def cmd_watchlist(ctx, code: str, bot_name: str = "sbot2"):
         await ctx.send(f"👀 관심종목 추가: **{code}({name})**\n만료: {expire_date}")
 
 
-async def cmd_watchlist_show(ctx, bot_name: str = "sbot2"):
+async def cmd_watchlist_show(ctx, bot_name: str = "sbot"):
     state     = read_state(bot_name)
     watchlist = state.get("watchlist", [])
     wl_expire = state.get("watchlist_expire", {})
     wl_source = state.get("watchlist_source", {})
     name_map  = state.get("last_status", {}).get("code_name_map", {})
     name_map.update(state.get("hts_watchlist", {}))
-    bot_label = "단타봇" if bot_name == "sbot2" else "스윙봇"
+    bot_label = "스윙봇2" if bot_name == "sbo2" else "스윙봇"
 
     today   = today_str()
     expired = [c for c in watchlist
@@ -529,12 +499,12 @@ async def cmd_all_status(ctx):
 
 
 async def cmd_restart_all(ctx):
-    """전체 봇 재시작 (kiki 제외) — nbot/sbot/cbot/telegram/sector"""
+    """전체 봇 재시작 (kiki 제외) — sbot/sbo2/cbot/telegram/sector"""
     import subprocess as _sp
     import asyncio as _ac
 
     SERVICES = [
-        ("sbot2",     "yeongam9-nbot"),
+        ("sbo2",     "yeongam9-sbo2"),
         ("sbot",     "yeongam9-sbot"),
         ("cbot",     "yeongam9-cbot"),
         ("telegram", "yeongam9-telegram"),
@@ -569,7 +539,7 @@ async def cmd_restart_all(ctx):
 # 핸들러 — 업종/테마
 # ============================================================
 async def cmd_theme_status(ctx):
-    state          = read_state("sbot2")
+    state          = read_state("sbot")
     active_sectors = state.get("active_sectors", [])
     sector_updated = state.get("sector_updated_at", "")
     name_map       = state.get("last_status", {}).get("code_name_map", {})
@@ -590,7 +560,7 @@ async def cmd_theme_status(ctx):
 
     if sector_updated:
         lines.append(f"\n⏰ 마지막 업종 체크: {sector_updated}")
-        lines.append("💡 nbot이 매시 20분 자동 체크합니다")
+        lines.append("💡 sbot이 매시 20분 자동 체크합니다")
 
     theme_codes = [c for c in watchlist if wl_source.get(c) == "hts_theme"]
     new_codes   = [c for c in watchlist if wl_source.get(c) == "hts_new"]
@@ -757,7 +727,7 @@ def _sync_watchlist_to_state(codes: list) -> dict:
     expire_date = (now_kst() + datetime.timedelta(days=30)).strftime("%Y-%m-%d")
     summary     = {"added": 0, "removed": 0, "total": len(hts_codes), "codes": hts_codes}
 
-    for bot_name in ("sbot2", "sbot"):
+    for bot_name in ("sbo2", "sbot"):
         state     = read_state(bot_name)
         watchlist = state.get("watchlist", [])
         wl_expire = state.get("watchlist_expire", {})
@@ -820,7 +790,7 @@ async def cmd_watchlist_hts(ctx):
         )
         return
 
-    state    = read_state("sbot2")
+    state    = read_state("sbot")
     name_map = state.get("last_status", {}).get("code_name_map", {})
     name_map.update(state.get("hts_watchlist", {}))
     watchlist = state.get("watchlist", [])
@@ -910,7 +880,7 @@ async def cmd_total_performance(ctx, days: int = 30):
 
         today_sum = get_today_summary()
         perf      = get_performance(days=days)
-        perf_n    = get_performance(days=days, bot_type="sbot2")
+        perf_o    = get_performance(days=days, bot_type="sbo2")
         perf_s    = get_performance(days=days, bot_type="sbot")
         perf_c    = get_performance(days=days, bot_type="cbot")
 
@@ -936,7 +906,7 @@ async def cmd_total_performance(ctx, days: int = 30):
             "  평균:" + "{:+.2f}".format(perf["avg_rate"]) + "% | 최고:" + "{:+.2f}".format(perf["best"]) + "% | 최저:" + "{:+.2f}".format(perf["worst"]) + "%",
             sep,
             "봇별 성과",
-            "  단타: " + str(perf_n["total"]) + "건 | 승률:" + str(perf_n["win_rate"]) + "% | " + "{:+,}".format(perf_n["total_krw"]) + "원",
+            "  스윙2: " + str(perf_o["total"]) + "건 | 승률:" + str(perf_o["win_rate"]) + "% | " + "{:+,}".format(perf_o["total_krw"]) + "원",
             "  스윙: " + str(perf_s["total"]) + "건 | 승률:" + str(perf_s["win_rate"]) + "% | " + "{:+,}".format(perf_s["total_krw"]) + "원",
             "  코인: " + str(perf_c["total"]) + "건 | 승률:" + str(perf_c["win_rate"]) + "% | " + "{:+,}".format(perf_c["total_krw"]) + "원",
         ]
@@ -1027,7 +997,7 @@ async def cmd_risk(ctx):
             f"당일 수익: {profit:,.0f}원\n"
             f"순손익:   {profit-loss:+,.0f}원\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"nbot: {state.get('nbot_loss_krw',0):,.0f}원\n"
+            f"sbo2: {state.get('sbo2_loss_krw',0):,.0f}원\n"
             f"sbot: {state.get('sbot_loss_krw',0):,.0f}원\n"
             f"cbot: {state.get('cbot_loss_krw',0):,.0f}원\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"

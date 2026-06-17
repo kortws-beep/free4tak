@@ -1,15 +1,15 @@
 {
   "telegram_event": {
     "keywords": [
-      "트럼프"
+      "AI"
     ],
     "themes": [
-      "에너지",
-      "방산",
-      "철강"
+      "반도체",
+      "클라우드",
+      "AI"
     ],
-    "score": 15,
-    "text": "[속보] 공개된 미-이란 양해각서 전문…“트럼프, 이란에 454조 주고 제재 해제” 사실이었다\nhttps://n.news.naver.com/article/081/0003653422",
-    "time": "18:38:39"
+    "score": 10,
+    "text": "AI 반도체 다음 승부처는 여기…TSMC·삼성이 꽂힌 '꿈의 기술'\nhttps://naver.me/x7e1Tl42",
+    "time": "19:12:22"
   }
 }

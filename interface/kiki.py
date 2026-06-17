@@ -100,7 +100,7 @@ from kiki_data import (
     get_today_realized_all,
 )
 from kiki_cmd import (
-    cmd_status, cmd_score, cmd_sell, cmd_buy, cmd_analyze,
+    cmd_status, cmd_score, cmd_sell, cmd_analyze,
     cmd_pause, cmd_performance, cmd_performance_detail,
     cmd_analyze_today, cmd_analyze_period,
     cmd_watchlist, cmd_watchlist_show,
@@ -864,18 +864,7 @@ async def execute_command(ctx, cmd: str):
             await cmd_score(ctx, int(parts[1]))
         else:
             await ctx.send("❌ 사용법: !점수기준 70")
-    elif cmd.startswith("!매도"):
-        parts = cmd.split()
-        if len(parts) == 2:
-            await cmd_sell(ctx, parts[1], "nbot")
-        else:
-            await ctx.send("❌ 사용법: !매도 005930")
-    elif cmd.startswith("!매수"):
-        parts = cmd.split()
-        if len(parts) == 3 and parts[2].isdigit():
-            await cmd_buy(ctx, parts[1], int(parts[2]))
-        else:
-            await ctx.send("❌ 사용법: !매수 005930 10")
+
     elif cmd.startswith("!분석"):
         parts = cmd.split()
         if len(parts) == 2:
