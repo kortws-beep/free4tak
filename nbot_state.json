@@ -1,15 +1,15 @@
 {
   "telegram_event": {
     "keywords": [
-      "트럼프"
+      "영업이익",
+      "상장"
     ],
     "themes": [
-      "에너지",
-      "철강",
-      "방산"
+      "IPO",
+      "실적개선"
     ],
-    "score": 15,
-    "text": "[미·이란 종전] \"트럼프, 한국기업 등 참여하는 이란 재건기금 추진\"\nhttps://n.news.naver.com/article/001/0016140525?sid=104",
-    "time": "07:44:52"
+    "score": 10,
+    "text": "🔺──── 상한가 ────🔺\n\n강동씨앤엘 장중 상한가 도달 🔺\n\n광주·전남 상장사 매출·영업이익·순이익 2년 연속 증가\nhttp://m.stock.naver.com/item/main.nhn#/stocks/198440/news/0016025553/office/001\n\n🔺────────────🔺",
+    "time": "11:46:58"
   }
 }
