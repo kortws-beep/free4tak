@@ -1,14 +1,31 @@
 import os
 import re
+import sys
 import time
 import sqlite3
 import requests
 from datetime import datetime
 from dotenv import load_dotenv
+
+# ── sys.path 설정 (core/kis_api.py 사용) ───────────────────────
+_STOCK_BOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+for _d in ["core", "interface", "bots", ""]:
+    _p = os.path.join(_STOCK_BOT, _d)
+    if os.path.exists(_p) and _p not in sys.path:
+        sys.path.insert(0, _p)
+
 from kis_api import KisAPI
 
 # ── 환경변수 & 경로 ────────────────────────────────────────────
-load_dotenv(dotenv_path=os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"), override=True)
+# .env 우선순위: lina_bot/.env → stock_bot/.env
+_BASE_DIR  = os.path.dirname(os.path.abspath(__file__))
+_STOCK_BOT_ENV = os.path.dirname(_BASE_DIR)
+_env1 = os.path.join(_BASE_DIR, ".env")
+_env2 = os.path.join(_STOCK_BOT_ENV, ".env")
+if os.path.exists(_env1):
+    load_dotenv(dotenv_path=_env1, override=True)
+elif os.path.exists(_env2):
+    load_dotenv(dotenv_path=_env2, override=True)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH  = os.path.join(BASE_DIR, "kr_theme_finance.db")
@@ -92,9 +109,10 @@ def backfill_investor_data(api: KisAPI, stock_name: str, code: str) -> int:
 if __name__ == "__main__":
     appkey = os.getenv("KIS_APPKEY")
     secret = os.getenv("KIS_SECRET")
-
+    cano   = os.getenv("KIS_CANO")
+    acnt   = os.getenv("KIS_ACNT_PRDT_CD")
     print("\n🚀 [과거 수급 데이터 빈칸 채우기 시작]")
-    api = KisAPI(appkey=appkey, secret=secret)
+    api = KisAPI(appkey=appkey, secret=secret, cano=cano, acnt=acnt)
     api.refresh_token_if_needed()
 
     # DB 에서 종목 목록 (raw 이름 그대로)
