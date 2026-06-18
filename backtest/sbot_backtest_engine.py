@@ -216,14 +216,46 @@ class SBotBacktestEngine:
             "buy_date":    date,
             "score":       score,
         }
-        self.peak_tracker[code] = {
-            "peak_rate":       0.0,
-            "stage":           0,
-            "remain_qty":      qty,
-            "buy2_done":       True,   # 스윙은 2차 매수 없음
-            "buy1_price":      fill_price,
-            "effective_entry": fill_price,
-        }
+
+        # ★ sbot_strategy.SwingStrategy.check_sell()이 기대하는 완전한 tracker 구조
+        #   (stop_price/target1/target_next/atr_val/peak_price 모두 필요 — 없으면 KeyError)
+        if self._using_swing:
+            atr_rate_init = 0.0
+            try:
+                df0 = self.loader.load_ohlcv(code)
+                if not df0.empty:
+                    d0 = pd.Timestamp(date)
+                    if d0 in df0.index:
+                        _r0 = df0.loc[d0]
+                        if hasattr(_r0, "columns"): _r0 = _r0.iloc[-1]
+                        atr14_0 = float(_r0.get("atr14", 0) or 0)
+                        if atr14_0 > 0 and fill_price > 0:
+                            atr_rate_init = atr14_0 / fill_price
+            except Exception:
+                pass
+            levels = self.strategy.calc_atr_levels(fill_price, atr_rate_init)
+            self.peak_tracker[code] = {
+                "peak_rate":   0.0,
+                "peak_price":  fill_price,
+                "stage":       0,
+                "buy2_done":   True,
+                "buy1_price":  fill_price,
+                "stop_price":  levels["stop_price"],
+                "target1":     levels["target1"],
+                "target_next": levels["target1"],
+                "atr_val":     levels["atr_val"],
+                "buy_date":    date,   # ★ 시뮬레이션 날짜로 고정 (실제 오늘 날짜 아님!)
+            }
+        else:
+            self.peak_tracker[code] = {
+                "peak_rate":       0.0,
+                "stage":           0,
+                "remain_qty":      qty,
+                "buy2_done":       True,   # 스윙은 2차 매수 없음
+                "buy1_price":      fill_price,
+                "effective_entry": fill_price,
+                "buy_date":        date,   # ★ 시뮬레이션 날짜로 고정 (실제 오늘 날짜 아님!)
+            }
         self.open_trades[code] = SwingTrade(
             code=code, buy_date=date,
             buy_price=fill_price, qty=qty, score=score,
@@ -420,6 +452,10 @@ class SBotBacktestEngine:
             if code not in self.positions:
                 continue
             pos = self.positions[code]
+
+            # ★ 25일 기한 로직용 — 시뮬레이션 날짜를 tracker에 주입 (실전 영향 없음)
+            if code in self.peak_tracker:
+                self.peak_tracker[code]["_bt_today"] = date.date()
 
             # ATR / MA20 — DB 컬럼 우선, 없으면 features에서 보완
             df       = self.loader.load_ohlcv(code)

@@ -280,7 +280,10 @@ class SwingStrategy:
                 buy_date_str = tracker.get("buy_date", "")
                 if buy_date_str:
                     buy_date = _dt.date.fromisoformat(buy_date_str)
-                    held_days = (_dt.date.today() - buy_date).days
+                    # ★ 백테스트용: tracker에 "_bt_today"가 있으면 그 날짜를 기준으로 사용
+                    #   (실전에서는 이 키가 없으므로 항상 date.today() 그대로 사용 — 영향 없음)
+                    _today = tracker.get("_bt_today") or _dt.date.today()
+                    held_days = (_today - buy_date).days
                     if held_days >= 25:
                         label = "기한초과" if rate >= 0 else "기한초과(손실)"
                         print(f"⏰ {label} {code} | 보유{held_days}일 | {rate:+.2%}")
