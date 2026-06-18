@@ -54,7 +54,9 @@ CHANNELS = [
     "hankyung_fin",   # 한국경제 금융
     "stocknewskorea", # 주식뉴스
     "kind_krx",       # 공시(KIND)
-    "AllStockNews",   # 전체 주식 뉴스 (상한가/이슈)
+    "AllStockNews",   # 전체 주식 뉴스 (상한가/이슈) — 여의도 주식 속보
+    "FastStockNews",  # 주식급등일보
+    "darthacking",    # 실시간 주식 공시
 ]
 
 # ── 공시 타입별 가산점 ────────────────────────────────
