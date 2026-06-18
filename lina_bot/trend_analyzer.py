@@ -30,6 +30,7 @@ PULLBACK_BAND    = 0.08   # 현재가가 최근 저점 ±8% 이내
 RSI_LOW          = 40     # RSI 하한
 RSI_HIGH         = 60     # RSI 상한
 VOL_PULL_RATIO   = 0.70   # 눌림 구간 거래량 < 전체 평균 × 70%
+MIN_TRADING_VALUE_EOK = 50    # 최소 거래대금(억원) — 잡주 방지
 SMART_DAYS       = 10
 SMART_MIN_DAYS   = 3
 ATR_PERIOD       = 14
@@ -516,6 +517,11 @@ def get_trend_data(top_n: int = 20) -> list:
         vol_avg_all    = sum(valid_volumes) / len(valid_volumes)
         vol_avg_recent = sum(valid_volumes[:5]) / 5
         if vol_avg_all == 0 or vol_avg_recent >= vol_avg_all * VOL_PULL_RATIO: continue
+
+        # ★ 거래대금 필터 — 최근 5일 평균 거래대금 50억 미달 제외 (잡주 방지)
+        recent_trading_value = (curr_price * vol_avg_recent) / 100_000_000  # 억원
+        if recent_trading_value < MIN_TRADING_VALUE_EOK:
+            continue
 
         f_net_raw  = [r[3] for r in rows]
         i_net_raw  = [r[4] for r in rows]

@@ -30,6 +30,7 @@ DB_PATH_TELEGRAM = os.path.join(BASE_DIR, "intelligence", "telegram_events.db")
 
 # ── 튜닝 파라미터 ─────────────────────────────────────
 MIN_SCORE        = 50     # 최소 통과 점수
+MIN_TRADING_VALUE_EOK = 50    # 최소 거래대금(억원) — 잡주 방지
 TOP_N            = 2      # 최종 선정 종목 수
 TELE_HOURS       = 360    # 텔레그램 수집 시간 범위 (15일 = 360시간)
 RSI_PERIOD       = 14
@@ -350,6 +351,13 @@ def _calc_swing_score(stock_name: str, tele_score: int, is_sshow: bool = False) 
         # 손절가 음수 or 손절폭 20% 초과 → 비정상 ATR → 스킵
         if stop_price <= 0 or stop_pct > 20:
             return result
+
+        # ★ 거래대금 필터 — 최근 5일 평균 거래대금 50억 미달 제외 (잡주 방지)
+        if len(volumes) >= 5:
+            _vol_avg_recent = sum(volumes[:5]) / 5
+            _recent_trading_value = (curr * _vol_avg_recent) / 100_000_000  # 억원
+            if _recent_trading_value < MIN_TRADING_VALUE_EOK:
+                return result
 
         # 목표가 최소 +8% 이상
         if tgt_pct < 8.0:

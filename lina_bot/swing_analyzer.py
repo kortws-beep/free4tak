@@ -26,6 +26,7 @@ DB_PATH  = os.path.join(BASE_DIR, "kr_theme_finance.db")
 MA20_BAND        = 0.10   # 20일선 ±10% 이내 밀집
 VCP_RATIO        = 0.70   # 최근 진폭 < 이전 진폭 × 70%
 VOL_DRY_RATIO    = 0.50   # 최근 5일 평균 거래량 < 전체 평균 × 50%
+MIN_TRADING_VALUE_EOK = 50    # 최소 거래대금(억원) — 잡주 방지
 SMART_DAYS       = 10     # 스마트머니 확인 기간 (일)
 SMART_MIN_DAYS   = 2      # 최소 순매수 일수
 ATR_PERIOD       = 14     # ATR 계산 기간
@@ -444,6 +445,11 @@ def get_swing_data(top_n: int = 20) -> list:
         vol_avg_all    = sum(valid_volumes) / len(valid_volumes)
         vol_avg_recent = sum(valid_volumes[:5]) / 5
         if vol_avg_all == 0 or vol_avg_recent >= vol_avg_all * VOL_DRY_RATIO: continue
+
+        # ★ 거래대금 필터 — 최근 5일 평균 거래대금 50억 미달 제외 (잡주 방지)
+        recent_trading_value = (curr_price * vol_avg_recent) / 100_000_000  # 억원
+        if recent_trading_value < MIN_TRADING_VALUE_EOK:
+            continue
 
         f_net_raw  = [r[3] for r in rows]
         i_net_raw  = [r[4] for r in rows]
