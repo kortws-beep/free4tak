@@ -1735,14 +1735,15 @@ class CBot:
                     _write_status(self._build_status(krw, total_profit))
                     time.sleep(LOOP_SLEEP); continue
 
-                # ── 매수 슬롯 (1차 익절 후 슬롯 반환) ──────────
+                # ── 매수 슬롯 (1차 익절 후 슬롯 반환, 주문가능금액 40만원 이상일 때만) ──
                 익절중 = sum(
                     1 for m in self.positions
                     if self.peak_tracker.get(m, {}).get("stage", 0) >= 1
                 )
-                available_slots = MAX_POSITIONS - len(self.positions) + 익절중
-                if 익절중:
-                    print(f"  ♻️ 익절진행중 {익절중}코인 슬롯 반환 → 가용:{available_slots}")
+                보너스 = 익절중 if krw >= 400_000 else 0
+                available_slots = MAX_POSITIONS - len(self.positions) + 보너스
+                if 보너스:
+                    print(f"  ♻️ 익절진행중 {보너스}코인 슬롯 반환 → 가용:{available_slots}")
 
                 # ── 매수 로직 ─────────────────────────────────
                 if available_slots <= 0:
