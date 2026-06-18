@@ -4,7 +4,7 @@
   "cmd_result": "✅ KRW-BTC 즉시매도 완료",
   "last_status": {
     "krw": 242488,
-    "total_profit": 15920,
+    "total_profit": 21634,
     "daily_pnl": 0,
     "positions": 3,
     "positions_detail": {
@@ -15,10 +15,10 @@
         "rate": 0.45
       },
       "KRW-ENA": {
-        "current": 139,
+        "current": 141,
         "entry_price": 140,
         "qty": 2857.14285714,
-        "rate": -0.71
+        "rate": 0.71
       },
       "KRW-WLFI": {
         "current": 94,
@@ -29,7 +29,7 @@
     },
     "daily_loss": 0,
     "market_status": "normal",
-    "btc_rate": -1.1736389,
+    "btc_rate": -1.0666639199999999,
     "fear_greed": 15,
     "is_night": false,
     "coin_pool": [
@@ -51,8 +51,8 @@
       "KRW-JTO",
       "KRW-NEAR",
       "KRW-ENA",
-      "KRW-ORCA",
       "KRW-TRUST",
+      "KRW-ORCA",
       "KRW-SUI",
       "KRW-ADA",
       "KRW-ELSA",
@@ -83,8 +83,8 @@
       "KRW-JTO",
       "KRW-NEAR",
       "KRW-ENA",
-      "KRW-ORCA",
       "KRW-TRUST",
+      "KRW-ORCA",
       "KRW-SUI",
       "KRW-ADA",
       "KRW-ELSA",
@@ -98,7 +98,7 @@
     ],
     "seed": "30만원 소액 모드"
   },
-  "last_update": "15:23:38",
+  "last_update": "15:30:49",
   "daily_loss": 0,
   "loss_date": "2026-06-18",
   "positions": {
@@ -110,7 +110,7 @@
     "KRW-ENA": {
       "entry_price": 140.0,
       "qty": 2857.14285714,
-      "current": 139.0
+      "current": 141.0
     },
     "KRW-WLFI": {
       "entry_price": 89.5,

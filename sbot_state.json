@@ -8,9 +8,9 @@
     "total_profit": 0,
     "positions": 4,
     "score_enter": 75,
-    "last_update": "15:14:24",
+    "last_update": "15:31:03",
     "market_status": "normal",
-    "market_rate": 2.47,
+    "market_rate": 2.61,
     "daily_loss": 1,
     "code_name_map": {
       "375500": "DL이앤씨",
@@ -171,7 +171,8 @@
       "011070": "LG이노텍",
       "064290": "인텍플러스",
       "051910": "LG화학",
-      "032830": "삼성생명"
+      "032830": "삼성생명",
+      "267250": "HD현대"
     },
     "new_codes": [
       "010170",
@@ -249,7 +250,7 @@
       }
     }
   },
-  "last_update": "15:14:35",
+  "last_update": "15:31:06",
   "sold_today": {
     "166090": "09:21:05"
   },

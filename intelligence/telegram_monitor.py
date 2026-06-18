@@ -121,6 +121,21 @@ CODE_PATTERN = re.compile(r'[\(（](\d{6})[\)）]')
 NAME_PATTERN = re.compile(r'([가-힣A-Za-z0-9&·\s]{2,20}?)[\(（]\d{6}[\)）]')
 
 
+def cleanup_old_events(days: int = 30):
+    """★ 신규: telegram_events 30일 초과 데이터 정리 (원본 로그만 — 분석결과는 event_bonus/stock_event_bonus에 별도 보관)"""
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=5)
+        cutoff = (datetime.datetime.now() - datetime.timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+        cur = conn.execute("DELETE FROM telegram_events WHERE created_at < ?", (cutoff,))
+        deleted = cur.rowcount
+        conn.commit()
+        conn.close()
+        if deleted > 0:
+            print(f"🧹 telegram_events {days}일 초과 {deleted}건 삭제")
+    except Exception as e:
+        print(f"⚠️ telegram_events 정리 오류: {e}")
+
+
 def init_db():
     conn = sqlite3.connect(DB_PATH)
     conn.execute("PRAGMA journal_mode=WAL")
@@ -417,7 +432,6 @@ async def main():
             print(f"\n🚨 [{now}] 빅 이벤트 감지!")
             print(f"   채널: {channel} | 키워드: {keywords} | +{score}점")
             print(f"   내용: {text[:100]}")
-            save_event(channel, text, keywords, themes, score)
             try:
                 from common_utils import update_state
                 update_state("nbot_state.json", telegram_event={
@@ -429,6 +443,15 @@ async def main():
                 })
             except Exception as e:
                 print(f"⚠️ state 업데이트 오류: {e}")
+        # ★ 키워드 매칭 여부와 무관하게 모든 메시지 저장 (브리핑/텔레스윙용)
+        save_event(channel, text, keywords, themes, score)
+
+    # ★ 1시간마다 오래된 메시지 정리
+    async def _periodic_cleanup():
+        while True:
+            cleanup_old_events(days=30)
+            await asyncio.sleep(3600)
+    asyncio.create_task(_periodic_cleanup())
 
     print("👂 메시지 대기 중...")
     await client.run_until_disconnected()
