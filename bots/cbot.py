@@ -137,7 +137,7 @@ EXCLUDE_KEYWORDS = ["UP", "DOWN", "BEAR", "BULL"]
 BUY_1ST_AMT       = 400_000     # 1차 매수 40만원 (단일, 추매 없음)
 BUY_2ND_AMT       = 0           # 추매 비활성화
 BUY_2ND_THRESHOLD = -9999       # 추매 비활성화 (절대 도달 안 하는 값)
-MAX_POSITIONS     = 3           # 최대 3코인
+MAX_POSITIONS     = 4           # 최대 4코인 (3→4, 마지막 슬롯은 잔액만큼 매수)
 MAX_ALT_POSITIONS = 3           # BTC/ETH 외 알트 동시 보유 최대 3개
 MIN_ORDER_AMT     = 5_000       # 업비트 최소 주문 금액
 
@@ -1795,11 +1795,17 @@ class CBot:
                             print(f"  ❌ AI점수 부족({ai_score}점 < {ai_threshold})")
                             continue
 
+                        # ★ 마지막 슬롯(포지션 4개째)이면 잔액만큼만 매수
+                        _is_last_slot = (len(self.positions) + 1) >= MAX_POSITIONS
+                        _buy_amt = min(BUY_1ST_AMT, int(krw * 0.98)) if _is_last_slot else BUY_1ST_AMT
+                        if _buy_amt < MIN_ORDER_AMT:
+                            print(f"  ⏭️ {market} — 잔액 부족({_buy_amt:,}원 < 최소주문)")
+                            continue
                         print(f"🚀 매수 시도 {market} | {ai_score}점 | "
-                              f"{BUY_1ST_AMT:,}원")
-                        if self.buy(market, BUY_1ST_AMT):
+                              f"{_buy_amt:,}원" + (" (마지막슬롯·잔액매수)" if _is_last_slot else ""))
+                        if self.buy(market, _buy_amt):
                             buy_price = ind.get("current", 0)
-                            est_qty   = BUY_1ST_AMT / buy_price if buy_price else 0
+                            est_qty   = _buy_amt / buy_price if buy_price else 0
                             # ★ peak_tracker 즉시 초기화
                             import datetime as _dt2
                             self.peak_tracker[market] = {

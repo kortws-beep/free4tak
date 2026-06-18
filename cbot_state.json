@@ -4,32 +4,32 @@
   "cmd_result": "✅ KRW-BTC 즉시매도 완료",
   "last_status": {
     "krw": 242488,
-    "total_profit": 21634,
+    "total_profit": -3432,
     "daily_pnl": 0,
     "positions": 3,
     "positions_detail": {
       "KRW-ICX": {
-        "current": 43,
+        "current": 42,
         "entry_price": 43,
         "qty": 6880.07438405,
-        "rate": 0.45
+        "rate": -2.76
       },
       "KRW-ENA": {
-        "current": 141,
+        "current": 139,
         "entry_price": 140,
         "qty": 2857.14285714,
-        "rate": 0.71
+        "rate": -0.71
       },
       "KRW-WLFI": {
-        "current": 94,
+        "current": 91,
         "entry_price": 89,
         "qty": 3351.95530726,
-        "rate": 5.81
+        "rate": 2.57
       }
     },
     "daily_loss": 0,
     "market_status": "normal",
-    "btc_rate": -0.43304292000000005,
+    "btc_rate": -0.29520978000000003,
     "fear_greed": 15,
     "is_night": false,
     "coin_pool": [
@@ -60,9 +60,9 @@
       "KRW-CHIP",
       "KRW-TRUMP",
       "KRW-SLX",
+      "KRW-PROS",
       "KRW-ASTR",
-      "KRW-ZKP",
-      "KRW-PROS"
+      "KRW-ZKP"
     ],
     "coins": [
       "KRW-BTC",
@@ -92,30 +92,30 @@
       "KRW-CHIP",
       "KRW-TRUMP",
       "KRW-SLX",
+      "KRW-PROS",
       "KRW-ASTR",
-      "KRW-ZKP",
-      "KRW-PROS"
+      "KRW-ZKP"
     ],
     "seed": "30만원 소액 모드"
   },
-  "last_update": "21:33:13",
+  "last_update": "21:47:13",
   "daily_loss": 0,
   "loss_date": "2026-06-18",
   "positions": {
     "KRW-ICX": {
       "entry_price": 43.60417973,
       "qty": 6880.07438405,
-      "current": 43.8
+      "current": 42.4
     },
     "KRW-ENA": {
       "entry_price": 140.0,
       "qty": 2857.14285714,
-      "current": 141.0
+      "current": 139.0
     },
     "KRW-WLFI": {
       "entry_price": 89.5,
       "qty": 3351.95530726,
-      "current": 94.7
+      "current": 91.8
     }
   },
   "peak_tracker": {
