@@ -5,12 +5,12 @@
   "cmd_result": null,
   "last_status": {
     "cash": 90260,
-    "total_profit": -465400,
+    "total_profit": -478100,
     "positions": 5,
     "score_enter": 75,
-    "last_update": "13:47:11",
+    "last_update": "14:09:40",
     "market_status": "normal",
-    "market_rate": -1.8,
+    "market_rate": -1.26,
     "daily_loss": 0,
     "code_name_map": {
       "004310": "현대약품",
@@ -206,46 +206,46 @@
       "001820": {
         "name": "삼화콘덴서",
         "entry_price": 190000,
-        "current": 167300,
-        "rate": -11.95,
+        "current": 165500,
+        "rate": -12.89,
         "qty": 4,
         "buy_tag": ""
       },
       "005930": {
         "name": "삼성전자",
         "entry_price": 369000,
-        "current": 351000,
-        "rate": -4.88,
+        "current": 351500,
+        "rate": -4.74,
         "qty": 1,
         "buy_tag": ""
       },
       "035420": {
         "name": "035420",
         "entry_price": 251000,
-        "current": 227000,
-        "rate": -9.56,
+        "current": 226500,
+        "rate": -9.76,
         "qty": 4,
         "buy_tag": ""
       },
       "089030": {
         "name": "테크윙",
         "entry_price": 63600,
-        "current": 57900,
-        "rate": -8.96,
+        "current": 58000,
+        "rate": -8.81,
         "qty": 16,
         "buy_tag": ""
       },
       "204320": {
         "name": "204320",
         "entry_price": 75700,
-        "current": 63600,
-        "rate": -15.98,
+        "current": 63200,
+        "rate": -16.51,
         "qty": 14,
         "buy_tag": ""
       }
     }
   },
-  "last_update": "13:47:12",
+  "last_update": "14:09:41",
   "sold_today": {},
   "sold_today_date": "2026-06-19",
   "daily_loss": 0,

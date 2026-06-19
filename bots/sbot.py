@@ -1279,18 +1279,19 @@ class SBot:
                 # ── 계좌 ─────────────────────────────────
                 cash           = (self._ws.cash if self._ws and self._ws.cash > 0 else self.api.get_buyable_cash())
                 new_pos = self.api.get_current_positions()
-                if not new_pos and self.positions:
-                    print("⚠️ 실계좌 잔고 빈값 — API 헬스체크")
+                # ★ None = 진짜 API 조회 실패 / {} = 정상응답인데 보유종목 0개 (구분 필수!)
+                if new_pos is None:
+                    print("⚠️ 실계좌 잔고 조회 실패 — 캐시(기존 positions) 유지, 이번 루프 동기화 스킵")
                     self._check_api_health(False)
                 else:
                     self._check_api_health(True)
-                # ★ 수동매도 감지 — 이전 포지션에 있었는데 실계좌에 없으면 감지
-                # ★ 수동매도는 재매수 허용 — sold_today 등록 안 함
-                for _code in list(self.positions.keys()):
-                    if _code not in new_pos and _code not in self.sold_today:
-                        print(f"🔍 수동매도 감지: {_code} → 재매수 허용")
-                self.positions.clear()
-                self.positions.update(new_pos)
+                    # ★ 수동매도 감지 — 이전 포지션에 있었는데 실계좌에 없으면 감지
+                    # ★ 수동매도는 재매수 허용 — sold_today 등록 안 함
+                    for _code in list(self.positions.keys()):
+                        if _code not in new_pos and _code not in self.sold_today:
+                            print(f"🔍 수동매도 감지: {_code} → 재매수 허용")
+                    self.positions.clear()
+                    self.positions.update(new_pos)
                 psbl_cash      = self.api.get_psbl_order_cash("005930")
                 if psbl_cash <= 0:
                     psbl_cash = cash
