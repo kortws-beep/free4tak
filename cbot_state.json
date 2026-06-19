@@ -4,33 +4,33 @@
   "cmd_result": "✅ KRW-BTC 즉시매도 완료",
   "last_status": {
     "krw": 242488,
-    "total_profit": -3432,
+    "total_profit": -7757,
     "daily_pnl": 0,
     "positions": 3,
     "positions_detail": {
       "KRW-ICX": {
-        "current": 42,
+        "current": 41,
         "entry_price": 43,
         "qty": 6880.07438405,
-        "rate": -2.76
+        "rate": -4.83
       },
       "KRW-ENA": {
-        "current": 139,
+        "current": 142,
         "entry_price": 140,
         "qty": 2857.14285714,
-        "rate": -0.71
+        "rate": 1.43
       },
       "KRW-WLFI": {
-        "current": 91,
+        "current": 89,
         "entry_price": 89,
         "qty": 3351.95530726,
-        "rate": 2.57
+        "rate": 0.34
       }
     },
     "daily_loss": 0,
     "market_status": "normal",
-    "btc_rate": -0.29520978000000003,
-    "fear_greed": 15,
+    "btc_rate": 0.10738199000000001,
+    "fear_greed": 14,
     "is_night": false,
     "coin_pool": [
       "KRW-BTC",
@@ -40,29 +40,29 @@
       "KRW-XLM",
       "KRW-WLD",
       "KRW-USDT",
-      "KRW-ONDO",
       "KRW-MEGA",
-      "KRW-XPL",
-      "KRW-ID",
-      "KRW-DOGE",
-      "KRW-SAHARA",
-      "KRW-BIO",
+      "KRW-ONDO",
       "KRW-TRUST",
+      "KRW-SAHARA",
+      "KRW-DOGE",
+      "KRW-ID",
+      "KRW-BIO",
       "KRW-NEAR",
-      "KRW-ENA",
       "KRW-JTO",
       "KRW-SUI",
+      "KRW-XPL",
+      "KRW-ENA",
+      "KRW-PROS",
+      "KRW-KERNEL",
+      "KRW-CHIP",
+      "KRW-AQT",
       "KRW-UNI",
       "KRW-ADA",
-      "KRW-KERNEL",
-      "KRW-ORCA",
+      "KRW-BLEND",
+      "KRW-IP",
+      "KRW-ZKP",
       "KRW-TRAC",
-      "KRW-CHIP",
-      "KRW-TRUMP",
-      "KRW-SLX",
-      "KRW-PROS",
-      "KRW-ASTR",
-      "KRW-ZKP"
+      "KRW-AVAX"
     ],
     "coins": [
       "KRW-BTC",
@@ -72,50 +72,50 @@
       "KRW-XLM",
       "KRW-WLD",
       "KRW-USDT",
-      "KRW-ONDO",
       "KRW-MEGA",
-      "KRW-XPL",
-      "KRW-ID",
-      "KRW-DOGE",
-      "KRW-SAHARA",
-      "KRW-BIO",
+      "KRW-ONDO",
       "KRW-TRUST",
+      "KRW-SAHARA",
+      "KRW-DOGE",
+      "KRW-ID",
+      "KRW-BIO",
       "KRW-NEAR",
-      "KRW-ENA",
       "KRW-JTO",
       "KRW-SUI",
+      "KRW-XPL",
+      "KRW-ENA",
+      "KRW-PROS",
+      "KRW-KERNEL",
+      "KRW-CHIP",
+      "KRW-AQT",
       "KRW-UNI",
       "KRW-ADA",
-      "KRW-KERNEL",
-      "KRW-ORCA",
+      "KRW-BLEND",
+      "KRW-IP",
+      "KRW-ZKP",
       "KRW-TRAC",
-      "KRW-CHIP",
-      "KRW-TRUMP",
-      "KRW-SLX",
-      "KRW-PROS",
-      "KRW-ASTR",
-      "KRW-ZKP"
+      "KRW-AVAX"
     ],
     "seed": "30만원 소액 모드"
   },
-  "last_update": "21:47:13",
+  "last_update": "09:35:35",
   "daily_loss": 0,
-  "loss_date": "2026-06-18",
+  "loss_date": "2026-06-19",
   "positions": {
     "KRW-ICX": {
       "entry_price": 43.60417973,
       "qty": 6880.07438405,
-      "current": 42.4
+      "current": 41.5
     },
     "KRW-ENA": {
       "entry_price": 140.0,
       "qty": 2857.14285714,
-      "current": 139.0
+      "current": 142.0
     },
     "KRW-WLFI": {
       "entry_price": 89.5,
       "qty": 3351.95530726,
-      "current": 91.8
+      "current": 89.8
     }
   },
   "peak_tracker": {

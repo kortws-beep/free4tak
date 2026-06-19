@@ -1002,15 +1002,21 @@ class SBot:
                 "ai_reason":  data.get("ai_reason", ""),
                 "stock_name": data.get("stock_name", ""),
             }
-            # ★ nbot 교차 보유 방지
+            # ★ sbo2 교차 보유 방지 (구 nbot 참조 — 경로/구조 모두 sbo2에 맞게 수정)
             try:
-                from common_utils import read_state as _read_state
-                nbot_st  = _read_state("nbot")
-                nbot_pos = set(nbot_st.get("last_status", {}).get("positions_detail", {}).keys())
-            except Exception:
-                nbot_pos = set()
-            if code in nbot_pos:
-                print(f"⛔ {code} nbot 보유 중 — sbot 매수 제외")
+                import os as _os, json as _json
+                _sbo2_state_path = _os.path.join(
+                    _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
+                    "lina_bot", "sbo2_state.json")
+                sbo2_pos = set()
+                if _os.path.exists(_sbo2_state_path):
+                    with open(_sbo2_state_path, "r", encoding="utf-8") as _f:
+                        sbo2_pos = set(_json.load(_f).get("positions", {}).keys())
+            except Exception as _e:
+                print(f"⚠️ sbo2 포지션 조회 오류: {_e}")
+                sbo2_pos = set()
+            if code in sbo2_pos:
+                print(f"⛔ {code} sbo2 보유 중 — sbot 매수 제외")
                 continue
             self._do_buy(code, data["current_price"], buy_amount)
 
