@@ -191,6 +191,8 @@ def main():
     parser.add_argument("--base-buy-amt",  type=int, default=1_000_000,
                         help="기본 매수금액 (sbo2 기본 100만원)")
     parser.add_argument("--max-positions", type=int, default=4)
+    parser.add_argument("--ma-period",     type=int, default=20,
+                        help="MA이탈 매도 기준 기간 (기본20, 검증용 40)")
     parser.add_argument("--buy-score-min", type=int, default=75,
                         help="매수 최소 점수 (sbot 점수분포상 75~90 권장)")
     parser.add_argument("--ai-mode",       default="rule_proxy",
@@ -233,6 +235,7 @@ def main():
         codes           = codes,
         ai_score_mode   = args.ai_mode,
         verbose         = args.verbose,
+        ma_period       = args.ma_period,
     )
 
     # 실행

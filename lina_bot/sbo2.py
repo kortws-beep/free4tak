@@ -1102,14 +1102,14 @@ class Sbo2:
                 except Exception:
                     pass
 
-            # ① MA20 이탈 — 추세 종료
+            # ① MA40 이탈 — 추세 종료 (구 MA20 → 백테스트 검증 후 MA40으로 변경, 2026-06-19)
             if not reason:
                 try:
                     tech = self.api.get_technical_indicators(code, {})
-                    ma20 = float(tech.get("ma20", 0) or 0)
+                    ma20 = float(tech.get("ma40", 0) or 0)   # ★ 변수명 유지(영향범위 최소화), 값은 ma40
                     if ma20 > 0 and curr < ma20:
-                        reason = f"MA20이탈({rate:+.1f}%)"
-                        print(f"📉 MA20 이탈 {code} | 현재:{curr:,.0f} < MA20:{ma20:,.0f}")
+                        reason = f"MA40이탈({rate:+.1f}%)"
+                        print(f"📉 MA40 이탈 {code} | 현재:{curr:,.0f} < MA40:{ma20:,.0f}")
                 except Exception:
                     ma20 = 0
 
@@ -1208,9 +1208,10 @@ class Sbo2:
             if _master_remove:
                 _master_remove("sbo2", code)
 
-            # 손절만 sold_today 등록
-            if "손절" in reason:
-                self.sold_today[code] = now_hms()
+            # ★ 매도 사유 무관하게 모든 매도는 당일 재매수 금지
+            #   (이전: "손절"만 등록 → MA20이탈 등은 재매수 금지가 안 걸려
+            #    매수↔매도 무한 반복 버그 발생. 2026-06-19 확인)
+            self.sold_today[code] = now_hms()
 
             del self.positions[code]
             self._save_state()

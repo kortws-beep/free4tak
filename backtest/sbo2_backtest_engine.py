@@ -140,6 +140,7 @@ class SBo2BacktestConfig:
     max_positions:     int   = 4
     # 매수 임계치
     buy_score_min:     int   = 65
+    ma_period:         int   = 20      # ★ MA이탈 매도 기준 기간 (기본20, 검증용 40 등 가능)
     # 종목 필터
     # ★ 백테스터 DB에 시총(hts_avls) 없음 → 거래대금으로 대형주 필터
     #   삼성전자 일평균 거래대금 ~5,000억 → 100억 이상이면 중대형주
@@ -457,10 +458,11 @@ class SBo2BacktestEngine:
             if code in self.peak_tracker:
                 self.peak_tracker[code]["_bt_today"] = date.date()
 
-            # ATR / MA20 — DB 컬럼 우선, 없으면 features에서 보완
+            # ATR / MA(가변기간) — DB 컬럼 우선, 없으면 features에서 보완
             df       = self.loader.load_ohlcv(code)
             atr_rate = 0.0
             ma20     = 0.0
+            _ma_period = getattr(self.config, "ma_period", 20)
             if not df.empty and date in df.index:
                 _row = df.loc[date]
                 if hasattr(_row, "columns"): _row = _row.iloc[-1]
@@ -468,11 +470,23 @@ class SBo2BacktestEngine:
                     atr14 = float(_row.get("atr14", 0) or 0)
                     if atr14 > 0 and pos["entry_price"] > 0:
                         atr_rate = atr14 / pos["entry_price"]
-                    ma20 = float(_row.get("ma20", 0) or 0)
                 except Exception:
                     pass
-            # ★ DB 컬럼에 없으면 feature_builder 결과에서 보완
-            if ma20 == 0:
+                # ★ ma_period가 20이 아니면 close 시계열로 직접 계산 (검증용)
+                if _ma_period != 20:
+                    try:
+                        _hist = df.loc[:date]["close"].tail(_ma_period)
+                        if len(_hist) >= _ma_period:
+                            ma20 = float(_hist.mean())
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        ma20 = float(_row.get("ma20", 0) or 0)
+                    except Exception:
+                        pass
+            # ★ DB 컬럼에 없으면 feature_builder 결과에서 보완 (ma_period=20 한정)
+            if ma20 == 0 and _ma_period == 20:
                 feat_now = build_features_at(self.loader, code, date)
                 if feat_now:
                     ma20     = float(feat_now.get("ma20", 0) or 0)
