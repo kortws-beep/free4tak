@@ -923,6 +923,20 @@ class Sbo2:
             if not (MIN_PRICE <= curr_price <= MAX_PRICE):
                 continue
 
+            # ★ MA40 아래에서는 매수 금지 (매수 즉시 MA40이탈로 청산되는 헛매매 방지, 2026-06-19)
+            try:
+                _tech = self.api.get_technical_indicators(code, {})
+                _ma40 = float(_tech.get("ma40", 0) or 0)
+                if _ma40 > 0 and curr_price < _ma40:
+                    print(f"⏭️ {name} 패스 — MA40({_ma40:,.0f}) 아래 (현재:{curr_price:,.0f})")
+                    save_candidate(name=name, grade=cand["grade"], score=cand["score"],
+                                   vcp=cand["vcp"], trend=cand["trend"], catalyst=cand["catalyst"],
+                                   curr=curr_price, stop=cand["stop"], tgt=cand["tgt"], rr=cand["rr"],
+                                   bought=False, skip_reason="MA40하단")
+                    continue
+            except Exception as _e:
+                print(f"⚠️ MA40 조회 오류 {name}: {_e}")
+
             # 매수금액 계산 — 예수금 부족시 있는 만큼 매수
             amount = calc_buy_amount(cand["grade"], psbl_cash)
 

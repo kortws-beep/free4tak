@@ -12,6 +12,7 @@ import os
 import re
 import time
 import sqlite3
+import sys
 from datetime import datetime, timedelta
 from dotenv import load_dotenv, find_dotenv  # 💡 find_dotenv 추가
 
@@ -20,6 +21,10 @@ load_dotenv(find_dotenv(), override=True)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH  = os.path.join(BASE_DIR, "kr_theme_finance.db")
+_PROJECT_ROOT = os.path.dirname(BASE_DIR)
+for _p in (os.path.join(_PROJECT_ROOT, "core"), os.path.join(_PROJECT_ROOT, "interface"), os.path.join(_PROJECT_ROOT, "bots"), _PROJECT_ROOT):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
 # ── 💡 한투 API 임포트 수정 (신형 클래스명 반영) ──────────────────
 # sbot2.py와 동일하게 kis_api 파일에서 KoreaInvestmentAPI를 가져옵니다.
