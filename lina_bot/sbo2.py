@@ -1116,17 +1116,6 @@ class Sbo2:
                 except Exception:
                     pass
 
-            # ① MA40 이탈 — 추세 종료 (구 MA20 → 백테스트 검증 후 MA40으로 변경, 2026-06-19)
-            if not reason:
-                try:
-                    tech = self.api.get_technical_indicators(code, {})
-                    ma20 = float(tech.get("ma40", 0) or 0)   # ★ 변수명 유지(영향범위 최소화), 값은 ma40
-                    if ma20 > 0 and curr < ma20:
-                        reason = f"MA40이탈({rate:+.1f}%)"
-                        print(f"📉 MA40 이탈 {code} | 현재:{curr:,.0f} < MA40:{ma20:,.0f}")
-                except Exception:
-                    ma20 = 0
-
             # ② 손절가 이탈
             if not reason and stop > 0 and curr <= stop:
                 reason = f"손절({rate:+.1f}%)"

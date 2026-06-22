@@ -1,16 +1,14 @@
 {
   "telegram_event": {
     "keywords": [
-      "수주"
+      "상장"
     ],
     "themes": [
-      "건설",
-      "방산",
-      "조선"
+      "IPO"
     ],
-    "score": 15,
-    "text": "[속보] 李 대통령 \"加 잠수함 수주 결과, 감을 잡기 어려워\"\nhttps://n.news.naver.com/mnews/article/015/0005300668",
-    "time": "15:02:51"
+    "score": 10,
+    "text": "2026.06.22 10:20:32\n기업명: 성광벤드(시가총액: 8,140억) A014620\n보고서명: 기업설명회(IR)개최\n\n개최일자 : 2026-06-24\n개최시각 : 10:00\n\n*IR 목적\n2026 코스닥 상장기업 온라인 IR 참가\n\n*IR 내용\n2026년 1분기 경영실적, 업황및 Q&A\n\n공시링크: https://dart.fss.or.kr/dsaf",
+    "time": "10:20:56"
   },
   "disclosure_event": {
     "code": "053610",

@@ -1,75 +1,1669 @@
 {
-  "date": "2026-06-18",
-  "saved_at": "2026-06-18 20:10",
+  "date": "2026-06-19",
+  "saved_at": "2026-06-19 20:10",
   "summary": {
-    "today": "2026-06-18",
-    "trades": 5,
-    "wins": 1,
-    "losses": 4,
-    "win_rate": 20.0,
-    "avg_profit": -3.54,
-    "total_pnl": -101100,
-    "avg_win": 2.33,
-    "avg_loss": -5.0,
+    "today": "2026-06-19",
+    "trades": 161,
+    "wins": 69,
+    "losses": 92,
+    "win_rate": 42.9,
+    "avg_profit": -0.25,
+    "total_pnl": -371400,
+    "avg_win": 0.15,
+    "avg_loss": -0.55,
     "by_hour": {},
     "by_reason": {
       "기타": {
-        "count": 5,
-        "avg_profit": -3.54,
-        "pct": 100.0
+        "count": 159,
+        "avg_profit": -0.15,
+        "pct": 98.8
+      },
+      "손절": {
+        "count": 2,
+        "avg_profit": -8.0,
+        "pct": 1.2
       }
     },
-    "by_stock": [],
-    "trade_details": [
+    "by_stock": [
       {
-        "code": "KRW-SOON",
-        "buy_price": 257.0,
-        "sell_price": 263.0,
-        "profit_rate": 2.33,
-        "sell_reason": "급락감지(-5.75%)",
-        "buy_time": "",
-        "sell_time": "06:00",
-        "ai_score": null
+        "code": "336260",
+        "trades": 88,
+        "win_rate": 46.6,
+        "avg_profit": -0.06,
+        "total": -5.19
+      },
+      {
+        "code": "016360",
+        "trades": 49,
+        "win_rate": 38.8,
+        "avg_profit": -0.09,
+        "total": -4.33
       },
       {
         "code": "000720",
-        "buy_price": 143000.0,
-        "sell_price": 138900.0,
-        "profit_rate": -2.87,
-        "sell_reason": "MA20이탈(-2.9%)",
+        "trades": 3,
+        "win_rate": 33.3,
+        "avg_profit": -0.11,
+        "total": -0.32
+      },
+      {
+        "code": "319400",
+        "trades": 13,
+        "win_rate": 38.5,
+        "avg_profit": -0.14,
+        "total": -1.77
+      }
+    ],
+    "trade_details": [
+      {
+        "code": "001820",
+        "buy_price": 187500.0,
+        "sell_price": 168400.0,
+        "profit_rate": -10.19,
+        "sell_reason": "손절(-10.2%)",
         "buy_time": "",
-        "sell_time": "09:11",
+        "sell_time": "12:33",
         "ai_score": 0
       },
       {
-        "code": "082740",
-        "buy_price": 67300.0,
-        "sell_price": 61900.0,
-        "profit_rate": -8.02,
-        "sell_reason": "MA20이탈(-8.0%)",
+        "code": "003460",
+        "buy_price": 3343.4409,
+        "sell_price": 3130.0,
+        "profit_rate": -6.38,
+        "sell_reason": "MA20이탈(-6.4%)",
         "buy_time": "",
-        "sell_time": "09:36",
+        "sell_time": "12:36",
+        "ai_score": 87
+      },
+      {
+        "code": "319400",
+        "buy_price": 31450.0,
+        "sell_price": 31450.0,
+        "profit_rate": 0.0,
+        "sell_reason": "MA20이탈(+0.0%)",
+        "buy_time": "",
+        "sell_time": "12:36",
+        "ai_score": 73
+      },
+      {
+        "code": "336260",
+        "buy_price": 63200.0,
+        "sell_price": 63200.0,
+        "profit_rate": 0.0,
+        "sell_reason": "MA20이탈(+0.0%)",
+        "buy_time": "",
+        "sell_time": "12:36",
+        "ai_score": 57
+      },
+      {
+        "code": "319400",
+        "buy_price": 31450.0,
+        "sell_price": 31600.0,
+        "profit_rate": 0.48,
+        "sell_reason": "MA20이탈(+0.5%)",
+        "buy_time": "",
+        "sell_time": "12:37",
+        "ai_score": 73
+      },
+      {
+        "code": "336260",
+        "buy_price": 63200.0,
+        "sell_price": 63600.0,
+        "profit_rate": 0.63,
+        "sell_reason": "MA20이탈(+0.6%)",
+        "buy_time": "",
+        "sell_time": "12:37",
+        "ai_score": 57
+      },
+      {
+        "code": "319400",
+        "buy_price": 31650.0,
+        "sell_price": 31600.0,
+        "profit_rate": -0.16,
+        "sell_reason": "MA20이탈(-0.2%)",
+        "buy_time": "",
+        "sell_time": "12:38",
+        "ai_score": 73
+      },
+      {
+        "code": "336260",
+        "buy_price": 63700.0,
+        "sell_price": 63700.0,
+        "profit_rate": 0.0,
+        "sell_reason": "MA20이탈(+0.0%)",
+        "buy_time": "",
+        "sell_time": "12:38",
+        "ai_score": 57
+      },
+      {
+        "code": "319400",
+        "buy_price": 31650.0,
+        "sell_price": 31650.0,
+        "profit_rate": 0.0,
+        "sell_reason": "MA20이탈(+0.0%)",
+        "buy_time": "",
+        "sell_time": "12:38",
+        "ai_score": 73
+      },
+      {
+        "code": "336260",
+        "buy_price": 63700.0,
+        "sell_price": 63700.0,
+        "profit_rate": 0.0,
+        "sell_reason": "MA20이탈(+0.0%)",
+        "buy_time": "",
+        "sell_time": "12:38",
+        "ai_score": 57
+      },
+      {
+        "code": "319400",
+        "buy_price": 31700.0,
+        "sell_price": 31600.0,
+        "profit_rate": -0.32,
+        "sell_reason": "MA20이탈(-0.3%)",
+        "buy_time": "",
+        "sell_time": "12:39",
+        "ai_score": 73
+      },
+      {
+        "code": "336260",
+        "buy_price": 63700.0,
+        "sell_price": 63800.0,
+        "profit_rate": 0.16,
+        "sell_reason": "MA20이탈(+0.2%)",
+        "buy_time": "",
+        "sell_time": "12:39",
+        "ai_score": 57
+      },
+      {
+        "code": "319400",
+        "buy_price": 31700.0,
+        "sell_price": 31600.0,
+        "profit_rate": -0.32,
+        "sell_reason": "MA20이탈(-0.3%)",
+        "buy_time": "",
+        "sell_time": "12:39",
+        "ai_score": 73
+      },
+      {
+        "code": "336260",
+        "buy_price": 63700.0,
+        "sell_price": 63600.0,
+        "profit_rate": -0.16,
+        "sell_reason": "MA20이탈(-0.2%)",
+        "buy_time": "",
+        "sell_time": "12:39",
+        "ai_score": 57
+      },
+      {
+        "code": "319400",
+        "buy_price": 31650.0,
+        "sell_price": 31650.0,
+        "profit_rate": 0.0,
+        "sell_reason": "MA20이탈(+0.0%)",
+        "buy_time": "",
+        "sell_time": "12:40",
+        "ai_score": 73
+      },
+      {
+        "code": "336260",
+        "buy_price": 63700.0,
+        "sell_price": 63600.0,
+        "profit_rate": -0.16,
+        "sell_reason": "MA20이탈(-0.2%)",
+        "buy_time": "",
+        "sell_time": "12:40",
+        "ai_score": 57
+      },
+      {
+        "code": "319400",
+        "buy_price": 31650.0,
+        "sell_price": 31650.0,
+        "profit_rate": 0.0,
+        "sell_reason": "MA20이탈(+0.0%)",
+        "buy_time": "",
+        "sell_time": "12:40",
+        "ai_score": 73
+      },
+      {
+        "code": "336260",
+        "buy_price": 63700.0,
+        "sell_price": 63600.0,
+        "profit_rate": -0.16,
+        "sell_reason": "MA20이탈(-0.2%)",
+        "buy_time": "",
+        "sell_time": "12:40",
+        "ai_score": 57
+      },
+      {
+        "code": "319400",
+        "buy_price": 31700.0,
+        "sell_price": 31600.0,
+        "profit_rate": -0.32,
+        "sell_reason": "MA20이탈(-0.3%)",
+        "buy_time": "",
+        "sell_time": "12:41",
+        "ai_score": 73
+      },
+      {
+        "code": "336260",
+        "buy_price": 63600.0,
+        "sell_price": 63600.0,
+        "profit_rate": 0.0,
+        "sell_reason": "MA20이탈(+0.0%)",
+        "buy_time": "",
+        "sell_time": "12:41",
+        "ai_score": 57
+      },
+      {
+        "code": "319400",
+        "buy_price": 31700.0,
+        "sell_price": 31600.0,
+        "profit_rate": -0.32,
+        "sell_reason": "MA20이탈(-0.3%)",
+        "buy_time": "",
+        "sell_time": "12:42",
+        "ai_score": 73
+      },
+      {
+        "code": "336260",
+        "buy_price": 63600.0,
+        "sell_price": 63600.0,
+        "profit_rate": 0.0,
+        "sell_reason": "MA20이탈(+0.0%)",
+        "buy_time": "",
+        "sell_time": "12:42",
+        "ai_score": 57
+      },
+      {
+        "code": "319400",
+        "buy_price": 31600.0,
+        "sell_price": 31500.0,
+        "profit_rate": -0.32,
+        "sell_reason": "MA20이탈(-0.3%)",
+        "buy_time": "",
+        "sell_time": "12:42",
+        "ai_score": 73
+      },
+      {
+        "code": "336260",
+        "buy_price": 63700.0,
+        "sell_price": 63600.0,
+        "profit_rate": -0.16,
+        "sell_reason": "MA20이탈(-0.2%)",
+        "buy_time": "",
+        "sell_time": "12:42",
+        "ai_score": 57
+      },
+      {
+        "code": "319400",
+        "buy_price": 31600.0,
+        "sell_price": 31450.0,
+        "profit_rate": -0.47,
+        "sell_reason": "MA20이탈(-0.5%)",
+        "buy_time": "",
+        "sell_time": "12:43",
+        "ai_score": 73
+      },
+      {
+        "code": "336260",
+        "buy_price": 63600.0,
+        "sell_price": 63300.0,
+        "profit_rate": -0.47,
+        "sell_reason": "MA20이탈(-0.5%)",
+        "buy_time": "",
+        "sell_time": "12:43",
+        "ai_score": 57
+      },
+      {
+        "code": "336260",
+        "buy_price": 63600.0,
+        "sell_price": 63100.0,
+        "profit_rate": -0.79,
+        "sell_reason": "MA20이탈(-0.8%)",
+        "buy_time": "",
+        "sell_time": "12:44",
+        "ai_score": 57
+      },
+      {
+        "code": "319400",
+        "buy_price": 31457.6923,
+        "sell_price": 31450.0,
+        "profit_rate": -0.02,
+        "sell_reason": "MA20이탈(-0.0%)",
+        "buy_time": "",
+        "sell_time": "12:45",
+        "ai_score": 0
+      },
+      {
+        "code": "336260",
+        "buy_price": 63200.0,
+        "sell_price": 63600.0,
+        "profit_rate": 0.63,
+        "sell_reason": "MA20이탈(+0.6%)",
+        "buy_time": "",
+        "sell_time": "12:45",
+        "ai_score": 57
+      },
+      {
+        "code": "336260",
+        "buy_price": 63200.0,
+        "sell_price": 63400.0,
+        "profit_rate": 0.32,
+        "sell_reason": "MA20이탈(+0.3%)",
+        "buy_time": "",
+        "sell_time": "12:45",
+        "ai_score": 57
+      },
+      {
+        "code": "336260",
+        "buy_price": 63471.4286,
+        "sell_price": 63600.0,
+        "profit_rate": 0.2,
+        "sell_reason": "MA20이탈(+0.2%)",
+        "buy_time": "",
+        "sell_time": "12:46",
+        "ai_score": 57
+      },
+      {
+        "code": "336260",
+        "buy_price": 63700.0,
+        "sell_price": 63500.0,
+        "profit_rate": -0.31,
+        "sell_reason": "MA20이탈(-0.3%)",
+        "buy_time": "",
+        "sell_time": "12:47",
+        "ai_score": 57
+      },
+      {
+        "code": "336260",
+        "buy_price": 63600.0,
+        "sell_price": 63900.0,
+        "profit_rate": 0.47,
+        "sell_reason": "MA20이탈(+0.5%)",
+        "buy_time": "",
+        "sell_time": "12:48",
+        "ai_score": 57
+      },
+      {
+        "code": "001720",
+        "buy_price": 192300.0,
+        "sell_price": 181100.0,
+        "profit_rate": -5.82,
+        "sell_reason": "손절(-5.8%)",
+        "buy_time": "",
+        "sell_time": "12:48",
+        "ai_score": 74
+      },
+      {
+        "code": "336260",
+        "buy_price": 63600.0,
+        "sell_price": 64100.0,
+        "profit_rate": 0.79,
+        "sell_reason": "MA20이탈(+0.8%)",
+        "buy_time": "",
+        "sell_time": "12:48",
+        "ai_score": 57
+      },
+      {
+        "code": "000720",
+        "buy_price": 127000.0,
+        "sell_price": 126900.0,
+        "profit_rate": -0.08,
+        "sell_reason": "MA20이탈(-0.1%)",
+        "buy_time": "",
+        "sell_time": "12:49",
+        "ai_score": 92
+      },
+      {
+        "code": "016360",
+        "buy_price": 117300.0,
+        "sell_price": 117150.0,
+        "profit_rate": -0.13,
+        "sell_reason": "MA20이탈(-0.1%)",
+        "buy_time": "",
+        "sell_time": "12:49",
+        "ai_score": 83
+      },
+      {
+        "code": "336260",
+        "buy_price": 64100.0,
+        "sell_price": 64100.0,
+        "profit_rate": 0.0,
+        "sell_reason": "MA20이탈(+0.0%)",
+        "buy_time": "",
+        "sell_time": "12:49",
+        "ai_score": 57
+      },
+      {
+        "code": "000720",
+        "buy_price": 127000.0,
+        "sell_price": 127000.0,
+        "profit_rate": 0.0,
+        "sell_reason": "MA20이탈(+0.0%)",
+        "buy_time": "",
+        "sell_time": "12:50",
+        "ai_score": 92
+      },
+      {
+        "code": "336260",
+        "buy_price": 64100.0,
+        "sell_price": 64000.0,
+        "profit_rate": -0.16,
+        "sell_reason": "MA20이탈(-0.2%)",
+        "buy_time": "",
+        "sell_time": "12:50",
+        "ai_score": 57
+      },
+      {
+        "code": "016360",
+        "buy_price": 117150.0,
+        "sell_price": 117300.0,
+        "profit_rate": 0.13,
+        "sell_reason": "MA20이탈(+0.1%)",
+        "buy_time": "",
+        "sell_time": "12:50",
+        "ai_score": 83
+      },
+      {
+        "code": "336260",
+        "buy_price": 64000.0,
+        "sell_price": 64000.0,
+        "profit_rate": 0.0,
+        "sell_reason": "MA20이탈(+0.0%)",
+        "buy_time": "",
+        "sell_time": "12:50",
+        "ai_score": 57
+      },
+      {
+        "code": "016360",
+        "buy_price": 117150.0,
+        "sell_price": 117600.0,
+        "profit_rate": 0.38,
+        "sell_reason": "MA20이탈(+0.4%)",
+        "buy_time": "",
+        "sell_time": "12:51",
+        "ai_score": 83
+      },
+      {
+        "code": "336260",
+        "buy_price": 64000.0,
+        "sell_price": 64200.0,
+        "profit_rate": 0.31,
+        "sell_reason": "MA20이탈(+0.3%)",
+        "buy_time": "",
+        "sell_time": "12:51",
+        "ai_score": 57
+      },
+      {
+        "code": "000720",
+        "buy_price": 127300.0,
+        "sell_price": 127000.0,
+        "profit_rate": -0.24,
+        "sell_reason": "MA20이탈(-0.2%)",
+        "buy_time": "",
+        "sell_time": "12:51",
         "ai_score": 0
       },
       {
         "code": "016360",
-        "buy_price": 125200.0,
-        "sell_price": 120700.0,
-        "profit_rate": -3.59,
-        "sell_reason": "MA20이탈(-3.6%)",
+        "buy_price": 117500.0,
+        "sell_price": 117200.0,
+        "profit_rate": -0.26,
+        "sell_reason": "MA20이탈(-0.3%)",
         "buy_time": "",
-        "sell_time": "09:55",
+        "sell_time": "12:51",
         "ai_score": 83
       },
       {
-        "code": "166090",
-        "buy_price": 72300.0,
-        "sell_price": 68300.0,
-        "profit_rate": -5.53,
-        "sell_reason": "MA20이탈(-5.53%)",
+        "code": "336260",
+        "buy_price": 64300.0,
+        "sell_price": 64200.0,
+        "profit_rate": -0.16,
+        "sell_reason": "MA20이탈(-0.2%)",
         "buy_time": "",
-        "sell_time": "10:47",
-        "ai_score": 75
+        "sell_time": "12:51",
+        "ai_score": 57
+      },
+      {
+        "code": "016360",
+        "buy_price": 117500.0,
+        "sell_price": 117000.0,
+        "profit_rate": -0.43,
+        "sell_reason": "MA20이탈(-0.4%)",
+        "buy_time": "",
+        "sell_time": "12:52",
+        "ai_score": 83
+      },
+      {
+        "code": "336260",
+        "buy_price": 64300.0,
+        "sell_price": 64200.0,
+        "profit_rate": -0.16,
+        "sell_reason": "MA20이탈(-0.2%)",
+        "buy_time": "",
+        "sell_time": "12:52",
+        "ai_score": 57
+      },
+      {
+        "code": "016360",
+        "buy_price": 117200.0,
+        "sell_price": 117000.0,
+        "profit_rate": -0.17,
+        "sell_reason": "MA20이탈(-0.2%)",
+        "buy_time": "",
+        "sell_time": "12:53",
+        "ai_score": 83
+      },
+      {
+        "code": "336260",
+        "buy_price": 64300.0,
+        "sell_price": 64000.0,
+        "profit_rate": -0.47,
+        "sell_reason": "MA20이탈(-0.5%)",
+        "buy_time": "",
+        "sell_time": "12:53",
+        "ai_score": 57
+      },
+      {
+        "code": "336260",
+        "buy_price": 64300.0,
+        "sell_price": 64100.0,
+        "profit_rate": -0.31,
+        "sell_reason": "MA20이탈(-0.3%)",
+        "buy_time": "",
+        "sell_time": "12:53",
+        "ai_score": 57
+      },
+      {
+        "code": "016360",
+        "buy_price": 117000.0,
+        "sell_price": 116900.0,
+        "profit_rate": -0.09,
+        "sell_reason": "MA20이탈(-0.1%)",
+        "buy_time": "",
+        "sell_time": "12:54",
+        "ai_score": 83
+      },
+      {
+        "code": "336260",
+        "buy_price": 64100.0,
+        "sell_price": 64000.0,
+        "profit_rate": -0.16,
+        "sell_reason": "MA20이탈(-0.2%)",
+        "buy_time": "",
+        "sell_time": "12:54",
+        "ai_score": 57
+      },
+      {
+        "code": "016360",
+        "buy_price": 117000.0,
+        "sell_price": 116900.0,
+        "profit_rate": -0.09,
+        "sell_reason": "MA20이탈(-0.1%)",
+        "buy_time": "",
+        "sell_time": "12:54",
+        "ai_score": 83
+      },
+      {
+        "code": "336260",
+        "buy_price": 64100.0,
+        "sell_price": 64000.0,
+        "profit_rate": -0.16,
+        "sell_reason": "MA20이탈(-0.2%)",
+        "buy_time": "",
+        "sell_time": "12:54",
+        "ai_score": 57
+      },
+      {
+        "code": "016360",
+        "buy_price": 116900.0,
+        "sell_price": 116700.0,
+        "profit_rate": -0.17,
+        "sell_reason": "MA20이탈(-0.2%)",
+        "buy_time": "",
+        "sell_time": "12:55",
+        "ai_score": 83
+      },
+      {
+        "code": "336260",
+        "buy_price": 64100.0,
+        "sell_price": 63900.0,
+        "profit_rate": -0.31,
+        "sell_reason": "MA20이탈(-0.3%)",
+        "buy_time": "",
+        "sell_time": "12:55",
+        "ai_score": 57
+      },
+      {
+        "code": "016360",
+        "buy_price": 116900.0,
+        "sell_price": 116900.0,
+        "profit_rate": 0.0,
+        "sell_reason": "MA20이탈(+0.0%)",
+        "buy_time": "",
+        "sell_time": "12:56",
+        "ai_score": 83
+      },
+      {
+        "code": "336260",
+        "buy_price": 64100.0,
+        "sell_price": 64000.0,
+        "profit_rate": -0.16,
+        "sell_reason": "MA20이탈(-0.2%)",
+        "buy_time": "",
+        "sell_time": "12:56",
+        "ai_score": 57
+      },
+      {
+        "code": "016360",
+        "buy_price": 116987.5,
+        "sell_price": 116800.0,
+        "profit_rate": -0.16,
+        "sell_reason": "MA20이탈(-0.2%)",
+        "buy_time": "",
+        "sell_time": "12:56",
+        "ai_score": 83
+      },
+      {
+        "code": "336260",
+        "buy_price": 64100.0,
+        "sell_price": 64100.0,
+        "profit_rate": 0.0,
+        "sell_reason": "MA20이탈(+0.0%)",
+        "buy_time": "",
+        "sell_time": "12:56",
+        "ai_score": 57
+      },
+      {
+        "code": "016360",
+        "buy_price": 116987.5,
+        "sell_price": 116600.0,
+        "profit_rate": -0.33,
+        "sell_reason": "MA20이탈(-0.3%)",
+        "buy_time": "",
+        "sell_time": "12:57",
+        "ai_score": 83
+      },
+      {
+        "code": "336260",
+        "buy_price": 64100.0,
+        "sell_price": 64000.0,
+        "profit_rate": -0.16,
+        "sell_reason": "MA20이탈(-0.2%)",
+        "buy_time": "",
+        "sell_time": "12:57",
+        "ai_score": 57
+      },
+      {
+        "code": "016360",
+        "buy_price": 116800.0,
+        "sell_price": 116700.0,
+        "profit_rate": -0.09,
+        "sell_reason": "MA20이탈(-0.1%)",
+        "buy_time": "",
+        "sell_time": "12:57",
+        "ai_score": 83
+      },
+      {
+        "code": "336260",
+        "buy_price": 64000.0,
+        "sell_price": 64000.0,
+        "profit_rate": 0.0,
+        "sell_reason": "MA20이탈(+0.0%)",
+        "buy_time": "",
+        "sell_time": "12:57",
+        "ai_score": 57
+      },
+      {
+        "code": "016360",
+        "buy_price": 116800.0,
+        "sell_price": 117100.0,
+        "profit_rate": 0.26,
+        "sell_reason": "MA20이탈(+0.3%)",
+        "buy_time": "",
+        "sell_time": "12:58",
+        "ai_score": 83
+      },
+      {
+        "code": "336260",
+        "buy_price": 64000.0,
+        "sell_price": 63900.0,
+        "profit_rate": -0.16,
+        "sell_reason": "MA20이탈(-0.2%)",
+        "buy_time": "",
+        "sell_time": "12:58",
+        "ai_score": 57
+      },
+      {
+        "code": "016360",
+        "buy_price": 117500.0,
+        "sell_price": 116700.0,
+        "profit_rate": -0.68,
+        "sell_reason": "MA20이탈(-0.7%)",
+        "buy_time": "",
+        "sell_time": "12:59",
+        "ai_score": 83
+      },
+      {
+        "code": "336260",
+        "buy_price": 63900.0,
+        "sell_price": 63800.0,
+        "profit_rate": -0.16,
+        "sell_reason": "MA20이탈(-0.2%)",
+        "buy_time": "",
+        "sell_time": "12:59",
+        "ai_score": 57
+      },
+      {
+        "code": "336260",
+        "buy_price": 63900.0,
+        "sell_price": 63600.0,
+        "profit_rate": -0.47,
+        "sell_reason": "MA20이탈(-0.5%)",
+        "buy_time": "",
+        "sell_time": "12:59",
+        "ai_score": 57
+      },
+      {
+        "code": "016360",
+        "buy_price": 116800.0,
+        "sell_price": 116800.0,
+        "profit_rate": 0.0,
+        "sell_reason": "MA20이탈(+0.0%)",
+        "buy_time": "",
+        "sell_time": "13:00",
+        "ai_score": 83
+      },
+      {
+        "code": "336260",
+        "buy_price": 63700.0,
+        "sell_price": 63700.0,
+        "profit_rate": 0.0,
+        "sell_reason": "MA20이탈(+0.0%)",
+        "buy_time": "",
+        "sell_time": "13:00",
+        "ai_score": 57
+      },
+      {
+        "code": "016360",
+        "buy_price": 116800.0,
+        "sell_price": 117000.0,
+        "profit_rate": 0.17,
+        "sell_reason": "MA20이탈(+0.2%)",
+        "buy_time": "",
+        "sell_time": "13:00",
+        "ai_score": 83
+      },
+      {
+        "code": "336260",
+        "buy_price": 63700.0,
+        "sell_price": 63900.0,
+        "profit_rate": 0.31,
+        "sell_reason": "MA20이탈(+0.3%)",
+        "buy_time": "",
+        "sell_time": "13:00",
+        "ai_score": 57
+      },
+      {
+        "code": "016360",
+        "buy_price": 116900.0,
+        "sell_price": 116700.0,
+        "profit_rate": -0.17,
+        "sell_reason": "MA20이탈(-0.2%)",
+        "buy_time": "",
+        "sell_time": "13:01",
+        "ai_score": 83
+      },
+      {
+        "code": "336260",
+        "buy_price": 64000.0,
+        "sell_price": 63800.0,
+        "profit_rate": -0.31,
+        "sell_reason": "MA20이탈(-0.3%)",
+        "buy_time": "",
+        "sell_time": "13:01",
+        "ai_score": 57
+      },
+      {
+        "code": "336260",
+        "buy_price": 64000.0,
+        "sell_price": 64000.0,
+        "profit_rate": 0.0,
+        "sell_reason": "MA20이탈(+0.0%)",
+        "buy_time": "",
+        "sell_time": "13:02",
+        "ai_score": 57
+      },
+      {
+        "code": "016360",
+        "buy_price": 116800.0,
+        "sell_price": 116500.0,
+        "profit_rate": -0.26,
+        "sell_reason": "MA20이탈(-0.3%)",
+        "buy_time": "",
+        "sell_time": "13:02",
+        "ai_score": 83
+      },
+      {
+        "code": "336260",
+        "buy_price": 63921.0526,
+        "sell_price": 63700.0,
+        "profit_rate": -0.35,
+        "sell_reason": "MA20이탈(-0.3%)",
+        "buy_time": "",
+        "sell_time": "13:02",
+        "ai_score": 57
+      },
+      {
+        "code": "016360",
+        "buy_price": 116800.0,
+        "sell_price": 116600.0,
+        "profit_rate": -0.17,
+        "sell_reason": "MA20이탈(-0.2%)",
+        "buy_time": "",
+        "sell_time": "13:03",
+        "ai_score": 83
+      },
+      {
+        "code": "336260",
+        "buy_price": 63921.0526,
+        "sell_price": 63800.0,
+        "profit_rate": -0.19,
+        "sell_reason": "MA20이탈(-0.2%)",
+        "buy_time": "",
+        "sell_time": "13:03",
+        "ai_score": 57
+      },
+      {
+        "code": "016360",
+        "buy_price": 116600.0,
+        "sell_price": 116400.0,
+        "profit_rate": -0.17,
+        "sell_reason": "MA20이탈(-0.2%)",
+        "buy_time": "",
+        "sell_time": "13:03",
+        "ai_score": 83
+      },
+      {
+        "code": "336260",
+        "buy_price": 63800.0,
+        "sell_price": 63500.0,
+        "profit_rate": -0.47,
+        "sell_reason": "MA20이탈(-0.5%)",
+        "buy_time": "",
+        "sell_time": "13:03",
+        "ai_score": 57
+      },
+      {
+        "code": "016360",
+        "buy_price": 116600.0,
+        "sell_price": 116400.0,
+        "profit_rate": -0.17,
+        "sell_reason": "MA20이탈(-0.2%)",
+        "buy_time": "",
+        "sell_time": "13:04",
+        "ai_score": 83
+      },
+      {
+        "code": "336260",
+        "buy_price": 63800.0,
+        "sell_price": 63400.0,
+        "profit_rate": -0.63,
+        "sell_reason": "MA20이탈(-0.6%)",
+        "buy_time": "",
+        "sell_time": "13:04",
+        "ai_score": 57
+      },
+      {
+        "code": "016360",
+        "buy_price": 116500.0,
+        "sell_price": 116400.0,
+        "profit_rate": -0.09,
+        "sell_reason": "MA20이탈(-0.1%)",
+        "buy_time": "",
+        "sell_time": "13:05",
+        "ai_score": 83
+      },
+      {
+        "code": "336260",
+        "buy_price": 63500.0,
+        "sell_price": 63500.0,
+        "profit_rate": 0.0,
+        "sell_reason": "MA20이탈(+0.0%)",
+        "buy_time": "",
+        "sell_time": "13:05",
+        "ai_score": 57
+      },
+      {
+        "code": "016360",
+        "buy_price": 116500.0,
+        "sell_price": 116500.0,
+        "profit_rate": 0.0,
+        "sell_reason": "MA20이탈(+0.0%)",
+        "buy_time": "",
+        "sell_time": "13:05",
+        "ai_score": 83
+      },
+      {
+        "code": "336260",
+        "buy_price": 63500.0,
+        "sell_price": 63200.0,
+        "profit_rate": -0.47,
+        "sell_reason": "MA20이탈(-0.5%)",
+        "buy_time": "",
+        "sell_time": "13:05",
+        "ai_score": 57
+      },
+      {
+        "code": "KRW-ENA",
+        "buy_price": 139.0,
+        "sell_price": 136.0,
+        "profit_rate": -2.16,
+        "sell_reason": "급락감지(-5.52%)",
+        "buy_time": "",
+        "sell_time": "13:05",
+        "ai_score": null
+      },
+      {
+        "code": "016360",
+        "buy_price": 116600.0,
+        "sell_price": 116300.0,
+        "profit_rate": -0.26,
+        "sell_reason": "MA20이탈(-0.3%)",
+        "buy_time": "",
+        "sell_time": "13:06",
+        "ai_score": 83
+      },
+      {
+        "code": "336260",
+        "buy_price": 63300.0,
+        "sell_price": 63300.0,
+        "profit_rate": 0.0,
+        "sell_reason": "MA20이탈(+0.0%)",
+        "buy_time": "",
+        "sell_time": "13:06",
+        "ai_score": 57
+      },
+      {
+        "code": "016360",
+        "buy_price": 116600.0,
+        "sell_price": 116900.0,
+        "profit_rate": 0.26,
+        "sell_reason": "MA20이탈(+0.3%)",
+        "buy_time": "",
+        "sell_time": "13:06",
+        "ai_score": 83
+      },
+      {
+        "code": "336260",
+        "buy_price": 63300.0,
+        "sell_price": 63800.0,
+        "profit_rate": 0.79,
+        "sell_reason": "MA20이탈(+0.8%)",
+        "buy_time": "",
+        "sell_time": "13:06",
+        "ai_score": 57
+      },
+      {
+        "code": "016360",
+        "buy_price": 117000.0,
+        "sell_price": 117100.0,
+        "profit_rate": 0.09,
+        "sell_reason": "MA20이탈(+0.1%)",
+        "buy_time": "",
+        "sell_time": "13:07",
+        "ai_score": 83
+      },
+      {
+        "code": "336260",
+        "buy_price": 63900.0,
+        "sell_price": 63600.0,
+        "profit_rate": -0.47,
+        "sell_reason": "MA20이탈(-0.5%)",
+        "buy_time": "",
+        "sell_time": "13:07",
+        "ai_score": 57
+      },
+      {
+        "code": "016360",
+        "buy_price": 117000.0,
+        "sell_price": 117000.0,
+        "profit_rate": 0.0,
+        "sell_reason": "MA20이탈(+0.0%)",
+        "buy_time": "",
+        "sell_time": "13:08",
+        "ai_score": 83
+      },
+      {
+        "code": "336260",
+        "buy_price": 63900.0,
+        "sell_price": 63700.0,
+        "profit_rate": -0.31,
+        "sell_reason": "MA20이탈(-0.3%)",
+        "buy_time": "",
+        "sell_time": "13:08",
+        "ai_score": 57
+      },
+      {
+        "code": "016360",
+        "buy_price": 117100.0,
+        "sell_price": 117100.0,
+        "profit_rate": 0.0,
+        "sell_reason": "MA20이탈(+0.0%)",
+        "buy_time": "",
+        "sell_time": "13:08",
+        "ai_score": 83
+      },
+      {
+        "code": "336260",
+        "buy_price": 63800.0,
+        "sell_price": 63700.0,
+        "profit_rate": -0.16,
+        "sell_reason": "MA20이탈(-0.2%)",
+        "buy_time": "",
+        "sell_time": "13:08",
+        "ai_score": 57
+      },
+      {
+        "code": "016360",
+        "buy_price": 117100.0,
+        "sell_price": 117100.0,
+        "profit_rate": 0.0,
+        "sell_reason": "MA20이탈(+0.0%)",
+        "buy_time": "",
+        "sell_time": "13:09",
+        "ai_score": 83
+      },
+      {
+        "code": "336260",
+        "buy_price": 63800.0,
+        "sell_price": 63700.0,
+        "profit_rate": -0.16,
+        "sell_reason": "MA20이탈(-0.2%)",
+        "buy_time": "",
+        "sell_time": "13:09",
+        "ai_score": 57
+      },
+      {
+        "code": "016360",
+        "buy_price": 117000.0,
+        "sell_price": 116900.0,
+        "profit_rate": -0.09,
+        "sell_reason": "MA20이탈(-0.1%)",
+        "buy_time": "",
+        "sell_time": "13:09",
+        "ai_score": 83
+      },
+      {
+        "code": "336260",
+        "buy_price": 63700.0,
+        "sell_price": 63700.0,
+        "profit_rate": 0.0,
+        "sell_reason": "MA20이탈(+0.0%)",
+        "buy_time": "",
+        "sell_time": "13:09",
+        "ai_score": 57
+      },
+      {
+        "code": "336260",
+        "buy_price": 63700.0,
+        "sell_price": 63800.0,
+        "profit_rate": 0.16,
+        "sell_reason": "MA20이탈(+0.2%)",
+        "buy_time": "",
+        "sell_time": "13:10",
+        "ai_score": 57
+      },
+      {
+        "code": "016360",
+        "buy_price": 117000.0,
+        "sell_price": 117000.0,
+        "profit_rate": 0.0,
+        "sell_reason": "MA20이탈(+0.0%)",
+        "buy_time": "",
+        "sell_time": "13:11",
+        "ai_score": 83
+      },
+      {
+        "code": "336260",
+        "buy_price": 63900.0,
+        "sell_price": 63700.0,
+        "profit_rate": -0.31,
+        "sell_reason": "MA20이탈(-0.3%)",
+        "buy_time": "",
+        "sell_time": "13:11",
+        "ai_score": 57
+      },
+      {
+        "code": "016360",
+        "buy_price": 117000.0,
+        "sell_price": 117000.0,
+        "profit_rate": 0.0,
+        "sell_reason": "MA20이탈(+0.0%)",
+        "buy_time": "",
+        "sell_time": "13:11",
+        "ai_score": 83
+      },
+      {
+        "code": "336260",
+        "buy_price": 63900.0,
+        "sell_price": 63700.0,
+        "profit_rate": -0.31,
+        "sell_reason": "MA20이탈(-0.3%)",
+        "buy_time": "",
+        "sell_time": "13:11",
+        "ai_score": 57
+      },
+      {
+        "code": "016360",
+        "buy_price": 117200.0,
+        "sell_price": 117100.0,
+        "profit_rate": -0.09,
+        "sell_reason": "MA20이탈(-0.1%)",
+        "buy_time": "",
+        "sell_time": "13:12",
+        "ai_score": 83
+      },
+      {
+        "code": "336260",
+        "buy_price": 63800.0,
+        "sell_price": 63700.0,
+        "profit_rate": -0.16,
+        "sell_reason": "MA20이탈(-0.2%)",
+        "buy_time": "",
+        "sell_time": "13:12",
+        "ai_score": 57
+      },
+      {
+        "code": "016360",
+        "buy_price": 117200.0,
+        "sell_price": 117000.0,
+        "profit_rate": -0.17,
+        "sell_reason": "MA20이탈(-0.2%)",
+        "buy_time": "",
+        "sell_time": "13:12",
+        "ai_score": 83
+      },
+      {
+        "code": "336260",
+        "buy_price": 63800.0,
+        "sell_price": 63500.0,
+        "profit_rate": -0.47,
+        "sell_reason": "MA20이탈(-0.5%)",
+        "buy_time": "",
+        "sell_time": "13:12",
+        "ai_score": 57
+      },
+      {
+        "code": "016360",
+        "buy_price": 117100.0,
+        "sell_price": 117100.0,
+        "profit_rate": 0.0,
+        "sell_reason": "MA20이탈(+0.0%)",
+        "buy_time": "",
+        "sell_time": "13:13",
+        "ai_score": 83
+      },
+      {
+        "code": "336260",
+        "buy_price": 63600.0,
+        "sell_price": 63800.0,
+        "profit_rate": 0.31,
+        "sell_reason": "MA20이탈(+0.3%)",
+        "buy_time": "",
+        "sell_time": "13:13",
+        "ai_score": 57
+      },
+      {
+        "code": "336260",
+        "buy_price": 63600.0,
+        "sell_price": 63900.0,
+        "profit_rate": 0.47,
+        "sell_reason": "MA20이탈(+0.5%)",
+        "buy_time": "",
+        "sell_time": "13:13",
+        "ai_score": 57
+      },
+      {
+        "code": "016360",
+        "buy_price": 117200.0,
+        "sell_price": 117200.0,
+        "profit_rate": 0.0,
+        "sell_reason": "MA20이탈(+0.0%)",
+        "buy_time": "",
+        "sell_time": "13:14",
+        "ai_score": 83
+      },
+      {
+        "code": "336260",
+        "buy_price": 63900.0,
+        "sell_price": 64100.0,
+        "profit_rate": 0.31,
+        "sell_reason": "MA20이탈(+0.3%)",
+        "buy_time": "",
+        "sell_time": "13:14",
+        "ai_score": 57
+      },
+      {
+        "code": "016360",
+        "buy_price": 117200.0,
+        "sell_price": 117000.0,
+        "profit_rate": -0.17,
+        "sell_reason": "MA20이탈(-0.2%)",
+        "buy_time": "",
+        "sell_time": "13:15",
+        "ai_score": 83
+      },
+      {
+        "code": "336260",
+        "buy_price": 63900.0,
+        "sell_price": 64300.0,
+        "profit_rate": 0.63,
+        "sell_reason": "MA20이탈(+0.6%)",
+        "buy_time": "",
+        "sell_time": "13:15",
+        "ai_score": 57
+      },
+      {
+        "code": "016360",
+        "buy_price": 117200.0,
+        "sell_price": 117000.0,
+        "profit_rate": -0.17,
+        "sell_reason": "MA20이탈(-0.2%)",
+        "buy_time": "",
+        "sell_time": "13:15",
+        "ai_score": 83
+      },
+      {
+        "code": "336260",
+        "buy_price": 64300.0,
+        "sell_price": 64300.0,
+        "profit_rate": 0.0,
+        "sell_reason": "MA20이탈(+0.0%)",
+        "buy_time": "",
+        "sell_time": "13:15",
+        "ai_score": 57
+      },
+      {
+        "code": "016360",
+        "buy_price": 117200.0,
+        "sell_price": 117000.0,
+        "profit_rate": -0.17,
+        "sell_reason": "MA20이탈(-0.2%)",
+        "buy_time": "",
+        "sell_time": "13:16",
+        "ai_score": 83
+      },
+      {
+        "code": "336260",
+        "buy_price": 64300.0,
+        "sell_price": 64200.0,
+        "profit_rate": -0.16,
+        "sell_reason": "MA20이탈(-0.2%)",
+        "buy_time": "",
+        "sell_time": "13:16",
+        "ai_score": 57
+      },
+      {
+        "code": "016360",
+        "buy_price": 117100.0,
+        "sell_price": 116900.0,
+        "profit_rate": -0.17,
+        "sell_reason": "MA20이탈(-0.2%)",
+        "buy_time": "",
+        "sell_time": "13:16",
+        "ai_score": 83
+      },
+      {
+        "code": "336260",
+        "buy_price": 64300.0,
+        "sell_price": 64500.0,
+        "profit_rate": 0.31,
+        "sell_reason": "MA20이탈(+0.3%)",
+        "buy_time": "",
+        "sell_time": "13:16",
+        "ai_score": 57
+      },
+      {
+        "code": "016360",
+        "buy_price": 117100.0,
+        "sell_price": 117000.0,
+        "profit_rate": -0.09,
+        "sell_reason": "MA20이탈(-0.1%)",
+        "buy_time": "",
+        "sell_time": "13:17",
+        "ai_score": 83
+      },
+      {
+        "code": "336260",
+        "buy_price": 64300.0,
+        "sell_price": 64700.0,
+        "profit_rate": 0.62,
+        "sell_reason": "MA20이탈(+0.6%)",
+        "buy_time": "",
+        "sell_time": "13:17",
+        "ai_score": 57
+      },
+      {
+        "code": "016360",
+        "buy_price": 117100.0,
+        "sell_price": 117100.0,
+        "profit_rate": 0.0,
+        "sell_reason": "MA20이탈(+0.0%)",
+        "buy_time": "",
+        "sell_time": "13:18",
+        "ai_score": 83
+      },
+      {
+        "code": "336260",
+        "buy_price": 64700.0,
+        "sell_price": 64800.0,
+        "profit_rate": 0.15,
+        "sell_reason": "MA20이탈(+0.2%)",
+        "buy_time": "",
+        "sell_time": "13:18",
+        "ai_score": 57
+      },
+      {
+        "code": "016360",
+        "buy_price": 117100.0,
+        "sell_price": 117100.0,
+        "profit_rate": 0.0,
+        "sell_reason": "MA20이탈(+0.0%)",
+        "buy_time": "",
+        "sell_time": "13:18",
+        "ai_score": 83
+      },
+      {
+        "code": "336260",
+        "buy_price": 64700.0,
+        "sell_price": 65100.0,
+        "profit_rate": 0.62,
+        "sell_reason": "MA20이탈(+0.6%)",
+        "buy_time": "",
+        "sell_time": "13:18",
+        "ai_score": 57
+      },
+      {
+        "code": "016360",
+        "buy_price": 117200.0,
+        "sell_price": 116900.0,
+        "profit_rate": -0.26,
+        "sell_reason": "MA20이탈(-0.3%)",
+        "buy_time": "",
+        "sell_time": "13:19",
+        "ai_score": 83
+      },
+      {
+        "code": "336260",
+        "buy_price": 65200.0,
+        "sell_price": 65100.0,
+        "profit_rate": -0.15,
+        "sell_reason": "MA20이탈(-0.2%)",
+        "buy_time": "",
+        "sell_time": "13:19",
+        "ai_score": 57
+      },
+      {
+        "code": "016360",
+        "buy_price": 117200.0,
+        "sell_price": 117100.0,
+        "profit_rate": -0.09,
+        "sell_reason": "MA20이탈(-0.1%)",
+        "buy_time": "",
+        "sell_time": "13:19",
+        "ai_score": 83
+      },
+      {
+        "code": "336260",
+        "buy_price": 65200.0,
+        "sell_price": 65100.0,
+        "profit_rate": -0.15,
+        "sell_reason": "MA20이탈(-0.2%)",
+        "buy_time": "",
+        "sell_time": "13:19",
+        "ai_score": 57
+      },
+      {
+        "code": "016360",
+        "buy_price": 117200.0,
+        "sell_price": 117100.0,
+        "profit_rate": -0.09,
+        "sell_reason": "MA20이탈(-0.1%)",
+        "buy_time": "",
+        "sell_time": "13:20",
+        "ai_score": 83
+      },
+      {
+        "code": "336260",
+        "buy_price": 65100.0,
+        "sell_price": 64800.0,
+        "profit_rate": -0.46,
+        "sell_reason": "MA20이탈(-0.5%)",
+        "buy_time": "",
+        "sell_time": "13:20",
+        "ai_score": 57
+      },
+      {
+        "code": "016360",
+        "buy_price": 117200.0,
+        "sell_price": 116900.0,
+        "profit_rate": -0.26,
+        "sell_reason": "MA20이탈(-0.3%)",
+        "buy_time": "",
+        "sell_time": "13:21",
+        "ai_score": 83
+      },
+      {
+        "code": "336260",
+        "buy_price": 65100.0,
+        "sell_price": 64700.0,
+        "profit_rate": -0.61,
+        "sell_reason": "MA20이탈(-0.6%)",
+        "buy_time": "",
+        "sell_time": "13:21",
+        "ai_score": 57
+      },
+      {
+        "code": "336260",
+        "buy_price": 64700.0,
+        "sell_price": 64600.0,
+        "profit_rate": -0.15,
+        "sell_reason": "MA20이탈(-0.2%)",
+        "buy_time": "",
+        "sell_time": "13:21",
+        "ai_score": 57
+      },
+      {
+        "code": "336260",
+        "buy_price": 64700.0,
+        "sell_price": 64500.0,
+        "profit_rate": -0.31,
+        "sell_reason": "MA20이탈(-0.3%)",
+        "buy_time": "",
+        "sell_time": "13:22",
+        "ai_score": 57
+      },
+      {
+        "code": "336260",
+        "buy_price": 64600.0,
+        "sell_price": 64600.0,
+        "profit_rate": 0.0,
+        "sell_reason": "MA20이탈(+0.0%)",
+        "buy_time": "",
+        "sell_time": "13:22",
+        "ai_score": 57
+      },
+      {
+        "code": "336260",
+        "buy_price": 64600.0,
+        "sell_price": 64500.0,
+        "profit_rate": -0.15,
+        "sell_reason": "MA20이탈(-0.2%)",
+        "buy_time": "",
+        "sell_time": "13:23",
+        "ai_score": 57
+      },
+      {
+        "code": "336260",
+        "buy_price": 64500.0,
+        "sell_price": 64500.0,
+        "profit_rate": 0.0,
+        "sell_reason": "MA20이탈(+0.0%)",
+        "buy_time": "",
+        "sell_time": "13:23",
+        "ai_score": 57
+      },
+      {
+        "code": "336260",
+        "buy_price": 64500.0,
+        "sell_price": 64500.0,
+        "profit_rate": 0.0,
+        "sell_reason": "MA20이탈(+0.0%)",
+        "buy_time": "",
+        "sell_time": "13:24",
+        "ai_score": 57
+      },
+      {
+        "code": "336260",
+        "buy_price": 64500.0,
+        "sell_price": 64400.0,
+        "profit_rate": -0.16,
+        "sell_reason": "MA20이탈(-0.2%)",
+        "buy_time": "",
+        "sell_time": "13:25",
+        "ai_score": 57
+      },
+      {
+        "code": "336260",
+        "buy_price": 64500.0,
+        "sell_price": 64500.0,
+        "profit_rate": 0.0,
+        "sell_reason": "MA20이탈(+0.0%)",
+        "buy_time": "",
+        "sell_time": "13:25",
+        "ai_score": 57
+      },
+      {
+        "code": "336260",
+        "buy_price": 64400.0,
+        "sell_price": 64400.0,
+        "profit_rate": 0.0,
+        "sell_reason": "MA20이탈(+0.0%)",
+        "buy_time": "",
+        "sell_time": "13:26",
+        "ai_score": 57
+      },
+      {
+        "code": "336260",
+        "buy_price": 64400.0,
+        "sell_price": 64400.0,
+        "profit_rate": 0.0,
+        "sell_reason": "MA20이탈(+0.0%)",
+        "buy_time": "",
+        "sell_time": "13:26",
+        "ai_score": 57
+      },
+      {
+        "code": "336260",
+        "buy_price": 64500.0,
+        "sell_price": 64400.0,
+        "profit_rate": -0.16,
+        "sell_reason": "MA20이탈(-0.2%)",
+        "buy_time": "",
+        "sell_time": "13:27",
+        "ai_score": 57
+      },
+      {
+        "code": "336260",
+        "buy_price": 64500.0,
+        "sell_price": 64200.0,
+        "profit_rate": -0.47,
+        "sell_reason": "MA20이탈(-0.5%)",
+        "buy_time": "",
+        "sell_time": "13:27",
+        "ai_score": 57
+      },
+      {
+        "code": "336260",
+        "buy_price": 64200.0,
+        "sell_price": 64400.0,
+        "profit_rate": 0.31,
+        "sell_reason": "MA20이탈(+0.3%)",
+        "buy_time": "",
+        "sell_time": "13:28",
+        "ai_score": 57
+      },
+      {
+        "code": "336260",
+        "buy_price": 64400.0,
+        "sell_price": 64100.0,
+        "profit_rate": -0.47,
+        "sell_reason": "MA20이탈(-0.5%)",
+        "buy_time": "",
+        "sell_time": "13:36",
+        "ai_score": 57
+      },
+      {
+        "code": "016360",
+        "buy_price": 116400.0,
+        "sell_price": 116500.0,
+        "profit_rate": 0.09,
+        "sell_reason": "MA20이탈(+0.1%)",
+        "buy_time": "",
+        "sell_time": "13:37",
+        "ai_score": 83
+      },
+      {
+        "code": "039490",
+        "buy_price": 342500.0,
+        "sell_price": 343500.0,
+        "profit_rate": 0.29,
+        "sell_reason": "MA20이탈(+0.3%)",
+        "buy_time": "",
+        "sell_time": "13:38",
+        "ai_score": 0
+      },
+      {
+        "code": "042660",
+        "buy_price": 125800.0,
+        "sell_price": 120700.0,
+        "profit_rate": -4.05,
+        "sell_reason": "MA40이탈(-4.1%)",
+        "buy_time": "",
+        "sell_time": "13:49",
+        "ai_score": 0
+      },
+      {
+        "code": "336260",
+        "buy_price": 64000.0,
+        "sell_price": 63800.0,
+        "profit_rate": -0.31,
+        "sell_reason": "MA40이탈(-0.3%)",
+        "buy_time": "",
+        "sell_time": "13:49",
+        "ai_score": 57
+      },
+      {
+        "code": "079550",
+        "buy_price": 836000.0,
+        "sell_price": 836000.0,
+        "profit_rate": 0.0,
+        "sell_reason": "MA40이탈(+0.0%)",
+        "buy_time": "",
+        "sell_time": "14:41",
+        "ai_score": 74
+      },
+      {
+        "code": "241560",
+        "buy_price": 63500.0,
+        "sell_price": 63500.0,
+        "profit_rate": 0.0,
+        "sell_reason": "MA40이탈(+0.0%)",
+        "buy_time": "",
+        "sell_time": "14:46",
+        "ai_score": 98
       }
     ]
   },
