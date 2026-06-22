@@ -519,10 +519,6 @@ def get_trend_data(top_n: int = 20) -> list:
         if vol_avg_all == 0 or vol_avg_recent >= vol_avg_all * VOL_PULL_RATIO: continue
 
         # ★ 거래대금 필터 — 최근 5일 평균 거래대금 50억 미달 제외 (잡주 방지)
-        recent_trading_value = (curr_price * vol_avg_recent) / 100_000_000  # 억원
-        if recent_trading_value < MIN_TRADING_VALUE_EOK:
-            continue
-
         f_net_raw  = [r[3] for r in rows]
         i_net_raw  = [r[4] for r in rows]
         supply_len = max(sum(1 for v in f_net_raw if v is not None),
