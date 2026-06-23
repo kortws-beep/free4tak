@@ -4,13 +4,13 @@
   "pending_cmd": null,
   "cmd_result": null,
   "last_status": {
-    "cash": 279211,
-    "total_profit": -269599,
+    "cash": 0,
+    "total_profit": 0,
     "positions": 5,
     "score_enter": 75,
-    "last_update": "08:42:13",
+    "last_update": "09:04:47",
     "market_status": "normal",
-    "market_rate": 0.69,
+    "market_rate": -0.15,
     "daily_loss": 0,
     "code_name_map": {},
     "new_codes": [],
@@ -18,46 +18,46 @@
       "001820": {
         "name": "001820",
         "entry_price": 187660,
-        "current": 167000,
-        "rate": -11.01,
+        "current": 187660,
+        "rate": 0.0,
         "qty": 5,
         "buy_tag": ""
       },
       "028050": {
         "name": "028050",
         "entry_price": 51300,
-        "current": 49900,
-        "rate": -2.73,
+        "current": 51300,
+        "rate": 0.0,
         "qty": 14,
         "buy_tag": ""
       },
       "035420": {
         "name": "035420",
         "entry_price": 251000,
-        "current": 222000,
-        "rate": -11.55,
+        "current": 251000,
+        "rate": 0.0,
         "qty": 4,
         "buy_tag": ""
       },
       "089030": {
         "name": "089030",
         "entry_price": 63435,
-        "current": 61100,
-        "rate": -3.68,
+        "current": 63435,
+        "rate": 0.0,
         "qty": 17,
         "buy_tag": ""
       },
       "131290": {
         "name": "131290",
         "entry_price": 255000,
-        "current": 259500,
-        "rate": 1.76,
+        "current": 255000,
+        "rate": 0.0,
         "qty": 2,
         "buy_tag": ""
       }
     }
   },
-  "last_update": "08:42:14",
+  "last_update": "09:04:50",
   "sold_today": {},
   "sold_today_date": "2026-06-23",
   "daily_loss": 0,
