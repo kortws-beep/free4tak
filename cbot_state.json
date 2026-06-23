@@ -3,21 +3,14 @@
   "pending_cmd": null,
   "cmd_result": "✅ KRW-BTC 즉시매도 완료",
   "last_status": {
-    "krw": 7003,
-    "total_profit": -16540,
-    "daily_pnl": 0,
-    "positions": 1,
-    "positions_detail": {
-      "KRW-ICX": {
-        "current": 41,
-        "entry_price": 43,
-        "qty": 6880.07438405,
-        "rate": -5.51
-      }
-    },
-    "daily_loss": 0,
+    "krw": 288258,
+    "total_profit": 0,
+    "daily_pnl": -17889,
+    "positions": 0,
+    "positions_detail": {},
+    "daily_loss": 1,
     "market_status": "normal",
-    "btc_rate": 1.2736516599999999,
+    "btc_rate": -0.09726821000000001,
     "fear_greed": 23,
     "is_night": false,
     "coin_pool": [
@@ -33,10 +26,10 @@
       "KRW-XLM",
       "KRW-LAYER",
       "KRW-ONDO",
-      "KRW-STRAX",
       "KRW-AXS",
-      "KRW-BLEND",
+      "KRW-STRAX",
       "KRW-DOGE",
+      "KRW-BLEND",
       "KRW-SLX",
       "KRW-SAHARA",
       "KRW-NEAR",
@@ -47,10 +40,10 @@
       "KRW-TRUMP",
       "KRW-W",
       "KRW-TRUST",
-      "KRW-IP",
       "KRW-MMT",
-      "KRW-WAVES",
-      "KRW-AERGO"
+      "KRW-AERGO",
+      "KRW-ORCA",
+      "KRW-IP"
     ],
     "coins": [
       "KRW-BTC",
@@ -65,10 +58,10 @@
       "KRW-XLM",
       "KRW-LAYER",
       "KRW-ONDO",
-      "KRW-STRAX",
       "KRW-AXS",
-      "KRW-BLEND",
+      "KRW-STRAX",
       "KRW-DOGE",
+      "KRW-BLEND",
       "KRW-SLX",
       "KRW-SAHARA",
       "KRW-NEAR",
@@ -79,32 +72,16 @@
       "KRW-TRUMP",
       "KRW-W",
       "KRW-TRUST",
-      "KRW-IP",
       "KRW-MMT",
-      "KRW-WAVES",
-      "KRW-AERGO"
+      "KRW-AERGO",
+      "KRW-ORCA",
+      "KRW-IP"
     ],
     "seed": "30만원 소액 모드"
   },
-  "last_update": "09:04:36",
+  "last_update": "09:24:12",
   "daily_loss": 0,
   "loss_date": "2026-06-23",
-  "positions": {
-    "KRW-ICX": {
-      "entry_price": 43.60417973,
-      "qty": 6880.07438405,
-      "current": 41.2
-    }
-  },
-  "peak_tracker": {
-    "KRW-ICX": {
-      "peak_rate": 0.020544366974610706,
-      "peak_price": 44.2,
-      "stage": 0,
-      "stop_price": 41.0,
-      "target1": 47.0,
-      "target_next": 47.0,
-      "atr_val": 1.1415444596412412
-    }
-  }
+  "positions": {},
+  "peak_tracker": {}
 }
