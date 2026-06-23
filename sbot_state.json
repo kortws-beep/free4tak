@@ -5,12 +5,12 @@
   "cmd_result": null,
   "last_status": {
     "cash": 279211,
-    "total_profit": -514499,
+    "total_profit": -635699,
     "positions": 5,
     "score_enter": 75,
-    "last_update": "09:42:56",
-    "market_status": "normal",
-    "market_rate": -1.32,
+    "last_update": "12:36:36",
+    "market_status": "stop",
+    "market_rate": -6.27,
     "daily_loss": 0,
     "code_name_map": {
       "000150": "두산",
@@ -164,7 +164,16 @@
       "006400": "삼성SDI",
       "004310": "현대약품",
       "000990": "DB하이텍",
-      "122640": "예스티"
+      "122640": "예스티",
+      "272110": "케이엔제이",
+      "356680": "엑스게이트",
+      "003230": "삼양식품",
+      "198440": "강동씨앤엘",
+      "026940": "부국철강",
+      "204270": "제이앤티씨",
+      "000270": "기아",
+      "006220": "제주은행",
+      "000720": "현대건설"
     },
     "new_codes": [
       "347850",
@@ -201,52 +210,53 @@
       "005290",
       "281820",
       "240810",
-      "003160"
+      "003160",
+      "042700"
     ],
     "positions_detail": {
       "001820": {
         "name": "삼화콘덴서",
         "entry_price": 187660,
-        "current": 155900,
-        "rate": -16.92,
+        "current": 148800,
+        "rate": -20.71,
         "qty": 5,
         "buy_tag": ""
       },
       "028050": {
         "name": "삼성E&A",
         "entry_price": 51300,
-        "current": 46900,
-        "rate": -8.58,
+        "current": 45050,
+        "rate": -12.18,
         "qty": 14,
         "buy_tag": ""
       },
       "035420": {
         "name": "NAVER",
         "entry_price": 251000,
-        "current": 210000,
-        "rate": -16.33,
+        "current": 205000,
+        "rate": -18.33,
         "qty": 4,
         "buy_tag": ""
       },
       "089030": {
         "name": "테크윙",
         "entry_price": 63435,
-        "current": 55900,
-        "rate": -11.88,
+        "current": 54500,
+        "rate": -14.09,
         "qty": 17,
         "buy_tag": ""
       },
       "131290": {
         "name": "티에스이",
         "entry_price": 255000,
-        "current": 254000,
-        "rate": -0.39,
+        "current": 246000,
+        "rate": -3.53,
         "qty": 2,
         "buy_tag": ""
       }
     }
   },
-  "last_update": "09:42:57",
+  "last_update": "12:36:36",
   "sold_today": {},
   "sold_today_date": "2026-06-23",
   "daily_loss": 0,
