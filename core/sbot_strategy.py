@@ -36,6 +36,7 @@ from typing import Optional, Callable
 # ==========================================================
 ATR_STOP_MULT    = 2.0    # 손절: 매수가 - ATR × 2
 ATR_TARGET_MULT  = 3.0    # 목표: 매수가 + ATR × 3
+TARGET1_CAP_RATE = 0.20   # ★ 목표가1 상한 +20% (ATR×3과 비교해 작은 값 사용)
 ATR_RAISE_MULT   = 1.0    # 목표1 달성 후 손절 올림: 매수가 + ATR × 1
 ATR_TRAIL_MULT   = 1.5    # 트레일링: 고점 - ATR × 1.5
 
@@ -157,7 +158,12 @@ class SwingStrategy:
         if atr_rate > 0:
             atr_val  = entry * atr_rate
             stop     = round(entry - atr_val * ATR_STOP_MULT, 0)
-            target1  = round(entry + atr_val * ATR_TARGET_MULT, 0)
+            # ★ 목표가1 상한 캡 (2026-06-23) — ATR×3과 +20% 중 작은 값
+            #   고변동성 종목(예: 테크윙)은 ATR×3이 +50~80%까지 치솟아
+            #   1차 목표가 사실상 도달불가능해지는 문제 방지
+            target1_atr = entry + atr_val * ATR_TARGET_MULT
+            target1_cap = entry * (1 + TARGET1_CAP_RATE)
+            target1     = round(min(target1_atr, target1_cap), 0)
         else:
             # ATR 없을 때 폴백
             atr_val  = entry * abs(FALLBACK_STOP) / ATR_STOP_MULT
