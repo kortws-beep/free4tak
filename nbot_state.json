@@ -1,14 +1,14 @@
 {
   "telegram_event": {
     "keywords": [
-      "영업이익"
+      "상장"
     ],
     "themes": [
-      "실적개선"
+      "IPO"
     ],
     "score": 10,
-    "text": "1분기 기업 영업이익률 13.2%로 역대 최대… 삼성전자·SK하이닉스가 절반 이상 기여\nhttps://n.news.naver.com/mnews/article/366/0001173663",
-    "time": "12:04:54"
+    "text": "메모리반도체 2배 레버리지, 오늘 미국서 상장…티커는 ‘RAM’\nhttps://n.news.naver.com/mnews/article/009/0005698136?rc=N&ntype=RANKING&sid=101",
+    "time": "14:52:36"
   },
   "disclosure_event": {
     "code": "053610",

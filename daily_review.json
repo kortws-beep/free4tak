@@ -1,49 +1,87 @@
 {
-  "date": "2026-06-22",
-  "saved_at": "2026-06-22 20:10",
+  "date": "2026-06-23",
+  "saved_at": "2026-06-23 20:10",
   "summary": {
-    "today": "2026-06-22",
-    "trades": 2,
-    "wins": 0,
-    "losses": 2,
-    "win_rate": 0.0,
-    "avg_profit": -11.46,
-    "total_pnl": -233400,
-    "avg_win": 0,
-    "avg_loss": -11.46,
+    "today": "2026-06-23",
+    "trades": 5,
+    "wins": 1,
+    "losses": 4,
+    "win_rate": 20.0,
+    "avg_profit": -5.59,
+    "total_pnl": -210620,
+    "avg_win": 0.0,
+    "avg_loss": -6.99,
     "by_hour": {},
     "by_reason": {
       "손절": {
-        "count": 1,
-        "avg_profit": -20.61,
-        "pct": 50.0
+        "count": 4,
+        "avg_profit": -6.99,
+        "pct": 80.0
       },
       "기타": {
         "count": 1,
-        "avg_profit": -2.3,
-        "pct": 50.0
+        "avg_profit": 0.0,
+        "pct": 20.0
       }
     },
-    "by_stock": [],
+    "by_stock": [
+      {
+        "code": "012510",
+        "trades": 2,
+        "win_rate": 50.0,
+        "avg_profit": -0.04,
+        "total": -0.08
+      }
+    ],
     "trade_details": [
       {
-        "code": "204320",
-        "buy_price": 75700.0,
-        "sell_price": 60100.0,
-        "profit_rate": -20.61,
-        "sell_reason": "손절(-20.61%)",
+        "code": "012510",
+        "buy_price": 120100.0,
+        "sell_price": 120100.0,
+        "profit_rate": 0.0,
+        "sell_reason": "목표1익절50%(+0.0%)",
         "buy_time": "",
-        "sell_time": "09:20",
+        "sell_time": "09:10",
+        "ai_score": 81
+      },
+      {
+        "code": "012510",
+        "buy_price": 120100.0,
+        "sell_price": 120000.0,
+        "profit_rate": -0.08,
+        "sell_reason": "손절(-0.1%)",
+        "buy_time": "",
+        "sell_time": "09:11",
+        "ai_score": 81
+      },
+      {
+        "code": "KRW-ICX",
+        "buy_price": 43.6,
+        "sell_price": 41.0,
+        "profit_rate": -5.96,
+        "sell_reason": "손절(-5.97%)",
+        "buy_time": "",
+        "sell_time": "09:17",
         "ai_score": null
       },
       {
-        "code": "307950",
-        "buy_price": 653000.0,
-        "sell_price": 638000.0,
-        "profit_rate": -2.3,
-        "sell_reason": "MA40이탈(-2.3%)",
+        "code": "388790",
+        "buy_price": 6462.3288,
+        "sell_price": 5580.0,
+        "profit_rate": -13.65,
+        "sell_reason": "손절(-13.7%)",
         "buy_time": "",
-        "sell_time": "10:11",
+        "sell_time": "10:50",
+        "ai_score": 74
+      },
+      {
+        "code": "403870",
+        "buy_price": 57782.3529,
+        "sell_price": 53000.0,
+        "profit_rate": -8.28,
+        "sell_reason": "손절(-8.3%)",
+        "buy_time": "",
+        "sell_time": "15:20",
         "ai_score": 0
       }
     ]
