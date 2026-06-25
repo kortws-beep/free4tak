@@ -63,7 +63,7 @@ ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
 # 오늘 복기 데이터 수집
 # ============================================================
 def get_today_summary() -> dict:
-    """오늘 매매 요약 데이터 수집"""
+    """오늘 매매 요약 데이터 수집 (sbot+sbo2 기준)"""
     today = datetime.datetime.now().strftime("%Y-%m-%d")
     pa = PerformanceAnalyzer(TRADE_DB)
 
@@ -75,6 +75,8 @@ def get_today_summary() -> dict:
         cols = [c[1] for c in cur]
         c_code = "market as code" if "market" in cols and "code" not in cols else "code"
         c_score = "ai_score" if "ai_score" in cols else "0 as ai_score"
+        # ★ sbot/sbo2 기준 복기 — bot_type 컬럼이 있을 때만 필터 적용
+        bot_filter = "AND bot_type IN ('sbot', 'sbo2')" if "bot_type" in cols else ""
 
         rows = conn.execute(f"""
             SELECT {c_code}, buy_price, sell_price, qty,
@@ -84,6 +86,7 @@ def get_today_summary() -> dict:
             WHERE sell_price IS NOT NULL AND sell_price > 0
               AND profit_rate > -99
               AND date(sell_time) = ?
+              {bot_filter}
             ORDER BY sell_time
         """, (today,)).fetchall()
         conn.close()
@@ -148,10 +151,47 @@ def get_today_summary() -> dict:
 # ============================================================
 # 최근 7일 누적 패턴
 # ============================================================
+def _fetch_trades_sbot_sbo2(days: int = 7) -> list:
+    """
+    daily_review 전용 — sbot/sbo2 기준 최근 N일 매매 이력 조회.
+    PerformanceAnalyzer._fetch_trades()와 동일한 컬럼 순서를 유지하여
+    by_hour()/by_sell_reason() 등 기존 분석 함수와 그대로 호환되게 한다.
+    (performance.py 자체는 수정하지 않음 — 다른 호출부 영향 차단)
+    """
+    try:
+        conn = sqlite3.connect(TRADE_DB, timeout=10)
+        conn.execute("PRAGMA query_only = ON")
+        cur = conn.execute("PRAGMA table_info(master_trades)").fetchall()
+        cols = [c[1] for c in cur]
+        c_code = "market as code" if "market" in cols and "code" not in cols else "code"
+        c_score = "ai_score" if "ai_score" in cols else "0 as ai_score"
+        bot_filter = "AND bot_type IN ('sbot', 'sbo2')" if "bot_type" in cols else ""
+
+        cutoff = (datetime.datetime.now()
+                  - datetime.timedelta(days=days)).strftime("%Y-%m-%d")
+
+        rows = conn.execute(f"""
+            SELECT {c_code}, buy_price, sell_price, qty,
+                   profit_rate, sell_reason, buy_time, sell_time,
+                   {c_score}, '' as market_status
+            FROM master_trades
+            WHERE sell_price IS NOT NULL AND sell_price > 0
+              AND profit_rate > -99
+              AND sell_time >= ?
+              {bot_filter}
+            ORDER BY sell_time ASC
+        """, (cutoff,)).fetchall()
+        conn.close()
+        return rows
+    except Exception as e:
+        print(f"⚠️ 7일 이력 조회 오류: {e}")
+        return []
+
+
 def get_weekly_pattern() -> dict:
-    """최근 7일 패턴 분석 — 반복되는 실수 감지"""
+    """최근 7일 패턴 분석 — 반복되는 실수 감지 (sbot+sbo2 기준)"""
     pa = PerformanceAnalyzer(TRADE_DB)
-    trades = pa._fetch_trades(days=7)
+    trades = _fetch_trades_sbot_sbo2(days=7)
     if not trades:
         return {}
 
