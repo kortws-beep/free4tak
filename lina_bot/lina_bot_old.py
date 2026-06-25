@@ -1,6 +1,5 @@
 import asyncio
 import os
-import subprocess
 import discord
 import aiohttp
 import datetime
@@ -676,98 +675,6 @@ async def daily_tele_swing_afternoon():
 async def before_daily_tele_swing_afternoon():
     await client.wait_until_ready()
 
-# ===================================================
-# 🛡️ API 토큰/인증 에러 감시 + 자동 재시작 (1분 주기)
-# ===================================================
-# 감시 대상: sbot, sbo2, sector — 한투/키움 API 토큰 인증 실패가
-# 반복되면 해당 systemd 서비스만 재시작한다.
-WATCHDOG_BOTS = ["sbot", "sbo2", "sector"]
-
-# 로그에 나타나는 토큰/인증 실패 문구 (sector_monitor.log 실측 기준 포함)
-API_ERROR_PATTERNS = [
-    "인증에 실패했습니다",
-    "Token이 유효하지 않습니다",
-    "토큰 발급 오류",
-    "토큰 발급 실패",
-]
-
-# 같은 분에 에러가 감지된 연속 횟수 (봇별)
-_api_error_streak = {bot: 0 for bot in WATCHDOG_BOTS}
-# 마지막 재시작 시각 (쿨다운 체크용)
-_last_restart_at = {bot: None for bot in WATCHDOG_BOTS}
-
-API_ERROR_STREAK_THRESHOLD = 2     # 연속 2분 감지되면 재시작
-RESTART_COOLDOWN_SECONDS = 300     # 재시작 후 5분간 재감지 무시
-
-
-def _check_recent_log_for_api_error(bot_name: str) -> bool:
-    """journalctl로 최근 1분 로그를 가져와 API 에러 패턴이 있는지 확인"""
-    try:
-        result = subprocess.run(
-            ["journalctl", "-u", f"yeongam9-{bot_name}",
-             "--since", "1 minute ago", "--no-pager"],
-            capture_output=True, text=True, timeout=15,
-        )
-        log_text = result.stdout
-    except Exception as e:
-        print(f"⚠️ [watchdog] {bot_name} 로그 조회 실패: {e}")
-        return False
-
-    return any(pattern in log_text for pattern in API_ERROR_PATTERNS)
-
-
-@tasks.loop(minutes=1)
-async def api_error_watchdog():
-    now = datetime.datetime.now(KST)
-
-    try:
-        channel = await client.fetch_channel(REPORT_CHANNEL_ID)
-    except Exception as e:
-        print(f"❌ [watchdog] 채널 접속 실패: {e}")
-        return
-
-    for bot_name in WATCHDOG_BOTS:
-        # 재시작 쿨다운 중이면 스킵 (재기동 직후 토큰 재발급 시간 확보)
-        last_restart = _last_restart_at[bot_name]
-        if last_restart and (now - last_restart).total_seconds() < RESTART_COOLDOWN_SECONDS:
-            continue
-
-        has_error = await asyncio.to_thread(_check_recent_log_for_api_error, bot_name)
-
-        if has_error:
-            _api_error_streak[bot_name] += 1
-            print(f"⚠️ [watchdog] {bot_name} API 에러 감지 "
-                  f"({_api_error_streak[bot_name]}/{API_ERROR_STREAK_THRESHOLD})")
-        else:
-            _api_error_streak[bot_name] = 0
-
-        if _api_error_streak[bot_name] >= API_ERROR_STREAK_THRESHOLD:
-            await send_safe_message(
-                channel,
-                f"🚨 **[watchdog] {bot_name} API 인증 오류 지속 감지**\n"
-                f"yeongam9-{bot_name} 재시작을 시도할게!"
-            )
-            try:
-                ret = subprocess.run(
-                    ["sudo", "systemctl", "restart", f"yeongam9-{bot_name}"],
-                    capture_output=True, text=True, timeout=30,
-                )
-                if ret.returncode == 0:
-                    await send_safe_message(channel, f"✅ {bot_name} 재시작 완료!")
-                else:
-                    err = (ret.stderr or "").strip()[:200]
-                    await send_safe_message(channel, f"❌ {bot_name} 재시작 실패: {err}")
-            except Exception as e:
-                await send_safe_message(channel, f"❌ {bot_name} 재시작 오류: {e}")
-
-            _api_error_streak[bot_name] = 0
-            _last_restart_at[bot_name] = now
-
-
-@api_error_watchdog.before_loop
-async def before_api_error_watchdog():
-    await client.wait_until_ready()
-
 # ==========================================
 # [메인 디스코드 코어 핸들러]
 # ==========================================
@@ -814,11 +721,6 @@ async def on_ready():
         daily_tele_swing_afternoon.start()
         print("✅ [시스템] 14:40 텔레스윙 오후 스케줄러 가동 성공!")
     except Exception as e: print(f"⚠️ [에러] 텔레스윙 오후 스케줄러: {e}")
-
-    try:
-        api_error_watchdog.start()
-        print("✅ [시스템] API 에러 watchdog (1분 주기, sbot/sbo2/sector) 가동 성공!")
-    except Exception as e: print(f"⚠️ [에러] API watchdog 스케줄러: {e}")
 
 @client.event
 async def on_message(message):
