@@ -32,8 +32,10 @@ for _d in ["core", "intelligence", "interface", "bots", ""]:
 import os
 import sys
 import json
+import re
 import sqlite3
 import datetime
+import requests
 
 # 프로젝트 루트
 _here = os.path.dirname(os.path.abspath(__file__))
@@ -47,7 +49,6 @@ for _ep in [os.path.join(_here, ".env"), os.path.join(os.path.dirname(_here), ".
         break
 
 from performance import PerformanceAnalyzer
-from anthropic import Anthropic
 
 # ============================================================
 # 설정
@@ -56,7 +57,10 @@ TRADE_DB     = os.path.join(os.path.dirname(_here), "master_trades.db")
 REVIEW_FILE  = os.path.join(_BASE, "daily_review.json")   # 복기 결과 저장
 AI_CACHE_DB  = os.path.join(_BASE, "ai_cache.db")
 
-ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
+# ★ 로컬 LLM(Ollama) 사용 — lina_bot.py와 같은 서버, 별도 모델/변수명
+#   (lina_bot.py의 MODEL_NAME=gemma4:e4b와 충돌하지 않도록 전용 변수 사용)
+OLLAMA_API_URL      = os.getenv("OLLAMA_API_URL", "http://127.0.0.1:11434/api/chat")
+REVIEW_OLLAMA_MODEL = os.getenv("REVIEW_OLLAMA_MODEL", "qwen2.5:14b")
 
 
 # ============================================================
@@ -218,9 +222,30 @@ def get_weekly_pattern() -> dict:
 # ============================================================
 # Claude 복기 분석
 # ============================================================
+def _extract_review_fields(text: str) -> dict:
+    """
+    로컬 LLM 응답이 통째로 유효한 JSON이 아닐 때의 fallback 파서.
+    qwen2.5:14b가 긴 한글 JSON을 생성하다 중간에 다른 언어로
+    새거나 ```json 블록으로 감싸는 등 불안정한 출력을 내는 경우,
+    "키": "값" 패턴을 필드별로 개별 추출해 살릴 수 있는 만큼 살린다.
+    (전부 깨지지 않은 한 앞쪽 필드들은 보통 정상이므로 부분 복구가 가능)
+    """
+    fields = ["오늘평가", "잘한점", "못한점", "반복패턴",
+              "내일전략", "주의종목유형", "주목시간대", "신뢰도"]
+    result = {}
+    for f in fields:
+        m = re.search(rf'"{f}"\s*:\s*"((?:[^"\\]|\\.)*)"', text)
+        if m:
+            result[f] = m.group(1)
+            continue
+        m_num = re.search(rf'"{f}"\s*:\s*(\d+)', text)
+        if m_num:
+            result[f] = int(m_num.group(1))
+    return result
+
+
 def claude_review(today_summary: dict, weekly_pattern: dict) -> dict:
-    """Claude가 오늘 매매를 복기하고 내일 전략을 제안"""
-    client = Anthropic()
+    """로컬 LLM(Ollama, qwen2.5:14b)이 오늘 매매를 복기하고 내일 전략을 제안"""
 
     # 오늘 매매 상세 텍스트
     trades_text = ""
@@ -265,7 +290,7 @@ def claude_review(today_summary: dict, weekly_pattern: dict) -> dict:
 [7일 누적 패턴]
 {pattern_text if pattern_text else "  데이터 없음"}
 
-다음 JSON 형식으로 답변하세요:
+다음 JSON 형식으로만 답변하세요. 다른 설명 없이 JSON만 출력하세요:
 {{
   "오늘평가": "한 줄 총평 (예: 승률 낮고 손절 다수 — 종목 선별 기준 강화 필요)",
   "잘한점": "구체적으로 잘된 것",
@@ -278,29 +303,62 @@ def claude_review(today_summary: dict, weekly_pattern: dict) -> dict:
 }}"""
 
     import time as _time
-    for _retry in range(3):  # ★ 최대 3회 재시도
+    payload = {
+        "model": REVIEW_OLLAMA_MODEL,
+        "messages": [{"role": "user", "content": prompt}],
+        "stream": False,
+        "options": {"temperature": 0.2},
+    }
+
+    best_partial = {}  # ★ 매 시도에서 fallback으로 건진 부분 결과 중 가장 필드가 많은 것
+
+    for _retry in range(3):  # ★ 최대 3회 재시도 (Ollama 서버 응답 지연/연결 실패 대응)
         try:
-            res = client.messages.create(
-                model=ANTHROPIC_MODEL,
-                max_tokens=600,
-                messages=[{"role": "user", "content": prompt}]
-            )
-            text = res.content[0].text.strip()
-            import re
+            res = requests.post(OLLAMA_API_URL, json=payload, timeout=120)
+            res.raise_for_status()
+            text = res.json().get("message", {}).get("content", "").strip()
             match = re.search(r'\{.*\}', text, re.DOTALL)
             if match:
-                result = json.loads(match.group())
-                print("✅ Claude 복기 완료")
-                return validate_review(result)
-            break
-        except Exception as e:
-            if "overloaded" in str(e).lower() or "529" in str(e):
-                wait = 30 * (_retry + 1)
-                print(f"⚠️ API 과부하 — {wait}초 후 재시도 ({_retry+1}/3)")
-                _time.sleep(wait)
+                json_str = match.group()
+                try:
+                    # ★ 로컬 LLM이 JSON 문자열 값 안에 raw 줄바꿈 등 제어문자를
+                    #   escape 없이 그대로 넣는 경우가 있어, strict=False로
+                    #   제어문자를 문자열 리터럴 내에서 허용한다 (표준 json 옵션)
+                    result = json.loads(json_str, strict=False)
+                    print("✅ 로컬 LLM 복기 완료")
+                    return validate_review(result)
+                except json.JSONDecodeError as je:
+                    print(f"⚠️ JSON 파싱 실패: {je}")
+                    print(f"⚠️ 원본 응답(앞 500자): {text[:500]!r}")
             else:
-                print(f"⚠️ Claude 복기 오류: {e}")
-                break
+                print(f"⚠️ 로컬 LLM 응답에서 닫는 중괄호를 찾지 못함 — 재시도 {_retry+1}/3")
+                print(f"⚠️ 원본 응답(앞 500자): {text[:500]!r}")
+
+            # ★ 통째 파싱 실패(또는 중괄호 자체를 못 찾은 경우) — qwen이 중간부터
+            #   다른 언어로 새거나 ```json 블록으로 감싸는 등 불안정한 출력을
+            #   내는 경우가 있어, 필드별로 개별 추출해 살릴 수 있는 만큼 복구한다.
+            partial = _extract_review_fields(text)
+            print(f"⚠️ 부분 복구된 필드: {list(partial.keys())} ({len(partial)}/8)")
+            if len(partial) > len(best_partial):
+                best_partial = partial
+            print(f"⚠️ 재시도 {_retry+1}/3")
+        except requests.exceptions.RequestException as e:
+            wait = 10 * (_retry + 1)
+            print(f"⚠️ Ollama 연결 오류 — {wait}초 후 재시도 ({_retry+1}/3): {e}")
+            _time.sleep(wait)
+        except Exception as e:
+            print(f"⚠️ 로컬 LLM 복기 오류: {e}")
+            break
+
+    # ★ 3회 모두 통째 JSON 파싱은 실패했지만, 필드별 부분 복구는 됐다면
+    #   "복기 실패"로 전부 버리지 않고 살릴 수 있는 만큼 살린다.
+    #   다만 신뢰도는 낮춰서(2 이하) validate_review의 가드레일이 인지하게 한다.
+    if best_partial.get("오늘평가"):
+        print(f"⚠️ 통째 파싱은 끝내 실패 — 부분 복구 결과 사용 ({len(best_partial)}/8 필드)")
+        best_partial.setdefault("신뢰도", 2)
+        if isinstance(best_partial.get("신뢰도"), int) and best_partial["신뢰도"] > 2:
+            best_partial["신뢰도"] = 2
+        return validate_review(best_partial)
 
     return {
         "오늘평가": "복기 실패",
@@ -439,8 +497,8 @@ def main():
     print("📈 7일 패턴 분석 중...")
     weekly = get_weekly_pattern()
 
-    # 3) Claude 복기
-    print("🤖 Claude 복기 분석 중...")
+    # 3) 로컬 LLM 복기
+    print("🤖 로컬 LLM(qwen2.5:14b) 복기 분석 중...")
     review = claude_review(today_summary, weekly)
     print(f"   평가: {review.get('오늘평가', '-')}")
     print(f"   내일: {review.get('내일전략', '-')}")
