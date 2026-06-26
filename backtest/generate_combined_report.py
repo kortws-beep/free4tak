@@ -7,6 +7,14 @@ def load_json(path):
         return data if isinstance(data,list) else [data]
     except Exception as e: print(f"⚠️ {path}: {e}"); return []
 
+def load_json_dict(path):
+    """signal_check 결과는 dict 구조(by_grade 등)를 그대로 유지해야 하므로
+    list로 강제 변환하지 않는 별도 로더 (2026-06-27 추가)"""
+    if not path or path.lower()=="none" or not os.path.exists(path): return None
+    try:
+        with open(path, encoding="utf-8") as f: return json.load(f)
+    except Exception as e: print(f"⚠️ {path}: {e}"); return None
+
 def safe(v,d=0):
     try: return float(v) if v is not None else d
     except: return d
@@ -86,7 +94,44 @@ def equity_chart(sbot,sbo2):
     return f'''<div class="card"><h2>📈 자산 곡선 비교</h2><canvas id="ec" height="80"></canvas></div>
     <script>new Chart(document.getElementById("ec"),{{type:"line",data:{{labels:{json.dumps(labels)},datasets:[{",".join(datasets)}]}},options:{{responsive:true,plugins:{{legend:{{labels:{{color:"#ccc"}}}}}},scales:{{x:{{ticks:{{color:"#888",maxTicksLimit:12}},grid:{{color:"#333"}}}},y:{{ticks:{{color:"#888",callback:v=>v.toLocaleString()+"원"}},grid:{{color:"#333"}}}}}}}}}});</script>'''
 
-def build_html(sbot,sbo2,date_str):
+def signal_check_card(data):
+    """sbo2_signal_check_*.json (run_sbo2_signal_check.py 결과)을
+    슬롯별(swing/trend/tele) 카드로 표시 — 다른 결과(list)와 형태가
+    달라(dict) 별도 렌더링 함수로 분리 (2026-06-27 추가)"""
+    if not data:
+        return '<div class="card"><h2>🔍 sbo2 실거래 신호 사후검증 (VCP/추세/텔레)</h2><p class="empty">결과 없음</p></div>'
+    by_grade = data.get("by_grade", {}) if isinstance(data, dict) else {}
+    if not by_grade:
+        return '<div class="card"><h2>🔍 sbo2 실거래 신호 사후검증 (VCP/추세/텔레)</h2><p class="empty">결과 없음</p></div>'
+
+    label_map = {"swing": "스윙(VCP)", "trend": "추세", "tele": "텔레스윙"}
+    rows = ""
+    for grade, g in by_grade.items():
+        total = g.get("total", 0)
+        win_pct = (g.get("목표1도달", 0) / total * 100) if total else 0
+        loss_pct = (g.get("손절", 0) / total * 100) if total else 0
+        undecided_pct = (g.get("미결", 0) / total * 100) if total else 0
+        ret = g.get("avg_return_pct", 0)
+        hold = g.get("avg_hold_days", 0)
+        rows += (f'<tr><td>{label_map.get(grade, grade)}</td>'
+                 f'<td>{total}</td>'
+                 f'<td style="color:{color(ret)};font-weight:700">{fmt_pct(ret)}</td>'
+                 f'<td>{win_pct:.1f}%</td><td>{loss_pct:.1f}%</td><td>{undecided_pct:.1f}%</td>'
+                 f'<td>{hold:.1f}일</td></tr>')
+
+    params = data.get("params", {})
+    skipped = data.get("skipped", 0)
+    note = (f'<p style="color:#888;font-size:.85rem;margin-bottom:12px">'
+            f'추적기간 {params.get("hold_days", "?")}일 | 분석제외(데이터부족) {skipped}건 | '
+            f'※ 종가기반 근사ATR 사용, 미결=관찰기간 내 손절·목표 미도달</p>')
+
+    return f'''<div class="card"><h2>🔍 sbo2 실거래 신호 사후검증 (VCP/추세/텔레)</h2>
+    {note}
+    <table><thead><tr><th>슬롯</th><th>건수</th><th>평균수익률</th><th>목표1도달</th><th>손절</th><th>미결</th><th>평균보유</th></tr></thead>
+    <tbody>{rows}</tbody></table></div>'''
+
+
+def build_html(sbot,sbo2,date_str,signal_check=None):
     return f'''<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8">
     <title>영암9 주간 백테스트 {date_str}</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -96,20 +141,25 @@ def build_html(sbot,sbo2,date_str):
     {scenario_table(sbot,"📊 스윙봇 (sbot)")}
     {scenario_table(sbo2,"📊 리나 스윙봇 (sbo2)")}
     {equity_chart(sbot,sbo2)}
+    {signal_check_card(signal_check)}
     </body></html>'''
 
 def main():
     parser=argparse.ArgumentParser()
     parser.add_argument("--sbot",default="none")
     parser.add_argument("--sbo2",default="none")
+    parser.add_argument("--signal-check",default="none",
+                         help="run_sbo2_signal_check.py 결과 JSON (sbo2 실거래 신호 사후검증)")
     parser.add_argument("--date",default=datetime.date.today().strftime("%Y-%m-%d"))
     parser.add_argument("--out",default="")
     args=parser.parse_args()
     sbot=load_json(args.sbot); sbo2=load_json(args.sbo2)
+    signal_check=load_json_dict(args.signal_check)
     if not sbot and not sbo2: print("❌ 결과 없음"); sys.exit(1)
     print(f"✅ sbot 시나리오: {len(sbot)}개")
     print(f"✅ sbo2 시나리오: {len(sbo2)}개")
-    html=build_html(sbot,sbo2,args.date)
+    print(f"✅ sbo2 신호검증: {'있음' if signal_check else '없음'}")
+    html=build_html(sbot,sbo2,args.date,signal_check)
     rd=os.path.join(os.path.dirname(__file__),"results"); os.makedirs(rd,exist_ok=True)
     out=args.out or os.path.join(rd,f"weekly_report_{args.date}.html")
     with open(out,"w",encoding="utf-8") as f: f.write(html)

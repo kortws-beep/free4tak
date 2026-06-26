@@ -19,7 +19,7 @@ echo "╚═══════════════════════�
 echo ""
 
 # ── Step 1: sbot 백테스트 ────────────────────────────────
-echo "🚀 [1/3] 스윙봇(sbot) 백테스트 실행 중..."
+echo "🚀 [1/4] 스윙봇(sbot) 백테스트 실행 중..."
 cd $BACKTEST_DIR
 $VENV run_sbot_backtest.py \
     --compare \
@@ -34,7 +34,7 @@ echo "📋 sbot 결과: ${SBOT_LATEST:-없음}"
 
 # ── Step 2: sbo2(lina) 백테스트 ─────────────────────────
 echo ""
-echo "🚀 [2/3] 리나 스윙봇(sbo2) 백테스트 실행 중..."
+echo "🚀 [2/4] 리나 스윙봇(sbo2) 백테스트 실행 중..."
 cd $LINA_BACKTEST_DIR
 $VENV lina_backtest.py \
     --compare \
@@ -46,14 +46,30 @@ sleep 2
 SBO2_LATEST=$(ls -t results/lina_backtest_*.json 2>/dev/null | head -1)
 echo "📋 sbo2 결과: ${SBO2_LATEST:-없음}"
 
-# ── Step 3: 통합 리포트 ──────────────────────────────────
+# ── Step 3: sbo2 실거래 신호 사후검증 ────────────────────
+#   ★ Step 2는 가상 시뮬레이션(swing_analyzer 자체 재현, 4슬롯/ATR
+#     트레일링 미반영)이라 실거래와 차이가 있을 수 있음. 이 단계는
+#     실제 운영 중 쌓인 sbo2_candidates(VCP/추세/텔레 추천 로그)를
+#     실거래와 동일한 ATR×2.0/3.0 로직으로 사후검증한다. (2026-06-27 추가)
 echo ""
-echo "📊 [3/3] 통합 HTML 리포트 생성..."
+echo "🚀 [3/4] sbo2 실거래 신호(VCP/추세/텔레) 사후검증 중..."
+cd $BACKTEST_DIR
+$VENV run_sbo2_signal_check.py --hold-days 25 \
+    2>&1 | grep -E "분석 대상|시뮬레이션 완료|슬롯별|점수구간별|총|목표1도달|평균|저장|⚠️"
+
+sleep 1
+SIGNAL_CHECK_LATEST=$(ls -t results/sbo2_signal_check_*.json 2>/dev/null | head -1)
+echo "📋 sbo2 신호검증 결과: ${SIGNAL_CHECK_LATEST:-없음}"
+
+# ── Step 4: 통합 리포트 ──────────────────────────────────
+echo ""
+echo "📊 [4/4] 통합 HTML 리포트 생성..."
 cd $BACKTEST_DIR
 
 $VENV generate_combined_report.py \
     --sbot  "${SBOT_LATEST:-none}" \
     --sbo2  "${SBO2_LATEST:-none}" \
+    --signal-check "${SIGNAL_CHECK_LATEST:-none}" \
     --date  "$TODAY"
 
 echo ""
