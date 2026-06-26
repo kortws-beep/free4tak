@@ -146,6 +146,12 @@ def now_hms() -> str:
 def today_str() -> str:
     return now_kst().strftime("%Y-%m-%d")
 
+def now_full_ts() -> str:
+    """★ 완전한 타임스탬프 (날짜+시각) — buy_time/sell_time 통일용
+    (기존에는 buy_time이 시각만(now_hms) 또는 날짜만(today_str)으로
+    저장처가 갈려서 hold_days 계산이 틀어지는 버그가 있었음, 2026-06-27 수정)"""
+    return now_kst().strftime("%Y-%m-%d %H:%M:%S")
+
 def is_weekend() -> bool:
     return now_kst().weekday() >= 5
 
@@ -207,6 +213,17 @@ def init_sbo2_db():
     """)
 
     conn.execute("CREATE INDEX IF NOT EXISTS idx_sbo2_code ON sbo2_trades(code, sell_time)")
+
+    # ── ★ 사후검증용 컬럼 추가 (기존 DB에도 안전하게 적용, 2026-06-27) ──
+    #   stage_reached    : 매도 시점까지 도달한 단계 (0=목표1 미달성, 1+=단계익절 진행)
+    #   atr_val_at_entry : 진입 시점 ATR 절대값 (백테스트/검증 시 손절·목표 재현용)
+    for col, coltype in [("stage_reached", "INTEGER DEFAULT 0"),
+                          ("atr_val_at_entry", "REAL DEFAULT 0")]:
+        try:
+            conn.execute(f"ALTER TABLE sbo2_trades ADD COLUMN {col} {coltype}")
+        except sqlite3.OperationalError:
+            pass  # 이미 컬럼이 존재하면 무시 (재실행 시 정상)
+
     conn.commit()
     conn.close()
     print(f"✅ sbo2 DB 초기화 완료: {SBO2_DB_PATH}")
@@ -242,7 +259,8 @@ def save_candidate(name: str, grade: str, score: int,
 def save_buy_trade(code: str, name: str, grade: str,
                    vcp: bool, trend: bool, catalyst: bool,
                    buy_price: float, qty: int, amount: float,
-                   score: int, stop: float, tgt: float, rr: float):
+                   score: int, stop: float, tgt: float, rr: float,
+                   atr_val: float = 0):
     """매수 이력 저장"""
     try:
         conn = sqlite3.connect(SBO2_DB_PATH, timeout=10)
@@ -251,12 +269,12 @@ def save_buy_trade(code: str, name: str, grade: str,
             INSERT INTO sbo2_trades
                 (code, stock_name, grade, vcp_hit, trend_hit, catalyst_hit,
                  buy_price, buy_time, buy_amount, qty, score,
-                 stop_price, tgt_price, rr_ratio)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 stop_price, tgt_price, rr_ratio, atr_val_at_entry)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             code, name, grade, int(vcp), int(trend), int(catalyst),
-            buy_price, now_hms(), amount, qty, score,
-            stop, tgt, rr
+            buy_price, now_full_ts(), amount, qty, score,
+            stop, tgt, rr, atr_val
         ))
         conn.commit()
         conn.close()
@@ -266,58 +284,77 @@ def save_buy_trade(code: str, name: str, grade: str,
 
 def save_sell_trade(code: str, sell_price: float, reason: str,
                     entry_price: float, qty: int, buy_time: str,
-                    stock_name: str = "", grade: str = ""):
+                    stock_name: str = "", grade: str = "", stage: int = 0):
     """매도 이력 업데이트 (매수 기록 없으면 INSERT)"""
     try:
         profit_rate = (sell_price - entry_price) / entry_price * 100 if entry_price else 0
         profit_krw  = (sell_price - entry_price) * qty
 
-        buy_date = buy_time[:10] if buy_time else today_str()
-        try:
-            bd = datetime.datetime.strptime(buy_date, "%Y-%m-%d").date()
-            hold_days = (datetime.date.today() - bd).days
-        except Exception:
-            hold_days = 0
+        def _calc_hold_days(buy_ts: str) -> int:
+            """완전한 타임스탬프('YYYY-MM-DD HH:MM:SS') 또는 날짜만 있는
+            과거 데이터('YYYY-MM-DD') 모두 안전하게 처리"""
+            if not buy_ts:
+                return 0
+            date_part = buy_ts[:10]
+            try:
+                bd = datetime.datetime.strptime(date_part, "%Y-%m-%d").date()
+                return (datetime.date.today() - bd).days
+            except Exception:
+                return 0
+
+        sell_ts = now_full_ts()
 
         conn = sqlite3.connect(SBO2_DB_PATH, timeout=10)
         conn.execute("PRAGMA journal_mode=WAL")
 
-        # 매수 기록 확인 (서브쿼리로 ORDER BY LIMIT 대체)
+        # 매수 기록 확인 — buy_time도 같이 가져와 DB에 실제 저장된 값으로
+        # hold_days를 계산한다 (인자로 받은 buy_time은 메모리상의 값이라
+        # 포맷이 다를 수 있어 신뢰하지 않음, 2026-06-27 수정)
         row = conn.execute("""
-            SELECT id FROM sbo2_trades
+            SELECT id, buy_time FROM sbo2_trades
             WHERE code = ? AND sell_time IS NULL
             ORDER BY id DESC LIMIT 1
         """, (code,)).fetchone()
 
         if row:
+            hold_days = _calc_hold_days(row[1])
             conn.execute("""
                 UPDATE sbo2_trades
-                SET sell_price  = ?,
-                    sell_time   = ?,
-                    sell_reason = ?,
-                    profit_rate = ?,
-                    profit_krw  = ?,
-                    hold_days   = ?
+                SET sell_price     = ?,
+                    sell_time      = ?,
+                    sell_reason    = ?,
+                    profit_rate    = ?,
+                    profit_krw     = ?,
+                    hold_days      = ?,
+                    stage_reached  = ?
                 WHERE id = ?
             """, (
-                sell_price, now_hms(), reason,
+                sell_price, sell_ts, reason,
                 round(profit_rate, 2), round(profit_krw, 0),
-                hold_days, row[0]
+                hold_days, stage, row[0]
             ))
             print(f"   💾 매도 저장: {stock_name or code} {profit_rate:+.2f}%")
         else:
             # 수동매수 등 매수 기록 없는 경우 INSERT
+            # (buy_time 인자가 날짜만(today_str, "YYYY-MM-DD")일 수도 있고,
+            #  과거 버그처럼 다른 포맷일 수도 있어 정규식으로 정확히 검증 후 보정)
+            import re as _re
+            if buy_time and _re.match(r'^\d{4}-\d{2}-\d{2}', buy_time):
+                buy_ts = buy_time if len(buy_time) > 10 else f"{buy_time} 00:00:00"
+            else:
+                buy_ts = now_full_ts()  # 형식이 안 맞으면 안전하게 현재 시각으로
+            hold_days = _calc_hold_days(buy_ts)
             conn.execute("""
                 INSERT INTO sbo2_trades
                     (code, stock_name, grade, buy_price, buy_time, qty,
                      sell_price, sell_time, sell_reason,
-                     profit_rate, profit_krw, hold_days)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+                     profit_rate, profit_krw, hold_days, stage_reached)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 code, stock_name, grade or "실계좌",
-                entry_price, buy_time or today_str(), qty,
-                sell_price, now_hms(), reason,
-                round(profit_rate, 2), round(profit_krw, 0), hold_days
+                entry_price, buy_ts, qty,
+                sell_price, sell_ts, reason,
+                round(profit_rate, 2), round(profit_krw, 0), hold_days, stage
             ))
             print(f"   💾 매도 저장(신규): {stock_name or code} {profit_rate:+.2f}%")
 
@@ -680,7 +717,8 @@ class Sbo2:
                         code=sell_code, sell_price=curr, reason="즉시매도(AI비서)",
                         entry_price=pos["entry_price"], qty=qty,
                         buy_time=pos.get("buy_time", ""),
-                        stock_name=pos.get("name", sell_code), grade=pos.get("grade", "")
+                        stock_name=pos.get("name", sell_code), grade=pos.get("grade", ""),
+                        stage=pos.get("stage", 0),
                     )
                     if _master_record:
                         _master_record(
@@ -1017,6 +1055,7 @@ class Sbo2:
                 stop=self.positions[code]["stop_price"],
                 tgt=self.positions[code]["tgt_price"],
                 rr=cand["rr"],
+                atr_val=_atr_val,
             )
             save_candidate(name=name, grade=cand["grade"], score=cand["score"],
                            vcp=cand["vcp"], trend=cand["trend"], catalyst=cand["catalyst"],
@@ -1154,7 +1193,8 @@ class Sbo2:
                             save_sell_trade(
                                 code=code, sell_price=curr, reason=f"목표1익절50%({rate:+.1f}%)",
                                 entry_price=entry, qty=half_qty, buy_time=pos.get("buy_time", ""),
-                                stock_name=name, grade=pos.get("grade", "")
+                                stock_name=name, grade=pos.get("grade", ""),
+                                stage=stage,
                             )
                             if _master_record:
                                 _master_record(
@@ -1208,7 +1248,8 @@ class Sbo2:
             save_sell_trade(
                 code=code, sell_price=curr, reason=reason,
                 entry_price=entry, qty=qty, buy_time=pos.get("buy_time", ""),
-                stock_name=name, grade=pos.get("grade", "")
+                stock_name=name, grade=pos.get("grade", ""),
+                stage=stage,
             )
 
             # master_db 기록
