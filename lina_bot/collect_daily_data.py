@@ -50,9 +50,27 @@ def parse_stock(raw_name: str) -> tuple[str, str] | tuple[None, None]:
     return pure_name, code
 
 
+# ── 스키마 보강 (기존 DB에도 안전하게 적용) ─────────────────────
+def ensure_ohlc_columns():
+    """
+    ★ kr_stock_daily_data에 시가/고가/저가 컬럼 추가 (2026-06-27)
+    기존에는 종가만 저장해서, ATR 등 변동성 계산이 종가 기반
+    근사치로만 가능했음. KIS API(get_daily_ohlc)는 이미 open/high/low를
+    주고 있었는데 활용을 안 하고 있던 것 — 이제부터 다 저장한다.
+    """
+    conn = sqlite3.connect(DB_PATH)
+    for col in ("open_price", "high_price", "low_price"):
+        try:
+            conn.execute(f"ALTER TABLE kr_stock_daily_data ADD COLUMN {col} INTEGER")
+        except sqlite3.OperationalError:
+            pass  # 이미 컬럼이 있으면 무시 (재실행 시 정상)
+    conn.commit()
+    conn.close()
+
+
 # ── DB upsert ──────────────────────────────────────────────────
 def upsert_daily_data(rows: list[dict]) -> int:
-    """rows: [{"date","stock_name","close","volume","foreign_net","inst_net"}, ...]"""
+    """rows: [{"date","stock_name","open","high","low","close","volume","foreign_net","inst_net"}, ...]"""
     if not rows:
         return 0
     conn   = sqlite3.connect(DB_PATH)
@@ -60,9 +78,14 @@ def upsert_daily_data(rows: list[dict]) -> int:
     cursor.executemany(
         """
         INSERT INTO kr_stock_daily_data
-            (date, stock_name, close_price, volume, foreign_net_buy, institution_net_buy)
-        VALUES (:date, :stock_name, :close, :volume, :foreign_net, :inst_net)
+            (date, stock_name, open_price, high_price, low_price, close_price,
+             volume, foreign_net_buy, institution_net_buy)
+        VALUES (:date, :stock_name, :open, :high, :low, :close,
+                :volume, :foreign_net, :inst_net)
         ON CONFLICT(date, stock_name) DO UPDATE SET
+            open_price          = excluded.open_price,
+            high_price          = excluded.high_price,
+            low_price           = excluded.low_price,
             close_price         = excluded.close_price,
             volume              = excluded.volume,
             foreign_net_buy     = excluded.foreign_net_buy,
@@ -140,6 +163,9 @@ def collect_stock(api: KisAPI, stock_name: str, code: str, days: int) -> int:
         rows.append({
             "date":        date_str,
             "stock_name":  stock_name,
+            "open":        candle.get("open", 0),
+            "high":        candle.get("high", 0),
+            "low":         candle.get("low", 0),
             "close":       candle["close"],
             "volume":      candle["volume"],
             "foreign_net": inv_day.get("foreign_net"),
@@ -165,6 +191,7 @@ def collect_all(days: int = 30, delay: float = 0.5) -> None:
         return
 
     print(f"\n🚀 [수급 수집] DB: {DB_PATH}")
+    ensure_ohlc_columns()  # ★ open/high/low_price 컬럼 보장 (2026-06-27)
     api = KisAPI(appkey=appkey, secret=secret)
 
     conn   = sqlite3.connect(DB_PATH)
@@ -209,6 +236,7 @@ def collect_one(raw_name: str, days: int = 30) -> None:
     """예: collect_one('삼성SDI KOSPI 006400')"""
     appkey = os.getenv("KIS_APPKEY")
     secret = os.getenv("KIS_SECRET")
+    ensure_ohlc_columns()  # ★ open/high/low_price 컬럼 보장 (2026-06-27)
     api    = KisAPI(appkey=appkey, secret=secret)
 
     name, code = parse_stock(raw_name)
