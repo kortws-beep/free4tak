@@ -712,8 +712,35 @@ RATE_LIMIT_ERROR_STREAK_THRESHOLD = 2  # 연속 2분(루프 30초 기준 약 4�
 RESTART_COOLDOWN_SECONDS = 300         # 재시작 후 5분간 재감지 무시
 
 
+# ★ 각 systemd 유닛의 StandardOutput 설정이 봇마다 다르다
+#   (실제로 /etc/systemd/system/yeongam9-*.service 에서 확인됨):
+#     - sbo2   : StandardOutput=journal           → journalctl로 조회 가능
+#     - sbot   : StandardOutput=append:logs/sbot.log          → journal에 안 쌓임
+#     - sector : StandardOutput=append:logs/sector_monitor.log → journal에 안 쌓임
+#   sbot/sector를 journalctl로만 조회하면 항상 빈 로그를 받아
+#   watchdog이 절대 감지를 못 하므로(실제로 이 버그로 sbot 미감지 발생),
+#   파일 직접 출처인 봇은 로그 파일을 직접 읽는다.
+_BOT_LOG_FILE = {
+    "sbot":   "/home/free4tak/k-bot/stock_bot/logs/sbot.log",
+    "sector": "/home/free4tak/k-bot/stock_bot/logs/sector_monitor.log",
+}
+_LOG_TAIL_BYTES = 8000  # 파일 끝에서 읽어올 바이트 수 (1분치 로그를 충분히 덮는 크기)
+
+
 def _fetch_recent_log(bot_name: str) -> str:
-    """journalctl로 최근 1분 로그를 가져온다"""
+    """최근 1분 로그를 봇의 실제 출처(journal 또는 파일)에 맞게 가져온다"""
+    log_file = _BOT_LOG_FILE.get(bot_name)
+    if log_file:
+        # ★ 파일로 직접 출력하는 봇 — 파일 끝부분만 읽어 최근 로그를 확보
+        try:
+            with open(log_file, "rb") as f:
+                f.seek(0, os.SEEK_END)
+                size = f.tell()
+                f.seek(max(0, size - _LOG_TAIL_BYTES), os.SEEK_SET)
+                return f.read().decode("utf-8", errors="ignore")
+        except Exception as e:
+            print(f"⚠️ [watchdog] {bot_name} 로그 파일 읽기 실패: {e}")
+            return ""
     try:
         result = subprocess.run(
             ["journalctl", "-u", f"yeongam9-{bot_name}",
