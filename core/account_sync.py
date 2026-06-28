@@ -7,9 +7,17 @@ account_sync.py — 실계좌 ↔ DB 정합성 자동 체크/정리
 2. DB에 없는 실계좌 종목   → 경고 알림 (수동 매수된 것)
 3. 수량 불일치             → 수량 보정
 
+[지원 봇]
+- sbot       : sync_positions()       — KIS API 기준 (한국투자증권)
+- cbot       : sync_positions_upbit() — 업비트 API 기준
+- sbo2       : 미사용 (자체 _sync_real_positions() 로직 보유)
+
 [사용법]
 from account_sync import sync_positions
-synced = sync_positions(api, db_path, notify_fn, bot_type="nbot")
+synced = sync_positions(kis_api, "sbot_trade_history.db", notify_fn, bot_type="sbot")
+
+from account_sync import sync_positions_upbit
+synced = sync_positions_upbit(cbot_instance, "cbot_trade_history.db", notify_fn)
 """
 import sqlite3
 import os
@@ -20,10 +28,10 @@ def sync_positions(
     api,
     db_path: str,
     notify_fn: Callable,
-    bot_type: str = "nbot",
+    bot_type: str = "sbot",
 ) -> dict:
     """
-    실계좌 ↔ DB 정합성 체크 및 자동 정리.
+    실계좌 ↔ DB 정합성 체크 및 자동 정리. (KIS API 전용 — sbot)
     반환: 정리된 실계좌 포지션 dict
     """
     print(f"🔍 [{bot_type}] 실계좌 ↔ DB 정합성 체크 중...")
@@ -190,58 +198,180 @@ def sync_positions(
     except Exception as e:
         print(f"⚠️ buy_date 복원 오류: {e}")
 
-    # ★ master_positions 실계좌 기준 동기화 비활성 (API 호출 제한)
     return real_pos
-    try:  # noqa
-        import sys, os as _os
-        _base = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
-        if _base not in sys.path:
-            sys.path.insert(0, _base + "/core")
-        from master_db import upsert_position, remove_position, get_all_positions
-        import requests as _req
-        from dotenv import load_dotenv as _ldenv
-        _ldenv(_os.path.join(_base, ".env"))
 
-        # 실계좌 기반으로 master_positions 갱신
-        # KIS API 잔고 조회 (현재가 포함)
-        _cano  = _os.getenv("KIS_CANO")  if bot_type == "nbot" else _os.getenv("KIS_CANO2")
-        _acnt  = _os.getenv("KIS_ACNT_PRDT_CD") if bot_type == "nbot" else _os.getenv("KIS_ACNT_PRDT_CD2")
-        _url   = f"{api.base_url}/uapi/domestic-stock/v1/trading/inquire-balance"
-        _hdrs  = {
-            "content-type":  "application/json",
-            "authorization": f"Bearer {api.token}",
-            "appkey":        api.appkey,
-            "appsecret":     api.secret,
-            "tr_id":         "TTTC8434R",
-        }
-        _params = {
-            "CANO": _cano, "ACNT_PRDT_CD": _acnt,
-            "AFHR_FLPR_YN": "N", "OFL_YN": "",
-            "INQR_DVSN": "01", "UNPR_DVSN": "01",
-            "FUND_STTL_ICLD_YN": "N", "FNCG_AMT_AUTO_RDPT_YN": "N",
-            "PRCS_DVSN": "00", "CTX_AREA_FK100": "", "CTX_AREA_NK100": "",
-        }
-        _res = _req.get(_url, headers=_hdrs, params=_params, timeout=5).json()
 
-        # 기존 master_positions에서 해당 봇 종목 삭제 후 재등록
-        _existing = [p["code"] for p in get_all_positions() if p["bot_type"] == bot_type]
-        for _c in _existing:
-            if _c not in real_pos:
-                remove_position(bot_type, _c)
+# ============================================================
+# cbot(업비트) 전용 동기화
+# ============================================================
+def sync_positions_upbit(
+    cbot,
+    db_path: str,
+    notify_fn: Callable,
+    bot_type: str = "cbot",
+) -> dict:
+    """
+    실계좌(업비트) ↔ DB 정합성 체크 및 자동 정리. (cbot 전용)
 
-        for _item in _res.get("output1", []):
-            _qty = int(_item.get("hldg_qty", 0))
-            if _qty > 0:
-                upsert_position(
-                    bot_type     = bot_type,
-                    code         = _item["pdno"],
-                    stock_name   = _item.get("prdt_name", ""),
-                    entry_price  = float(_item.get("pchs_avg_pric", 0)),
-                    current_price= float(_item.get("prpr", 0)),
-                    qty          = _qty,
+    ★ sync_positions()(KIS 전용)와 분리한 이유:
+    - cbot은 KisAPI 인스턴스가 없음 — 업비트 REST API + JWT 인증 사용
+      (api.token / api._issue_token() 같은 KIS 전용 속성이 존재하지 않음)
+    - cbot의 trades 테이블은 종목 컬럼명이 code가 아니라 market
+      (예: "KRW-BTC") — 동일 SQL을 그대로 재사용할 수 없음
+    - 과거엔 cbot.run()이 sync_positions(self, ...)로 KIS용 함수를
+      그대로 호출해 api.token 접근 시 AttributeError가 발생, 매번
+      try/except로 조용히 무시되어 사실상 한 번도 동작하지 않았음
+
+    cbot: CoinBot 인스턴스. get_current_positions()를 제공해야 함
+          (반환 형식: {"KRW-BTC": {"entry_price", "qty", ...}, ...})
+    반환: 정리된 실계좌 포지션 dict
+    """
+    print(f"🔍 [{bot_type}] 실계좌(업비트) ↔ DB 정합성 체크 중...")
+
+    # 1. 실계좌(업비트) 조회 — 업비트는 JWT를 매 요청마다 새로 만들어
+    #    쓰므로 KIS처럼 토큰 캐시/재발급 로직이 필요 없음
+    try:
+        real_pos = cbot.get_current_positions()
+    except Exception as e:
+        print(f"⚠️ 실계좌 조회 실패: {e}")
+        return {}
+
+    print(f"   실계좌: {len(real_pos)}종목 — {list(real_pos.keys())}")
+
+    # 2. DB 미매도 레코드 조회 (★ market 컬럼 — code 아님)
+    db_pos = {}
+    try:
+        conn = sqlite3.connect(db_path, timeout=10)
+        rows = conn.execute("""
+            SELECT id, market, buy_price, qty
+            FROM trades
+            WHERE sell_price IS NULL
+            ORDER BY buy_time
+        """).fetchall()
+        conn.close()
+        for row_id, market, buy_price, qty in rows:
+            if market not in db_pos:
+                db_pos[market] = []
+            db_pos[market].append((row_id, buy_price, qty))
+    except Exception as e:
+        print(f"⚠️ DB 조회 실패: {e}")
+        return real_pos
+
+    print(f"   DB 미매도: {len(db_pos)}종목 — {list(db_pos.keys())}")
+
+    # 3. 실계좌에 없는 DB 레코드 삭제
+    ghost_markets = [m for m in db_pos if m not in real_pos]
+    if ghost_markets:
+        try:
+            conn = sqlite3.connect(db_path, timeout=10)
+            for market in ghost_markets:
+                ids = [str(r[0]) for r in db_pos[market]]
+                conn.execute(
+                    f"DELETE FROM trades WHERE id IN ({','.join(ids)})"
                 )
-        print(f"✅ [{bot_type}] master_positions 실계좌 동기화 완료")
-    except Exception as _e:
-        print(f"⚠️ master_positions 동기화 오류: {_e}")
+                print(f"   🗑️ DB 정리: {market} ({len(ids)}건) — 실계좌에 없음")
+            conn.commit()
+            conn.close()
+            notify_fn(
+                f"🔧 [{bot_type}] DB 정합성 정리\n"
+                f"실계좌에 없는 미매도 레코드 삭제: {', '.join(ghost_markets)}",
+                critical=False,
+            )
+        except Exception as e:
+            print(f"⚠️ DB 정리 실패: {e}")
+
+    # 4. 실계좌에 있는데 DB에 없는 코인 → 경고 + 자동 추가
+    missing_markets = [m for m in real_pos if m not in db_pos]
+    if missing_markets:
+        print(f"   ⚠️ DB 누락 종목: {missing_markets} (수동매수 또는 기록 누락)")
+        notify_fn(
+            f"⚠️ [{bot_type}] DB 누락 종목 발견\n"
+            f"{', '.join(missing_markets)} — 수동매수 또는 기록 누락\n"
+            f"매도 체크는 정상 작동하나 복기/성과에서 누락될 수 있어요",
+            critical=False,
+        )
+        try:
+            conn = sqlite3.connect(db_path, timeout=10)
+            for _m in missing_markets:
+                _entry = real_pos[_m].get("entry_price", 0)
+                _qty   = real_pos[_m].get("qty", 0)
+                if _entry > 0 and _qty > 0:
+                    conn.execute(
+                        "INSERT INTO trades (market, buy_price, qty, buy_time) "
+                        "VALUES (?,?,?,datetime('now','localtime'))",
+                        (_m, _entry, _qty)
+                    )
+                    print(f"   ✅ DB 자동 추가: {_m} ({_entry:,.0f}원 × {_qty})")
+            conn.commit()
+            conn.close()
+        except Exception as _e:
+            print(f"⚠️ DB 자동 추가 오류: {_e}")
+
+    # 5. 수량 불일치 체크 (코인은 소수점 보유 가능 — 부동소수 오차 허용)
+    QTY_TOLERANCE = 1e-6
+    for market in real_pos:
+        if market not in db_pos:
+            continue
+        real_qty = real_pos[market].get("qty", 0)
+        db_qty   = sum(r[2] for r in db_pos[market])
+        if abs(real_qty - db_qty) > QTY_TOLERANCE:
+            print(f"   ⚠️ 수량 불일치 {market}: 실계좌={real_qty} DB={db_qty}")
+            try:
+                conn = sqlite3.connect(db_path, timeout=10)
+                last_id = db_pos[market][-1][0]
+                if len(db_pos[market]) > 1:
+                    old_ids = [str(r[0]) for r in db_pos[market][:-1]]
+                    conn.execute(
+                        f"DELETE FROM trades WHERE id IN ({','.join(old_ids)})"
+                    )
+                conn.execute(
+                    "UPDATE trades SET qty=? WHERE id=?",
+                    (real_qty, last_id)
+                )
+                conn.commit()
+                conn.close()
+                print(f"   ✅ 수량 보정: {market} {db_qty} → {real_qty}")
+            except Exception as e:
+                print(f"⚠️ 수량 보정 실패: {e}")
+
+    print(f"✅ [{bot_type}] DB 정합성 체크 완료")
+
+    # ★ buy_date 복원 — DB trades 테이블의 buy_time 기준
+    import datetime as _dt_sync
+    _today = _dt_sync.date.today()
+    MAX_HOLD_DAYS = 30
+    try:
+        conn = sqlite3.connect(db_path, timeout=10)
+        tables = [r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
+        if "trades" not in tables:
+            conn.close()
+            return real_pos
+        for market in real_pos:
+            row = conn.execute("""
+                SELECT buy_time FROM trades
+                WHERE market=? AND sell_price IS NULL
+                ORDER BY buy_time ASC LIMIT 1
+            """, (market,)).fetchone()
+            if row and row[0]:
+                buy_date_str = str(row[0])[:10]
+                try:
+                    buy_dt = _dt_sync.date.fromisoformat(buy_date_str)
+                    days_held = (_today - buy_dt).days
+                    if days_held > MAX_HOLD_DAYS:
+                        real_pos[market]["buy_date"] = _today.isoformat()
+                        print(f"   ⚠️ buy_date 오염 감지: {market} ({buy_date_str}, {days_held}일) → 오늘로 리셋")
+                    else:
+                        real_pos[market]["buy_date"] = buy_date_str
+                        print(f"   📅 buy_date 복원: {market} → {buy_date_str} ({days_held}일 보유)")
+                except Exception:
+                    real_pos[market]["buy_date"] = _today.isoformat()
+                    print(f"   ⚠️ buy_date 파싱 실패: {market} → 오늘로 리셋")
+            else:
+                real_pos[market]["buy_date"] = _today.isoformat()
+                print(f"   📅 buy_date 없음: {market} → 오늘로 설정")
+        conn.close()
+    except Exception as e:
+        print(f"⚠️ buy_date 복원 오류: {e}")
 
     return real_pos

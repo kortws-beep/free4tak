@@ -234,10 +234,15 @@ def _update_state(**kwargs):
 def _write_cmd_result(result: str):
     _update_state(cmd_result=result, pending_cmd=None)
 
-def _write_status(status: dict):
+def _write_status(status: dict, peak_tracker: dict = None):
     state = _read_state()
     state["last_status"] = status
     state["last_update"] = now_hms()
+    # ★ peak_tracker 영속화 (2026-06-28 추가) — 재시작 시 손절가/목표가/
+    #   stage/buy_date가 전부 초기화되던 문제 방지. None이 아닐 때만 갱신
+    #   (호출하지 않는 다른 경로에서 값이 날아가지 않도록 보호).
+    if peak_tracker is not None:
+        state["peak_tracker"] = peak_tracker
     write_state(BOT_STATE_FILE, state)
 
 
@@ -619,6 +624,43 @@ class SBot:
             return 0
 
     # ============================================================
+    # peak_tracker 항목 생성 (★ 공통 헬퍼 — 2026-06-28 신규)
+    # ============================================================
+    def _make_peak_tracker_entry(self, entry_price: float,
+                                 atr_rate: float = 0.0,
+                                 buy_date: str = None,
+                                 buy2_done: bool = False) -> dict:
+        """
+        peak_tracker[code]에 들어갈 딕셔너리를 항상 동일한 필드 구성으로 생성.
+
+        ★ 배경: 과거에는 매수 경로(일반매수/수동매수/5대장주)마다 peak_tracker를
+        직접 만들어 일부 필드(buy_date, stop_price, target1 등)가 누락되는 경우가
+        있었음. 누락 시:
+          - buy_date 누락 → sbot_strategy.check_sell()의 25일 보유기한 매도가
+            평생 작동하지 않음 (tracker가 이미 존재해 자동 채움 로직을 안 탐)
+          - stop_price/target1/target_next 누락 → check_sell()에서 KeyError →
+            그 종목 이후의 모든 보유종목 매도체크가 그 루프에서 스킵됨
+
+        buy2_done: 물타기(2차매수) 허용 여부. 일반/수동매수는 False(물타기 허용),
+                   5대장주처럼 추가매수를 안 쓰는 경로는 True로 호출.
+
+        이 헬퍼 하나로 모든 매수 경로를 통일해 위 문제를 근본적으로 방지.
+        """
+        levels = self.strategy.calc_atr_levels(entry_price, atr_rate)
+        return {
+            "peak_rate":   0.0,
+            "peak_price":  entry_price,
+            "stage":       0,
+            "buy2_done":   buy2_done,
+            "buy1_price":  entry_price,
+            "stop_price":  levels["stop_price"],
+            "target1":     levels["target1"],
+            "target_next": levels["target1"],
+            "atr_val":     levels["atr_val"],
+            "buy_date":    buy_date or today_str(),
+        }
+
+    # ============================================================
     # API 헬스체크 (연속 실패 시 재시작)
     # ============================================================
     def _check_api_health(self, success: bool):
@@ -698,11 +740,13 @@ class SBot:
                 "stock_name": self._name(buy_code),
             }
             self._do_buy(buy_code, cur, int(cur * buy_qty * 1.01))
-            self.peak_tracker[buy_code] = {
-                "peak_rate": 0.0, "stage": 0,
-                "remain_qty": buy_qty, "buy2_done": True,
-                "buy1_price": cur, "effective_entry": cur,
-            }
+            # ★ 공통 헬퍼로 통일 — stop_price/target1/atr_val/buy_date 등
+            #   필수 필드 누락 방지 (과거엔 일부만 채워 다음 매도체크에서
+            #   KeyError 발생 → 그 이후 보유종목 매도체크 전체가 스킵되는 버그)
+            _atr_rate = self._get_atr_rate(buy_code)
+            self.peak_tracker[buy_code] = self._make_peak_tracker_entry(
+                entry_price=cur, atr_rate=_atr_rate,
+            )
             _write_cmd_result(f"✅ [SWING] {buy_code} {buy_qty}주 매수 완료")
 
     # ============================================================
@@ -1036,20 +1080,16 @@ class SBot:
             self._do_buy(code, data["current_price"], buy_amount)
 
             # ★ peak_tracker 즉시 초기화 (v3 — ATR 추세추종)
+            # ★ 공통 헬퍼로 통일 — 기존엔 buy_date 필드가 빠져 있어서
+            #   25일 보유기한 매도 로직이 이 종목에는 평생 작동하지 않는
+            #   버그가 있었음 (sbot_strategy.check_sell의 tracker 자동
+            #   초기화 분기는 code가 peak_tracker에 "없을 때만" 실행되는데,
+            #   여기서 이미 채워 넣으니 그 분기가 다시는 안 돔)
             _entry    = data["current_price"]
             _atr_rate = self._get_atr_rate(code)
-            _levels   = self.strategy.calc_atr_levels(_entry, _atr_rate)
-            self.peak_tracker[code] = {
-                "peak_rate":   0.0,
-                "peak_price":  _entry,
-                "stage":       0,
-                "buy2_done":   False,
-                "buy1_price":  _entry,
-                "stop_price":  _levels["stop_price"],
-                "target1":     _levels["target1"],
-                "target_next": _levels["target1"],
-                "atr_val":     _levels["atr_val"],
-            }
+            self.peak_tracker[code] = self._make_peak_tracker_entry(
+                entry_price=_entry, atr_rate=_atr_rate,
+            )
             slots -= 1
             time.sleep(1)
 
@@ -1214,6 +1254,47 @@ class SBot:
                     self.positions.update(real)
             except Exception as e:
                 print(f"⚠️ DB 정합성 체크 오류: {e}")
+
+        # ★ peak_tracker 복원 (2026-06-28 추가)
+        # 과거엔 peak_tracker가 메모리에만 있어 재시작마다 모든 보유종목의
+        # stage(익절 단계)/손절가/목표가/buy_date가 초기값으로 리셋되는
+        # 문제가 있었음 (트레일링 진행 중이던 종목이 손절폭이 다시 좁아지는 등).
+        # sbot_state.json에 저장된 peak_tracker를 불러와 실제 보유종목과
+        # 대조 — 실계좌에 없는 잔재는 버리고, 실계좌에 있는데 저장값이
+        # 없는 종목(완전 신규/수동매수 후 첫 재시작)은 헬퍼로 새로 생성.
+        _PT_REQUIRED_FIELDS = {
+            "stage", "stop_price", "target1", "target_next", "atr_val",
+            "buy2_done", "buy1_price", "peak_rate", "peak_price", "buy_date",
+        }
+        try:
+            _saved_pt = _read_state().get("peak_tracker", {}) or {}
+        except Exception as e:
+            print(f"⚠️ peak_tracker 복원 오류: {e}")
+            _saved_pt = {}
+        restored, created, repaired = 0, 0, 0
+        for _code, _pos in self.positions.items():
+            _saved_entry = _saved_pt.get(_code)
+            # ★ 저장된 항목이 있어도 필수 필드가 빠져 있으면(과거 버그로
+            #   생성된 불완전한 데이터) 그대로 쓰지 않고 새로 생성 —
+            #   안 그러면 재시작 한 번에 KeyError 버그가 다시 살아남
+            if _saved_entry and _PT_REQUIRED_FIELDS.issubset(_saved_entry.keys()):
+                self.peak_tracker[_code] = _saved_entry
+                restored += 1
+            else:
+                _entry = _pos.get("entry_price", 0)
+                if _entry > 0:
+                    _atr_rate = self._get_atr_rate(_code)
+                    self.peak_tracker[_code] = self._make_peak_tracker_entry(
+                        entry_price=_entry, atr_rate=_atr_rate,
+                        buy_date=_pos.get("buy_date"),
+                    )
+                    if _saved_entry:
+                        repaired += 1
+                    else:
+                        created += 1
+        if restored or created or repaired:
+            print(f"📦 peak_tracker 복원: 기존유지 {restored}건 / "
+                  f"신규생성 {created}건 / 불완전복구 {repaired}건")
 
 
         while True:
@@ -1560,46 +1641,12 @@ class SBot:
         self._pending_orders[code] = (orgno or "", odno or "", qty)
 
         # ATR 기반 손절/목표가 — 기존 추세추종 로직에 그대로 편입
-        _atr_rate = 0.0
-        try:
-            ohlc2 = self.api.get_daily_ohlc(code, days=20)
-            if ohlc2 and len(ohlc2) >= 14:
-                highs2  = [c["high"]  for c in ohlc2[:15]]
-                lows2   = [c["low"]   for c in ohlc2[:15]]
-                closes2 = [c["close"] for c in ohlc2[:15]]
-                trs = []
-                for i in range(1, len(closes2)):
-                    tr = max(highs2[i] - lows2[i],
-                              abs(highs2[i] - closes2[i-1]),
-                              abs(lows2[i]  - closes2[i-1]))
-                    trs.append(tr)
-                atr = sum(trs) / len(trs) if trs else 0
-                _atr_rate = atr / current if current > 0 else 0
-        except Exception:
-            pass
-
-        if _atr_rate > 0:
-            _atr_val = current * _atr_rate
-            _stop    = round(current - _atr_val * 2.0, 0)
-            _tgt     = round(current + _atr_val * 3.0, 0)
-        else:
-            _atr_val = current * 0.07 / 2.0
-            _stop    = round(current * 0.93, 0)
-            _tgt     = round(current * 1.12, 0)
-
-        import datetime as _dt
-        self.peak_tracker[code] = {
-            "peak_rate":   0.0,
-            "peak_price":  current,
-            "stage":       0,
-            "buy2_done":   True,
-            "buy1_price":  current,
-            "stop_price":  _stop,
-            "target1":     _tgt,
-            "target_next": _tgt,
-            "atr_val":     _atr_val,
-            "buy_date":    _dt.date.today().isoformat(),
-        }
+        # ★ 공통 헬퍼로 통일 (기존 자체 ATR 재계산 코드 제거 — _get_atr_rate와
+        #   동일한 risk.calc_atr_rate 기반이라 중복이었음)
+        _atr_rate = self._get_atr_rate(code)
+        self.peak_tracker[code] = self._make_peak_tracker_entry(
+            entry_price=current, atr_rate=_atr_rate, buy2_done=True,
+        )
         if code not in self.code_name_map:
             self.code_name_map[code] = name
 
@@ -1630,7 +1677,7 @@ class SBot:
                 }
                 for code, pos in self.positions.items()
             },
-        })
+        }, peak_tracker=self.peak_tracker)
 
 
 # ============================================================

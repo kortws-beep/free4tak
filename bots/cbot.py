@@ -86,7 +86,7 @@ import requests
 import datetime
 from dotenv import load_dotenv
 try:
-    from account_sync import sync_positions as _sync_positions
+    from account_sync import sync_positions_upbit as _sync_positions
 except ImportError:
     _sync_positions = None
     print("⚠️ account_sync 없음 → DB 정합성 체크 비활성")
@@ -1616,12 +1616,12 @@ class CBot:
         self._ws_subscribe(initial_markets)
         import time as _t; _t.sleep(2)  # 연결 대기
 
-        # ★ 실계좌 ↔ DB 정합성 체크 (코인봇은 CBOT_HIST_DB)
+        # ★ 실계좌 ↔ DB 정합성 체크 (cbot 전용 — 업비트 기준)
         if _sync_positions:
             try:
                 real = _sync_positions(
                     self,
-                    CBOT_HIST_DB,
+                    TRADE_HIST_DB,
                     self.notify,
                     bot_type="cbot",
                 )

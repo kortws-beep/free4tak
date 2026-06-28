@@ -563,9 +563,14 @@ class KisAPI:
     # ============================================================
     def buy(self, code: str, price: float, amount: int,
             code_name_map: dict = None, psbl_cash: int = None) -> bool:
+        # ★ 반환값은 항상 (성공여부, orgno, odno) 3-튜플로 통일.
+        #   호출부(sbot.py/sbo2.py)가 항상 `ok, orgno, odno = api.buy(...)`로
+        #   unpack하므로, 실패 케이스도 반드시 3개 값을 반환해야 함.
+        #   (과거: 실패 시 2-튜플만 반환 → ValueError로 그 회차 매수 루프
+        #    전체가 죽는 버그가 있었음 → 전부 3-튜플로 수정, 2026-06-28)
         psbl = psbl_cash if psbl_cash is not None else self.get_psbl_order_cash(code)
         if psbl <= 0:
-            print(f"⚠️ 주문가능금액 없음: {code}"); return False, ""
+            print(f"⚠️ 주문가능금액 없음: {code}"); return False, "", ""
 
         order_cash = min(psbl, amount)
 
@@ -586,7 +591,7 @@ class KisAPI:
                 print(f"⚠️ 예산 부족 → 최소 1주 매수 시도: {code} ({limit_price:,}원)")
             else:
                 print(f"⚠️ 수량 부족: {code} | 주문가능:{order_cash:,} < 주가:{limit_price:,}")
-                return False, ""
+                return False, "", ""
 
         name = (code_name_map or {}).get(code, code)
         print(f"💡 매수계산 {code}({name}) | {order_cash:,}원 | {qty}주 | 지정가:{limit_price:,}")
@@ -606,15 +611,22 @@ class KisAPI:
                 odno  = out.get("ODNO", "")
                 return True, orgno, odno
             else:
-                print(f"❌ 매수 실패 {code}: {res.get('msg1', '알 수 없는 오류')}"); return False, ""
+                print(f"❌ 매수 실패 {code}: {res.get('msg1', '알 수 없는 오류')}"); return False, "", ""
         except Exception as e:
-            print(f"❌ 매수 요청 예외 {code}: {e}"); return False, ""
+            print(f"❌ 매수 요청 예외 {code}: {e}"); return False, "", ""
 
 
     def cancel_order(self, orgno: str, odno: str, code: str, qty: int) -> bool:
-        """미체결 주문 취소 (TTTC0803U)"""
+        """
+        미체결 주문 취소 (TTTC0803U)
+        ★ 반환값은 항상 bool 단일값으로 통일 (호출부가
+          `ok = api.cancel_order(...)`로 단일 변수에 받음).
+          과거 (False, "")/(True, "") 튜플을 반환하던 버그가 있었는데,
+          빈 문자열이 있어도 튜플 자체는 항상 truthy라서 취소가 실제로
+          실패해도 "취소 성공" 알림이 나가는 문제가 있었음 (2026-06-28 수정)
+        """
         if not odno:
-            return False, ""
+            return False
         url  = f"{self.base_url}/uapi/domestic-stock/v1/trading/order-rvsecncl"
         data = {
             "CANO": self.cano, "ACNT_PRDT_CD": self.acnt,

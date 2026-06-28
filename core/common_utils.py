@@ -88,15 +88,46 @@ def safe_float(value: Any, default: float = 0.0) -> float:
 
 
 # ============================================================
-# 상태 파일 관리 (Atomic Write로 깨짐 방지)
+# 상태 파일 관리 (Atomic Write + 파일 락으로 동시쓰기 보호)
 # ============================================================
-def read_state(state_file: str, default: dict = None) -> dict:
+# ★ 2026-06-28 추가: 여러 봇 프로세스(예: sbot 메인 루프와 kiki의
+#   디스코드 명령 처리)가 동시에 같은 *_state.json을 update_state()로
+#   건드릴 때, read → modify → write 사이에 다른 프로세스가 끼어들면
+#   한쪽의 변경사항이 사라지는 lost-update 문제가 있었음
+#   (예: !일시중단 명령이 sbot의 상태 갱신에 덮어써져 사라지는 경우).
+#   filelock으로 update_state()의 read-modify-write 전체를 보호.
+#
+#   ★ 주의: read_state()/write_state() 자체는 락을 걸지 않음 — 매번
+#   새 FileLock 인스턴스를 만들면 filelock의 재진입(reentrant) 보장이
+#   안 통해 update_state() 내부에서 read_state()/write_state()를 호출할
+#   때 같은 파일을 두 번 잠그려다 데드락(타임아웃)이 나는 문제가 있었음.
+#   그래서 락은 update_state() 한 곳에서만 걸고, 그 안에서는 락 없는
+#   내부 헬퍼(_read_state_raw/_write_state_raw)를 직접 사용.
+try:
+    from filelock import FileLock as _FileLock
+    _FILELOCK_AVAILABLE = True
+except ImportError:
+    _FileLock = None
+    _FILELOCK_AVAILABLE = False
+    print("⚠️ filelock 미설치 → state 파일 동시쓰기 보호 비활성 "
+          "(pip install filelock 권장)")
+
+
+def _state_lock(state_file: str):
     """
-    상태 파일을 읽어 dict로 반환.
-    파일이 없거나 깨졌으면 default를 반환.
+    state_file에 대응하는 락 객체 반환.
+    filelock 미설치 시 아무 동작도 하지 않는 더미 컨텍스트매니저 반환
+    (기존 동작 그대로 — 락 없이 진행).
     """
-    if default is None:
-        default = {}
+    if _FILELOCK_AVAILABLE:
+        return _FileLock(state_file + ".lock", timeout=10)
+    else:
+        from contextlib import nullcontext
+        return nullcontext()
+
+
+def _read_state_raw(state_file: str, default: dict) -> dict:
+    """락 없이 그냥 읽기 (update_state 내부 전용)"""
     try:
         if os.path.exists(state_file):
             with open(state_file, "r", encoding="utf-8") as f:
@@ -106,16 +137,12 @@ def read_state(state_file: str, default: dict = None) -> dict:
     return default.copy()
 
 
-def write_state(state_file: str, state: dict) -> bool:
-    """
-    상태 파일을 안전하게 저장.
-    중간에 죽어도 파일이 깨지지 않도록 임시 파일에 먼저 쓴 뒤 교체.
-    """
+def _write_state_raw(state_file: str, state: dict) -> bool:
+    """락 없이 그냥 쓰기 (update_state 내부 전용)"""
     try:
         tmp_file = state_file + ".tmp"
         with open(tmp_file, "w", encoding="utf-8") as f:
             json.dump(state, f, ensure_ascii=False, indent=2)
-        # atomic rename (POSIX)
         os.replace(tmp_file, state_file)
         return True
     except Exception as e:
@@ -123,11 +150,39 @@ def write_state(state_file: str, state: dict) -> bool:
         return False
 
 
+def read_state(state_file: str, default: dict = None) -> dict:
+    """
+    상태 파일을 읽어 dict로 반환.
+    파일이 없거나 깨졌으면 default를 반환.
+    """
+    if default is None:
+        default = {}
+    return _read_state_raw(state_file, default)
+
+
+def write_state(state_file: str, state: dict) -> bool:
+    """
+    상태 파일을 안전하게 저장.
+    중간에 죽어도 파일이 깨지지 않도록 임시 파일에 먼저 쓴 뒤 교체.
+    """
+    return _write_state_raw(state_file, state)
+
+
 def update_state(state_file: str, **kwargs) -> bool:
-    """상태 파일을 부분 업데이트 (기존 내용 유지하며 일부만 변경)"""
-    state = read_state(state_file)
-    state.update(kwargs)
-    return write_state(state_file, state)
+    """
+    상태 파일을 부분 업데이트 (기존 내용 유지하며 일부만 변경).
+    ★ read-modify-write 전체를 단일 락으로 보호 — 다른 프로세스가
+    이 사이에 같은 파일을 건드려 변경사항이 사라지는 것을 방지.
+    """
+    try:
+        with _state_lock(state_file):
+            state = _read_state_raw(state_file, {})
+            state.update(kwargs)
+            return _write_state_raw(state_file, state)
+    except Exception as e:
+        # filelock.Timeout 등 — 락 획득 실패 시에도 죽지 않고 False 반환
+        print(f"⚠️ 상태 파일 업데이트 오류 ({state_file}): {e}")
+        return False
 
 
 # ============================================================

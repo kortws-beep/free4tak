@@ -1,16 +1,16 @@
 {
   "telegram_event": {
     "keywords": [
-      "트럼프"
+      "AI"
     ],
     "themes": [
-      "방산",
-      "에너지",
-      "철강"
+      "클라우드",
+      "AI",
+      "반도체"
     ],
-    "score": 15,
-    "text": "▶️트럼프 행정부, 지난 2월 발표된 해양행동계획(Maritime Action Plan, MAP)'를 법제화 하기 위한 '조선 부활법(Shipbuilding Revitalization Act)'을 의회에 제출\n\nhttps://oceanpress.co.kr/news/article.html?no=30433",
-    "time": "20:17:46"
+    "score": 10,
+    "text": "* 애플이 미국 정부 허가를 받는 건 그렇다치고 과연 CXMT가(그리고 중국 정부가) 애플향 수출을 해줄까?\n\n\n- CXMT의 26년말 예상 캐파는 350K/M(source : SemiAnalysis)\n\n- 고객사 비중은 모바일향 60%, 서버향 27%, PC향 4%이며, 모두 중국향(source : 상하이거래소 STAR Market\n공식 투자설명서(招股说",
+    "time": "12:55:40"
   },
   "disclosure_event": {
     "code": "397030",
