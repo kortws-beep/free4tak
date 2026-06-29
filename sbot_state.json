@@ -5,12 +5,12 @@
   "cmd_result": null,
   "last_status": {
     "cash": 30484,
-    "total_profit": -431649,
+    "total_profit": -433649,
     "positions": 3,
     "score_enter": 75,
-    "last_update": "11:50:09",
+    "last_update": "11:58:34",
     "market_status": "normal",
-    "market_rate": -1.65,
+    "market_rate": -1.88,
     "daily_loss": 0,
     "code_name_map": {
       "036930": "주성엔지니어링",
@@ -67,7 +67,9 @@
       "240810": "원익IPS",
       "003160": "디아이",
       "037710": "광주신세계",
-      "373220": "LG에너지솔루션"
+      "373220": "LG에너지솔루션",
+      "028260": "삼성물산",
+      "034020": "두산에너빌리티"
     },
     "new_codes": [
       "090360",
@@ -116,16 +118,16 @@
       "028050": {
         "name": "삼성E&A",
         "entry_price": 48246,
-        "current": 46700,
-        "rate": -3.2,
+        "current": 46500,
+        "rate": -3.62,
         "qty": 25,
         "buy_tag": ""
       },
       "035420": {
         "name": "035420",
         "entry_price": 233700,
-        "current": 202000,
-        "rate": -13.56,
+        "current": 202500,
+        "rate": -13.35,
         "qty": 6,
         "buy_tag": ""
       },
@@ -139,7 +141,7 @@
       }
     }
   },
-  "last_update": "11:50:11",
+  "last_update": "11:58:37",
   "sold_today": {},
   "sold_today_date": "2026-06-29",
   "daily_loss": 0,

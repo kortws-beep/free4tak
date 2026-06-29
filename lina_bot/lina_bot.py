@@ -74,25 +74,50 @@ MAX_MEMORY = 10
 # 🛡️ 안전 전송기
 # ===================================================
 async def send_safe_message(target, text, reply_to=None):
-    if len(text) <= 1900:
+    # ★ 2026-06-29 수정: 기존엔 "한 줄(line)이 1900자를 넘지 않는다"는
+    #   가정 하에서만 안전하게 분할됐음. AI 응답에 줄바꿈 없는 긴 문단이
+    #   하나라도 있으면 그 줄이 그대로 청크에 들어가 1900자를 훌쩍
+    #   넘긴 채 전송 시도 → 디스코드 길이제한 초과로 400 Bad Request
+    #   ("Must be 4000 or fewer in length") 에러가 발생하던 버그.
+    #   이제 1900자를 넘는 단일 줄은 강제로 잘라서 여러 청크로 나눔.
+    CHUNK_LIMIT = 1900
+
+    def _split_long_line(line: str) -> list:
+        """단일 줄이 CHUNK_LIMIT을 넘으면 문자 단위로 강제 분할.
+        분할 크기는 CHUNK_LIMIT-1로 잡아 이후 개행문자(\\n)가 붙어도
+        CHUNK_LIMIT을 넘지 않도록 함."""
+        if len(line) <= CHUNK_LIMIT:
+            return [line]
+        step = CHUNK_LIMIT - 1
+        return [line[i:i + step] for i in range(0, len(line), step)]
+
+    if len(text) <= CHUNK_LIMIT:
         if reply_to: await reply_to.reply(text)
         else: await target.send(text)
         return
+
     lines = text.split('\n')
+    chunks = []
     chunk = ""
     for line in lines:
-        if len(chunk) + len(line) + 1 > 1900:
-            if reply_to:
-                await reply_to.reply(chunk)
-                reply_to = None
+        # 줄 자체가 너무 길면 먼저 강제 분할
+        sub_lines = _split_long_line(line)
+        for sub in sub_lines:
+            if len(chunk) + len(sub) + 1 > CHUNK_LIMIT:
+                if chunk.strip():
+                    chunks.append(chunk)
+                chunk = sub + '\n'
             else:
-                await target.send(chunk)
-            chunk = line + '\n'
-        else:
-            chunk += line + '\n'
+                chunk += sub + '\n'
     if chunk.strip():
-        if reply_to: await reply_to.reply(chunk)
-        else: await target.send(chunk)
+        chunks.append(chunk)
+
+    for c in chunks:
+        if reply_to:
+            await reply_to.reply(c)
+            reply_to = None
+        else:
+            await target.send(c)
 
 # ==========================================
 # [데이터베이스 / 가계부 / 맵핑 / 캘린더]
