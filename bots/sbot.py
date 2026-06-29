@@ -443,14 +443,19 @@ class SBot:
         매수 주문 실행.
         ★ 개선: 매수 직후 self.positions 즉시 반영 → 다음 매도 체크에서 누락 방지.
         """
-        ok, orgno, odno = self.api.buy(code, price, amount, self.code_name_map)
-        if not ok:
+        ok, orgno, odno, qty = self.api.buy(code, price, amount, self.code_name_map)
+        if not ok or qty <= 0:
             return
         # ★ 미체결 주문 등록
-        self._pending_orders[code] = (orgno or "", odno or "", amount // price if price > 0 else 0)
+        self._pending_orders[code] = (orgno or "", odno or "", qty)
 
         ctx = self.buy_context.get(code, {})
-        qty = max(int(amount / price), 1) if price > 0 else 0
+        # ★ 2026-06-29: qty는 더 이상 amount/price로 추정하지 않고 buy()가
+        #   반환한 실제 주문 수량을 그대로 사용. 기존 추정 계산(호가단위
+        #   보정 전 가격으로 나눔)은 buy() 내부의 정확한 계산(호가단위
+        #   보정 + 수수료 반영)과 약 2% 확률로 어긋나, 실제보다 많은 qty가
+        #   self.positions에 기록되어 매도 시 "주문가능수량 초과" 에러로
+        #   이어질 수 있었음.
 
         # ★ 매수 직후 메모리 반영
         if not is_second:
@@ -1632,9 +1637,8 @@ class SBot:
             print(f"⏭️ 5대장주 {name} 패스 — 예산({amount:,}) < 주가({current:,.0f})")
             return
 
-        qty = max(int(amount / current), 1)
-        ok, orgno, odno = self.api.buy(code, current, amount, {code: name})
-        if not ok:
+        ok, orgno, odno, qty = self.api.buy(code, current, amount, {code: name})
+        if not ok or qty <= 0:
             print(f"❌ 5대장주 매수 실패: {name}")
             return
 

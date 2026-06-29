@@ -311,29 +311,74 @@ def save_sell_trade(code: str, sell_price: float, reason: str,
         # hold_days를 계산한다 (인자로 받은 buy_time은 메모리상의 값이라
         # 포맷이 다를 수 있어 신뢰하지 않음, 2026-06-27 수정)
         row = conn.execute("""
-            SELECT id, buy_time FROM sbo2_trades
+            SELECT id, buy_time, qty FROM sbo2_trades
             WHERE code = ? AND sell_time IS NULL
             ORDER BY id DESC LIMIT 1
         """, (code,)).fetchone()
 
         if row:
-            hold_days = _calc_hold_days(row[1])
-            conn.execute("""
-                UPDATE sbo2_trades
-                SET sell_price     = ?,
-                    sell_time      = ?,
-                    sell_reason    = ?,
-                    profit_rate    = ?,
-                    profit_krw     = ?,
-                    hold_days      = ?,
-                    stage_reached  = ?
-                WHERE id = ?
-            """, (
-                sell_price, sell_ts, reason,
-                round(profit_rate, 2), round(profit_krw, 0),
-                hold_days, stage, row[0]
-            ))
-            print(f"   💾 매도 저장: {stock_name or code} {profit_rate:+.2f}%")
+            row_id, row_buy_time, row_qty = row
+            hold_days = _calc_hold_days(row_buy_time)
+            # ★ 부분매도 처리 (2026-06-29 수정) — 목표가1 달성 시 50%만 매도
+            #   하는 경우, DB 원본 행의 qty(매수 시 전체 수량)와 이번에 판
+            #   qty가 다름. 과거엔 qty 컬럼을 건드리지 않아 부분매도인데도
+            #   DB에는 전체 수량이 매도완료로 찍히는 버그가 있었음 (씨이랩
+            #   9주 매수 후 1주만 팔았는데 DB엔 qty=9로 "목표1익절50%"가
+            #   찍힌 사고). row_qty와 인자 qty가 다르면 행을 분할:
+            #   - 원본 행은 "판 수량(qty)"만큼으로 줄여서 매도완료 처리
+            #   - 남은 수량(row_qty - qty)은 새 행으로 분리해 계속 보유 상태 유지
+            if row_qty and row_qty > qty:
+                remain_qty = row_qty - qty
+                conn.execute("""
+                    UPDATE sbo2_trades
+                    SET qty            = ?,
+                        sell_price     = ?,
+                        sell_time      = ?,
+                        sell_reason    = ?,
+                        profit_rate    = ?,
+                        profit_krw     = ?,
+                        hold_days      = ?,
+                        stage_reached  = ?
+                    WHERE id = ?
+                """, (
+                    qty, sell_price, sell_ts, reason,
+                    round(profit_rate, 2), round(profit_krw, 0),
+                    hold_days, stage, row_id
+                ))
+                # 잔여 수량은 새 행으로 분리 (계속 보유 — sell_time NULL)
+                # stage_reached는 분리 시점에는 0(잔여분은 아직 추가 익절
+                # 안 됨)이 맞아 컬럼 생략(DEFAULT 0), atr_val_at_entry는
+                # 원본 값을 그대로 이어받아야 손절/목표 재계산 시 정확함
+                conn.execute("""
+                    INSERT INTO sbo2_trades
+                        (code, stock_name, grade, buy_price, buy_time,
+                         buy_amount, qty, score, stop_price, tgt_price,
+                         rr_ratio, atr_val_at_entry)
+                    SELECT code, stock_name, grade, buy_price, buy_time,
+                           buy_amount, ?, score, stop_price, tgt_price,
+                           rr_ratio, atr_val_at_entry
+                    FROM sbo2_trades WHERE id = ?
+                """, (remain_qty, row_id))
+                print(f"   💾 부분매도 저장: {stock_name or code} {profit_rate:+.2f}% "
+                      f"({qty}주 매도, {remain_qty}주 잔여)")
+            else:
+                # 전량매도 — 기존과 동일하게 원본 행 그대로 매도완료 처리
+                conn.execute("""
+                    UPDATE sbo2_trades
+                    SET sell_price     = ?,
+                        sell_time      = ?,
+                        sell_reason    = ?,
+                        profit_rate    = ?,
+                        profit_krw     = ?,
+                        hold_days      = ?,
+                        stage_reached  = ?
+                    WHERE id = ?
+                """, (
+                    sell_price, sell_ts, reason,
+                    round(profit_rate, 2), round(profit_krw, 0),
+                    hold_days, stage, row_id
+                ))
+                print(f"   💾 매도 저장: {stock_name or code} {profit_rate:+.2f}%")
         else:
             # 수동매수 등 매수 기록 없는 경우 INSERT
             # (buy_time 인자가 날짜만(today_str, "YYYY-MM-DD")일 수도 있고,
@@ -660,6 +705,16 @@ class Sbo2:
         self._cand_ts    = 0        # 후보 마지막 갱신 시각
         self._cand_date  = ""       # 후보 마지막 갱신 날짜
         self._pending_orders = {}   # 미체결 주문 {code: (orgno, odno, qty)}
+        # ★ 매수 직후 qty 동기화 보호 (2026-06-29 추가)
+        #   한투 API가 매수 체결을 즉시 잔고에 반영하지 못하는 경우가 있어,
+        #   _sync_real_positions()가 매수 직후 곧바로 실행되면 아직 일부만
+        #   반영된 잔고로 qty를 잘못 덮어쓰는 레이스컨디션이 있었음
+        #   (씨이랩 9주 매수 직후 목표가1 달성 시 half_qty가 9//2=4가 아닌
+        #   1로 계산된 사고 — qty가 일시적으로 2~3으로 잘못 동기화됐던 것).
+        #   이 딕셔너리에 매수 시각을 기록해두고, BUY_SYNC_GUARD_SEC 동안은
+        #   해당 종목의 qty를 실계좌 동기화로 덮어쓰지 않음.
+        self._buy_sync_guard = {}   # {code: 매수시각(epoch)}
+
 
         # 상태 복원
         st = _read_state()
@@ -993,14 +1048,22 @@ class Sbo2:
                 continue
 
             # 매수 실행
-            ok, orgno, odno = self.api.buy(code, curr_price, amount, {code: name})
-            if not ok:
+            ok, orgno, odno, qty = self.api.buy(code, curr_price, amount, {code: name})
+            if not ok or qty <= 0:
                 continue
 
-            qty = max(int(amount / curr_price), 1)
+            # ★ 2026-06-29: qty는 buy()가 반환한 실제 주문 수량을 그대로 사용.
+            #   기존엔 amount/curr_price로 따로 추정했는데, buy() 내부의
+            #   실제 계산(호가단위 보정 + 수수료 반영)과 어긋날 수 있어
+            #   씨이랩(189330) 사고의 근본 원인 중 하나였을 것으로 추정됨
+            #   (_buy_sync_guard는 그 다음 루프의 잘못된 재동기화만 막을 뿐,
+            #   최초 추정 자체의 오차는 막지 못함).
 
             # 미체결 추적 등록
             self._pending_orders[code] = (orgno or "", odno or "", qty)
+            # ★ qty 동기화 보호 시작 — 한투 체결반영 지연 동안 _sync_real_positions()가
+            #   잘못된(아직 부분반영된) 잔고로 qty를 덮어쓰는 것 방지
+            self._buy_sync_guard[code] = time.time()
 
             # ★ ATR 기반 손절/목표가 계산 (추세추종 방식)
             #   최소 ATR 비율 1% 강제 — 더존비즈온처럼 변동성이 극단적으로
@@ -1379,13 +1442,25 @@ class Sbo2:
 
             # ── 실계좌 기준으로 포지션 갱신 ───────────────────
             # 기존 포지션 메타(손절/목표/등급) 보존하면서 수량/평단 갱신
+            # ★ 매수 직후 BUY_SYNC_GUARD_SEC 동안은 qty 동기화 스킵
+            #   (한투 체결반영 지연으로 잘못된 qty가 들어와 50% 익절 수량
+            #   계산이 망가지는 레이스컨디션 방지 — 2026-06-29)
+            BUY_SYNC_GUARD_SEC = 90
+            now_ts = time.time()
             updated = {}
             for code, rdata in new_pos.items():
                 if code in self.positions:
                     # 기존 포지션 메타 유지 + 수량/평단 갱신
                     existing = self.positions[code]
-                    existing["qty"]         = rdata["qty"]
-                    existing["entry_price"] = rdata["entry_price"]
+                    guard_until = self._buy_sync_guard.get(code, 0) + BUY_SYNC_GUARD_SEC
+                    if now_ts < guard_until:
+                        # 보호 시간 내 — 메모리상 qty/entry_price 그대로 유지
+                        print(f"   🛡️ {existing.get('name', code)}({code}) "
+                              f"매수직후 동기화 보호 중 — qty 유지 "
+                              f"(실계좌:{rdata['qty']}, 메모리:{existing['qty']})")
+                    else:
+                        existing["qty"]         = rdata["qty"]
+                        existing["entry_price"] = rdata["entry_price"]
                     # 종목명이 코드 그대로면 DB에서 다시 조회
                     cur_name = existing.get("name", code)
                     if cur_name == code:
@@ -1415,6 +1490,10 @@ class Sbo2:
                           f"{entry:,}원 × {rdata['qty']}주")
 
             self.positions = updated
+            # ★ 더 이상 보유하지 않는 종목의 가드 기록 정리 (메모리 누적 방지)
+            for _code in list(self._buy_sync_guard.keys()):
+                if _code not in updated:
+                    self._buy_sync_guard.pop(_code, None)
             self._save_state()
 
         except Exception as e:

@@ -136,7 +136,7 @@ def _get_tele_stocks() -> dict:
         # 최근 메시지 수집 — 허용 채널만
         placeholders = ",".join("?" * len(ALLOWED_CHANNELS))
         cursor.execute(f"""
-            SELECT message, score
+            SELECT message, score, created_at
             FROM telegram_events
             WHERE created_at >= ?
               AND channel IN ({placeholders})
@@ -169,13 +169,19 @@ def _get_tele_stocks() -> dict:
                        datetime.timedelta(hours=72)).strftime("%Y-%m-%d %H:%M:%S")
 
         # 메시지에서 종목명 매칭 (신선도 가중치 적용)
+        # ★ 2026-06-29 수정: cutoff_fresh가 정의만 되고 실제로 쓰이지
+        #   않아서, "3일 내 언급만 ×2"라는 의도와 다르게 360시간(15일)
+        #   이내 모든 메시지에 무조건 ×2가 적용되던 버그. 이제 메시지의
+        #   created_at을 직접 비교해서 3일 이내인 것만 ×2, 그 외(4~15일
+        #   전)는 가중치 없이(×1) 반영.
         combined = " ".join(r[0] for r in rows if r[0])
         for pure, db_name in stock_names.items():
             if pure in combined:
-                # 3일 내 언급 → 점수 × 2 (신선도 가중치)
-                fresh_score = sum((r[1] or 10) * 2
-                                  for r in rows
-                                  if r[0] and pure in r[0])
+                fresh_score = sum(
+                    (r[1] or 10) * (2 if (len(r) > 2 and r[2] and r[2] >= cutoff_fresh) else 1)
+                    for r in rows
+                    if r[0] and pure in r[0]
+                )
                 score = min(fresh_score, 100)
                 # 최소 30점 이상만 후보 포함
                 if score >= 30:
@@ -493,6 +499,18 @@ def get_tele_swing_report(top_n: int = TOP_N) -> str:
         stop_pct = round((curr_price - stop_price) / curr_price * 100, 1)
 
         # ── 3. 지표 태그 생성 ──
+        # ★ 2026-06-29 수정: R:R이 "1:2.0 우량"으로 하드코딩되어 있어서
+        #   실제 rr_ratio(이미 정확히 계산되어 있던 값)와 무관하게 항상
+        #   같은 텍스트가 찍히던 버그. 실제 값을 쓰고 swing_analyzer.py와
+        #   동일한 등급 기준(2.5+우량/1.5+보통/그 외 불량)으로 통일.
+        rr_ratio = item.get("rr_ratio", 0)
+        if rr_ratio >= 2.5:
+            rr_tag = "✅ 우량"
+        elif rr_ratio >= 1.5:
+            rr_tag = "🔸 보통"
+        else:
+            rr_tag = "❌ 불량"
+
         rsi_val  = item.get("rsi", 50)
         if rsi_val >= 70:
             rsi_tag = f"{rsi_val} ⚠️ 과매수"
@@ -518,7 +536,7 @@ def get_tele_swing_report(top_n: int = TOP_N) -> str:
             f"    💰 현재가    : {curr_price:,}원\n"
             f"    🎯 목표가    : {tgt_price:,}원  (+{tgt_pct}%)\n"
             f"    🛑 손절가    : {stop_price:,}원  (-{stop_pct}%)\n"
-            f"    ⚖️  R:R       : 1 : 2.0  ✅ 우량\n"
+            f"    ⚖️  R:R       : 1 : {rr_ratio}  {rr_tag}\n"
             f"    📉 RSI       : {rsi_tag}\n"
             f"    📊 MACD      : {macd_tag}\n"
             f"    🌀 피보나치  : {fib_tag}\n"

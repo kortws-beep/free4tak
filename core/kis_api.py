@@ -563,14 +563,19 @@ class KisAPI:
     # ============================================================
     def buy(self, code: str, price: float, amount: int,
             code_name_map: dict = None, psbl_cash: int = None) -> bool:
-        # ★ 반환값은 항상 (성공여부, orgno, odno) 3-튜플로 통일.
-        #   호출부(sbot.py/sbo2.py)가 항상 `ok, orgno, odno = api.buy(...)`로
-        #   unpack하므로, 실패 케이스도 반드시 3개 값을 반환해야 함.
+        # ★ 반환값은 항상 (성공여부, orgno, odno, qty) 4-튜플로 통일.
+        #   (2026-06-29 추가: qty) — 기존엔 실제 주문에 사용한 수량을
+        #   호출부에 알려주지 않아서, sbot.py의 _do_buy()가 amount/price로
+        #   따로 "추정"한 qty를 self.positions에 기록했음. 이 함수 내부의
+        #   실제 계산(limit_price 호가단위 보정 + 수수료 0.00015 반영)과
+        #   추정치가 약 2% 확률로 어긋나, 실제 보유수량보다 많은 qty가
+        #   기록되어 매도 시 "주문가능수량 초과" 에러가 날 수 있었음.
+        #   이제 실제 주문 qty를 그대로 반환해 호출부가 정확한 값을 쓰게 함.
         #   (과거: 실패 시 2-튜플만 반환 → ValueError로 그 회차 매수 루프
-        #    전체가 죽는 버그가 있었음 → 전부 3-튜플로 수정, 2026-06-28)
+        #    전체가 죽는 버그가 있었음 → 전부 통일된 튜플로 수정, 2026-06-28)
         psbl = psbl_cash if psbl_cash is not None else self.get_psbl_order_cash(code)
         if psbl <= 0:
-            print(f"⚠️ 주문가능금액 없음: {code}"); return False, "", ""
+            print(f"⚠️ 주문가능금액 없음: {code}"); return False, "", "", 0
 
         order_cash = min(psbl, amount)
 
@@ -591,7 +596,7 @@ class KisAPI:
                 print(f"⚠️ 예산 부족 → 최소 1주 매수 시도: {code} ({limit_price:,}원)")
             else:
                 print(f"⚠️ 수량 부족: {code} | 주문가능:{order_cash:,} < 주가:{limit_price:,}")
-                return False, "", ""
+                return False, "", "", 0
 
         name = (code_name_map or {}).get(code, code)
         print(f"💡 매수계산 {code}({name}) | {order_cash:,}원 | {qty}주 | 지정가:{limit_price:,}")
@@ -609,11 +614,11 @@ class KisAPI:
                 out = res.get("output", {})
                 orgno = out.get("KRX_FWDG_ORD_ORGNO", "")
                 odno  = out.get("ODNO", "")
-                return True, orgno, odno
+                return True, orgno, odno, qty
             else:
-                print(f"❌ 매수 실패 {code}: {res.get('msg1', '알 수 없는 오류')}"); return False, "", ""
+                print(f"❌ 매수 실패 {code}: {res.get('msg1', '알 수 없는 오류')}"); return False, "", "", 0
         except Exception as e:
-            print(f"❌ 매수 요청 예외 {code}: {e}"); return False, "", ""
+            print(f"❌ 매수 요청 예외 {code}: {e}"); return False, "", "", 0
 
 
     def cancel_order(self, orgno: str, odno: str, code: str, qty: int) -> bool:
