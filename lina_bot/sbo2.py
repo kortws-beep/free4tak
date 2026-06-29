@@ -858,6 +858,14 @@ class Sbo2:
         # ── 전체 갱신 (하루 1회, 날짜 바뀌거나 처음 실행 시) ──
         if hasattr(self, '_cand_date') and self._cand_date == today:
             return
+        # ★ 2026-06-29 수정: 재시작 직후 첫 갱신인지(_cand_date가 원래
+        #   ""였던 경우) vs 진짜 날짜가 바뀐 갱신인지 구분.
+        #   재시작 직후라면 위에서 이미 텔레스윙 갱신을 막 끝냈을 수 있는데,
+        #   아래에서 무조건 _tele_refreshed_am/pm을 False로 리셋해버리면
+        #   바로 다음 루프에서 텔레스윙이 불필요하게 한 번 더 실행되는
+        #   버그가 있었음 (날짜 바뀐 경우엔 리셋이 맞지만, 재시작 직후
+        #   첫 갱신에서는 막 처리한 결과를 그대로 유지해야 함).
+        _is_restart_first_run = (self._cand_date == "")
         print(f"\n🔄 [sbo2] 후보 전체 갱신 중...")
         try:
             all_cands = _filter(get_candidates())
@@ -865,8 +873,9 @@ class Sbo2:
             tele_slot = [c for c in self.candidates if c["grade"] == SLOT_TELE]
             self.candidates = all_cands + tele_slot
             self._cand_date = today
-            self._tele_refreshed_am = False
-            self._tele_refreshed_pm = False
+            if not _is_restart_first_run:
+                self._tele_refreshed_am = False
+                self._tele_refreshed_pm = False
             _save_cand_date(self._cand_date)
         except Exception as e:
             print(f"⚠️ 후보 갱신 오류: {e}")

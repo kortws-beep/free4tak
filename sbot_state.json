@@ -5,12 +5,12 @@
   "cmd_result": null,
   "last_status": {
     "cash": 30484,
-    "total_profit": -451099,
+    "total_profit": -436999,
     "positions": 3,
     "score_enter": 75,
-    "last_update": "11:39:18",
+    "last_update": "11:43:30",
     "market_status": "weak",
-    "market_rate": -2.07,
+    "market_rate": -2.01,
     "daily_loss": 0,
     "code_name_map": {
       "006400": "삼성SDI",
@@ -122,8 +122,8 @@
       "028050": {
         "name": "삼성E&A",
         "entry_price": 48246,
-        "current": 46250,
-        "rate": -4.14,
+        "current": 46550,
+        "rate": -3.52,
         "qty": 25,
         "buy_tag": ""
       },
@@ -138,14 +138,14 @@
       "089030": {
         "name": "테크윙",
         "entry_price": 60518,
-        "current": 51200,
-        "rate": -15.4,
+        "current": 51500,
+        "rate": -14.9,
         "qty": 22,
         "buy_tag": ""
       }
     }
   },
-  "last_update": "11:39:20",
+  "last_update": "11:43:32",
   "sold_today": {},
   "sold_today_date": "2026-06-29",
   "daily_loss": 0,
