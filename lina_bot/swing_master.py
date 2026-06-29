@@ -280,11 +280,16 @@ def get_master_report(top_n: int = TOP_N_DEFAULT) -> str:
     report += "   💡 S급부터 공략 → A급은 조합 보고 판단 → B급은 관망\n\n"
 
     # ── 각 엔진 Top2 ─────────────────────────────────────────
-    swing_top2 = sorted(swing_names)[:2]
+    # ★ 2026-06-29 수정: swing_names/trend_names는 점수 정보가 없는 set이라
+    #   sorted()를 해도 가나다순일 뿐 점수 상위가 아니었음 (실제로는
+    #   "탑픽"이라는 라벨과 다르게 동작하던 버그). swing_list/trend_list는
+    #   get_swing_data()/get_trend_data() 단계에서 이미 점수 내림차순으로
+    #   정렬되어 있으므로, 그 순서 그대로 앞 2개를 뽑으면 진짜 점수 상위가 됨.
+    swing_top2 = [d["name"] for d in swing_list[:2]]
     if swing_top2:
         report += f"   🔻 VCP 탑픽   : {' / '.join(swing_top2)}\n"
 
-    trend_top2 = sorted(trend_names)[:2]
+    trend_top2 = [d["name"] for d in trend_list[:2]]
     if trend_top2:
         report += f"   📈 추세 탑픽   : {' / '.join(trend_top2)}\n"
 

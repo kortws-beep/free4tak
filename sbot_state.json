@@ -4,11 +4,11 @@
   "pending_cmd": null,
   "cmd_result": null,
   "last_status": {
-    "cash": 0,
-    "total_profit": -455049,
+    "cash": 30484,
+    "total_profit": -451099,
     "positions": 3,
     "score_enter": 75,
-    "last_update": "11:36:07",
+    "last_update": "11:39:18",
     "market_status": "weak",
     "market_rate": -2.07,
     "daily_loss": 0,
@@ -122,30 +122,30 @@
       "028050": {
         "name": "삼성E&A",
         "entry_price": 48246,
-        "current": 46300,
-        "rate": -4.03,
+        "current": 46250,
+        "rate": -4.14,
         "qty": 25,
         "buy_tag": ""
       },
       "035420": {
         "name": "035420",
         "entry_price": 233700,
-        "current": 200500,
-        "rate": -14.21,
+        "current": 201000,
+        "rate": -13.99,
         "qty": 6,
         "buy_tag": ""
       },
       "089030": {
         "name": "테크윙",
         "entry_price": 60518,
-        "current": 51100,
-        "rate": -15.56,
+        "current": 51200,
+        "rate": -15.4,
         "qty": 22,
         "buy_tag": ""
       }
     }
   },
-  "last_update": "11:36:12",
+  "last_update": "11:39:20",
   "sold_today": {},
   "sold_today_date": "2026-06-29",
   "daily_loss": 0,
