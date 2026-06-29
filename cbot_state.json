@@ -40,8 +40,8 @@
       "KRW-ONDO",
       "KRW-LSK",
       "KRW-ELF",
-      "KRW-IP",
       "KRW-NEAR",
+      "KRW-IP",
       "KRW-POLYX",
       "KRW-JTO"
     ],
@@ -72,14 +72,14 @@
       "KRW-ONDO",
       "KRW-LSK",
       "KRW-ELF",
-      "KRW-IP",
       "KRW-NEAR",
+      "KRW-IP",
       "KRW-POLYX",
       "KRW-JTO"
     ],
     "seed": "30만원 소액 모드"
   },
-  "last_update": "11:47:45",
+  "last_update": "11:50:52",
   "daily_loss": 0,
   "loss_date": "2026-06-29",
   "positions": {},

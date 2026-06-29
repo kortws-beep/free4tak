@@ -5,10 +5,10 @@
   "cmd_result": null,
   "last_status": {
     "cash": 30484,
-    "total_profit": -415649,
+    "total_profit": -431649,
     "positions": 3,
     "score_enter": 75,
-    "last_update": "11:47:00",
+    "last_update": "11:50:09",
     "market_status": "normal",
     "market_rate": -1.65,
     "daily_loss": 0,
@@ -65,7 +65,9 @@
       "005290": "동진쎄미켐",
       "281820": "케이씨텍",
       "240810": "원익IPS",
-      "003160": "디아이"
+      "003160": "디아이",
+      "037710": "광주신세계",
+      "373220": "LG에너지솔루션"
     },
     "new_codes": [
       "090360",
@@ -114,8 +116,8 @@
       "028050": {
         "name": "삼성E&A",
         "entry_price": 48246,
-        "current": 46900,
-        "rate": -2.79,
+        "current": 46700,
+        "rate": -3.2,
         "qty": 25,
         "buy_tag": ""
       },
@@ -130,14 +132,14 @@
       "089030": {
         "name": "테크윙",
         "entry_price": 60518,
-        "current": 51800,
-        "rate": -14.41,
+        "current": 51300,
+        "rate": -15.23,
         "qty": 22,
         "buy_tag": ""
       }
     }
   },
-  "last_update": "11:47:03",
+  "last_update": "11:50:11",
   "sold_today": {},
   "sold_today_date": "2026-06-29",
   "daily_loss": 0,

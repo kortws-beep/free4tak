@@ -491,12 +491,16 @@ def _save_cand_date(date: str):
 # ============================================================
 # 점수 비례 매수금액 계산
 # ============================================================
-def calc_buy_amount(grade: str, psbl_cash: int) -> int:
+def calc_buy_amount(grade: str, psbl_cash: int, score: int = 0) -> int:
     """
     전략별 매수금액:
-    - inter (교집합) → 150만원 (100%)
-    - swing/trend    → 125만원 (83%)
-    - tele (텔레)    → 100만원 (67%)
+    - inter (교집합) → 150만원 (100%) 기준
+    - swing/trend    → 125만원 (83%) 기준
+    - tele (텔레)    → 100만원 (67%) 기준
+    - 점수 보정: 80점 이상 +20%, 50점 미만 -20%, 그 사이는 기준 그대로
+      (★ 2026-06-29 추가 — 기존엔 docstring에 "매수금액: 점수 비례"라고
+      적혀 있었으나 실제로는 슬롯 등급으로만 고정금액이 정해져 점수가
+      매수금액에 전혀 반영되지 않던 불일치를 해소)
     - 주문가능금액 초과 시 조정
     """
     if grade == SLOT_INTER:
@@ -505,6 +509,11 @@ def calc_buy_amount(grade: str, psbl_cash: int) -> int:
         amount = int(BASE_BUY_AMT * 0.83)   # 125만원
     else:                                    # tele
         amount = int(BASE_BUY_AMT * 0.67)   # 100만원
+
+    if score >= 80:
+        amount = int(amount * 1.2)
+    elif score < 50:
+        amount = int(amount * 0.8)
 
     amount = min(amount, psbl_cash)
     return amount
@@ -1040,7 +1049,8 @@ class Sbo2:
                 print(f"⚠️ MA40 조회 오류 {name}: {_e}")
 
             # 매수금액 계산 — 예수금 부족시 있는 만큼 매수
-            amount = calc_buy_amount(cand["grade"], psbl_cash)
+            # ★ score 전달 — 점수 기반 매수금액 보정 적용 (2026-06-29)
+            amount = calc_buy_amount(cand["grade"], psbl_cash, score=cand.get("score", 0))
 
             # 예수금이 기본금액보다 적으면 있는 만큼으로 조정
             if psbl_cash < amount:
