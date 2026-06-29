@@ -1,16 +1,15 @@
 {
   "telegram_event": {
     "keywords": [
-      "AI"
+      "빅파마"
     ],
     "themes": [
-      "클라우드",
-      "AI",
-      "반도체"
+      "바이오",
+      "제약"
     ],
-    "score": 10,
-    "text": "* 애플이 미국 정부 허가를 받는 건 그렇다치고 과연 CXMT가(그리고 중국 정부가) 애플향 수출을 해줄까?\n\n\n- CXMT의 26년말 예상 캐파는 350K/M(source : SemiAnalysis)\n\n- 고객사 비중은 모바일향 60%, 서버향 27%, PC향 4%이며, 모두 중국향(source : 상하이거래소 STAR Market\n공식 투자설명서(招股说",
-    "time": "12:55:40"
+    "score": 18,
+    "text": "나노엔텍, '글로벌 빅파마' 길리어드 子 카이트파마에 세포 대량 분석 자동화 로봇 '공급 확정'\nhttps://www.newsprime.co.kr/news/article/?no=738250",
+    "time": "09:34:36"
   },
   "disclosure_event": {
     "code": "397030",

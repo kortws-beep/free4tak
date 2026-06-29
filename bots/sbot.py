@@ -1262,10 +1262,20 @@ class SBot:
         # sbot_state.json에 저장된 peak_tracker를 불러와 실제 보유종목과
         # 대조 — 실계좌에 없는 잔재는 버리고, 실계좌에 있는데 저장값이
         # 없는 종목(완전 신규/수동매수 후 첫 재시작)은 헬퍼로 새로 생성.
+        #
+        # (2026-06-29 메모: 한때 target1이 entry+atr_val*3과 다르면
+        # "오염 데이터"로 보고 재생성하는 값 정합성 검증을 추가했었으나,
+        # sbot_strategy.py의 TARGET1_CAP_RATE(+20% 상한 캡, 2026-06-23
+        # 추가)을 놓치고 분석한 착오였음 — 고변동성 종목은 ATR×3과 +20%
+        # 중 작은 값을 쓰는 게 정상이라 단순 entry+atr_val*3 비교로는
+        # 정상 데이터를 오탐함. 캡 상수에 의존하면 sbot_strategy.py 쪽
+        # 계산 로직이 바뀔 때마다 같이 고쳐야 하는 결합도 생겨, 값 검증은
+        # 제거하고 원래 목적이던 필드 존재 검증만 유지.)
         _PT_REQUIRED_FIELDS = {
             "stage", "stop_price", "target1", "target_next", "atr_val",
             "buy2_done", "buy1_price", "peak_rate", "peak_price", "buy_date",
         }
+
         try:
             _saved_pt = _read_state().get("peak_tracker", {}) or {}
         except Exception as e:
@@ -1274,6 +1284,7 @@ class SBot:
         restored, created, repaired = 0, 0, 0
         for _code, _pos in self.positions.items():
             _saved_entry = _saved_pt.get(_code)
+            _entry_price = _pos.get("entry_price", 0)
             # ★ 저장된 항목이 있어도 필수 필드가 빠져 있으면(과거 버그로
             #   생성된 불완전한 데이터) 그대로 쓰지 않고 새로 생성 —
             #   안 그러면 재시작 한 번에 KeyError 버그가 다시 살아남
@@ -1281,11 +1292,10 @@ class SBot:
                 self.peak_tracker[_code] = _saved_entry
                 restored += 1
             else:
-                _entry = _pos.get("entry_price", 0)
-                if _entry > 0:
+                if _entry_price > 0:
                     _atr_rate = self._get_atr_rate(_code)
                     self.peak_tracker[_code] = self._make_peak_tracker_entry(
-                        entry_price=_entry, atr_rate=_atr_rate,
+                        entry_price=_entry_price, atr_rate=_atr_rate,
                         buy_date=_pos.get("buy_date"),
                     )
                     if _saved_entry:
