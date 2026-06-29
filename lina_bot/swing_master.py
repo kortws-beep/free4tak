@@ -51,11 +51,54 @@ from trend_analyzer import get_trend_picks
 # 촉매 확인 (1번 엔진) - DB 연동 동적 스캔 버전
 # ══════════════════════════════════════════════════════════════
 
+CATALYST_CACHE_FILE = os.path.join(BASE_DIR, "catalyst_cache.json")
+CATALYST_CACHE_TTL_SEC = 1800   # 30분 — 이 안에는 캐시 재사용
+
 def _get_catalyst_stocks() -> set:
     """
     us_kr_mapping.db에서 미장 티커를 동적으로 불러와 급등(+3% 이상) 스캔
     → 한국 수혜 종목명 set 반환
     + 텔레그램 최근 50건 언급 종목 추가
+
+    ★ 2026-06-29 캐시 추가: swing_master.get_master_report()(07:20 브리핑)와
+    sbo2.get_candidates()(후보 갱신)가 각자 독립적으로 이 함수를 호출해서
+    yfinance API를 미장 티커 수만큼(약 45개) 매번 중복 조회하던 문제가 있었음.
+    - 두 호출 사이 시간차로 결과가 달라질 수 있어 사용자가 브리핑에서 본
+      "촉매 종목"과 sbo2가 실제로 쓰는 종목이 다를 수 있었음
+    - 원래 설계 의도("브리핑이 계산하면 sbo2가 재사용")가 실제로는
+      구현되어 있지 않았음
+    파일 캐시(30분 TTL)로 양쪽이 같은 결과를 공유하도록 수정.
+    """
+    import json as _json
+    import time as _time
+
+    try:
+        if os.path.exists(CATALYST_CACHE_FILE):
+            with open(CATALYST_CACHE_FILE, "r", encoding="utf-8") as f:
+                cached = _json.load(f)
+            age = _time.time() - cached.get("ts", 0)
+            if age < CATALYST_CACHE_TTL_SEC:
+                print(f"   ♻️ catalyst_set 캐시 재사용 ({int(age)}초 전, "
+                      f"{len(cached.get('stocks', []))}개)")
+                return set(cached.get("stocks", []))
+    except Exception as e:
+        print(f"⚠️ catalyst 캐시 읽기 오류: {e}")
+
+    hot_kr = _get_catalyst_stocks_fresh()
+
+    try:
+        with open(CATALYST_CACHE_FILE, "w", encoding="utf-8") as f:
+            _json.dump({"ts": _time.time(), "stocks": sorted(hot_kr)}, f, ensure_ascii=False)
+    except Exception as e:
+        print(f"⚠️ catalyst 캐시 저장 오류: {e}")
+
+    return hot_kr
+
+
+def _get_catalyst_stocks_fresh() -> set:
+    """
+    실제 yfinance/텔레그램 스캔 수행 (캐시 미사용 — _get_catalyst_stocks()의
+    내부 구현. 강제로 새로 스캔하고 싶을 때는 이 함수를 직접 호출 가능)
     """
     hot_kr = set()
 
