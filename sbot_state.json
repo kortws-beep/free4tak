@@ -5,12 +5,12 @@
   "cmd_result": null,
   "last_status": {
     "cash": 30484,
-    "total_profit": -388299,
+    "total_profit": -390599,
     "positions": 3,
     "score_enter": 75,
-    "last_update": "12:48:23",
+    "last_update": "13:00:10",
     "market_status": "normal",
-    "market_rate": 1.47,
+    "market_rate": 1.12,
     "daily_loss": 0,
     "code_name_map": {
       "000660": "SK하이닉스",
@@ -92,7 +92,10 @@
       "403850": "더핑크퐁컴퍼니",
       "408920": "메쎄이상",
       "439260": "대한조선",
-      "461300": "아이스크림미디어"
+      "461300": "아이스크림미디어",
+      "002990": "금호건설",
+      "001210": "금호전기",
+      "222800": "심텍"
     },
     "new_codes": [
       "090360",
@@ -157,14 +160,14 @@
       "403870": {
         "name": "HPSP",
         "entry_price": 56100,
-        "current": 54400,
-        "rate": -3.03,
+        "current": 54300,
+        "rate": -3.21,
         "qty": 23,
         "buy_tag": ""
       }
     }
   },
-  "last_update": "12:48:27",
+  "last_update": "13:00:16",
   "sold_today": {},
   "sold_today_date": "2026-06-30",
   "daily_loss": 0,

@@ -35,7 +35,9 @@ BASE_DIR    = os.path.dirname(os.path.abspath(__file__))
 DB_PATH     = os.path.join(BASE_DIR, "sshow_picks.db")
 KEEP_DAYS   = 90   # ★ 2026-06-30: 7일 → 90일로 연장 (결과추적/통계 누적을 위해
                     #   필요. 7일이면 5영업일 판정 끝나기도 전에 삭제될 수 있었음)
-RESULT_CHECK_DAYS = 5   # 추천 후 5영업일 뒤 결과 판정
+RESULT_CHECK_DAYS = 15   # 최종 판정까지의 거래일 수 (15거래일 = 3주 체크인의 마지막)
+CHECKIN_DAYS = [5, 10, 15]  # ★ 2026-06-30: 5/10/15거래일마다 경과 알림
+                             #   (5,10일=중간 경과 리포트, 15일=최종 확정)
 
 
 # ══════════════════════════════════════════════════════════════
@@ -65,6 +67,7 @@ def init_db():
         ("result_date",  "TEXT DEFAULT ''"),
         ("result_price", "REAL DEFAULT 0"),
         ("price_valid",  "INTEGER DEFAULT 1"),
+        ("last_checkin", "INTEGER DEFAULT 0"),  # 마지막으로 알림 보낸 체크인 일수(0/5/10/15)
     ]:
         try:
             conn.execute(f"ALTER TABLE sshow_picks ADD COLUMN {col} {coltype}")
@@ -264,31 +267,39 @@ def _get_price_history(stock_name: str, since_date: str) -> list:
         return []
 
 
-def check_and_update_results(force_today: str = None) -> dict:
+def check_and_update_results(force_today: str = None) -> list:
     """
-    추천 후 RESULT_CHECK_DAYS(5)영업일이 지난 'pending' 건을 자동 판정.
-    판정 기준 (since_date~지금까지의 종가 흐름을 순서대로 확인):
-      - 목표가에 먼저 도달한 종가가 있으면 → 'hit'
-      - 손절가에 먼저 도달한 종가가 있으면 → 'stop'
-      - 둘 다 아닌 채 5영업일(거래일 기준)이 지나면 → 'hold'
-      - 가격 데이터가 아직 부족하면 → 그대로 'pending' 유지
-    price_valid=0(가격 역전 등 비정상)인 건은 애초에 판정하지 않고 건너뜀.
+    생쇼 추천 결과를 5/10/15거래일 체크인 시점마다 점검.
 
-    매일 1회(예: 장 마감 후) 호출 권장. 반환: {"hit": N, "stop": N, "hold": N}
+    동작:
+      1. 모든 'pending' 건에 대해 목표가/손절가 조기 도달 여부를 확인
+         → 도달했으면 즉시 result='hit'/'stop'으로 확정 (체크인 일수와 무관)
+      2. 아직 미확정인 건 중, 거래일수가 정확히 5/10/15에 막 도달한 건은
+         "체크인 알림" 대상으로 수집:
+         - 5일/10일: 중간 경과 (목표가/손절가 중 어느 쪽에 더 가까운지)
+         - 15일: 그래도 미확정이면 result='hold'로 최종 확정
+      3. 같은 체크인 단계에 대해 중복 알림이 안 가도록 last_checkin 갱신
+
+    price_valid=0(가격 역전 등 비정상)인 건은 판정/알림 대상에서 제외.
+
+    반환: 알림으로 보낼 메시지 dict 리스트
+      [{"name":..., "stage": 5|10|15, "kind": "hit"|"stop"|"progress"|"hold",
+        "text": "..."}, ...]
+    매일 1회(텔레스윙 갱신 시점 등) 호출 권장.
     """
     init_db()
     today = force_today or datetime.date.today().strftime("%Y-%m-%d")
 
     conn = sqlite3.connect(DB_PATH, timeout=10)
     pending = conn.execute("""
-        SELECT id, date, stock_name, buy_price, stop_price, tgt_price
+        SELECT id, date, stock_name, buy_price, stop_price, tgt_price, last_checkin
         FROM sshow_picks
         WHERE result = 'pending' AND price_valid = 1
     """).fetchall()
 
-    counts = {"hit": 0, "stop": 0, "hold": 0}
+    notifications = []
 
-    for pick_id, pick_date, name, buy_p, stop_p, tgt_p in pending:
+    for pick_id, pick_date, name, buy_p, stop_p, tgt_p, last_checkin in pending:
         if not (buy_p > 0 and stop_p > 0 and tgt_p > 0):
             continue  # 가격 파싱 자체가 실패한 건 — 판정 불가, pending 유지
 
@@ -301,9 +312,11 @@ def check_and_update_results(force_today: str = None) -> dict:
         if not history:
             continue
 
-        result = None
-        result_date = None
-        result_price = None
+        trading_days_elapsed = len(history)  # 추천 이후 경과한 거래일 수
+        latest_date, latest_price = history[-1]
+
+        # ── 1. 조기 확정 체크 (목표가/손절가 도달은 언제든 발생 가능) ──
+        result, result_date, result_price = None, None, None
         for d, p in history:
             if p >= tgt_p:
                 result, result_date, result_price = "hit", d, p
@@ -312,32 +325,73 @@ def check_and_update_results(force_today: str = None) -> dict:
                 result, result_date, result_price = "stop", d, p
                 break
 
-        if result is None:
-            # 목표/손절 둘 다 안 닿음 — 거래일 수가 RESULT_CHECK_DAYS 이상이면 보합 확정
-            if len(history) >= RESULT_CHECK_DAYS:
-                result = "hold"
-                result_date, result_price = history[-1][0], history[-1][1]
-            else:
-                continue  # 아직 판정 기간 안 됨 — pending 유지
+        if result:
+            conn.execute("""
+                UPDATE sshow_picks
+                SET result = ?, result_date = ?, result_price = ?
+                WHERE id = ?
+            """, (result, result_date, result_price, pick_id))
+            pct = (result_price - buy_p) / buy_p * 100
+            kind = "hit" if result == "hit" else "stop"
+            emoji = "🎯" if kind == "hit" else "🛑"
+            label = "목표가 도달" if kind == "hit" else "손절가 터치"
+            notifications.append({
+                "name": name, "stage": trading_days_elapsed, "kind": kind,
+                "text": f"{emoji} {name} {label}! {result_price:,.0f}원 "
+                        f"({pct:+.1f}%, 추천일:{pick_date})",
+            })
+            print(f"   📊 생쇼 결과판정: {name} ({pick_date}) → {result} "
+                  f"({result_price:,.0f}원, {result_date})")
+            continue  # 조기확정된 건은 체크인 알림 대상에서 제외
 
-        conn.execute("""
-            UPDATE sshow_picks
-            SET result = ?, result_date = ?, result_price = ?
-            WHERE id = ?
-        """, (result, result_date, result_price, pick_id))
-        counts[result] += 1
-        print(f"   📊 생쇼 결과판정: {name} ({pick_date}) → {result} "
-              f"({result_price:,.0f}원, {result_date})")
+        # ── 2. 체크인 단계 도달 여부 (5/10/15거래일) ──
+        # last_checkin보다 큰 체크인 단계 중, 이미 도달한 가장 가까운 단계를 찾음
+        reached_stage = None
+        for stage in CHECKIN_DAYS:
+            if trading_days_elapsed >= stage and last_checkin < stage:
+                reached_stage = stage
+                # 한 번에 여러 단계를 건너뛰지 않도록 가장 작은 새 단계만 사용
+                break
+
+        if reached_stage is None:
+            continue  # 아직 다음 체크인 시점이 안 됨
+
+        pct = (latest_price - buy_p) / buy_p * 100
+        dist_to_tgt = (tgt_p - latest_price) / buy_p * 100
+        dist_to_stop = (latest_price - stop_p) / buy_p * 100
+
+        if reached_stage == RESULT_CHECK_DAYS:
+            # 최종 체크인(15일) — 미확정이면 hold로 마감
+            conn.execute("""
+                UPDATE sshow_picks
+                SET result='hold', result_date=?, result_price=?, last_checkin=?
+                WHERE id=?
+            """, (latest_date, latest_price, reached_stage, pick_id))
+            notifications.append({
+                "name": name, "stage": reached_stage, "kind": "hold",
+                "text": f"⏱️ {name} {reached_stage}거래일 경과, 보합 마감 "
+                        f"({latest_price:,.0f}원, {pct:+.1f}%, 추천일:{pick_date})",
+            })
+        else:
+            # 중간 체크인(5일/10일) — 진행상황만 알림, pending 유지
+            conn.execute("""
+                UPDATE sshow_picks SET last_checkin=? WHERE id=?
+            """, (reached_stage, pick_id))
+            closer = "목표가" if dist_to_tgt < dist_to_stop else "손절가"
+            notifications.append({
+                "name": name, "stage": reached_stage, "kind": "progress",
+                "text": f"📍 {name} {reached_stage}거래일 경과 — "
+                        f"현재 {latest_price:,.0f}원({pct:+.1f}%), "
+                        f"{closer} 쪽에 더 가까움 (추천일:{pick_date})",
+            })
 
     conn.commit()
     conn.close()
 
-    total = sum(counts.values())
-    if total > 0:
-        print(f"✅ 생쇼 결과판정 완료: 적중{counts['hit']} / "
-              f"손절{counts['stop']} / 보합{counts['hold']}")
+    if notifications:
+        print(f"✅ 생쇼 체크인 알림 {len(notifications)}건 생성")
 
-    return counts
+    return notifications
 
 
 def get_sshow_stats(days: int = 30) -> dict:

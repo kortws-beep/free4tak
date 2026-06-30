@@ -503,16 +503,6 @@ async def daily_afternoon_report():
     extracted_picks = await fetch_mbngold_async(service_id="10020", limit=4)
     if not extracted_picks or "텅 비어" in extracted_picks: return
 
-    # ★ 2026-06-30: 결과 자동판정 — 과거 추천(5영업일 경과분)을 먼저 판정
-    #   해야 적중률 통계가 쌓이고, tele_swing_analyzer의 가변 가산점이
-    #   의미를 가짐. 이 호출이 없으면 모든 추천이 영원히 'pending'으로
-    #   남아 통계 자체가 만들어지지 않음.
-    try:
-        from sshow_db import check_and_update_results
-        check_and_update_results()
-    except Exception as e:
-        print(f"⚠️ 생쇼 결과판정 오류: {e}")
-
     # 생쇼 DB 저장
     try:
         from sshow_db import save_sshow_picks
@@ -688,6 +678,19 @@ async def daily_tele_swing_report():
     except Exception as e:
         print(f"❌ 텔레스윙 오류: {e}")
 
+    # ★ 2026-06-30: 생쇼 추천 5/10/15거래일 체크인 알림
+    #   (조기 목표가/손절가 도달도 이 시점에 같이 보고됨)
+    try:
+        from sshow_db import check_and_update_results
+        notis = await asyncio.to_thread(check_and_update_results)
+        if notis:
+            lines = [n["text"] for n in notis]
+            msg = "📊 **[생쇼 추천 결과 체크인]** 📊\n\n" + "\n".join(lines)
+            await send_safe_message(channel, msg)
+            print(f"✅ 생쇼 체크인 알림 {len(notis)}건 전송 완료!")
+    except Exception as e:
+        print(f"❌ 생쇼 체크인 알림 오류: {e}")
+
 @daily_tele_swing_report.before_loop
 async def before_daily_tele_swing_report():
     await client.wait_until_ready()
@@ -706,6 +709,18 @@ async def daily_tele_swing_afternoon():
         print("✅ 14:40 텔레스윙 전송 완료!")
     except Exception as e:
         print(f"❌ 텔레스윙 오후 오류: {e}")
+
+    # ★ 2026-06-30: 생쇼 추천 5/10/15거래일 체크인 알림
+    try:
+        from sshow_db import check_and_update_results
+        notis = await asyncio.to_thread(check_and_update_results)
+        if notis:
+            lines = [n["text"] for n in notis]
+            msg = "📊 **[생쇼 추천 결과 체크인]** 📊\n\n" + "\n".join(lines)
+            await send_safe_message(channel, msg)
+            print(f"✅ 생쇼 체크인 알림 {len(notis)}건 전송 완료!")
+    except Exception as e:
+        print(f"❌ 생쇼 체크인 알림 오류: {e}")
 
 @daily_tele_swing_afternoon.before_loop
 async def before_daily_tele_swing_afternoon():
