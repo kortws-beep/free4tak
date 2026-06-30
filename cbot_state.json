@@ -10,7 +10,7 @@
     "positions_detail": {},
     "daily_loss": 0,
     "market_status": "normal",
-    "btc_rate": -0.72004039,
+    "btc_rate": -0.7826048800000001,
     "fear_greed": 15,
     "is_night": false,
     "coin_pool": [
@@ -37,13 +37,13 @@
       "KRW-ORCA",
       "KRW-HUNT",
       "KRW-ID",
+      "KRW-TAIKO",
       "KRW-EDGE",
+      "KRW-AQT",
       "KRW-JTO",
       "KRW-VANA",
       "KRW-ONT",
-      "KRW-XPL",
-      "KRW-SAHARA",
-      "KRW-NEAR"
+      "KRW-XPL"
     ],
     "coins": [
       "KRW-BTC",
@@ -69,17 +69,17 @@
       "KRW-ORCA",
       "KRW-HUNT",
       "KRW-ID",
+      "KRW-TAIKO",
       "KRW-EDGE",
+      "KRW-AQT",
       "KRW-JTO",
       "KRW-VANA",
       "KRW-ONT",
-      "KRW-XPL",
-      "KRW-SAHARA",
-      "KRW-NEAR"
+      "KRW-XPL"
     ],
     "seed": "30만원 소액 모드"
   },
-  "last_update": "13:07:41",
+  "last_update": "13:30:06",
   "daily_loss": 0,
   "loss_date": "2026-06-30",
   "positions": {},

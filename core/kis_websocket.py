@@ -288,6 +288,9 @@ class KisWebSocket:
                 print(f"✅ [WS] 초기 잔고 로드: {len(pos)}종목")
             if cash:
                 self.cash = cash
+                print(f"✅ [WS] 초기 예수금 로드: {cash:,}원")
+            else:
+                print(f"⚠️ [WS] 초기 예수금 로드 실패 (0 또는 None 반환)")
         except Exception as e:
             print(f"⚠️ [WS] 초기 잔고 로드 오류: {e}")
 
@@ -342,9 +345,14 @@ class KisWebSocket:
         self._thread.start()
         print(f"🚀 [WS] 웹소켓 시작 [{self.cano}]")
 
-        # 연결 대기 (최대 10초)
+        # ★ 2026-06-30: 연결 대기 — 기존엔 connected(소켓 연결)만 보고
+        #   끝났는데, _load_initial_positions()(REST로 cash 로드)가
+        #   웹소켓 연결보다 먼저 실행되긴 하지만 별도 스레드라 완료
+        #   시점이 보장되지 않음. cash가 채워졌는지(혹은 충분히 기다렸는지)
+        #   도 같이 확인해 호출부(sbot.py)가 cash=0인 상태로 시작하지
+        #   않도록 보강.
         for _ in range(20):
-            if self.connected:
+            if self.connected and self.cash > 0:
                 break
             time.sleep(0.5)
 
@@ -356,8 +364,20 @@ class KisWebSocket:
         print(f"🛑 [WS] 웹소켓 종료 [{self.cano}]")
 
     def is_healthy(self) -> bool:
-        """웹소켓 연결 상태 확인"""
-        return self.connected and (time.time() - self.last_update < 300 or len(self.positions) == 0)
+        """
+        웹소켓 연결 상태 확인.
+        ★ 2026-06-30 수정: last_update는 체결통보(_parse_체결통보)가 와야만
+        갱신되는데, 연결 직후엔 아직 체결이 한 번도 없는 게 정상임에도
+        last_update=0(초기값) 상태라 "time.time()-0 < 300"이 항상 False가
+        되어 — 매매가 없는 동안은 영원히 is_healthy()=False가 되던 버그.
+        last_update가 아직 0(체결통보 무수신)이면 connected 여부만으로
+        판단하고, 한 번이라도 체결통보를 받은 뒤부터 300초 기준을 적용.
+        """
+        if not self.connected:
+            return False
+        if self.last_update == 0:
+            return True  # 아직 체결통보 없음 — 연결만 살아있으면 정상
+        return time.time() - self.last_update < 300
 
 
 # ============================================================

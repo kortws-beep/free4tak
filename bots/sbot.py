@@ -298,7 +298,25 @@ class SBot:
 
         # ── 시장 상태 ─────────────────────────────────────
         self.market_status     = "normal"
-        self._ws               = None  # 웹소켓 (미사용 시 None)
+        # ★ 2026-06-30: 웹소켓 실제 연동 — 매 루프(60초마다) REST API로
+        #   잔고/예수금을 조회하던 것을 체결통보 기반 실시간 갱신으로 대체.
+        #   sbot이 분석하는 종목 풀(보통 50개 안팎) × 시세/호가 조회와
+        #   합쳐져 "API 호출빈도 초과" watchdog 재시작이 빈번했는데, 그중
+        #   잔고/예수금 조회(매 루프 최소 2회) 비중을 없애는 게 목적.
+        #   기존엔 self._ws가 항상 None으로만 초기화되고 실제로 생성되는
+        #   코드가 없어 1391번째 줄의 웹소켓 우선 사용 분기가 죽은 코드였음.
+        try:
+            from kis_websocket import KisWebSocket
+            self._ws = KisWebSocket(
+                appkey=os.getenv("KIS_APPKEY2"),
+                secret=os.getenv("KIS_SECRET2"),
+                cano  =os.getenv("KIS_CANO2"),
+                acnt  =os.getenv("KIS_ACNT_PRDT_CD2"),
+            )
+            self._ws.start()
+        except Exception as e:
+            print(f"⚠️ 웹소켓 초기화 실패 — REST API 폴백 모드: {e}")
+            self._ws = None
         self._kospi_low         = 0.0   # ★ 코스피 최저점 추적
         self._rebound_count     = 0     # ★ 연속 반등 횟수
         self._prefer_kosdaq     = False  # ★ 코스닥 강세 시 우선
@@ -1388,7 +1406,14 @@ class SBot:
                 self.api.refresh_token_if_needed()
 
                 # ── 계좌 ─────────────────────────────────
-                cash           = (self._ws.cash if self._ws and self._ws.cash > 0 else self.api.get_buyable_cash())
+                # ★ 2026-06-30: 예수금은 웹소켓(체결통보 기반) 우선 사용 —
+                #   is_healthy() 체크 추가해 연결이 끊기거나 오래
+                #   갱신 안 됐으면(5분 이상) 안전하게 REST로 폴백.
+                #   잔고(보유종목) 자체는 buy_date 등 메타데이터 보존이
+                #   중요하고 수동매매 빈도가 높아 당분간 REST 유지 —
+                #   예수금만 먼저 webosocket화해 API 호출 1회를 줄임.
+                _ws_ok = self._ws and self._ws.is_healthy() and self._ws.cash > 0
+                cash = self._ws.cash if _ws_ok else self.api.get_buyable_cash()
                 new_pos = self.api.get_current_positions()
                 # ★ None = 진짜 API 조회 실패 / {} = 정상응답인데 보유종목 0개 (구분 필수!)
                 if new_pos is None:
@@ -1406,7 +1431,8 @@ class SBot:
                 psbl_cash      = self.api.get_psbl_order_cash("005930")
                 if psbl_cash <= 0:
                     psbl_cash = cash
-                print(f"\n⏰ {now} | 💵 예수금: {cash:,} | 💰 주문가능: {psbl_cash:,}")
+                _ws_tag = "WS" if _ws_ok else "REST"
+                print(f"\n⏰ {now} | 💵 예수금[{_ws_tag}]: {cash:,} | 💰 주문가능: {psbl_cash:,}")
 
                 # ── 보유종목 ─────────────────────────────
                 pos_mkt_cache = {}
