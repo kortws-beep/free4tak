@@ -2,16 +2,22 @@
 run_sshow_backtest.py — 생쇼(전문가4인 추천) 결과 체크 & 적중률 백테스터
 ================================================================
 목적:
-  sshow_db.py에 쌓인 생쇼 추천을 ATR 재계산 + 7/14/21일 역일 체크인
-  방식으로 점검하고, 적중률 통계를 콘솔에 보기 좋게 출력한다.
+  sshow_db.py에 쌓인 생쇼 추천을 ATR 재계산 + 7/14일 역일 체크인
+  방식으로 점검하고, 적중률 통계 및 모든 pending 종목의 현재
+  손익 스냅샷을 콘솔에 보기 좋게 출력한다.
 
   2026-06-30: 원래 lina_bot.py의 07:50/14:40 텔레스윙 스케줄러에 묻혀
   자동 알림으로 보내던 기능을, 결과를 차분히 들여다볼 수 있도록 이
   독립 스크립트로 분리. lina_bot.py에서는 해당 호출을 제거함.
   (14:30 mbn 생쇼 데이터 수집 자체는 lina_bot.py에 그대로 남아있음)
 
+  2026-07-01: 체크인을 7/14/21 → 7/14로 단축(pending이 60종목까지
+  쌓여 보기 어려웠음). 또한 "정확히 7/14일째 도달한 것만 보고"가
+  아니라, 실행할 때마다 모든 pending 종목의 현재가/현재수익률을
+  항상 보여주도록 변경 (get_pending_with_current_price 사용).
+
 사용법:
-  python3 run_sshow_backtest.py                # 체크인 + 통계 출력
+  python3 run_sshow_backtest.py                # 체크인 + 통계 + 현재손익 출력
   python3 run_sshow_backtest.py --migrate       # 기존 데이터 일괄 ATR재계산도 함께 (1회성)
   python3 run_sshow_backtest.py --cutoff 2026-06-16  # 마이그레이션 시 삭제 기준일 변경
 """
@@ -54,7 +60,7 @@ def main():
               f"재계산: {result['recalced']}건 | "
               f"재계산실패(원문유지): {result['kept_failed']}건")
 
-    print_header("📊 7/14/21일 체크인 — 신규 판정/알림")
+    print_header("📊 7/14일 체크인 — 신규 판정/알림")
     notis = sshow_db.check_and_update_results()
     if notis:
         for n in notis:
@@ -75,33 +81,19 @@ def main():
           f"보합(hold): {stats['hold']}건")
     print(f"  적중률(hit/(hit+stop)): {stats['hit_rate']:.1%}")
 
-    print_header("📋 현재 보유 중인 pending(미확정) 추천 목록")
-    pending_list = []
-    try:
-        import sqlite3
-        conn = sqlite3.connect(sshow_db.DB_PATH)
-        rows = conn.execute("""
-            SELECT date, stock_name, buy_price, stop_price, tgt_price,
-                   last_checkin, price_source, price_valid
-            FROM sshow_picks WHERE result='pending'
-            ORDER BY date DESC
-        """).fetchall()
-        conn.close()
-        if rows:
-            for d, name, buy, stop, tgt, checkin, src, valid in rows:
-                tag = "✅" if valid else "❌무효"
-                print(f"  {d} {name:>10} | 매수:{buy:>10,.0f} 손절:{stop:>10,.0f} "
-                      f"목표:{tgt:>10,.0f} | 체크인:{checkin:>2}일 | "
-                      f"출처:{src} {tag}")
-                pending_list.append({
-                    "date": d, "name": name, "buy_price": buy, "stop_price": stop,
-                    "tgt_price": tgt, "last_checkin": checkin,
-                    "price_source": src, "price_valid": bool(valid),
-                })
-        else:
-            print("  없음")
-    except Exception as e:
-        print(f"  ⚠️ 조회 오류: {e}")
+    print_header("📋 pending(미확정) 추천 — 현재 손익 스냅샷")
+    pending_list = sshow_db.get_pending_with_current_price()
+    if pending_list:
+        for p in pending_list:
+            tag = "✅" if p["price_valid"] else "❌무효"
+            cur = f"{p['current_price']:,.0f}원" if p["current_price"] else "데이터없음"
+            pct = f"{p['current_pct']:+.1f}%" if p["current_pct"] is not None else "  -  "
+            print(f"  {p['date']} {p['name']:>10} | 매수:{p['buy_price']:>10,.0f} "
+                  f"손절:{p['stop_price']:>10,.0f} 목표:{p['tgt_price']:>10,.0f} | "
+                  f"현재:{cur:>12}({pct:>7}) | {p['checkin_label']:<14} | "
+                  f"출처:{p['price_source']} {tag}")
+    else:
+        print("  없음")
 
     # 결과 JSON 저장 (다른 run_*_backtest.py와 동일한 패턴)
     os.makedirs(RESULT_DIR, exist_ok=True)

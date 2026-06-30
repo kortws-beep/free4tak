@@ -33,16 +33,13 @@ import datetime
 
 BASE_DIR    = os.path.dirname(os.path.abspath(__file__))
 DB_PATH     = os.path.join(BASE_DIR, "sshow_picks.db")
-KEEP_DAYS   = 25   # ★ 2026-06-30: lina_bot 자동알림을 제거하고 토요일
-                    #   백테스터(run_sshow_backtest.py) 단독 실행으로 전환.
-                    #   21일 체크인으로 모든 건이 확정되니, 그보다 살짝
-                    #   여유 있는 25일을 보관 기준으로 — DB가 무한정
-                    #   쌓이지 않게 확정된 건은 주기적으로 정리.
-RESULT_CHECK_DAYS = 21   # 최종 판정까지의 역일(달력일) 수
-CHECKIN_DAYS = [7, 14, 21]  # ★ 2026-06-30: 7/14/21 역일(달력일)마다 경과 알림
-                             #   (7,14일=중간 경과, 21일=최종 확정)
-                             #   거래일(영업일) 대신 역일 기준으로 변경 —
-                             #   주말 끼는 것까지 합쳐 "3주" 개념을 그대로 유지
+KEEP_DAYS   = 18   # ★ 2026-07-01: 14일 체크인으로 단축됨에 따라 보관기간도
+                    #   14일+여유(18일)로 줄여 pending 목록이 과도하게
+                    #   쌓이지 않도록 함.
+RESULT_CHECK_DAYS = 14   # 최종 판정까지의 역일(달력일) 수
+CHECKIN_DAYS = [7, 14]   # ★ 2026-06-30→07-01: 7/14/21 → 7/14로 단축
+                          #   (21일 기준이면 pending 목록이 60종목까지
+                          #   쌓여 한눈에 보기 어려움 — 14일로 줄여 40종목 수준으로)
 
 
 # ══════════════════════════════════════════════════════════════
@@ -264,9 +261,65 @@ def save_sshow_picks(raw_text: str) -> int:
     return saved
 
 
+def get_pending_with_current_price(force_today: str = None) -> list:
+    """
+    모든 pending(미확정) 추천에 대해, 체크인 단계(7/14일) 도달 여부와
+    무관하게 항상 "지금 기준" 현재가/수익률을 계산해서 반환.
+    (★ 2026-07-01 추가 — 기존 check_and_update_results()는 정확히 7일/14일
+    째에 막 도달한 건만 보고했는데, 실제로는 "몇 일째든 지금 상태가 어떤지"
+    매번 보고 싶다는 요청에 맞춰 분리. 7일/14일을 못 채운 종목은 "추천 후
+    N일째(7일 전)"처럼 표시, 14일 이상이면 최종 판정 기준에 해당.
+
+    반환: [{"date", "name", "buy_price", "stop_price", "tgt_price",
+            "days_elapsed", "current_price", "current_pct", "checkin_label",
+            "price_source", "price_valid"}, ...] 추천일 내림차순
+    """
+    init_db()
+    today = force_today or datetime.date.today().strftime("%Y-%m-%d")
+    today_d = datetime.date.fromisoformat(today)
+
+    conn = sqlite3.connect(DB_PATH, timeout=10)
+    rows = conn.execute("""
+        SELECT date, stock_name, buy_price, stop_price, tgt_price,
+               price_source, price_valid
+        FROM sshow_picks WHERE result='pending'
+        ORDER BY date DESC
+    """).fetchall()
+    conn.close()
+
+    result = []
+    for pick_date, name, buy_p, stop_p, tgt_p, src, valid in rows:
+        days_elapsed = (today_d - datetime.date.fromisoformat(pick_date)).days
+
+        history = _get_price_history(name, pick_date)
+        history = [(d, p) for d, p in history if d >= pick_date]
+        current_price = history[-1][1] if history else None
+        current_pct = (
+            round((current_price - buy_p) / buy_p * 100, 2)
+            if (current_price and buy_p > 0) else None
+        )
+
+        if days_elapsed >= CHECKIN_DAYS[1]:   # 14일 이상 — 최종 단계
+            checkin_label = f"{CHECKIN_DAYS[1]}일째(최종)"
+        elif days_elapsed >= CHECKIN_DAYS[0]:  # 7일 이상 — 1차 체크
+            checkin_label = f"{CHECKIN_DAYS[0]}일째 체크"
+        else:
+            checkin_label = f"D+{days_elapsed} ({CHECKIN_DAYS[0]}일째 전)"
+
+        result.append({
+            "date": pick_date, "name": name,
+            "buy_price": buy_p, "stop_price": stop_p, "tgt_price": tgt_p,
+            "days_elapsed": days_elapsed,
+            "current_price": current_price, "current_pct": current_pct,
+            "checkin_label": checkin_label,
+            "price_source": src, "price_valid": bool(valid),
+        })
+    return result
+
+
 def cleanup_old_picks(conn: sqlite3.Connection = None) -> int:
     """
-    KEEP_DAYS(25일) 지난 추천 삭제. conn이 주어지면 그 커넥션 재사용,
+    KEEP_DAYS(18일) 지난 추천 삭제. conn이 주어지면 그 커넥션 재사용,
     없으면 새로 열고 닫음. 백테스터(run_sshow_backtest.py)에서도
     독립적으로 호출 가능하도록 분리.
     반환: 삭제된 행 수

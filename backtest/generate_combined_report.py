@@ -164,19 +164,27 @@ def sshow_card(data):
     noti_table = (f'<table><thead><tr><th>종목</th><th>경과</th><th>구분</th><th style="text-align:left">내용</th></tr></thead>'
                   f'<tbody>{noti_rows}</tbody></table>') if noti_rows else '<p class="empty">이번 체크인 신규 판정 없음</p>'
 
-    # 현재 미확정(pending) 추천 목록
+    # 현재 미확정(pending) 추천 목록 — 현재가/현재수익률 포함
     pending = data.get("pending", []) or []
     pend_rows = ""
     for p in pending:
         valid_tag = "" if p.get("price_valid", True) else ' style="color:#ef5350"'
         src_tag = "ATR" if p.get("price_source") == "atr" else "원문"
+        cur_price = p.get("current_price")
+        cur_pct = p.get("current_pct")
+        cur_price_str = f'{cur_price:,.0f}' if cur_price is not None else "-"
+        cur_pct_str = fmt_pct(cur_pct) if cur_pct is not None else "-"
+        pct_color = color(cur_pct) if cur_pct is not None else "#888"
         pend_rows += (f'<tr{valid_tag}><td>{p.get("date","")}</td><td>{p.get("name","")}</td>'
                       f'<td>{safe(p.get("buy_price")):,.0f}</td>'
                       f'<td>{safe(p.get("stop_price")):,.0f}</td>'
                       f'<td>{safe(p.get("tgt_price")):,.0f}</td>'
-                      f'<td>{p.get("last_checkin",0)}일</td>'
+                      f'<td>{cur_price_str}</td>'
+                      f'<td style="color:{pct_color};font-weight:700">{cur_pct_str}</td>'
+                      f'<td>{p.get("checkin_label", "")}</td>'
                       f'<td>{src_tag}</td></tr>')
-    pend_table = (f'<table><thead><tr><th>추천일</th><th>종목</th><th>매수가</th><th>손절가</th><th>목표가</th><th>체크인</th><th>가격출처</th></tr></thead>'
+    pend_table = (f'<table><thead><tr><th>추천일</th><th>종목</th><th>매수가</th><th>손절가</th><th>목표가</th>'
+                  f'<th>현재가</th><th>현재수익률</th><th>경과</th><th>가격출처</th></tr></thead>'
                   f'<tbody>{pend_rows}</tbody></table>') if pend_rows else '<p class="empty">미확정 추천 없음</p>'
 
     note = ('<p style="color:#888;font-size:.85rem;margin:12px 0">'
@@ -184,7 +192,7 @@ def sshow_card(data):
             '목표/손절가는 ATR(stop×2.0/target×3.0) 재계산값 사용 — '
             '액면분할 등으로 원문 가격이 오염되는 문제 방지. '
             '적중률 = 적중/(적중+손절), 보합은 무승부로 분모 제외. '
-            '7/14/21일 역일 기준 체크인.</p>')
+            '7/14일 역일 기준 체크인, pending은 실행 시점 현재가/수익률 항상 표시.</p>')
 
     return f'''<div class="card"><h2>📺 생쇼(전문가4인) 추천 결과 체크인</h2>
     {summary}{note}
