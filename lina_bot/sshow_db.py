@@ -33,11 +33,16 @@ import datetime
 
 BASE_DIR    = os.path.dirname(os.path.abspath(__file__))
 DB_PATH     = os.path.join(BASE_DIR, "sshow_picks.db")
-KEEP_DAYS   = 90   # ★ 2026-06-30: 7일 → 90일로 연장 (결과추적/통계 누적을 위해
-                    #   필요. 7일이면 5영업일 판정 끝나기도 전에 삭제될 수 있었음)
-RESULT_CHECK_DAYS = 15   # 최종 판정까지의 거래일 수 (15거래일 = 3주 체크인의 마지막)
-CHECKIN_DAYS = [5, 10, 15]  # ★ 2026-06-30: 5/10/15거래일마다 경과 알림
-                             #   (5,10일=중간 경과 리포트, 15일=최종 확정)
+KEEP_DAYS   = 25   # ★ 2026-06-30: lina_bot 자동알림을 제거하고 토요일
+                    #   백테스터(run_sshow_backtest.py) 단독 실행으로 전환.
+                    #   21일 체크인으로 모든 건이 확정되니, 그보다 살짝
+                    #   여유 있는 25일을 보관 기준으로 — DB가 무한정
+                    #   쌓이지 않게 확정된 건은 주기적으로 정리.
+RESULT_CHECK_DAYS = 21   # 최종 판정까지의 역일(달력일) 수
+CHECKIN_DAYS = [7, 14, 21]  # ★ 2026-06-30: 7/14/21 역일(달력일)마다 경과 알림
+                             #   (7,14일=중간 경과, 21일=최종 확정)
+                             #   거래일(영업일) 대신 역일 기준으로 변경 —
+                             #   주말 끼는 것까지 합쳐 "3주" 개념을 그대로 유지
 
 
 # ══════════════════════════════════════════════════════════════
@@ -68,6 +73,13 @@ def init_db():
         ("result_price", "REAL DEFAULT 0"),
         ("price_valid",  "INTEGER DEFAULT 1"),
         ("last_checkin", "INTEGER DEFAULT 0"),  # 마지막으로 알림 보낸 체크인 일수(0/5/10/15)
+        # ★ 2026-06-30: buy_price/stop_price/tgt_price는 이제 ATR 기반
+        #   재계산값을 기본 저장하고, mbn 원문 파싱값은 참고용으로 별도
+        #   보존 (분할/파싱오류로 어긋나도 원본 비교/디버깅 가능하도록)
+        ("raw_buy_price",  "REAL DEFAULT 0"),
+        ("raw_stop_price", "REAL DEFAULT 0"),
+        ("raw_tgt_price",  "REAL DEFAULT 0"),
+        ("price_source",   "TEXT DEFAULT 'raw'"),  # 'atr'=재계산값 사용 / 'raw'=원문 파싱값 그대로
     ]:
         try:
             conn.execute(f"ALTER TABLE sshow_picks ADD COLUMN {col} {coltype}")
@@ -185,12 +197,29 @@ def save_sshow_picks(raw_text: str) -> int:
         if not name or len(name) < 2:
             continue
 
-        # ★ 2026-06-30 추가: 가격 정합성 검증 (손절가 < 매수가 < 목표가가
-        #   정상). KT&G/엘앤에프처럼 손절가가 매수가보다 크게 파싱되는
-        #   사례가 실제로 발견됨 — 원문 자체의 오타일 수도, 파싱 실패일
-        #   수도 있어 단정해서 버리지는 않되, price_valid=0으로 표시해
-        #   통계 집계에서 자동 제외되도록 함.
-        buy_p, stop_p, tgt_p = parsed["buy_price"], parsed["stop_price"], parsed["tgt_price"]
+        # ★ 2026-06-30 추가: mbn 원문 매수가/목표가/손절가가 액면분할
+        #   반영시차나 파싱오류로 실제가격과 5~7배씩 어긋나는 사고가
+        #   발견됨(미코 등). kr_theme_finance.db의 실제 종가+ATR 기반으로
+        #   재계산한 값을 우선 사용. 재계산 실패(데이터 없음 등) 시에만
+        #   원문 파싱값으로 폴백. 원문값은 raw_* 컬럼에 항상 보존.
+        raw_buy_p, raw_stop_p, raw_tgt_p = (
+            parsed["buy_price"], parsed["stop_price"], parsed["tgt_price"])
+
+        recalced = _recalc_prices_from_finance_db(name, today)
+        if recalced:
+            buy_p, stop_p, tgt_p = (
+                recalced["buy_price"], recalced["stop_price"], recalced["tgt_price"])
+            price_source = "atr"
+        else:
+            buy_p, stop_p, tgt_p = raw_buy_p, raw_stop_p, raw_tgt_p
+            price_source = "raw"
+            print(f"   ⚠️ {name} ATR 재계산 실패(가격데이터 없음) → 원문 파싱값 사용")
+
+        # ★ 가격 정합성 검증 (손절가 < 매수가 < 목표가가 정상). ATR
+        #   재계산값은 식 자체가 항상 정합하므로 사실상 raw 폴백 케이스만
+        #   해당 — KT&G/엘앤에프처럼 손절가가 매수가보다 크게 파싱되는
+        #   사례가 실제로 발견됨. 단정해서 버리지는 않되, price_valid=0으로
+        #   표시해 통계 집계에서 자동 제외되도록 함.
         price_valid = 1
         if buy_p > 0 and stop_p > 0 and tgt_p > 0:
             if not (stop_p < buy_p < tgt_p):
@@ -209,30 +238,54 @@ def save_sshow_picks(raw_text: str) -> int:
             conn.execute("""
                 INSERT OR IGNORE INTO sshow_picks
                     (date, stock_name, buy_price, stop_price, tgt_price,
-                     raw_text, price_valid)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (today, name, parsed["buy_price"], parsed["stop_price"],
-                  parsed["tgt_price"], reason[:300], price_valid))
+                     raw_text, price_valid,
+                     raw_buy_price, raw_stop_price, raw_tgt_price, price_source)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (today, name, buy_p, stop_p, tgt_p,
+                  reason[:300], price_valid,
+                  raw_buy_p, raw_stop_p, raw_tgt_p, price_source))
             if conn.execute("SELECT changes()").fetchone()[0] > 0:
                 saved += 1
-                print(f"   💾 생쇼 저장: {name} 매수:{parsed['buy_price']:,.0f} "
-                      f"손절:{parsed['stop_price']:,.0f} 목표:{parsed['tgt_price']:,.0f}")
+                src_tag = "ATR재계산" if price_source == "atr" else "원문"
+                print(f"   💾 생쇼 저장[{src_tag}]: {name} 매수:{buy_p:,.0f} "
+                      f"손절:{stop_p:,.0f} 목표:{tgt_p:,.0f}")
         except Exception as e:
             print(f"⚠️ 생쇼 저장 오류 {name}: {e}")
 
     conn.commit()
 
     # 오래된 데이터 정리
-    cutoff = (datetime.date.today() -
-              datetime.timedelta(days=KEEP_DAYS)).strftime("%Y-%m-%d")
-    conn.execute("DELETE FROM sshow_picks WHERE date < ?", (cutoff,))
-    conn.commit()
+    cleanup_old_picks(conn)
     conn.close()
 
     if saved > 0:
         print(f"✅ 생쇼 DB 저장: {saved}건 (날짜: {today})")
 
     return saved
+
+
+def cleanup_old_picks(conn: sqlite3.Connection = None) -> int:
+    """
+    KEEP_DAYS(25일) 지난 추천 삭제. conn이 주어지면 그 커넥션 재사용,
+    없으면 새로 열고 닫음. 백테스터(run_sshow_backtest.py)에서도
+    독립적으로 호출 가능하도록 분리.
+    반환: 삭제된 행 수
+    """
+    own_conn = conn is None
+    if own_conn:
+        init_db()
+        conn = sqlite3.connect(DB_PATH, timeout=10)
+
+    cutoff = (datetime.date.today() -
+              datetime.timedelta(days=KEEP_DAYS)).strftime("%Y-%m-%d")
+    deleted = conn.execute("DELETE FROM sshow_picks WHERE date < ?", (cutoff,)).rowcount
+    conn.commit()
+
+    if own_conn:
+        conn.close()
+    if deleted:
+        print(f"🗑️ 생쇼 오래된 데이터 정리: {deleted}건 ({KEEP_DAYS}일 초과)")
+    return deleted
 
 
 # ══════════════════════════════════════════════════════════════
@@ -267,25 +320,118 @@ def _get_price_history(stock_name: str, since_date: str) -> list:
         return []
 
 
+# ══════════════════════════════════════════════════════════════
+# ATR 기반 가격 재계산 (2026-06-30 추가)
+# ══════════════════════════════════════════════════════════════
+# 배경: mbn 원문에서 파싱한 buy_price/stop_price/tgt_price가 실제 가격과
+# 5~7배씩 차이나는 사고가 발견됨 (미코 106,500원 vs 실제 20,950원 등).
+# 원인은 액면분할/병합 반영 시차 또는 원문 파싱 오류로 추정되나, mbn
+# 원문 형식이 항상 일정하지 않아 파싱만으로는 근본 해결이 어려움.
+# 대신 우리가 이미 보유한 kr_theme_finance.db의 실제 종가(매수가 기준)와
+# ATR 기반 손절/목표 계산식(sbot_strategy.calc_atr_levels와 동일 로직)을
+# 사용해 가격을 재산출 — 데이터 오염에 흔들리지 않는 일관된 기준 확보.
+
+ATR_STOP_MULT_SSHOW   = 2.0
+ATR_TARGET_MULT_SSHOW = 3.0
+
+
+def _get_ohlc(stock_name: str, end_date: str, days: int = 15) -> list:
+    """end_date 이전(포함) days일치 (date, high, low, close)를 날짜 오름차순 반환"""
+    finance_db = _get_finance_db_path()
+    if not os.path.exists(finance_db):
+        return []
+    try:
+        conn = sqlite3.connect(finance_db, timeout=5)
+        rows = conn.execute("""
+            SELECT date, high_price, low_price, close_price
+            FROM kr_stock_daily_data
+            WHERE stock_name = ? AND date <= ?
+            ORDER BY date DESC LIMIT ?
+        """, (stock_name, end_date, days)).fetchall()
+        conn.close()
+        return list(reversed(rows))  # 오름차순으로 반환
+    except Exception as e:
+        print(f"⚠️ OHLC 조회 오류 {stock_name}: {e}")
+        return []
+
+
+def _calc_atr_rate(ohlc: list, period: int = 14) -> float:
+    """
+    True Range 기반 ATR을 종가 대비 비율로 반환.
+    ohlc: [(date, high, low, close), ...] 날짜 오름차순, 최소 2개 이상 필요.
+    risk_manager.calc_atr_rate와 동일한 계산 방식.
+    """
+    if len(ohlc) < 2:
+        return 0.0
+    trs = []
+    for i in range(1, len(ohlc)):
+        _, high, low, close = ohlc[i]
+        _, _, _, prev_close = ohlc[i - 1]
+        if not (high and low and close and prev_close):
+            continue
+        tr = max(high - low, abs(high - prev_close), abs(low - prev_close))
+        trs.append(tr)
+    if not trs:
+        return 0.0
+    trs = trs[-period:]  # 최근 period개만 사용
+    atr = sum(trs) / len(trs)
+    last_close = ohlc[-1][3]
+    return (atr / last_close) if last_close > 0 else 0.0
+
+
+def _recalc_prices_from_finance_db(stock_name: str, pick_date: str) -> dict:
+    """
+    추천일(pick_date) 기준으로 kr_theme_finance.db의 실제 종가를 매수가로,
+    ATR 기반 계산식으로 손절가/목표가를 재산출.
+    실패(데이터 없음 등) 시 빈 dict 반환 — 호출부가 원문 파싱값으로 폴백.
+    """
+    ohlc = _get_ohlc(stock_name, pick_date, days=15)
+    if not ohlc:
+        return {}
+    # pick_date 당일 종가를 매수가로 사용 (없으면 가장 가까운 직전 거래일)
+    buy_price = None
+    for d, h, l, c in reversed(ohlc):
+        if d <= pick_date and c > 0:
+            buy_price = c
+            break
+    if not buy_price:
+        return {}
+
+    atr_rate = _calc_atr_rate(ohlc)
+    if atr_rate <= 0:
+        return {}
+
+    atr_val = buy_price * atr_rate
+    stop_price = round(buy_price - atr_val * ATR_STOP_MULT_SSHOW, 0)
+    tgt_price  = round(buy_price + atr_val * ATR_TARGET_MULT_SSHOW, 0)
+
+    return {
+        "buy_price": round(buy_price, 0),
+        "stop_price": stop_price,
+        "tgt_price": tgt_price,
+        "atr_rate": atr_rate,
+    }
+
+
 def check_and_update_results(force_today: str = None) -> list:
     """
-    생쇼 추천 결과를 5/10/15거래일 체크인 시점마다 점검.
+    생쇼 추천 결과를 7/14/21 역일(달력일) 체크인 시점마다 점검.
 
     동작:
       1. 모든 'pending' 건에 대해 목표가/손절가 조기 도달 여부를 확인
          → 도달했으면 즉시 result='hit'/'stop'으로 확정 (체크인 일수와 무관)
-      2. 아직 미확정인 건 중, 거래일수가 정확히 5/10/15에 막 도달한 건은
-         "체크인 알림" 대상으로 수집:
-         - 5일/10일: 중간 경과 (목표가/손절가 중 어느 쪽에 더 가까운지)
-         - 15일: 그래도 미확정이면 result='hold'로 최종 확정
+      2. 아직 미확정인 건 중, 추천일로부터 경과한 역일수가 정확히
+         7/14/21에 막 도달한 건은 "체크인 알림" 대상으로 수집:
+         - 7일/14일: 중간 경과 (목표가/손절가 중 어느 쪽에 더 가까운지)
+         - 21일: 그래도 미확정이면 result='hold'로 최종 확정
       3. 같은 체크인 단계에 대해 중복 알림이 안 가도록 last_checkin 갱신
 
     price_valid=0(가격 역전 등 비정상)인 건은 판정/알림 대상에서 제외.
 
     반환: 알림으로 보낼 메시지 dict 리스트
-      [{"name":..., "stage": 5|10|15, "kind": "hit"|"stop"|"progress"|"hold",
+      [{"name":..., "stage": 7|14|21, "kind": "hit"|"stop"|"progress"|"hold",
         "text": "..."}, ...]
-    매일 1회(텔레스윙 갱신 시점 등) 호출 권장.
+    토요일 백테스터(run_sshow_backtest.py)에서 수동 실행 권장.
     """
     init_db()
     today = force_today or datetime.date.today().strftime("%Y-%m-%d")
@@ -312,7 +458,9 @@ def check_and_update_results(force_today: str = None) -> list:
         if not history:
             continue
 
-        trading_days_elapsed = len(history)  # 추천 이후 경과한 거래일 수
+        # ★ 2026-06-30: 거래일 수가 아닌 역일(달력일) 수로 경과 판단
+        days_elapsed = (datetime.date.fromisoformat(today) -
+                        datetime.date.fromisoformat(pick_date)).days
         latest_date, latest_price = history[-1]
 
         # ── 1. 조기 확정 체크 (목표가/손절가 도달은 언제든 발생 가능) ──
@@ -336,7 +484,7 @@ def check_and_update_results(force_today: str = None) -> list:
             emoji = "🎯" if kind == "hit" else "🛑"
             label = "목표가 도달" if kind == "hit" else "손절가 터치"
             notifications.append({
-                "name": name, "stage": trading_days_elapsed, "kind": kind,
+                "name": name, "stage": days_elapsed, "kind": kind,
                 "text": f"{emoji} {name} {label}! {result_price:,.0f}원 "
                         f"({pct:+.1f}%, 추천일:{pick_date})",
             })
@@ -344,11 +492,11 @@ def check_and_update_results(force_today: str = None) -> list:
                   f"({result_price:,.0f}원, {result_date})")
             continue  # 조기확정된 건은 체크인 알림 대상에서 제외
 
-        # ── 2. 체크인 단계 도달 여부 (5/10/15거래일) ──
+        # ── 2. 체크인 단계 도달 여부 (7/14/21 역일) ──
         # last_checkin보다 큰 체크인 단계 중, 이미 도달한 가장 가까운 단계를 찾음
         reached_stage = None
         for stage in CHECKIN_DAYS:
-            if trading_days_elapsed >= stage and last_checkin < stage:
+            if days_elapsed >= stage and last_checkin < stage:
                 reached_stage = stage
                 # 한 번에 여러 단계를 건너뛰지 않도록 가장 작은 새 단계만 사용
                 break
@@ -361,7 +509,7 @@ def check_and_update_results(force_today: str = None) -> list:
         dist_to_stop = (latest_price - stop_p) / buy_p * 100
 
         if reached_stage == RESULT_CHECK_DAYS:
-            # 최종 체크인(15일) — 미확정이면 hold로 마감
+            # 최종 체크인(21일) — 미확정이면 hold로 마감
             conn.execute("""
                 UPDATE sshow_picks
                 SET result='hold', result_date=?, result_price=?, last_checkin=?
@@ -369,18 +517,18 @@ def check_and_update_results(force_today: str = None) -> list:
             """, (latest_date, latest_price, reached_stage, pick_id))
             notifications.append({
                 "name": name, "stage": reached_stage, "kind": "hold",
-                "text": f"⏱️ {name} {reached_stage}거래일 경과, 보합 마감 "
+                "text": f"⏱️ {name} {reached_stage}일 경과, 보합 마감 "
                         f"({latest_price:,.0f}원, {pct:+.1f}%, 추천일:{pick_date})",
             })
         else:
-            # 중간 체크인(5일/10일) — 진행상황만 알림, pending 유지
+            # 중간 체크인(7일/14일) — 진행상황만 알림, pending 유지
             conn.execute("""
                 UPDATE sshow_picks SET last_checkin=? WHERE id=?
             """, (reached_stage, pick_id))
             closer = "목표가" if dist_to_tgt < dist_to_stop else "손절가"
             notifications.append({
                 "name": name, "stage": reached_stage, "kind": "progress",
-                "text": f"📍 {name} {reached_stage}거래일 경과 — "
+                "text": f"📍 {name} {reached_stage}일 경과 — "
                         f"현재 {latest_price:,.0f}원({pct:+.1f}%), "
                         f"{closer} 쪽에 더 가까움 (추천일:{pick_date})",
             })
@@ -440,6 +588,58 @@ def get_sshow_stats(days: int = 30) -> dict:
         "hit_rate": hit_rate,
         "sample_size_ok": total >= 20,  # 최소 20건은 돼야 신뢰 가능
     }
+
+
+def migrate_recalc_existing(cutoff_date: str = "2026-06-16") -> dict:
+    """
+    일회성 마이그레이션 (2026-06-30):
+    - cutoff_date 이전 추천은 삭제 (오염 우려 + 통계적으로도 의미 적은
+      오래된 데이터)
+    - cutoff_date 이후 추천은 ATR 기반 가격으로 재계산해 덮어씀
+      (raw_buy_price 등에 원문값은 보존)
+    - 재계산 실패(가격데이터 없음)한 건은 그대로 두되 price_valid=0으로
+      표시해 통계에서 제외
+
+    반환: {"deleted": N, "recalced": N, "kept_failed": N}
+    """
+    init_db()
+    conn = sqlite3.connect(DB_PATH, timeout=10)
+
+    deleted = conn.execute(
+        "DELETE FROM sshow_picks WHERE date < ?", (cutoff_date,)
+    ).rowcount
+    conn.commit()
+
+    rows = conn.execute("""
+        SELECT id, date, stock_name, buy_price, stop_price, tgt_price
+        FROM sshow_picks WHERE date >= ?
+    """, (cutoff_date,)).fetchall()
+
+    recalced, kept_failed = 0, 0
+    for pick_id, pick_date, name, old_buy, old_stop, old_tgt in rows:
+        result = _recalc_prices_from_finance_db(name, pick_date)
+        if result:
+            conn.execute("""
+                UPDATE sshow_picks
+                SET buy_price=?, stop_price=?, tgt_price=?,
+                    raw_buy_price=?, raw_stop_price=?, raw_tgt_price=?,
+                    price_source='atr', price_valid=1
+                WHERE id=?
+            """, (result["buy_price"], result["stop_price"], result["tgt_price"],
+                  old_buy, old_stop, old_tgt, pick_id))
+            recalced += 1
+            print(f"   🔧 재계산: {name}({pick_date}) "
+                  f"매수:{old_buy:,.0f}→{result['buy_price']:,.0f}")
+        else:
+            conn.execute("UPDATE sshow_picks SET price_valid=0 WHERE id=?", (pick_id,))
+            kept_failed += 1
+            print(f"   ⚠️ 재계산 실패(데이터없음): {name}({pick_date}) → 통계 제외 표시")
+
+    conn.commit()
+    conn.close()
+
+    print(f"✅ 마이그레이션 완료: 삭제{deleted} / 재계산{recalced} / 실패{kept_failed}")
+    return {"deleted": deleted, "recalced": recalced, "kept_failed": kept_failed}
 
 
 def get_sshow_stocks(days: int = 5) -> dict:

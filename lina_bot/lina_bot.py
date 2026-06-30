@@ -678,19 +678,6 @@ async def daily_tele_swing_report():
     except Exception as e:
         print(f"❌ 텔레스윙 오류: {e}")
 
-    # ★ 2026-06-30: 생쇼 추천 5/10/15거래일 체크인 알림
-    #   (조기 목표가/손절가 도달도 이 시점에 같이 보고됨)
-    try:
-        from sshow_db import check_and_update_results
-        notis = await asyncio.to_thread(check_and_update_results)
-        if notis:
-            lines = [n["text"] for n in notis]
-            msg = "📊 **[생쇼 추천 결과 체크인]** 📊\n\n" + "\n".join(lines)
-            await send_safe_message(channel, msg)
-            print(f"✅ 생쇼 체크인 알림 {len(notis)}건 전송 완료!")
-    except Exception as e:
-        print(f"❌ 생쇼 체크인 알림 오류: {e}")
-
 @daily_tele_swing_report.before_loop
 async def before_daily_tele_swing_report():
     await client.wait_until_ready()
@@ -709,18 +696,6 @@ async def daily_tele_swing_afternoon():
         print("✅ 14:40 텔레스윙 전송 완료!")
     except Exception as e:
         print(f"❌ 텔레스윙 오후 오류: {e}")
-
-    # ★ 2026-06-30: 생쇼 추천 5/10/15거래일 체크인 알림
-    try:
-        from sshow_db import check_and_update_results
-        notis = await asyncio.to_thread(check_and_update_results)
-        if notis:
-            lines = [n["text"] for n in notis]
-            msg = "📊 **[생쇼 추천 결과 체크인]** 📊\n\n" + "\n".join(lines)
-            await send_safe_message(channel, msg)
-            print(f"✅ 생쇼 체크인 알림 {len(notis)}건 전송 완료!")
-    except Exception as e:
-        print(f"❌ 생쇼 체크인 알림 오류: {e}")
 
 @daily_tele_swing_afternoon.before_loop
 async def before_daily_tele_swing_afternoon():
