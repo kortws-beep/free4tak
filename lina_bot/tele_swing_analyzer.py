@@ -207,11 +207,42 @@ def _get_sshow_stocks() -> dict:
         return {}
 
 
+def _get_sshow_bonus_score() -> int:
+    """
+    생쇼(전문가4인) 추천 가산점을 최근 30일 적중률 기반으로 산출.
+    (★ 2026-06-30 추가 — 기존엔 고정 +8점이었으나, 결과추적 데이터가
+    쌓이면서 실제 성과에 따라 가변 적용하도록 변경)
+    - 표본 20건 미만(sample_size_ok=False) → 고정 +8 (기존과 동일,
+      통계가 신뢰할 만큼 안 쌓였을 때는 보수적으로 유지)
+    - 적중률 60% 이상 → +10
+    - 적중률 40~60%  → +8 (기존과 동일)
+    - 적중률 40% 미만 → +5
+    """
+    try:
+        from sshow_db import get_sshow_stats
+        stats = get_sshow_stats(days=30)
+    except Exception as e:
+        print(f"⚠️ [텔레스윙] 생쇼 통계 조회 오류: {e}")
+        return 8  # 통계 조회 실패 시 기존 고정값으로 안전하게 폴백
+
+    if not stats.get("sample_size_ok", False):
+        return 8
+
+    hit_rate = stats.get("hit_rate", 0.0)
+    if hit_rate >= 0.6:
+        return 10
+    elif hit_rate >= 0.4:
+        return 8
+    else:
+        return 5
+
+
 # ══════════════════════════════════════════════════════════════
 # 정통 스윙 점수 계산
 # ══════════════════════════════════════════════════════════════
 
-def _calc_swing_score(stock_name: str, tele_score: int, is_sshow: bool = False) -> dict:
+def _calc_swing_score(stock_name: str, tele_score: int, is_sshow: bool = False,
+                       sshow_bonus: int = 8) -> dict:
     """
     정통 스윙 트레이딩 원칙 기반 점수 산출
     """
@@ -341,10 +372,10 @@ def _calc_swing_score(stock_name: str, tele_score: int, is_sshow: bool = False) 
         score += tele_pts
         detail["텔레그램"] = f"+{tele_pts} (원점수:{tele_score})"
 
-        # ── 8. 생쇼 추천 (+8점) ──────────────────────────────
+        # ── 8. 생쇼 추천 (적중률 기반 가변 가산점) ──────────────
         if is_sshow:
-            score += 8
-            detail["생쇼추천"] = "+8 (전문가추천)"
+            score += sshow_bonus
+            detail["생쇼추천"] = f"+{sshow_bonus} (전문가추천, 30일적중률 기반)"
 
         # ── ATR 손절/목표 ─────────────────────────────────────
         atr        = _atr(closes)
@@ -442,11 +473,18 @@ def get_tele_swing_picks(top_n: int = TOP_N, min_score: int = MIN_SCORE) -> list
     sshow_names  = set(sshow_stocks.keys()) & set(tele_stocks.keys())  # 교집합만
     print(f"   생쇼 교집합: {len(sshow_names)}개 (텔레그램+생쇼 동시 언급)")
 
+    # ★ 2026-06-30: 생쇼 가산점을 적중률 기반으로 — 종목마다 매번 통계를
+    #   다시 조회하면 비효율이므로 루프 시작 전 한 번만 조회
+    sshow_bonus = _get_sshow_bonus_score()
+    if sshow_names:
+        print(f"   생쇼 가산점: +{sshow_bonus} (30일 적중률 기반)")
+
     # 2. 정통 스윙 점수 계산
     results = []
     for name, tele_score in tele_stocks.items():
         is_sshow = name in sshow_names
-        data = _calc_swing_score(name, tele_score, is_sshow=is_sshow)
+        data = _calc_swing_score(name, tele_score, is_sshow=is_sshow,
+                                  sshow_bonus=sshow_bonus)
         if data["curr_price"] > 0 and data["rr_ratio"] >= 1.5:
             results.append(data)
 

@@ -503,6 +503,16 @@ async def daily_afternoon_report():
     extracted_picks = await fetch_mbngold_async(service_id="10020", limit=4)
     if not extracted_picks or "텅 비어" in extracted_picks: return
 
+    # ★ 2026-06-30: 결과 자동판정 — 과거 추천(5영업일 경과분)을 먼저 판정
+    #   해야 적중률 통계가 쌓이고, tele_swing_analyzer의 가변 가산점이
+    #   의미를 가짐. 이 호출이 없으면 모든 추천이 영원히 'pending'으로
+    #   남아 통계 자체가 만들어지지 않음.
+    try:
+        from sshow_db import check_and_update_results
+        check_and_update_results()
+    except Exception as e:
+        print(f"⚠️ 생쇼 결과판정 오류: {e}")
+
     # 생쇼 DB 저장
     try:
         from sshow_db import save_sshow_picks

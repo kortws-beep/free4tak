@@ -13,6 +13,17 @@ sshow_db.py — 생쇼 공략주 DB 저장 및 조회
     - tgt_price  : 목표가 (파싱 성공시)
     - raw_text   : 원문
     - created_at : 저장시각
+    - result        : 결과 판정 (2026-06-30 추가)
+                       'pending'=미판정, 'hit'=목표가도달,
+                       'stop'=손절가터치, 'hold'=기간만료(보합)
+    - result_date   : 결과 판정일
+    - result_price  : 판정 시점 종가
+    - price_valid   : 가격 정합성 (1=정상, 0=비정상 — stop>=buy 등)
+
+[적중률 통계]
+  get_sshow_stats() — 최근 N일 result='hit'/'stop'/'hold' 집계
+  check_and_update_results() — 5영업일 지난 pending 건을 자동 판정
+  (매일 1회, kiki_briefing 등에서 호출 권장)
 """
 
 import os
@@ -22,7 +33,9 @@ import datetime
 
 BASE_DIR    = os.path.dirname(os.path.abspath(__file__))
 DB_PATH     = os.path.join(BASE_DIR, "sshow_picks.db")
-KEEP_DAYS   = 7    # 7일치 보관 (5영업일 + 주말 여유)
+KEEP_DAYS   = 90   # ★ 2026-06-30: 7일 → 90일로 연장 (결과추적/통계 누적을 위해
+                    #   필요. 7일이면 5영업일 판정 끝나기도 전에 삭제될 수 있었음)
+RESULT_CHECK_DAYS = 5   # 추천 후 5영업일 뒤 결과 판정
 
 
 # ══════════════════════════════════════════════════════════════
@@ -45,6 +58,18 @@ def init_db():
             UNIQUE(date, stock_name)
         )
     """)
+    # ★ 2026-06-30 추가 컬럼 — 기존 운영 DB에도 안전하게 적용되도록
+    #   ALTER TABLE로 동적 추가 (이미 있으면 무시)
+    for col, coltype in [
+        ("result",       "TEXT DEFAULT 'pending'"),
+        ("result_date",  "TEXT DEFAULT ''"),
+        ("result_price", "REAL DEFAULT 0"),
+        ("price_valid",  "INTEGER DEFAULT 1"),
+    ]:
+        try:
+            conn.execute(f"ALTER TABLE sshow_picks ADD COLUMN {col} {coltype}")
+        except sqlite3.OperationalError:
+            pass  # 이미 존재
     conn.commit()
     conn.close()
 
@@ -157,6 +182,19 @@ def save_sshow_picks(raw_text: str) -> int:
         if not name or len(name) < 2:
             continue
 
+        # ★ 2026-06-30 추가: 가격 정합성 검증 (손절가 < 매수가 < 목표가가
+        #   정상). KT&G/엘앤에프처럼 손절가가 매수가보다 크게 파싱되는
+        #   사례가 실제로 발견됨 — 원문 자체의 오타일 수도, 파싱 실패일
+        #   수도 있어 단정해서 버리지는 않되, price_valid=0으로 표시해
+        #   통계 집계에서 자동 제외되도록 함.
+        buy_p, stop_p, tgt_p = parsed["buy_price"], parsed["stop_price"], parsed["tgt_price"]
+        price_valid = 1
+        if buy_p > 0 and stop_p > 0 and tgt_p > 0:
+            if not (stop_p < buy_p < tgt_p):
+                price_valid = 0
+                print(f"   ⚠️ 가격 역전 감지: {name} 매수:{buy_p:,.0f} "
+                      f"손절:{stop_p:,.0f} 목표:{tgt_p:,.0f} → 통계 제외 표시")
+
         # [사유] 추출
         reason = ""
         for line in block.split("\n"):
@@ -167,10 +205,11 @@ def save_sshow_picks(raw_text: str) -> int:
         try:
             conn.execute("""
                 INSERT OR IGNORE INTO sshow_picks
-                    (date, stock_name, buy_price, stop_price, tgt_price, raw_text)
-                VALUES (?, ?, ?, ?, ?, ?)
+                    (date, stock_name, buy_price, stop_price, tgt_price,
+                     raw_text, price_valid)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
             """, (today, name, parsed["buy_price"], parsed["stop_price"],
-                  parsed["tgt_price"], reason[:300]))
+                  parsed["tgt_price"], reason[:300], price_valid))
             if conn.execute("SELECT changes()").fetchone()[0] > 0:
                 saved += 1
                 print(f"   💾 생쇼 저장: {name} 매수:{parsed['buy_price']:,.0f} "
@@ -191,6 +230,162 @@ def save_sshow_picks(raw_text: str) -> int:
         print(f"✅ 생쇼 DB 저장: {saved}건 (날짜: {today})")
 
     return saved
+
+
+# ══════════════════════════════════════════════════════════════
+# 결과 자동 판정 (2026-06-30 추가)
+# ══════════════════════════════════════════════════════════════
+
+def _get_finance_db_path() -> str:
+    """kr_theme_finance.db 경로 (BASE_DIR 기준, 같은 lina_bot 폴더)"""
+    return os.path.join(BASE_DIR, "kr_theme_finance.db")
+
+
+def _get_price_history(stock_name: str, since_date: str) -> list:
+    """
+    종목명으로 since_date 이후의 (date, close_price) 목록을 날짜순 반환.
+    ★ exact match만 사용 — LIKE 매칭은 '삼성전자'가 '삼성전자우'까지
+    잘못 잡는 문제가 있어 반드시 정확히 일치하는 stock_name만 조회.
+    """
+    finance_db = _get_finance_db_path()
+    if not os.path.exists(finance_db):
+        return []
+    try:
+        conn = sqlite3.connect(finance_db, timeout=5)
+        rows = conn.execute("""
+            SELECT date, close_price FROM kr_stock_daily_data
+            WHERE stock_name = ? AND date >= ?
+            ORDER BY date ASC
+        """, (stock_name, since_date)).fetchall()
+        conn.close()
+        return rows
+    except Exception as e:
+        print(f"⚠️ 가격 조회 오류 {stock_name}: {e}")
+        return []
+
+
+def check_and_update_results(force_today: str = None) -> dict:
+    """
+    추천 후 RESULT_CHECK_DAYS(5)영업일이 지난 'pending' 건을 자동 판정.
+    판정 기준 (since_date~지금까지의 종가 흐름을 순서대로 확인):
+      - 목표가에 먼저 도달한 종가가 있으면 → 'hit'
+      - 손절가에 먼저 도달한 종가가 있으면 → 'stop'
+      - 둘 다 아닌 채 5영업일(거래일 기준)이 지나면 → 'hold'
+      - 가격 데이터가 아직 부족하면 → 그대로 'pending' 유지
+    price_valid=0(가격 역전 등 비정상)인 건은 애초에 판정하지 않고 건너뜀.
+
+    매일 1회(예: 장 마감 후) 호출 권장. 반환: {"hit": N, "stop": N, "hold": N}
+    """
+    init_db()
+    today = force_today or datetime.date.today().strftime("%Y-%m-%d")
+
+    conn = sqlite3.connect(DB_PATH, timeout=10)
+    pending = conn.execute("""
+        SELECT id, date, stock_name, buy_price, stop_price, tgt_price
+        FROM sshow_picks
+        WHERE result = 'pending' AND price_valid = 1
+    """).fetchall()
+
+    counts = {"hit": 0, "stop": 0, "hold": 0}
+
+    for pick_id, pick_date, name, buy_p, stop_p, tgt_p in pending:
+        if not (buy_p > 0 and stop_p > 0 and tgt_p > 0):
+            continue  # 가격 파싱 자체가 실패한 건 — 판정 불가, pending 유지
+
+        history = _get_price_history(name, pick_date)
+        if not history:
+            continue  # 가격 데이터 없음 — 다음 기회에 재시도
+
+        # 추천일 자체(같은 날 종가)는 매수 시점 기준이 아니므로 다음날부터 판정
+        history = [(d, p) for d, p in history if d > pick_date]
+        if not history:
+            continue
+
+        result = None
+        result_date = None
+        result_price = None
+        for d, p in history:
+            if p >= tgt_p:
+                result, result_date, result_price = "hit", d, p
+                break
+            if p <= stop_p:
+                result, result_date, result_price = "stop", d, p
+                break
+
+        if result is None:
+            # 목표/손절 둘 다 안 닿음 — 거래일 수가 RESULT_CHECK_DAYS 이상이면 보합 확정
+            if len(history) >= RESULT_CHECK_DAYS:
+                result = "hold"
+                result_date, result_price = history[-1][0], history[-1][1]
+            else:
+                continue  # 아직 판정 기간 안 됨 — pending 유지
+
+        conn.execute("""
+            UPDATE sshow_picks
+            SET result = ?, result_date = ?, result_price = ?
+            WHERE id = ?
+        """, (result, result_date, result_price, pick_id))
+        counts[result] += 1
+        print(f"   📊 생쇼 결과판정: {name} ({pick_date}) → {result} "
+              f"({result_price:,.0f}원, {result_date})")
+
+    conn.commit()
+    conn.close()
+
+    total = sum(counts.values())
+    if total > 0:
+        print(f"✅ 생쇼 결과판정 완료: 적중{counts['hit']} / "
+              f"손절{counts['stop']} / 보합{counts['hold']}")
+
+    return counts
+
+
+def get_sshow_stats(days: int = 30) -> dict:
+    """
+    최근 N일간 판정 완료(hit/stop/hold)된 추천의 적중률 통계.
+    반환: {"total": N, "hit": N, "stop": N, "hold": N, "hit_rate": 0~1,
+           "sample_size_ok": bool}
+    가격 정합성 비정상(price_valid=0) 건은 집계에서 제외.
+    """
+    if not os.path.exists(DB_PATH):
+        return {"total": 0, "hit": 0, "stop": 0, "hold": 0,
+                "hit_rate": 0.0, "sample_size_ok": False}
+
+    cutoff = (datetime.date.today() -
+              datetime.timedelta(days=days)).strftime("%Y-%m-%d")
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=5)
+        rows = conn.execute("""
+            SELECT result, COUNT(*) FROM sshow_picks
+            WHERE date >= ? AND price_valid = 1 AND result != 'pending'
+            GROUP BY result
+        """, (cutoff,)).fetchall()
+        conn.close()
+    except Exception as e:
+        print(f"⚠️ 생쇼 통계 조회 오류: {e}")
+        return {"total": 0, "hit": 0, "stop": 0, "hold": 0,
+                "hit_rate": 0.0, "sample_size_ok": False}
+
+    counts = {"hit": 0, "stop": 0, "hold": 0}
+    for result, cnt in rows:
+        if result in counts:
+            counts[result] = cnt
+
+    total = sum(counts.values())
+    # 적중률: hit / (hit + stop)  ('hold'는 무승부로 분모에서 제외 —
+    #  목표/손절 어느 쪽도 안 닿은 종목까지 패배로 잡으면 적중률이
+    #  부당하게 낮아짐)
+    decided = counts["hit"] + counts["stop"]
+    hit_rate = (counts["hit"] / decided) if decided > 0 else 0.0
+
+    return {
+        "total": total,
+        "hit": counts["hit"],
+        "stop": counts["stop"],
+        "hold": counts["hold"],
+        "hit_rate": hit_rate,
+        "sample_size_ok": total >= 20,  # 최소 20건은 돼야 신뢰 가능
+    }
 
 
 def get_sshow_stocks(days: int = 5) -> dict:
