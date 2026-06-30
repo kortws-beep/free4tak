@@ -897,12 +897,21 @@ class SBot:
         print(f"\n🔄 [SWING] 분석: 신규 {len(new_codes)}개 | 캐시 {len(cached_codes)}개")
 
         # 1) 룰 점수 계산
+        # ★ 2026-06-30: 종목당 2~4회 API 호출(시세/호가/수급)이 딜레이 없이
+        #   연속 실행되면, 재시작 직후나 종목풀 대량교체 시(40개+ 신규)
+        #   순식간에 100~200회가 몰려 한투 서버가 "초당 거래건수 초과"로
+        #   거부하거나, 더 심하면 연결 자체를 강제로 끊어버리는
+        #   (RemoteDisconnected) 사고가 실제로 발생함. 종목 간 짧은
+        #   딜레이를 넣어 순간 호출량을 분산.
+        ANALYSIS_DELAY_SEC = 0.15
         rule_candidates = []
         for idx, code in enumerate(new_codes):
             print(f"🔎 분석 {idx+1}/{len(new_codes)}: {code}", end="")
             data, rule_score = self._analyze_one_code(code)
             if data is not None:
                 rule_candidates.append((code, rule_score, data))
+            if idx < len(new_codes) - 1:
+                time.sleep(ANALYSIS_DELAY_SEC)
 
         # 2) 상위 10개 AI 분석
         rule_candidates.sort(key=lambda x: x[1], reverse=True)

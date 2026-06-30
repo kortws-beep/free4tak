@@ -61,7 +61,7 @@ class KisAPI:
         body = {"grant_type": "client_credentials",
                 "appkey": self.appkey, "appsecret": self.secret}
         try:
-            res = requests.post(url, json=body).json()
+            res = requests.post(url, json=body, timeout=10).json()
             if "error_code" in res:
                 print(f"❌ 토큰 발급 오류 [{self.cano}]: {res.get('error_description', res['error_code'])}")
                 return ""
@@ -98,7 +98,7 @@ class KisAPI:
                    "appkey": self.appkey, "appsecret": self.secret}
         try:
             return requests.post(url, headers=headers,
-                                 data=json.dumps(data)).json().get("HASH", "")
+                                 data=json.dumps(data), timeout=10).json().get("HASH", "")
         except Exception as e:
             print(f"⚠️ 해시키 발급 실패: {e}"); return ""
 
@@ -118,7 +118,7 @@ class KisAPI:
             "PRCS_DVSN": "00", "CTX_AREA_FK100": "", "CTX_AREA_NK100": "",
         }
         try:
-            res     = requests.get(url, headers=headers, params=params).json()
+            res     = requests.get(url, headers=headers, params=params, timeout=10).json()
             output2 = res.get("output2", [{}])[0] if res.get("output2") else {}
             cash    = (output2.get("dnca_tot_amt") or
                        output2.get("prvs_rcdl_excc_amt") or
@@ -137,7 +137,7 @@ class KisAPI:
                    "ORD_DVSN": "01", "CMA_EVLU_AMT_ICLD_YN": "N",
                    "OVRS_ICLD_YN": "N"}
         try:
-            res    = requests.get(url, headers=headers, params=params).json()
+            res    = requests.get(url, headers=headers, params=params, timeout=10).json()
             output = res.get("output", {})
             cash   = (output.get("nrcvb_buy_amt") or
                       output.get("max_buy_amt") or
@@ -226,7 +226,7 @@ class KisAPI:
                    "tr_id": "FHKST01010100"}
         params  = {"FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": code}
         try:
-            result = requests.get(url, headers=headers, params=params).json().get("output")
+            result = requests.get(url, headers=headers, params=params, timeout=10).json().get("output")
             if result:
                 self._mkt_cache[code] = (result, time.time())
             return result
@@ -358,7 +358,7 @@ class KisAPI:
                   "fid_input_date_1": start_date, "fid_input_date_2": end_date,
                   "fid_period_div_code": "D", "fid_org_adj_prc": "0"}
         try:
-            res     = requests.get(url, headers=headers, params=params).json()
+            res     = requests.get(url, headers=headers, params=params, timeout=10).json()
             candles = res.get("output2", [])
             if len(candles) < 26: return {}
 
@@ -498,7 +498,10 @@ class KisAPI:
                    "tr_id": "FHKST01010900"}
         params  = {"fid_cond_mrkt_div_code": "J", "fid_input_iscd": code}
         try:
-            res   = requests.get(url, headers=headers, params=params).json()
+            # ★ 2026-06-30: timeout 추가 — 누락되어 있어 응답 지연 시
+            #   무한 대기하다 연결이 강제로 끊기는(RemoteDisconnected)
+            #   사고로 이어질 수 있었음. 다른 API 호출들과 동일하게 10초로 통일.
+            res   = requests.get(url, headers=headers, params=params, timeout=10).json()
             items = res.get("output", [])
             if not items: return {}
 
@@ -805,7 +808,7 @@ class KisAPI:
                    "FID_VOL_CNT": "0", "FID_INPUT_DATE_1": "0"}
         codes = []
         try:
-            res = requests.get(url, headers=headers, params=params).json()
+            res = requests.get(url, headers=headers, params=params, timeout=10).json()
             if res.get("rt_cd") == "0":
                 for item in res.get("output", []):
                     code = item.get("mksc_shrn_iscd", "").strip()
