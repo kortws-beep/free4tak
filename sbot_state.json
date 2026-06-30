@@ -5,12 +5,12 @@
   "cmd_result": null,
   "last_status": {
     "cash": 30484,
-    "total_profit": -390599,
+    "total_profit": -390699,
     "positions": 3,
     "score_enter": 75,
-    "last_update": "13:00:10",
+    "last_update": "13:07:42",
     "market_status": "normal",
-    "market_rate": 1.12,
+    "market_rate": 1.86,
     "daily_loss": 0,
     "code_name_map": {
       "000660": "SK하이닉스",
@@ -95,7 +95,8 @@
       "461300": "아이스크림미디어",
       "002990": "금호건설",
       "001210": "금호전기",
-      "222800": "심텍"
+      "222800": "심텍",
+      "039030": "이오테크닉스"
     },
     "new_codes": [
       "090360",
@@ -152,22 +153,22 @@
       "089030": {
         "name": "테크윙",
         "entry_price": 60518,
-        "current": 53700,
-        "rate": -11.27,
+        "current": 53800,
+        "rate": -11.1,
         "qty": 22,
         "buy_tag": ""
       },
       "403870": {
         "name": "HPSP",
         "entry_price": 56100,
-        "current": 54300,
-        "rate": -3.21,
+        "current": 54200,
+        "rate": -3.39,
         "qty": 23,
         "buy_tag": ""
       }
     }
   },
-  "last_update": "13:00:16",
+  "last_update": "13:07:44",
   "sold_today": {},
   "sold_today_date": "2026-06-30",
   "daily_loss": 0,

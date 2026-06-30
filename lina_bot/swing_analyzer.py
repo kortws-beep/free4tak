@@ -127,15 +127,11 @@ def get_swing_picks(top_n: int = TOP_N_DEFAULT) -> str:
         curr_price = valid_closes[0]
         pure_name  = re.sub(r'\s*(KOSPI|KOSDAQ)\s*\d{6}$', '', stock_name).strip()
 
-        # ETF / 인버스 / 레버리지 제외
-        etf_keywords = ['KODEX','TIGER','KBSTAR','ARIRANG','HANARO',
-                        'KOSEF','TREX','SOL','ACE','PLUS','RISE',
-                        '인버스','레버리지','ETN']
-        if any(kw in pure_name for kw in etf_keywords):
-            continue
-
-        # 우선주 제외
-        if pure_name.endswith('우') or pure_name.endswith('우B'):
+        # ETF / 인버스 / 레버리지 / 우선주 제외 (공통 필터 — 2026-06-30)
+        # ★ "WON" 등 누락된 ETF 브랜드 때문에 ETF가 일반종목처럼 추천되던
+        #   사고가 있어, stock_filters.py로 통합 관리하도록 변경
+        from stock_filters import is_etf_or_excluded
+        if is_etf_or_excluded(pure_name):
             continue
 
         # ① 200일선 위
@@ -419,12 +415,10 @@ def get_swing_data(top_n: int = 20) -> list:
         curr_price = valid_closes[0]
         pure_name  = re.sub(r"\s*(KOSPI|KOSDAQ)\s*\d{6}$", "", stock_name).strip()
 
-        # ETF / 우선주 제외
-        etf_kw = ["KODEX","TIGER","KBSTAR","ARIRANG","HANARO","KOSEF","TREX",
-                  "SOL","ACE","PLUS","RISE","KIWOOM","SMART","FOCUS",
-                  "인버스","레버리지","ETN","ETF"]
-        if any(k in pure_name for k in etf_kw): continue
-        if pure_name.endswith("우") or pure_name.endswith("우B"): continue
+        # ETF / 우선주 제외 (공통 필터 — 2026-06-30)
+        from stock_filters import is_etf_or_excluded
+        if is_etf_or_excluded(pure_name):
+            continue
 
         ma200 = _ma(valid_closes, 200)
         if ma200 == 0 or curr_price < ma200: continue
