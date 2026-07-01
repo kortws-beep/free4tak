@@ -1018,23 +1018,24 @@ class Sbo2:
                 print(f"⏭️ 이미 보유중: {name}({code}) - 스킵")
                 continue
 
-            # ★ sbot 교차 보유 방지
-            try:
-                import os as _os, json as _json
-                _sbot_state_path = _os.path.join(
-                    _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
-                    "sbot_state.json")
-                sbot_pos = set()
-                if _os.path.exists(_sbot_state_path):
-                    with open(_sbot_state_path, "r", encoding="utf-8") as _f:
-                        _sbot_st = _json.load(_f)
-                    sbot_pos = set(_sbot_st.get("last_status", {})
-                                       .get("positions_detail", {}).keys())
-                if code in sbot_pos:
-                    print(f"⛔ {name}({code}) sbot 보유 중 — sbo2 매수 제외")
-                    continue
-            except Exception as _e:
-                print(f"⚠️ sbot 포지션 조회 오류: {_e}")
+            # ★ sbot 교차 보유 방지 — master_db 기반 (2026-07-02)
+            #   기존엔 sbot_state.json을 직접 열어 읽었음 — 락이 없어 sbot이
+            #   쓰는 도중이면 깨진 JSON을 만날 수 있고, 상대 state 파일의
+            #   내부 스키마(last_status.positions_detail)에 그대로 의존해
+            #   구조가 바뀌면 조용히 깨지는 구조였음. 두 봇 다 매수/매도마다
+            #   이미 기록하는 master_db(master_positions)를 단일 기준으로 사용.
+            #   조회 실패 시엔 기존과 동일하게 "교차 보유 없음"으로 보고
+            #   매수를 막지는 않음(안전 폴백 — 이 체크는 사고 방지용 부가
+            #   안전장치일 뿐 매수 자체를 중단시킬 이유는 아님).
+            sbot_pos = set()
+            if get_all_positions:
+                try:
+                    sbot_pos = {p["code"] for p in get_all_positions() if p["bot_type"] == "sbot"}
+                except Exception as _e:
+                    print(f"⚠️ sbot 포지션 조회 오류: {_e}")
+            if code in sbot_pos:
+                print(f"⛔ {name}({code}) sbot 보유 중 — sbo2 매수 제외")
+                continue
             if code in self.sold_today:
                 print(f"🚫 재매수 금지: {name}")
                 save_candidate(name=name, grade=cand["grade"], score=cand["score"],
@@ -1597,6 +1598,25 @@ class Sbo2:
                     print(f"   💼 {pos.get('name', code)}({label}) "
                           f"{rate:+.1f}% | 현재:{int(curr):,} | "
                           f"손절:{pos['stop_price']:,.0f} 목표:{pos['tgt_price']:,.0f}")
+                    # ★ 2026-07-02: master_positions 현재가 갱신 (sbot과 동일 패턴).
+                    #   기존엔 신규 매수 시점에만 upsert하고 재시작으로 실계좌에서
+                    #   그대로 복원(adopt)된 보유종목은 한 번도 master_db에 반영된
+                    #   적이 없어서, sbo2 현재 보유종목이 master_positions에서
+                    #   통째로 빠져있었음(sbot이 sbo2 교차보유 체크에 master_db를
+                    #   쓰면 항상 빈 결과를 받는 문제로 이어짐). 매 루프 upsert로
+                    #   실계좌 기준과 항상 동기화되도록 함.
+                    if _master_upsert:
+                        try:
+                            _master_upsert(
+                                bot_type='sbo2', code=code,
+                                stock_name=pos.get('name', code),
+                                entry_price=pos['entry_price'],
+                                current_price=curr,
+                                qty=pos.get('qty', 0),
+                                stage=pos.get('stage', 0),
+                            )
+                        except Exception:
+                            pass
 
             except KeyboardInterrupt:
                 print("\n⛔ [sbo2] 중단")

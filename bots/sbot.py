@@ -88,11 +88,13 @@ try:
         record_trade    as _master_record,
         upsert_position as _master_upsert,
         remove_position as _master_remove,
+        get_all_positions,
     )
 except Exception:
     _master_record = None
     _master_upsert = None
     _master_remove = None
+    get_all_positions = None
 SECTOR_MONITOR_DB = '/home/free4tak/k-bot/stock_bot/sector_monitor.db'
 
 # ============================================================
@@ -1099,19 +1101,19 @@ class SBot:
                 "ai_reason":  data.get("ai_reason", ""),
                 "stock_name": data.get("stock_name", ""),
             }
-            # ★ sbo2 교차 보유 방지 (구 nbot 참조 — 경로/구조 모두 sbo2에 맞게 수정)
-            try:
-                import os as _os, json as _json
-                _sbo2_state_path = _os.path.join(
-                    _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
-                    "lina_bot", "sbo2_state.json")
-                sbo2_pos = set()
-                if _os.path.exists(_sbo2_state_path):
-                    with open(_sbo2_state_path, "r", encoding="utf-8") as _f:
-                        sbo2_pos = set(_json.load(_f).get("positions", {}).keys())
-            except Exception as _e:
-                print(f"⚠️ sbo2 포지션 조회 오류: {_e}")
-                sbo2_pos = set()
+            # ★ sbo2 교차 보유 방지 — master_db 기반 (2026-07-02)
+            #   기존엔 sbo2_state.json을 직접 열어 읽었음(파일 스키마 의존 +
+            #   락 없음). 두 봇 다 매수/매도마다 이미 기록하는
+            #   master_db(master_positions)를 단일 기준으로 사용.
+            #   조회 실패 시엔 기존과 동일하게 "교차 보유 없음"으로 보고
+            #   매수를 막지는 않음(부가 안전장치 — 매수 자체를 중단시킬
+            #   이유는 아님).
+            sbo2_pos = set()
+            if get_all_positions:
+                try:
+                    sbo2_pos = {p["code"] for p in get_all_positions() if p["bot_type"] == "sbo2"}
+                except Exception as _e:
+                    print(f"⚠️ sbo2 포지션 조회 오류: {_e}")
             if code in sbo2_pos:
                 print(f"⛔ {code} sbo2 보유 중 — sbot 매수 제외")
                 continue
