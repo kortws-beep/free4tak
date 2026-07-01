@@ -903,7 +903,13 @@ class SBot:
         #   거부하거나, 더 심하면 연결 자체를 강제로 끊어버리는
         #   (RemoteDisconnected) 사고가 실제로 발생함. 종목 간 짧은
         #   딜레이를 넣어 순간 호출량을 분산.
-        ANALYSIS_DELAY_SEC = 0.15
+        # ★ 2026-07-01: 장 개장 직후(09:00~09:20)에 재시작이 가장 잦음 —
+        #   이 시간대는 키움 조건검색 + 신규종목 분석이 동시에 몰리므로
+        #   딜레이를 0.15 → 0.3초로 강화.
+        _open_hour = now_t[:4] <= "0920"
+        ANALYSIS_DELAY_SEC = 0.3 if _open_hour else 0.15
+        if _open_hour and new_codes:
+            print(f"   🕐 장 개장 시간대 — 분석 딜레이 {ANALYSIS_DELAY_SEC}초 적용 ({len(new_codes)}개)")
         rule_candidates = []
         for idx, code in enumerate(new_codes):
             print(f"🔎 분석 {idx+1}/{len(new_codes)}: {code}", end="")
@@ -1263,7 +1269,7 @@ class SBot:
             f"🚀 [영암9 SWING] 스윙봇 가동\n"
             f"⏰ {now_kst().strftime('%Y-%m-%d %H:%M:%S')}\n"
             f"💰 1차:{fmt_won(BUY_1ST_AMT_BASE)} / 최대 {MAX_POSITIONS}종목\n"
-            f"🎯 익절:+8%/+15%/+25% | 손절:-7% (1차후 본절-3%)\n"
+            f"🎯 ATR×3 목표가 상향추종 | 손절:ATR×2 | 1차달성시 50%매도+상향\n"
             f"⏳ 매수: {BUY_START_TIME} 이후\n"
             f"⛔ 단타 제외: {SKIP_COND_KEYWORDS}",
             critical=True,
@@ -1425,8 +1431,19 @@ class SBot:
                 cash = self._ws.cash if _ws_ok else self.api.get_buyable_cash()
                 new_pos = self.api.get_current_positions()
                 # ★ None = 진짜 API 조회 실패 / {} = 정상응답인데 보유종목 0개 (구분 필수!)
-                if new_pos is None:
-                    print("⚠️ 실계좌 잔고 조회 실패 — 캐시(기존 positions) 유지, 이번 루프 동기화 스킵")
+                # ★ 2026-07-01 추가: {} 방어 — 기존에 보유종목이 있는데 빈 dict가
+                #   오면 API 오류로 간주해 positions를 덮어쓰지 않음.
+                #   한투 API가 "초당 거래건수 초과" 등 오류 시 {} 를 반환하는 경우가
+                #   있어 positions.clear()가 실행돼 모든 보유종목이 사라지는
+                #   치명적 버그가 실제로 발생했음 (035420 손절 직후 잔고조회
+                #   실패로 positions=[] 됐다가 watchdog 재시작 루핑).
+                _pos_suspicious = (new_pos == {} and len(self.positions) > 0)
+                if new_pos is None or _pos_suspicious:
+                    if _pos_suspicious:
+                        print(f"⚠️ 잔고조회 결과 빈값({{}}), 기존 {len(self.positions)}종목 보유 중 "
+                              f"→ API 오류로 간주, 기존 positions 유지")
+                    else:
+                        print("⚠️ 실계좌 잔고 조회 실패(None) — 기존 positions 유지")
                     self._check_api_health(False)
                 else:
                     self._check_api_health(True)

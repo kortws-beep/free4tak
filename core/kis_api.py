@@ -208,9 +208,11 @@ class KisAPI:
                     time.sleep(1)
                 else:
                     if hasattr(self, '_pos_cache') and self._pos_cache:
+                        print(f"⚠️ 잔고조회 예외 — 이전 캐시 유지 ({len(self._pos_cache)}종목)")
                         return self._pos_cache
-                    return {}
-        return {}
+                    return None  # ★ 캐시도 없으면 None — {} 반환 시 positions.clear()로
+                                 #   모든 보유종목이 사라지는 치명적 버그 방지
+        return None  # ★ for루프 정상종료 없이 빠져나온 경우도 None으로 안전하게
 
     # ============================================================
     # 시세 조회
