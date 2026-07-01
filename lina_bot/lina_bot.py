@@ -400,9 +400,74 @@ async def fetch_mbn_strategy(cutoff_hour: int = 8, cutoff_minute: int = 50) -> s
 
     if not items: return ""
     items.sort(key=lambda x: x["time"])
-    lines = [f"📊 [{x['time']}] **{x['manager']}** — {x['title']}\n   🔗 {x['link']}"
-             for x in items]
-    return "\n\n".join(lines)
+
+    # ── 본문 요약 (★ 2026-07-02 추가) ────────────────────────
+    #   기존엔 제목+링크만 보내서 로그인 없이는 실제 내용을 알 수 없었음.
+    #   각 글의 상세페이지(mhj_pd_view_content)를 열어 본문을 가져오고
+    #   LLM으로 A4 1페이지 분량 요약. HTTP+LLM 호출은 블로킹이라
+    #   디스코드 이벤트루프를 몇 분씩 막지 않도록 스레드로 분리.
+    summaries = await asyncio.to_thread(_fetch_and_summarize_bodies, sess, headers, items)
+
+    lines = []
+    for x, summary in zip(items, summaries):
+        block = f"📊 [{x['time']}] **{x['manager']}** — {x['title']}\n   🔗 {x['link']}"
+        if summary:
+            block += f"\n\n{summary}"
+        lines.append(block)
+    return "\n\n─────────────\n\n".join(lines)
+
+
+def _fetch_and_summarize_bodies(sess, headers, items: list) -> list:
+    """전략 글 상세페이지 본문을 가져와 LLM으로 요약. 동기 함수 — to_thread로 실행."""
+    results = []
+    for x in items:
+        text = ""
+        try:
+            r = sess.get(x["link"], headers=headers, timeout=10)
+            soup = BeautifulSoup(r.content.decode("utf-8", errors="ignore"), "html.parser")
+            body = soup.find("div", class_="mhj_pd_view_content")
+            text = body.get_text("\n", strip=True) if body else ""
+        except Exception as e:
+            print(f"⚠️ MBN 본문 조회 오류 ({x.get('title','')}): {e}")
+        results.append(_summarize_report_body(text) if text else "")
+    return results
+
+
+def _summarize_report_body(text: str) -> str:
+    """투자전략 본문을 A4 1페이지 분량으로 요약.
+    로컬 ollama 우선 시도 → 실패 시 Claude API로 폴백 (2026-07-02)."""
+    prompt = (
+        "다음은 오늘자 증권사 전문가 투자전략/시황 리포트 원문이다. "
+        "핵심 내용을 놓치지 않으면서 A4 한 페이지 분량(1000~1500자)으로 "
+        "한국어로 요약해라. 숫자·종목명·원인-결과 관계는 유지하고 "
+        "불필요한 수식어만 줄여라.\n\n"
+        f"[원문]\n{text[:4000]}"
+    )
+    ollama_model = os.getenv("OLLAMA_MODEL", "qwen2.5:14b")
+    ollama_url   = os.getenv("OLLAMA_URL", "http://localhost:11434")
+    try:
+        import openai as _openai
+        client = _openai.OpenAI(base_url=f"{ollama_url}/v1", api_key="ollama", timeout=120)
+        res = client.chat.completions.create(
+            model=ollama_model, max_tokens=1200,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return res.choices[0].message.content.strip()
+    except Exception as e:
+        print(f"⚠️ 로컬 LLM 요약 실패({e}) → Claude로 폴백")
+
+    try:
+        import anthropic as _ant
+        client = _ant.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+        res = client.messages.create(
+            model=os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001"),
+            max_tokens=1200,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return res.content[0].text.strip()
+    except Exception as e:
+        print(f"⚠️ Claude 요약도 실패({e}) — 본문 일부만 전달")
+        return text[:800] + ("..." if len(text) > 800 else "")
 
 def fetch_recent_telegram_events(limit_count=4, minutes_back=65):
     """
