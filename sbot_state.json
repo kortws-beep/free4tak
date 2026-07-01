@@ -5,10 +5,10 @@
   "cmd_result": null,
   "last_status": {
     "cash": 30484,
-    "total_profit": -254600,
+    "total_profit": -249100,
     "positions": 4,
     "score_enter": 75,
-    "last_update": "14:46:01",
+    "last_update": "14:47:08",
     "market_status": "normal",
     "market_rate": -1.71,
     "daily_loss": 0,
@@ -144,38 +144,38 @@
       "028050": {
         "name": "삼성E&A",
         "entry_price": 50929,
-        "current": 51300,
-        "rate": 0.73,
+        "current": 51400,
+        "rate": 0.92,
         "qty": 17,
         "buy_tag": ""
       },
       "089030": {
         "name": "테크윙",
         "entry_price": 62700,
-        "current": 58100,
-        "rate": -7.34,
+        "current": 58200,
+        "rate": -7.18,
         "qty": 17,
         "buy_tag": ""
       },
       "403870": {
         "name": "HPSP",
         "entry_price": 58500,
-        "current": 51000,
-        "rate": -12.82,
+        "current": 51200,
+        "rate": -12.48,
         "qty": 18,
         "buy_tag": ""
       },
       "448900": {
         "name": "한국피아이엠",
         "entry_price": 59380,
-        "current": 56200,
-        "rate": -5.36,
+        "current": 56100,
+        "rate": -5.52,
         "qty": 15,
         "buy_tag": ""
       }
     }
   },
-  "last_update": "14:46:08",
+  "last_update": "14:47:15",
   "sold_today": {},
   "sold_today_date": "2026-07-01",
   "daily_loss": 0,

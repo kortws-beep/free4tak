@@ -871,10 +871,16 @@ async def on_ready():
         print("✅ [시스템] 14시 30분 생쇼 스케줄러 가동 성공!")
     except Exception as e: print(f"⚠️ [에러] 생쇼 스케줄러: {e}")
 
-    try:
-        hourly_telegram_event_report.start()
-        print("✅ [시스템] 텔레그램 1분 감시 스케줄러 가동 성공!")
-    except Exception as e: print(f"⚠️ [에러] 텔레그램 스케줄러: {e}")
+    # ★ 2026-07-01: hourly_telegram_event_report 비활성화
+    #   텔레그램 메시지는 이미 1분마다 DB에 수집/저장 중이므로
+    #   매 시간 30분마다 자동으로 디스코드에 요약을 보낼 필요 없음.
+    #   같은 내용이 12:30/13:30/14:30에 반복 전송되고, 14:30엔
+    #   생쇼 브리핑과 겹쳐서 지저분해지는 문제가 있었음.
+    #   필요할 때 !텔레요약 명령어로 조회하는 방식으로 대체.
+    # try:
+    #     hourly_telegram_event_report.start()
+    #     print("✅ [시스템] 텔레그램 1분 감시 스케줄러 가동 성공!")
+    # except Exception as e: print(f"⚠️ [에러] 텔레그램 스케줄러: {e}")
 
     try:
         daily_news_report.start()
