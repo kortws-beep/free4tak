@@ -125,6 +125,7 @@ CANDIDATE_REFRESH= 86400        # 후보 갱신 주기 (하루 1회)
 MIN_PRICE        = 3_000        # 최소 주가
 MAX_PRICE        = 3_000_000    # 최대 주가
 MIN_BUY_CHECK_CASH = 200_000     # 주문가능금액이 이 밑이면 후보 전수 조회(현재가+MA40) 자체를 건너뜀
+CANDIDATE_CAP_PER_SLOT = 3       # 슬롯당 후보 상위 N개만 유지 (교집합도 동일 적용, 2026-07-02)
 
 BOT_STATE_FILE   = os.path.join(BASE_DIR, "sbo2_state.json")
 SBO2_DB_PATH     = os.path.join(BASE_DIR, "sbo2_trades.db")
@@ -552,10 +553,15 @@ def get_candidates() -> list:
     candidates = []
 
     # ── 슬롯1: 교집합 (VCP + 추세 + 촉매) ──────────────────────
+    # ★ 2026-07-02: 스윙/추세 슬롯과 달리 캡이 없어서 교집합에 걸리는 종목이
+    #   많은 날엔 _check_buy가 매 루프(30초)마다 그 후보 전체를 현재가+MA40
+    #   조회하며 KIS API 호출이 몰리는 원인이 됐음 — 다른 슬롯과 동일하게
+    #   점수 상위 N개로 캡.
     inter_names = swing_names & trend_names & catalyst_set
+    inter_list = []
     for name in inter_names:
         d = detail_map.get(name, {})
-        candidates.append({
+        inter_list.append({
             "name":     name,
             "grade":    SLOT_INTER,
             "score":    d.get("score", 100),  # 교집합 최고 우선순위
@@ -568,6 +574,8 @@ def get_candidates() -> list:
             "rr":       d.get("rr_ratio", 0),
             "themes":   d.get("themes", []),
         })
+    inter_list.sort(key=lambda x: x["score"], reverse=True)
+    candidates += inter_list[:CANDIDATE_CAP_PER_SLOT]
 
     # ── 슬롯2: 스윙 (VCP only, 교집합 제외) ────────────────────
     swing_only = swing_names - trend_names
@@ -588,7 +596,7 @@ def get_candidates() -> list:
             "themes":   d.get("themes", []),
         })
     swing_list.sort(key=lambda x: x["score"], reverse=True)
-    candidates += swing_list[:3]  # 상위 3개만 후보
+    candidates += swing_list[:CANDIDATE_CAP_PER_SLOT]
 
     # ── 슬롯3: 추세 (trend only, 교집합 제외) ──────────────────
     trend_only = trend_names - swing_names
@@ -609,7 +617,7 @@ def get_candidates() -> list:
             "themes":   d.get("themes", []),
         })
     trend_list.sort(key=lambda x: x["score"], reverse=True)
-    candidates += trend_list[:3]  # 상위 3개만 후보
+    candidates += trend_list[:CANDIDATE_CAP_PER_SLOT]
 
     return candidates
 
