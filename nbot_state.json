@@ -1,15 +1,16 @@
 {
   "telegram_event": {
     "keywords": [
-      "계약체결"
+      "AI"
     ],
     "themes": [
-      "바이오",
-      "제약"
+      "반도체",
+      "클라우드",
+      "AI"
     ],
-    "score": 15,
-    "text": "2026.07.01 09:42:02\n기업명: 삼성E&A(시가총액: 9조 9,372억) A028050\n보고서명: 단일판매ㆍ공급계약체결\n\n계약상대 : - \n계약내용 : ( 용역제공 ) - \n공급지역 : 중동 \n계약금액 : \n\n계약시작 : -\n계약종료 : -\n계약기간 : \n매출대비 : -%\n\n공시링크: https://dart.fss.or.kr/dsaf001/ma",
-    "time": "09:42:36"
+    "score": 10,
+    "text": "✅ 앤스로픽 ‘클로드 사이언스’로 AI 신약전쟁 참전\n\nhttps://n.news.naver.com/mnews/article/020/0003730750?rc=N&ntype=RANKING&sid=101",
+    "time": "14:38:49"
   },
   "disclosure_event": {
     "code": "397030",
