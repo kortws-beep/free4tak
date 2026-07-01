@@ -1680,6 +1680,11 @@ class CBot:
                     if _code not in new_pos and _code not in self.sold_today:
                         self.sold_today[_code] = now_hms()
                         print(f"🔍 수동매도 감지: {_code} → sold_today 추가")
+                        # ★ 2026-07-02: master_positions 정리 누락 수정 —
+                        #   기존엔 감지만 하고 지우질 않아 수동매도된 코인이
+                        #   master_positions에 유령으로 계속 남아있었음.
+                        if _master_remove:
+                            _master_remove('cbot', _code)
                 self.positions.clear()
                 self.positions.update(new_pos)
                 krw            = self.get_krw_balance()

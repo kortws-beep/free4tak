@@ -1454,6 +1454,12 @@ class SBot:
                     for _code in list(self.positions.keys()):
                         if _code not in new_pos and _code not in self.sold_today:
                             print(f"🔍 수동매도 감지: {_code} → 재매수 허용")
+                            # ★ 2026-07-02: master_positions 정리 누락 수정 —
+                            #   기존엔 여기서 감지만 하고 지우질 않아 수동매도된
+                            #   종목이 master_positions에 유령으로 계속 남아있었음
+                            #   (sbo2는 이미 정리하고 있었음, sbot만 누락).
+                            if _master_remove:
+                                _master_remove("sbot", _code)
                     self.positions.clear()
                     self.positions.update(new_pos)
                 psbl_cash      = self.api.get_psbl_order_cash("005930")

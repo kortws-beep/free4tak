@@ -235,7 +235,6 @@ class SwingAnalyzer:
             f"- 기관 당일: {data.get('orgn_today', 0):,}주\n\n"
 
             + hist_text
-            + self._get_review_hint()
             + self._get_news_hint()   # ★ 뉴스 감성 (3일치)
 
             + "\n[★ 점수 기준 — 스윙봇 특성 (일봉 추세 + 수급 지속성)]\n"
@@ -340,27 +339,6 @@ class SwingAnalyzer:
 
         except Exception as e:
             print(f"⚠️ [SWING AI] 뉴스 힌트 오류: {e}")
-            return ""
-
-    # ============================================================
-    # 어제 복기 힌트
-    # ============================================================
-    def _get_review_hint(self) -> str:
-        """어제 자동 복기 결과를 프롬프트에 주입"""
-        try:
-            from daily_review import load_yesterday_review
-            review = load_yesterday_review()
-            if not review:
-                return ""
-            lines = ["\n[어제 복기 — 오늘 전략 반영]"]
-            if review.get("내일전략"):
-                lines.append(f"- 주의사항: {review['내일전략']}")
-            if review.get("주의종목유형"):
-                lines.append(f"- 피해야 할 종목: {review['주의종목유형']}")
-            if review.get("주목시간대"):
-                lines.append(f"- 집중 시간대: {review['주목시간대']}")
-            return "\n".join(lines) + "\n"
-        except Exception:
             return ""
 
     # ============================================================

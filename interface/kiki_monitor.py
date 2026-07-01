@@ -586,9 +586,15 @@ async def proactive_insight_provider():
 # ─────────────────────────────────────────────────────────────
 # 4️⃣ 일일 리뷰 (15:35 — 장 마감 후)
 # ─────────────────────────────────────────────────────────────
+# ★ 2026-07-02: 기존엔 nbot 기준 서술형 AI 복기(오늘평가/잘한점/못한점/
+#   내일전략 등)였음 — nbot이 폐기되면서 더 이상 필요 없어짐. sbot/sbo2/
+#   cbot 실전봇 기준으로 "보유종목 등락률 + 금일 실현손익"만 보여주는
+#   단순 요약으로 교체 (별도 interface/daily_review.py 20:10 cron은
+#   비활성화 — 이 함수가 대체).
 async def proactive_daily_review():
-    """📊 평일 15:35 장 마감 직후 종합 리뷰"""
+    """📊 평일 15:35 장 마감 직후 — sbot/sbo2/cbot 보유종목 + 금일 실현손익"""
     last_review_date = None
+    from master_db import get_all_positions, get_today_summary
 
     while True:
         await asyncio.sleep(60)  # 1분 간격 체크
@@ -608,49 +614,26 @@ async def proactive_daily_review():
             if not ch:
                 continue
 
-            ctx = _gather_bot_context()
+            positions   = get_all_positions()
+            pnl_summary = get_today_summary()
 
-            # 단타봇 오늘 거래 (최근 50건)
-            nbot_trades = []
-            try:
-                conn = _ro_connect(TRADE_HIST_DB)
-                rows = conn.execute("""
-                    SELECT code, profit_rate, sell_reason, ai_score, sell_time
-                    FROM trades
-                    WHERE sell_price IS NOT NULL AND sell_time >= ?
-                    ORDER BY sell_time DESC LIMIT 50
-                """, (today,)).fetchall()
-                conn.close()
-                nbot_trades = [
-                    {
-                        "code":   r[0],
-                        "rate":   round(r[1] or 0, 2),
-                        "reason": r[2],
-                        "score":  r[3],
-                        "time":   r[4][-8:] if r[4] else "",
-                    }
-                    for r in rows
-                ]
-            except Exception:
-                pass
+            lines = [f"📊 **키키 일일 리뷰** [{now.strftime('%m/%d')}]",
+                     "━━━━━━━━━━━━━━━━━━━━"]
+            for bot_type in ["sbot", "sbo2", "cbot"]:
+                bot_pos = [p for p in positions if p["bot_type"] == bot_type]
+                if bot_pos:
+                    pos_str = ", ".join(
+                        f"{p.get('stock_name') or p['code']}"
+                        f"({(p.get('profit_rate') or 0):+.1f}%)"
+                        for p in bot_pos
+                    )
+                else:
+                    pos_str = "없음"
+                pnl = pnl_summary.get(bot_type, {}).get("pnl", 0)
+                lines.append(f"**{bot_type}** : 보유종목({pos_str}) | 금일손익: {pnl:+,}원")
 
-
-
-            review_data = {
-                "date":        today,
-                "context":     ctx,
-                "nbot_trades": nbot_trades,
-                "today_pnl":   ctx["today_realized"],
-            }
-            msg = await _ai_proactive_message(
-                ctx, "review", extra_data=review_data,
-            )
-            if msg and msg != "OK":
-                await ch.send(
-                    f"📊 **키키 일일 리뷰** [{now.strftime('%m/%d')}]\n"
-                    f"━━━━━━━━━━━━━━━━━━━━\n{msg}"
-                )
-                print(f"✅ 일일 리뷰 전송 {today}")
+            await ch.send("\n".join(lines))
+            print(f"✅ 일일 리뷰 전송 {today}")
 
         except Exception as e:
             print(f"⚠️ proactive_daily_review: {e}")
