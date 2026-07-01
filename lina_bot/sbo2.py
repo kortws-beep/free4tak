@@ -677,12 +677,18 @@ def get_stock_code(name: str) -> str:
         db = os.path.join(BASE_DIR, "kr_theme_finance.db")
         conn = sqlite3.connect(db, timeout=5)
 
-        # 1. kr_theme_stocks 에서 조회 (코드 포함된 경우 많음)
+        # 1. kr_theme_stocks 에서 조회
+        # ★ 2026-07-02: 기존 LIKE '%name%'는 저장포맷이 "{종목명}{시장}
+        #   {코드}"로 붙어있다보니 "삼성전자" 조회 시 "삼성전자우"(완전히
+        #   다른 우선주, 005935)까지 같이 매칭되고 ORDER BY 없는 LIMIT 1이라
+        #   어느 게 나올지 예측 불가 — 잘못된 종목을 살 위험이 있었음.
+        #   name 바로 뒤에 시장구분자가 붙는 행만 매칭하도록 앵커링해
+        #   "삼성전자우" 같은 접두어 충돌을 확정적으로 배제.
         row = conn.execute("""
             SELECT DISTINCT stock_name FROM kr_theme_stocks
-            WHERE stock_name LIKE ?
+            WHERE stock_name LIKE ? OR stock_name LIKE ?
             LIMIT 1
-        """, (f"%{name}%",)).fetchone()
+        """, (f"{name}KOSPI %", f"{name}KOSDAQ %")).fetchone()
 
         if row:
             m = re.search(r'(\d{6})', row[0])
@@ -690,12 +696,12 @@ def get_stock_code(name: str) -> str:
                 conn.close()
                 return m.group(1)
 
-        # 2. kr_stock_daily_data 에서 폴백
+        # 2. kr_stock_daily_data 에서 폴백 (코드 미포함 포맷 — 종목명 정확일치만)
         row = conn.execute("""
             SELECT stock_name FROM kr_stock_daily_data
-            WHERE stock_name LIKE ?
+            WHERE stock_name = ?
             LIMIT 1
-        """, (f"%{name}%",)).fetchone()
+        """, (name,)).fetchone()
         conn.close()
 
         if row:
