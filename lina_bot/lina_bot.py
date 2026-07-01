@@ -843,20 +843,32 @@ _BOT_LOG_FILE = {
     "sbot":   "/home/free4tak/k-bot/stock_bot/logs/sbot.log",
     "sector": "/home/free4tak/k-bot/stock_bot/logs/sector_monitor.log",
 }
-_LOG_TAIL_BYTES = 8000  # 파일 끝에서 읽어올 바이트 수 (1분치 로그를 충분히 덮는 크기)
+# ★ 2026-07-02: 고정 바이트 tail(_LOG_TAIL_BYTES) 방식은 로그가 적게 쌓이는
+#   구간(장외 대기 등)에서 8000바이트가 10~20분치까지 덮어버려, 이미 지나간
+#   1회성 rate-limit 에러가 여러 번의 1분 체크에서 계속 "감지"되며 스트릭이
+#   허위로 쌓여 sbot이 불필요하게 자주 재시작되는 버그가 있었음. 각 봇의
+#   마지막 읽은 오프셋을 기억해 그 이후 새로 추가된 부분만 읽도록 수정 —
+#   이래야 진짜 "최근 1분" 신규 로그만 보게 된다.
+_log_read_offset: dict[str, int] = {}
 
 
 def _fetch_recent_log(bot_name: str) -> str:
     """최근 1분 로그를 봇의 실제 출처(journal 또는 파일)에 맞게 가져온다"""
     log_file = _BOT_LOG_FILE.get(bot_name)
     if log_file:
-        # ★ 파일로 직접 출력하는 봇 — 파일 끝부분만 읽어 최근 로그를 확보
+        # ★ 파일로 직접 출력하는 봇 — 마지막 체크 이후 새로 추가된 부분만 읽는다
         try:
             with open(log_file, "rb") as f:
                 f.seek(0, os.SEEK_END)
                 size = f.tell()
-                f.seek(max(0, size - _LOG_TAIL_BYTES), os.SEEK_SET)
-                return f.read().decode("utf-8", errors="ignore")
+                last_offset = _log_read_offset.get(bot_name, size)
+                if last_offset > size:
+                    # 로그 로테이션/재생성 등으로 파일이 줄어든 경우 — 처음부터 다시 추적
+                    last_offset = 0
+                f.seek(last_offset, os.SEEK_SET)
+                data = f.read()
+                _log_read_offset[bot_name] = size
+                return data.decode("utf-8", errors="ignore")
         except Exception as e:
             print(f"⚠️ [watchdog] {bot_name} 로그 파일 읽기 실패: {e}")
             return ""

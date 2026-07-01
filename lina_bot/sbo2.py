@@ -124,6 +124,7 @@ CANDIDATE_REFRESH= 86400        # 후보 갱신 주기 (하루 1회)
 
 MIN_PRICE        = 3_000        # 최소 주가
 MAX_PRICE        = 3_000_000    # 최대 주가
+MIN_BUY_CHECK_CASH = 200_000     # 주문가능금액이 이 밑이면 후보 전수 조회(현재가+MA40) 자체를 건너뜀
 
 BOT_STATE_FILE   = os.path.join(BASE_DIR, "sbo2_state.json")
 SBO2_DB_PATH     = os.path.join(BASE_DIR, "sbo2_trades.db")
@@ -711,6 +712,7 @@ class Sbo2:
         self.candidates  = []       # 현재 후보 리스트
         self.api_fail_count = 0         # API 연속 실패 카운터
         self.atr_cache      = {}         # {code: (atr_rate, ts)}
+        self._last_sell_prices = {}      # {code: curr} — _check_sell에서 조회한 현재가, 상태출력에서 재사용
         self._cand_ts    = 0        # 후보 마지막 갱신 시각
         self._cand_date  = ""       # 후보 마지막 갱신 날짜
         self._pending_orders = {}   # 미체결 주문 {code: (orgno, odno, qty)}
@@ -919,8 +921,8 @@ class Sbo2:
 
         # 텔레스윙은 _refresh_candidates에서 처리
 
-        # 주문가능금액 조회 — 삼성전자로 조회 (sbot 방식)
-        psbl_cash = self.api.get_psbl_order_cash("005930")
+        # 주문가능금액 — 위에서 이미 조회한 값 재사용 (중복 API 호출 방지)
+        psbl_cash = _psbl_check
         # API 조회 실패시 예수금 직접 조회
         if psbl_cash <= 0:
             try:
@@ -946,6 +948,13 @@ class Sbo2:
         print(f"   💰 주문가능: {psbl_cash:,}원")
         if psbl_cash <= 0:
             print("⚠️ [sbo2] 주문가능금액 없음 — 매수 스킵")
+            return
+        if psbl_cash < MIN_BUY_CHECK_CASH:
+            # ★ 2026-07-02: 슬롯은 남았지만 실제로 살 돈이 없으면 후보 전체를
+            #   순회하며 현재가+MA40을 조회할 필요가 없음. 이 조회가 후보수 ×
+            #   2번씩 매 루프(30초)마다 반복돼 KIS API 초당 호출제한에 자주
+            #   걸리는 원인이었음 — 슬롯이 안 찼어도 예산이 없으면 여기서 컷.
+            print(f"   💰 주문가능({psbl_cash:,}원) < 최소기준({MIN_BUY_CHECK_CASH:,}원) — 후보 조회 스킵")
             return
 
         # ── 4슬롯 전략별 매수 후보 구성 ────────────────────────
@@ -1213,6 +1222,7 @@ class Sbo2:
                 continue
 
             curr  = float(mdata.get("stck_prpr", 0))
+            self._last_sell_prices[code] = curr  # ★ run() 상태출력에서 재사용 (중복 API 호출 방지)
             entry = pos["entry_price"]
             qty   = pos["qty"]
             stop  = pos["stop_price"]
@@ -1566,8 +1576,13 @@ class Sbo2:
                 # 상태 출력
                 print(f"   보유: {len(self.positions)}종목 | 후보: {len(self.candidates)}개")
                 for code, pos in self.positions.items():
-                    mdata = self.api.get_market_data(code)
-                    curr  = float(mdata.get("stck_prpr", 0)) if mdata else pos["entry_price"]
+                    # ★ 2026-07-02: _check_sell()이 이미 조회한 현재가를 재사용 —
+                    #   같은 루프에서 종목당 현재가를 두 번 조회하던 중복 제거.
+                    #   캐시에 없으면(예: 매도체크 시간대 밖, 방금 신규매수 등) 새로 조회.
+                    curr = self._last_sell_prices.get(code)
+                    if curr is None:
+                        mdata = self.api.get_market_data(code)
+                        curr  = float(mdata.get("stck_prpr", 0)) if mdata else pos["entry_price"]
                     rate  = (curr - pos["entry_price"]) / pos["entry_price"] * 100
                     grade = pos.get('grade', '')
                     label = SLOT_LABEL.get(grade, grade)
