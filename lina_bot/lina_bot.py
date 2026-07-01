@@ -29,6 +29,12 @@ base_dir = os.path.dirname(os.path.abspath(__file__))
 env_path = os.path.join(base_dir, '.env')
 load_dotenv(dotenv_path=env_path)
 
+# ★ 2026-07-02: intelligence/market_concentration.py를 모듈로 가져오기 위한 경로 추가
+import sys as _sys
+_INTEL_DIR = os.path.join(os.path.dirname(base_dir), "intelligence")
+if _INTEL_DIR not in _sys.path:
+    _sys.path.insert(0, _INTEL_DIR)
+
 # 환경 변수 및 모델 세팅
 DISCORD_TOKEN = os.getenv("DISCORD_BOT_TOKEN_N")
 OLLAMA_API_URL = os.getenv("OLLAMA_API_URL", "http://127.0.0.1:11434/api/chat")
@@ -46,6 +52,7 @@ REPORT_CHANNEL_ID = 1508487747508240525
 #   기존 경로(lina_bot/intelligence/telegram_events.db)는 죽은 옛 사본(6/12 이후 갱신 안됨)을
 #   가리키고 있어, 30분 텔레그램 브리핑이 항상 "새 속보 없음"으로 나오던 근본 원인.
 DB_PATH_TELEGRAM = os.path.join(os.path.dirname(base_dir), "intelligence", "telegram_events.db")
+DB_PATH_CONCENTRATION = os.path.join(os.path.dirname(base_dir), "intelligence", "market_concentration.db")
 DB_PATH_FINANCE = os.path.join(base_dir, 'finance.db')
 DB_PATH_MAPPING = os.path.join(base_dir, 'us_kr_mapping.db')  # 💡 신규 맵핑 DB 경로
 DB_PATH_THEME_FINANCE = os.path.join(base_dir, 'kr_theme_finance.db')
@@ -433,9 +440,40 @@ def _fetch_and_summarize_bodies(sess, headers, items: list) -> list:
     return results
 
 
+def _call_llm(prompt: str, max_tokens: int = 1200) -> str:
+    """로컬 ollama 우선 시도 → 실패 시 Claude API로 폴백 (2026-07-02).
+    ★ 2026-07-02: _summarize_report_body 전용이던 이 호출부를 공용 헬퍼로
+    추출 — 시장 종합 브리핑(_build_market_context_summary) 등 다른 곳에서도
+    같은 폴백 로직을 재사용하기 위함."""
+    ollama_model = os.getenv("OLLAMA_MODEL", "qwen2.5:14b")
+    ollama_url   = os.getenv("OLLAMA_URL", "http://localhost:11434")
+    try:
+        import openai as _openai
+        client = _openai.OpenAI(base_url=f"{ollama_url}/v1", api_key="ollama", timeout=120)
+        res = client.chat.completions.create(
+            model=ollama_model, max_tokens=max_tokens,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return res.choices[0].message.content.strip()
+    except Exception as e:
+        print(f"⚠️ 로컬 LLM 호출 실패({e}) → Claude로 폴백")
+
+    try:
+        import anthropic as _ant
+        client = _ant.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+        res = client.messages.create(
+            model=os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001"),
+            max_tokens=max_tokens,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return res.content[0].text.strip()
+    except Exception as e:
+        print(f"⚠️ Claude 호출도 실패({e})")
+        return ""
+
+
 def _summarize_report_body(text: str) -> str:
-    """투자전략 본문을 A4 1페이지 분량으로 요약.
-    로컬 ollama 우선 시도 → 실패 시 Claude API로 폴백 (2026-07-02)."""
+    """투자전략 본문을 A4 1페이지 분량으로 요약."""
     prompt = (
         "다음은 오늘자 증권사 전문가 투자전략/시황 리포트 원문이다. "
         "핵심 내용을 놓치지 않으면서 A4 한 페이지 분량(1000~1500자)으로 "
@@ -443,31 +481,92 @@ def _summarize_report_body(text: str) -> str:
         "불필요한 수식어만 줄여라.\n\n"
         f"[원문]\n{text[:4000]}"
     )
-    ollama_model = os.getenv("OLLAMA_MODEL", "qwen2.5:14b")
-    ollama_url   = os.getenv("OLLAMA_URL", "http://localhost:11434")
-    try:
-        import openai as _openai
-        client = _openai.OpenAI(base_url=f"{ollama_url}/v1", api_key="ollama", timeout=120)
-        res = client.chat.completions.create(
-            model=ollama_model, max_tokens=1200,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        return res.choices[0].message.content.strip()
-    except Exception as e:
-        print(f"⚠️ 로컬 LLM 요약 실패({e}) → Claude로 폴백")
+    result = _call_llm(prompt, max_tokens=1200)
+    if result:
+        return result
+    print("⚠️ 요약 실패 — 본문 일부만 전달")
+    return text[:800] + ("..." if len(text) > 800 else "")
 
+
+# ============================================================
+# 시장 쏠림 지수 — 종합 브리핑 (★ 2026-07-02 신규, 관찰 전용 Phase 1)
+# ============================================================
+def _build_market_context_summary() -> str:
+    """
+    intelligence/market_concentration.py의 최신 쏠림지수 스냅샷 +
+    최근 텔레그램 이벤트 + (있으면) 오늘 MBN 투자전략 요약을 모아
+    "오늘 시장 종합 코멘트" 한 문단을 생성한다.
+
+    ★ 이 단계는 관찰 전용이다 — sbot/sbo2 스코어링에는 연결하지 않는다.
+    코멘트 품질을 며칠 지켜본 뒤에 점수 보너스로 연결할지 결정한다.
+    """
     try:
-        import anthropic as _ant
-        client = _ant.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-        res = client.messages.create(
-            model=os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001"),
-            max_tokens=1200,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        return res.content[0].text.strip()
+        from market_concentration import get_latest_snapshot, get_recent_summaries
     except Exception as e:
-        print(f"⚠️ Claude 요약도 실패({e}) — 본문 일부만 전달")
-        return text[:800] + ("..." if len(text) > 800 else "")
+        print(f"⚠️ market_concentration 모듈 로드 실패: {e}")
+        return ""
+
+    snapshot = get_latest_snapshot()
+    if not snapshot:
+        return ""
+
+    tele_context = fetch_recent_telegram_events(minutes_back=150)
+    recent = get_recent_summaries(days=3)
+    trend_text = "\n".join(
+        f"- {r['date']}: {r['summary_text'][:150]}..." for r in recent
+    ) if recent else "없음"
+
+    prompt = (
+        "당신은 한국 주식시장 데이터 분석가입니다. 아래 숫자와 최근 텔레그램 "
+        "속보를 바탕으로 '오늘 시장이 특정 대형주/섹터에 얼마나 쏠려있는지, "
+        "어떤 섹터/테마가 주도하고 있는지'를 3~5문장으로 요약하세요. "
+        "숫자를 지어내지 말고 주어진 값만 근거로 삼으세요.\n\n"
+        f"[쏠림 지수 스냅샷 — {snapshot.get('ts', '')}]\n"
+        f"- 코스피 등락률: {snapshot.get('kospi_rate', 0):+.2f}%\n"
+        f"- 대형주(삼성전자/SK하이닉스 등) 평균 등락률: {snapshot.get('mega_avg_rate', 0):+.2f}%\n"
+        f"- 쏠림 갭(대형주-코스피): {snapshot.get('concentration_gap', 0):+.2f}%p "
+        f"(클수록 대형주 쏠림)\n"
+        f"- 시장 폭(상승종목비율): {snapshot.get('breadth_ratio', 0):.1f}%\n"
+        f"- 주도주/섹터 교체 신호: {snapshot.get('rotation_flag') or '없음'}\n\n"
+        f"[최근 텔레그램 속보]\n{tele_context or '없음'}\n\n"
+        f"[최근 3일 종합 코멘트 추세 — 참고용]\n{trend_text}"
+    )
+    return _call_llm(prompt, max_tokens=600)
+
+
+@tasks.loop(minutes=1)
+async def daily_market_context_report():
+    kst_now = datetime.datetime.now(KST)
+    if kst_now.hour != 9 or kst_now.minute != 30:
+        return
+    print(f"\n📐 [{kst_now.strftime('%H:%M')}] 시장 쏠림 종합 브리핑 가동!")
+    try:
+        channel = await client.fetch_channel(REPORT_CHANNEL_ID)
+    except Exception as e:
+        print(f"❌ 쏠림 브리핑 채널 접속 실패: {e}"); return
+    try:
+        summary = await asyncio.to_thread(_build_market_context_summary)
+        if summary:
+            today = kst_now.strftime("%Y-%m-%d")
+            await send_safe_message(
+                channel,
+                f"📐 **[대장! 오늘 시장 쏠림 코멘트야 (관찰 전용)]** 📐\n\n{summary}"
+            )
+            try:
+                from market_concentration import save_market_summary, get_latest_snapshot
+                save_market_summary(today, summary, get_latest_snapshot())
+            except Exception as e:
+                print(f"⚠️ 쏠림 브리핑 저장 오류: {e}")
+            print("✅ 시장 쏠림 종합 브리핑 전송 완료!")
+        else:
+            print("💤 쏠림 지수 스냅샷 없음 — 브리핑 생략 (장 시작 직후이거나 cron 미실행)")
+    except Exception as e:
+        print(f"❌ 시장 쏠림 종합 브리핑 에러: {e}")
+
+@daily_market_context_report.before_loop
+async def before_daily_market_context_report():
+    await client.wait_until_ready()
+
 
 def fetch_recent_telegram_events(limit_count=4, minutes_back=65):
     """
@@ -1062,6 +1161,11 @@ async def on_ready():
         daily_strategy_report.start()
         print("✅ [시스템] 08:50 MBN 투자전략 요약 스케줄러 가동 성공!")
     except Exception as e: print(f"⚠️ [에러] 투자전략 스케줄러: {e}")
+
+    try:
+        daily_market_context_report.start()
+        print("✅ [시스템] 09:30 시장 쏠림 종합 브리핑 스케줄러 가동 성공! (관찰 전용)")
+    except Exception as e: print(f"⚠️ [에러] 쏠림 브리핑 스케줄러: {e}")
 
     try:
         daily_master_report.start()
