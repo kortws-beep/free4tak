@@ -340,6 +340,70 @@ async def fetch_mbngold_async(service_id="10001", limit=5):
         
     return "텅 비어 있어. (MBN골드 사이트 지연 또는 오늘자 업데이트 없음)"
 
+
+async def fetch_mbn_strategy(cutoff_hour: int = 8, cutoff_minute: int = 50) -> str:
+    """
+    MBN골드 투자전략 페이지(/mg/strategy/)에서 당일 올라온 전략/시황 글을 수집.
+    (★ 2026-07-01 신규 — 매시간 텔레그램 테마 요약 제거 후 대체)
+    수집 기준: 당일 07:30 ~ cutoff(기본 08:50) 사이 글만
+    """
+    import requests as _req
+    from bs4 import BeautifulSoup as _BS
+    from dotenv import load_dotenv as _load
+    _load(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
+
+    base_url = "https://www.mbngold.com"
+    headers  = {"User-Agent": "Mozilla/5.0", "Referer": f"{base_url}/mg/mypage/login.php"}
+    sess     = _req.Session()
+    try:
+        sess.post(f"{base_url}/mg/mypage/login_action.php", headers=headers, data={
+            "mode": "login", "rURL": f"{base_url}/mg/news/",
+            "mID":  os.getenv("MBNGOLD_ID", ""),
+            "mPWD": os.getenv("MBNGOLD_PW", ""),
+        }, timeout=10)
+    except Exception as e:
+        print(f"❌ MBN골드 전략 로그인 에러: {e}"); return ""
+
+    try:
+        res  = sess.get(f"{base_url}/mg/strategy/", headers=headers, timeout=10)
+        soup = _BS(res.content.decode("utf-8", errors="ignore"), "html.parser")
+    except Exception as e:
+        print(f"❌ MBN골드 전략 페이지 에러: {e}"); return ""
+
+    today     = datetime.datetime.now(KST).strftime("%Y-%m-%d")
+    start_hm  = "07:30"
+    cutoff_hm = f"{cutoff_hour:02d}:{cutoff_minute:02d}"
+
+    items = []
+    for card in soup.find_all("article", class_="istrat_hero_card"):
+        body = card.find("div", class_="istrat_hero_body")
+        if not body: continue
+        time_tag = body.find("time", class_="istrat_hero_date")
+        if not time_tag: continue
+        dt_str = time_tag.get_text(strip=True)
+        if not dt_str.startswith(today): continue
+        hm = dt_str[11:16]
+        if not (start_hm <= hm <= cutoff_hm): continue
+
+        manager = ""
+        meta = body.find("div", class_="istrat_hero_meta")
+        if meta:
+            texts = [t.strip() for t in meta.stripped_strings if t.strip()]
+            manager = texts[0] if texts else ""
+
+        parts = [p.strip() for p in body.get_text(separator="|", strip=True).split("|") if p.strip()]
+        title = parts[-1] if parts else ""
+
+        a_tag = card.find("a", href=True)
+        link  = f"{base_url}/mg/strategy/{a_tag['href']}" if a_tag else ""
+        items.append({"time": hm, "manager": manager, "title": title, "link": link})
+
+    if not items: return ""
+    items.sort(key=lambda x: x["time"])
+    lines = [f"📊 [{x['time']}] **{x['manager']}** — {x['title']}\n   🔗 {x['link']}"
+             for x in items]
+    return "\n\n".join(lines)
+
 def fetch_recent_telegram_events(limit_count=4, minutes_back=65):
     """
     ★ 시간 기준으로 변경 (2026-06-23) — 기존 id 기반(LAST_TELEGRAM_ID 전역변수) 방식은
@@ -637,6 +701,36 @@ async def daily_news_report():
 async def before_daily_news_report():
     await client.wait_until_ready()
 
+
+# 4-1. 08시 50분 MBN골드 투자전략 요약 루프 (★ 2026-07-01 신규)
+@tasks.loop(minutes=1)
+async def daily_strategy_report():
+    kst_now = datetime.datetime.now(KST)
+    if kst_now.hour != 8 or kst_now.minute != 50:
+        return
+    print(f"\n📊 [{kst_now.strftime('%H:%M')}] MBN 투자전략 요약 가동!")
+    try:
+        channel = await client.fetch_channel(REPORT_CHANNEL_ID)
+    except Exception as e:
+        print(f"❌ 전략 채널 접속 실패: {e}"); return
+    try:
+        result = await fetch_mbn_strategy(cutoff_hour=8, cutoff_minute=50)
+        if result:
+            await send_safe_message(
+                channel,
+                f"📊 **[대장! 오늘 전문가 투자전략/시황 요약이야 (07:30~08:50)]** 📊\n\n{result}"
+            )
+            print("✅ MBN 투자전략 요약 전송 완료!")
+        else:
+            print("💤 MBN 투자전략 07:30~08:50 사이 새 글 없음")
+    except Exception as e:
+        print(f"❌ MBN 투자전략 요약 에러: {e}")
+
+@daily_strategy_report.before_loop
+async def before_daily_strategy_report():
+    await client.wait_until_ready()
+
+
 # 5. 07시 20분 스윙 마스터 리포트 루프
 @tasks.loop(minutes=1)
 async def daily_master_report():
@@ -886,6 +980,11 @@ async def on_ready():
         daily_news_report.start()
         print("✅ [시스템] 07시 뉴스 스케줄러 가동 성공!")
     except Exception as e: print(f"⚠️ [에러] 뉴스 스케줄러: {e}")
+
+    try:
+        daily_strategy_report.start()
+        print("✅ [시스템] 08:50 MBN 투자전략 요약 스케줄러 가동 성공!")
+    except Exception as e: print(f"⚠️ [에러] 투자전략 스케줄러: {e}")
 
     try:
         daily_master_report.start()

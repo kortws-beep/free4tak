@@ -1,16 +1,20 @@
 {
   "telegram_event": {
     "keywords": [
-      "AI"
+      "AI",
+      "수주"
     ],
     "themes": [
       "반도체",
-      "클라우드",
-      "AI"
+      "조선",
+      "AI",
+      "방산",
+      "건설",
+      "클라우드"
     ],
-    "score": 10,
-    "text": "✅ 앤스로픽 ‘클로드 사이언스’로 AI 신약전쟁 참전\n\nhttps://n.news.naver.com/mnews/article/020/0003730750?rc=N&ntype=RANKING&sid=101",
-    "time": "14:38:49"
+    "score": 15,
+    "text": "✅##### 특징주 급등알림 #####✅\n\n❗️지엔씨에너지 매수세 몰리며 급등\n\n&quot;AI 데이터센터 550兆 투자…건설 수주 사이클 온다&quot;[클릭e종목]\nhttp://m.stock.naver.com/item/main.nhn#/stocks/119850/news/0005783663/office/277\n\n✅#######################",
+    "time": "14:56:30"
   },
   "disclosure_event": {
     "code": "397030",
