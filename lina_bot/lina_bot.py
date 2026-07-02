@@ -517,6 +517,21 @@ def _build_market_context_summary() -> str:
     if not snapshot:
         return ""
 
+    # ★ 2026-07-02: cron(market_concentration.py, 정각/30분 실행)과 이
+    #   스케줄러(1분 주기 체크, 봇 재시작 시점 기준이라 정각과 안 맞음)
+    #   사이에 타이밍 경합이 있어 — cron이 아직 그 시각 스냅샷을 저장하기
+    #   전에 여기서 먼저 조회하면 훨씬 오래된(심하면 장외 시간대) 스냅샷을
+    #   "최신"으로 잘못 쓰는 사고가 실제로 발생함(코스피 -5.95%인데 옛날
+    #   테스트값 -2.04%를 보낸 사고). 스냅샷이 15분 이내로 신선한지 확인.
+    try:
+        snap_ts = datetime.datetime.strptime(snapshot.get("ts", ""), "%Y-%m-%d %H:%M")
+        age_min = (datetime.datetime.now() - snap_ts).total_seconds() / 60
+    except Exception:
+        age_min = 9999
+    if age_min > 15:
+        print(f"⚠️ 쏠림지수 스냅샷이 오래됨({age_min:.0f}분 전, ts={snapshot.get('ts')}) — 브리핑 생략")
+        return ""
+
     tele_context = fetch_recent_telegram_events(minutes_back=150)
     recent = get_recent_summaries(days=3)
     trend_text = "\n".join(
@@ -547,7 +562,10 @@ def _build_market_context_summary() -> str:
 @tasks.loop(minutes=1)
 async def daily_market_context_report():
     kst_now = datetime.datetime.now(KST)
-    if kst_now.hour != 9 or kst_now.minute != 30:
+    # ★ 09:30이 아니라 09:35 — cron(market_concentration.py)이 09:30 정각에
+    #   실행되므로, API 호출 몇 개(1~2분 소요 가능) 끝날 시간을 벌어주기 위함.
+    #   (그래도 늦어질 수 있어 위 신선도 체크가 최종 안전장치)
+    if kst_now.hour != 9 or kst_now.minute != 35:
         return
     print(f"\n📐 [{kst_now.strftime('%H:%M')}] 시장 쏠림 종합 브리핑 가동!")
     try:
@@ -1174,7 +1192,7 @@ async def on_ready():
 
     try:
         daily_market_context_report.start()
-        print("✅ [시스템] 09:30 시장 쏠림 종합 브리핑 스케줄러 가동 성공! (관찰 전용)")
+        print("✅ [시스템] 09:35 시장 쏠림 종합 브리핑 스케줄러 가동 성공! (관찰 전용)")
     except Exception as e: print(f"⚠️ [에러] 쏠림 브리핑 스케줄러: {e}")
 
     try:
