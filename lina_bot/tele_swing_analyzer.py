@@ -459,30 +459,38 @@ def get_tele_swing_picks(top_n: int = TOP_N, min_score: int = MIN_SCORE) -> list
     """
     print("\n📡 [텔레스윙] 텔레그램 언급 종목 스캔 중...")
 
-    # 1. 텔레그램 언급 종목 추출
-    tele_stocks = _get_tele_stocks()
-    if not tele_stocks:
-        print("   ⚠️ 텔레그램 언급 종목 없음")
+    # 1. 텔레그램 언급 종목 + 생쇼(전문가 추천) 종목 추출
+    # ★ 2026-07-03 변경: 기존엔 생쇼 단독 종목(텔레그램 언급 없음)은
+    #   후보 풀에서 통째로 제외되고, 텔레그램 언급 종목에만 생쇼
+    #   가산점을 얹어주는 방식이었음. 이러면 생쇼에서 뽑힌 멀쩡한
+    #   종목이 "텔레그램에 안 나왔다"는 이유만으로 점수표에 아예 안
+    #   올라가는 문제가 있었음(사용자 지적 — 실제로 07/02 생쇼 픽업
+    #   4종목이 텔레그램 미언급으로 전부 후보 제외 확인됨). 이제
+    #   텔레그램 언급 종목 ∪ 생쇼 종목을 후보 풀로 하고, 텔레그램
+    #   언급이 있으면(tele_score) 그 부분 가산점만 추가로 받는다.
+    tele_stocks  = _get_tele_stocks()
+    sshow_stocks = _get_sshow_stocks()
+    if not tele_stocks and not sshow_stocks:
+        print("   ⚠️ 텔레그램 언급/생쇼 추천 종목 모두 없음")
         return []
 
-    print(f"   텔레그램 언급 종목: {len(tele_stocks)}개")
+    print(f"   텔레그램 언급 종목: {len(tele_stocks)}개 | 생쇼 추천 종목: {len(sshow_stocks)}개")
 
-    # 1-2. 생쇼 종목 — 텔레그램 언급 종목에만 가산점 부여
-    # ★ 생쇼 단독 종목은 후보 제외 — 텔레그램 언급이 있어야 의미있음
-    sshow_stocks = _get_sshow_stocks()
-    sshow_names  = set(sshow_stocks.keys()) & set(tele_stocks.keys())  # 교집합만
-    print(f"   생쇼 교집합: {len(sshow_names)}개 (텔레그램+생쇼 동시 언급)")
+    all_names = set(tele_stocks.keys()) | set(sshow_stocks.keys())
+    overlap   = set(tele_stocks.keys()) & set(sshow_stocks.keys())
+    print(f"   교집합(텔레그램+생쇼 동시언급): {len(overlap)}개")
 
     # ★ 2026-06-30: 생쇼 가산점을 적중률 기반으로 — 종목마다 매번 통계를
     #   다시 조회하면 비효율이므로 루프 시작 전 한 번만 조회
     sshow_bonus = _get_sshow_bonus_score()
-    if sshow_names:
+    if sshow_stocks:
         print(f"   생쇼 가산점: +{sshow_bonus} (30일 적중률 기반)")
 
     # 2. 정통 스윙 점수 계산
     results = []
-    for name, tele_score in tele_stocks.items():
-        is_sshow = name in sshow_names
+    for name in all_names:
+        tele_score = tele_stocks.get(name, 0)
+        is_sshow   = name in sshow_stocks
         data = _calc_swing_score(name, tele_score, is_sshow=is_sshow,
                                   sshow_bonus=sshow_bonus)
         if data["curr_price"] > 0 and data["rr_ratio"] >= 1.5:
