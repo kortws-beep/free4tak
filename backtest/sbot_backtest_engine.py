@@ -158,6 +158,10 @@ class SBotBacktestConfig:
     ai_score_fixed:    int   = 60
     # 리스크
     max_daily_loss:    int   = 3
+    # ★ 2026-07-03: 보유기한 청산 파라미터화 — 기존엔 모듈 상수
+    #   SWING_MAX_HOLD_DAYS(11)로 고정돼 있어 값을 바꾸려면 코드를
+    #   고쳐야 했음. 백테스트로 11/20영업일 등 비교하기 위해 config로 노출.
+    max_hold_days:     int   = SWING_MAX_HOLD_DAYS
     # 디버그
     verbose:           bool  = False
 
@@ -416,7 +420,7 @@ class SBotBacktestEngine:
     def _check_over_hold(self, code: str, pos: dict,
                          date_str: str, market_data: dict):
         hold_days = self._calc_hold_days(pos["buy_date"], date_str)
-        if hold_days < SWING_MAX_HOLD_DAYS:
+        if hold_days < self.config.max_hold_days:
             return
 
         current = float(market_data.get("stck_prpr", 0))

@@ -193,6 +193,8 @@ def main():
     parser.add_argument("--max-positions", type=int, default=2)
     parser.add_argument("--buy-score-min", type=int, default=75,
                         help="매수 최소 점수 (sbot 점수분포상 75~90 권장)")
+    parser.add_argument("--max-hold-days", type=int, default=11,
+                        help="장기보유 청산 기준 영업일 (기본 11, 실전 sbot과 동일)")
     parser.add_argument("--ai-mode",       default="rule_proxy",
                         choices=["fixed", "rule_proxy", "cache"])
     parser.add_argument("--compare",       action="store_true",
@@ -228,6 +230,7 @@ def main():
         base_buy_amt    = args.base_buy_amt,
         max_positions   = args.max_positions,
         buy_score_min   = args.buy_score_min,
+        max_hold_days   = args.max_hold_days,
         start_date      = args.start,
         end_date        = end_date,
         codes           = codes,
