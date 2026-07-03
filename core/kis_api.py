@@ -4,11 +4,47 @@ kis_api.py — 한국투자증권 OpenAPI 래퍼
 import os
 import time
 import json
+import threading
 import requests
 import datetime
 
 
 TOKEN_TTL = 86400
+
+# ============================================================
+# 전역 호출 스로틀 (★ 2026-07-03 추가)
+# ============================================================
+# 기존엔 API 호출부(18곳)마다 각자 requests.get/post를 직접 호출해서
+# 공용 제어 지점이 없었음. 특정 루프(예: 신규 후보 20개+ 한꺼번에 분석)
+# 에서 짧은 시간에 호출이 몰리면 KIS의 "초당 거래건수 초과"에 걸리고,
+# 바로 다음 루프의 잔고조회까지 실패해 watchdog이 봇을 재시작시키는
+# 사고가 반복됐음(2026-07-02/03). 개별 호출부마다 딜레이를 넣는 대신,
+# 이 클래스를 쓰는 모든 요청이 최소 간격을 두고 나가도록 공용 스로틀을
+# 추가 — 어느 코드 경로에서 호출하든 자동으로 폭주가 완화된다.
+# 프로세스별 전역이라 sbot/sbo2는 각자 별도 프로세스이므로 서로
+# 영향을 주지 않고 각자 자기 호출만 스스로 페이싱한다.
+_throttle_lock = threading.Lock()
+_last_call_ts  = [0.0]
+MIN_CALL_INTERVAL = 0.08   # 최소 호출 간격(초) — 초당 최대 약 12건
+
+
+def _throttle():
+    with _throttle_lock:
+        now  = time.monotonic()
+        wait = MIN_CALL_INTERVAL - (now - _last_call_ts[0])
+        if wait > 0:
+            time.sleep(wait)
+        _last_call_ts[0] = time.monotonic()
+
+
+def _get(*args, **kwargs):
+    _throttle()
+    return requests.get(*args, **kwargs)
+
+
+def _post(*args, **kwargs):
+    _throttle()
+    return requests.post(*args, **kwargs)
 
 
 class KisAPI:
@@ -61,7 +97,7 @@ class KisAPI:
         body = {"grant_type": "client_credentials",
                 "appkey": self.appkey, "appsecret": self.secret}
         try:
-            res = requests.post(url, json=body, timeout=10).json()
+            res = _post(url, json=body, timeout=10).json()
             if "error_code" in res:
                 print(f"❌ 토큰 발급 오류 [{self.cano}]: {res.get('error_description', res['error_code'])}")
                 return ""
@@ -97,7 +133,7 @@ class KisAPI:
         headers = {"Content-Type": "application/json",
                    "appkey": self.appkey, "appsecret": self.secret}
         try:
-            return requests.post(url, headers=headers,
+            return _post(url, headers=headers,
                                  data=json.dumps(data), timeout=10).json().get("HASH", "")
         except Exception as e:
             print(f"⚠️ 해시키 발급 실패: {e}"); return ""
@@ -118,7 +154,7 @@ class KisAPI:
             "PRCS_DVSN": "00", "CTX_AREA_FK100": "", "CTX_AREA_NK100": "",
         }
         try:
-            res     = requests.get(url, headers=headers, params=params, timeout=10).json()
+            res     = _get(url, headers=headers, params=params, timeout=10).json()
             output2 = res.get("output2", [{}])[0] if res.get("output2") else {}
             cash    = (output2.get("dnca_tot_amt") or
                        output2.get("prvs_rcdl_excc_amt") or
@@ -137,7 +173,7 @@ class KisAPI:
                    "ORD_DVSN": "01", "CMA_EVLU_AMT_ICLD_YN": "N",
                    "OVRS_ICLD_YN": "N"}
         try:
-            res    = requests.get(url, headers=headers, params=params, timeout=10).json()
+            res    = _get(url, headers=headers, params=params, timeout=10).json()
             output = res.get("output", {})
             cash   = (output.get("nrcvb_buy_amt") or
                       output.get("max_buy_amt") or
@@ -168,7 +204,7 @@ class KisAPI:
                      "KOSEF","TREX","SOL","ACE","PLUS","RISE"]
         for _retry in range(3):
             try:
-                res = requests.get(url, headers=headers, params=params, timeout=10).json()
+                res = _get(url, headers=headers, params=params, timeout=10).json()
                 # ★ API 응답 자체의 성공/실패 여부를 rt_cd로 먼저 판별
                 #   (rt_cd!="0" = 진짜 API 실패 → 재시도/캐시유지, 호출측엔 None 반환
                 #    rt_cd=="0"인데 output1이 비어있음 = 정상적으로 보유종목 0개 → {} 반환)
@@ -228,7 +264,7 @@ class KisAPI:
                    "tr_id": "FHKST01010100"}
         params  = {"FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": code}
         try:
-            result = requests.get(url, headers=headers, params=params, timeout=10).json().get("output")
+            result = _get(url, headers=headers, params=params, timeout=10).json().get("output")
             if result:
                 self._mkt_cache[code] = (result, time.time())
             return result
@@ -258,7 +294,7 @@ class KisAPI:
                    "tr_id": "FHKST01010200"}
         params  = {"FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": code}
         try:
-            res = requests.get(url, headers=headers,
+            res = _get(url, headers=headers,
                                params=params, timeout=5).json()
             out = res.get("output1", {})
             if not out:
@@ -293,7 +329,7 @@ class KisAPI:
                        "tr_id": "CTCA0903R"}
             today  = datetime.datetime.now().strftime("%Y%m%d")
             params = {"BASS_DT": today, "CTX_AREA_NK": "", "CTX_AREA_FK": ""}
-            res    = requests.get(url, headers=headers, params=params, timeout=5).json()
+            res    = _get(url, headers=headers, params=params, timeout=5).json()
             output = res.get("output", [])
             if not output: return True
             is_open = output[0].get("bzdy_yn", "Y") == "Y"
@@ -312,7 +348,7 @@ class KisAPI:
         headers = {"User-Agent": "Mozilla/5.0"}
         for symbol, key in [("KOSPI", "kospi"), ("KOSDAQ", "kosdaq")]:
             try:
-                res  = requests.get(
+                res  = _get(
                     f"https://m.stock.naver.com/api/index/{symbol}/basic",
                     headers=headers, timeout=5,
                 ).json()
@@ -331,7 +367,7 @@ class KisAPI:
         for code in sector_code_map.keys():
             params = {"FID_COND_MRKT_DIV_CODE": "U", "FID_INPUT_ISCD": code}
             try:
-                res  = requests.get(url, headers=headers, params=params, timeout=3).json()
+                res  = _get(url, headers=headers, params=params, timeout=3).json()
                 rate = float(res.get("output", {}).get("bstp_nmix_prdy_ctrt", 0) or 0)
                 result[code] = rate
                 time.sleep(0.05)
@@ -360,7 +396,7 @@ class KisAPI:
                   "fid_input_date_1": start_date, "fid_input_date_2": end_date,
                   "fid_period_div_code": "D", "fid_org_adj_prc": "0"}
         try:
-            res     = requests.get(url, headers=headers, params=params, timeout=10).json()
+            res     = _get(url, headers=headers, params=params, timeout=10).json()
             candles = res.get("output2", [])
             if len(candles) < 26: return {}
 
@@ -503,7 +539,7 @@ class KisAPI:
             # ★ 2026-06-30: timeout 추가 — 누락되어 있어 응답 지연 시
             #   무한 대기하다 연결이 강제로 끊기는(RemoteDisconnected)
             #   사고로 이어질 수 있었음. 다른 API 호출들과 동일하게 10초로 통일.
-            res   = requests.get(url, headers=headers, params=params, timeout=10).json()
+            res   = _get(url, headers=headers, params=params, timeout=10).json()
             items = res.get("output", [])
             if not items: return {}
 
@@ -614,7 +650,7 @@ class KisAPI:
                    "appkey": self.appkey, "appsecret": self.secret,
                    "tr_id": "TTTC0802U", "hashkey": self.get_hashkey(data)}
         try:
-            res = requests.post(url, headers=headers, data=json.dumps(data), timeout=10).json()
+            res = _post(url, headers=headers, data=json.dumps(data), timeout=10).json()
             if res.get("rt_cd") == "0":
                 out = res.get("output", {})
                 orgno = out.get("KRX_FWDG_ORD_ORGNO", "")
@@ -650,7 +686,7 @@ class KisAPI:
                    "appkey": self.appkey, "appsecret": self.secret,
                    "tr_id": "TTTC0803U", "hashkey": self.get_hashkey(data)}
         try:
-            res = requests.post(url, headers=headers, data=json.dumps(data), timeout=10).json()
+            res = _post(url, headers=headers, data=json.dumps(data), timeout=10).json()
             if res.get("rt_cd") == "0":
                 print(f"✅ 주문취소: {code} (odno:{odno})")
                 return True
@@ -690,7 +726,7 @@ class KisAPI:
                    "appkey": self.appkey, "appsecret": self.secret,
                    "tr_id": "TTTC0801U", "hashkey": self.get_hashkey(data)}
         try:
-            res = requests.post(url, headers=headers, data=json.dumps(data), timeout=10).json()
+            res = _post(url, headers=headers, data=json.dumps(data), timeout=10).json()
             if res.get("rt_cd") == "0":
                 print(f"✅ 매도 성공 {code} | {ord_dvsn} | {qty}주")
                 return True
@@ -709,7 +745,7 @@ class KisAPI:
                    "tr_id": "HHKCM113004C7", "custtype": "P"}
         params  = {"TYPE": "1", "FID_ETC_CLS_CODE": "00", "USER_ID": hts_id}
         try:
-            res = requests.get(url, headers=headers, params=params, timeout=5).json()
+            res = _get(url, headers=headers, params=params, timeout=5).json()
             if res.get("rt_cd") != "0":
                 print(f"  ⚠️ 한투 관심그룹 오류: {res.get('msg1')}"); return {}
             groups = {}
@@ -733,7 +769,7 @@ class KisAPI:
                    "HTS_KOR_ISNM": "", "CNTG_CLS_CODE": "",
                    "FID_ETC_CLS_CODE": "4"}
         try:
-            res  = requests.get(url, headers=headers, params=params, timeout=5).json()
+            res  = _get(url, headers=headers, params=params, timeout=5).json()
             if res.get("rt_cd") != "0":
                 print(f"  ⚠️ [{grp_code}] 그룹종목 오류: {res.get('msg1')}"); return []
             result = []
@@ -773,7 +809,7 @@ class KisAPI:
                   "fid_input_date_1": start_date, "fid_input_date_2": end_date,
                   "fid_period_div_code": "D", "fid_org_adj_prc": "0"}
         try:
-            res     = requests.get(url, headers=headers, params=params, timeout=5).json()
+            res     = _get(url, headers=headers, params=params, timeout=5).json()
             candles = res.get("output2", [])
             ohlc    = []
             for c in candles[:days]:
@@ -810,7 +846,7 @@ class KisAPI:
                    "FID_VOL_CNT": "0", "FID_INPUT_DATE_1": "0"}
         codes = []
         try:
-            res = requests.get(url, headers=headers, params=params, timeout=10).json()
+            res = _get(url, headers=headers, params=params, timeout=10).json()
             if res.get("rt_cd") == "0":
                 for item in res.get("output", []):
                     code = item.get("mksc_shrn_iscd", "").strip()
