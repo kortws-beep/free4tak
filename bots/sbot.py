@@ -191,6 +191,11 @@ MEGA_CAP_LOOKBACK_DAYS  = 10
 MEGA_CAP_BUY_AMT        = 1_000_000
 MEGA_CAP_CHECK_INTERVAL = 1800    # 30분마다 체크
 BUY_1ST_AMT_BASE = 1_000_000    # 1차 매수 기본 금액 (330K→100만, 5종목)
+# ★ 2026-07-03: 주문가능금액이 이 밑이면 신규 후보 분석 자체를 건너뜀
+#   (sbo2의 MIN_BUY_CHECK_CASH와 동일 목적 — 슬롯은 남아도 살 돈이
+#   없으면 종목풀 전체를 API로 조회/분석할 필요가 없음. 이 분석
+#   폭주가 KIS "초당 거래건수 초과" 재시작의 원인 중 하나였음)
+MIN_ANALYSIS_CASH = 200_000
 BUY_SCORE_MIN    = 45             # 후보 최소 점수
 BUY_SCORE_ENTER  = 85             # 매수 진입 기준점 (백테스트 검증: PF 2.07, 승률44.9%)
 LOOP_SLEEP       = 60
@@ -1614,6 +1619,9 @@ class SBot:
                 avail_slots = MAX_POSITIONS - len(self.positions) + 보너스
                 if avail_slots <= 0:
                     print(f"⛔ 슬롯 없음 ({len(self.positions)}/{MAX_POSITIONS}) — 신규 분석 스킵")
+                elif psbl_cash < MIN_ANALYSIS_CASH:
+                    print(f"💰 주문가능({psbl_cash:,}원) < 최소기준({MIN_ANALYSIS_CASH:,}원) "
+                          f"— 신규 분석 스킵")
                 else:
                     self._run_analysis(codes, now_t, score_enter, psbl_cash)
 
