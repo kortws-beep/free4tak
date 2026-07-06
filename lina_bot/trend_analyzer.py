@@ -8,9 +8,10 @@ trend_analyzer.py
  ② 고점이 전 고점보다 높음 (HH)      (상승 파동 확인)
  ③ 저점이 전 저점보다 높음 (HL)      (눌림목 확인)
  ④ 현재가가 최근 저점 근처 (±8%)     (눌림목 진입 타점)
- ⑤ RSI 40~60 구간                   (건전한 눌림, 과매도 아님)
- ⑥ 거래량 눌림 구간에서 감소         (매도 압력 약화)
- ⑦ 스마트머니 수급                   (외인/기관 잠입 확인)
+ ⑤ 반등 확인                        (저점이 2일 이상 전에 찍혔고, 현재가가 그 저점보다 높음)
+ ⑥ RSI 40~60 구간                   (건전한 눌림, 과매도 아님)
+ ⑦ 거래량 눌림 구간에서 감소         (매도 압력 약화)
+ ⑧ 스마트머니 수급                   (외인/기관 잠입 확인)
 
 추가 정보:
  - ATR 14일 기반 손절가 / 목표가 / R:R
@@ -116,8 +117,8 @@ def get_trend_picks(top_n: int = TOP_N_DEFAULT) -> str:
     ma60_pass: dict[str, float] = {}
 
     filtered = {"total": 0, "f1_ma60": 0, "f2_hh": 0,
-                "f3_hl": 0, "f4_pullback": 0, "f5_rsi": 0,
-                "f6_vol": 0, "f7_smart": 0}
+                "f3_hl": 0, "f4_pullback": 0, "f5_bounce": 0, "f6_rsi": 0,
+                "f7_vol": 0, "f8_smart": 0}
     passed   = []
 
     for stock_name in all_stocks:
@@ -173,7 +174,8 @@ def get_trend_picks(top_n: int = TOP_N_DEFAULT) -> str:
         if len(valid_closes) < WAVE_RECENT + WAVE_PREV:
             continue
 
-        recent_hi = max(valid_closes[0:WAVE_RECENT])
+        recent_window = valid_closes[0:WAVE_RECENT]
+        recent_hi = max(recent_window)
         prev_hi   = max(valid_closes[WAVE_RECENT:WAVE_RECENT + WAVE_PREV])
 
         if recent_hi <= prev_hi:
@@ -183,7 +185,7 @@ def get_trend_picks(top_n: int = TOP_N_DEFAULT) -> str:
         # ════════════════════════════════════════════════
         # ③ HL — 최근 저점 > 이전 저점
         # ════════════════════════════════════════════════
-        recent_lo = min(valid_closes[0:WAVE_RECENT])
+        recent_lo = min(recent_window)
         prev_lo   = min(valid_closes[WAVE_RECENT:WAVE_RECENT + WAVE_PREV])
 
         if recent_lo <= prev_lo:
@@ -201,15 +203,24 @@ def get_trend_picks(top_n: int = TOP_N_DEFAULT) -> str:
             continue
 
         # ════════════════════════════════════════════════
-        # ⑤ RSI 40~60 (건전한 눌림)
+        # ⑤ 반등 확인 — 저점이 아직 오늘/어제가 아니고(2일 이상 전),
+        #    현재가가 그 저점보다 높아야 함 (아직 하락 중인 종목 배제)
         # ════════════════════════════════════════════════
-        rsi = _rsi(valid_closes, 14)
-        if not (RSI_LOW <= rsi <= RSI_HIGH):
-            filtered["f5_rsi"] += 1
+        idx_lo = recent_window.index(recent_lo)
+        if idx_lo < 2 or curr_price <= recent_lo:
+            filtered["f5_bounce"] += 1
             continue
 
         # ════════════════════════════════════════════════
-        # ⑥ 거래량 감소 (눌림 구간 에너지 응축)
+        # ⑥ RSI 40~60 (건전한 눌림)
+        # ════════════════════════════════════════════════
+        rsi = _rsi(valid_closes, 14)
+        if not (RSI_LOW <= rsi <= RSI_HIGH):
+            filtered["f6_rsi"] += 1
+            continue
+
+        # ════════════════════════════════════════════════
+        # ⑦ 거래량 감소 (눌림 구간 에너지 응축)
         # ════════════════════════════════════════════════
         valid_volumes = [v for v in volumes if v > 0]
         if len(valid_volumes) < 10:
@@ -219,11 +230,11 @@ def get_trend_picks(top_n: int = TOP_N_DEFAULT) -> str:
         vol_avg_recent = sum(valid_volumes[:5]) / 5
 
         if vol_avg_all == 0 or vol_avg_recent >= vol_avg_all * VOL_PULL_RATIO:
-            filtered["f6_vol"] += 1
+            filtered["f7_vol"] += 1
             continue
 
         # ════════════════════════════════════════════════
-        # ⑦ 스마트머니
+        # ⑧ 스마트머니
         # ════════════════════════════════════════════════
         f_net_raw  = [r[3] for r in rows]
         i_net_raw  = [r[4] for r in rows]
@@ -252,7 +263,7 @@ def get_trend_picks(top_n: int = TOP_N_DEFAULT) -> str:
             )
 
         if not smart_ok:
-            filtered["f7_smart"] += 1
+            filtered["f8_smart"] += 1
             continue
 
         # ════════════════════════════════════════════════
@@ -311,6 +322,7 @@ def get_trend_picks(top_n: int = TOP_N_DEFAULT) -> str:
             "hh_pct":      round(hh_strength * 100, 1),
             "hl_pct":      round(hl_strength * 100, 1),
             "dist_lo_pct": round(dist_from_lo * 100, 1),
+            "bounce_days": idx_lo,
             "rsi":         rsi,
             "vol_dry_pct": round(dry_ratio * 100, 1),
             "f_pos_days":  f_pos_days,
@@ -352,9 +364,10 @@ def get_trend_picks(top_n: int = TOP_N_DEFAULT) -> str:
             f"   ② HH 미형성      : {filtered['f2_hh']}개\n"
             f"   ③ HL 미형성      : {filtered['f3_hl']}개\n"
             f"   ④ 눌림목 이탈    : {filtered['f4_pullback']}개\n"
-            f"   ⑤ RSI 범위 이탈  : {filtered['f5_rsi']}개\n"
-            f"   ⑥ 거래량 과다    : {filtered['f6_vol']}개\n"
-            f"   ⑦ 스마트머니 미감지: {filtered['f7_smart']}개\n"
+            f"   ⑤ 반등 미확인    : {filtered['f5_bounce']}개\n"
+            f"   ⑥ RSI 범위 이탈  : {filtered['f6_rsi']}개\n"
+            f"   ⑦ 거래량 과다    : {filtered['f7_vol']}개\n"
+            f"   ⑧ 스마트머니 미감지: {filtered['f8_smart']}개\n"
             f"   → 조건 통과 종목 없어. 파라미터 조정을 고려해봐."
         )
 
@@ -405,6 +418,7 @@ def get_trend_picks(top_n: int = TOP_N_DEFAULT) -> str:
             f"    📊 60일선      : {item['ma60']:,.0f}원  (상단 +{item['gap60']}%)\n"
             f"    🌊 파동 분석   : 고점 +{item['hh_pct']}% 상승 / 저점 +{item['hl_pct']}% 상승\n"
             f"    🎯 눌림 위치   : 최근 저점에서 +{item['dist_lo_pct']}% (타점 근접)\n"
+            f"    🔄 반등 확인   : 저점 {item['bounce_days']}일 전 형성, 이후 반등 진행\n"
             f"    📉 RSI         : {item['rsi']} (건전한 눌림 구간)\n"
             f"    💤 거래량 마름 : 평소 대비 {item['vol_dry_pct']}% 수준\n"
             f"    🕵️  스마트머니  : {smart_tag} "
@@ -494,8 +508,9 @@ def get_trend_data(top_n: int = 20) -> list:
         ma60_pass[pure_name] = curr_price
 
         if len(valid_closes) < WAVE_RECENT + WAVE_PREV: continue
-        recent_hi = max(valid_closes[0:WAVE_RECENT])
-        recent_lo = min(valid_closes[0:WAVE_RECENT])
+        recent_window = valid_closes[0:WAVE_RECENT]
+        recent_hi = max(recent_window)
+        recent_lo = min(recent_window)
         prev_hi   = max(valid_closes[WAVE_RECENT:WAVE_RECENT + WAVE_PREV])
         prev_lo   = min(valid_closes[WAVE_RECENT:WAVE_RECENT + WAVE_PREV])
         if recent_hi <= prev_hi: continue
@@ -503,6 +518,10 @@ def get_trend_data(top_n: int = 20) -> list:
 
         dist_from_lo = abs(curr_price - recent_lo) / recent_lo if recent_lo > 0 else 1
         if dist_from_lo > PULLBACK_BAND: continue
+
+        # 반등 확인 — 저점이 2일 이상 전에 찍혔고, 현재가가 저점보다 높아야 함
+        idx_lo = recent_window.index(recent_lo)
+        if idx_lo < 2 or curr_price <= recent_lo: continue
 
         rsi = _rsi(valid_closes, 14)
         if not (RSI_LOW <= rsi <= RSI_HIGH): continue
