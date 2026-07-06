@@ -513,16 +513,24 @@ class SBot:
         )
 
         # ★ master_positions 등록
+        # ★ 2026-07-06: 2차매수(is_second=True) 시 entry_price/qty에 이번
+        #   체결분(price/qty)만 넘겨서, self.positions[code]엔 정확히
+        #   평균단가/합산수량이 반영되는데도 master_db엔 2차매수 가격이
+        #   전체 진입가인 것처럼 덮어써지는 버그가 있었음 (HPSP가 실제
+        #   -23.9%인데 master_db엔 entry_price가 잘못 저장돼 -47.2%로
+        #   보이는 사고로 발견됨). self.positions[code]의 확정된 값을
+        #   그대로 사용하도록 수정.
         if _master_upsert:
             try:
                 ctx2 = self.buy_context.get(code, {})
+                _pos_now = self.positions.get(code, {"entry_price": price, "qty": qty})
                 _master_upsert(
                     bot_type      = 'sbot',
                     code          = code,
                     stock_name    = self._name(code),
-                    entry_price   = price,
+                    entry_price   = _pos_now["entry_price"],
                     current_price = price,
-                    qty           = qty,
+                    qty           = _pos_now["qty"],
                     buy_time      = ctx2.get('buy_time', ''),
                     buy_tag       = ctx2.get('buy_tag', ''),
                     ai_score      = ctx2.get('ai_score', 0),
