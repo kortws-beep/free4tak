@@ -9,6 +9,7 @@ swing_analyzer.py
  ③ VCP — 진폭 수렴     (최근 15일 진폭 < 이전 15일 진폭의 60%)
  ④ 거래량 마름         (최근 5일 평균 < 전체 평균의 50%)
  ⑤ 스마트머니 잠입     (외인/기관 최근 10일 중 3일 이상 순매수)
+ ⑥ 피봇 돌파 확인      (종가가 최근 30일 고점 상향 돌파 + 당일 거래량 평균×1.4 이상)
 
 추가 정보:
  - ATR 14일 기반 손절가 / 목표가 / 리스크:리워드
@@ -34,6 +35,8 @@ ATR_STOP_MULT    = 1.5    # 손절 = 현재가 - ATR × 1.5
 ATR_TARGET_MULT  = 3.0    # 목표 = 현재가 + ATR × 3.0
 CLUSTER_MIN      = 3      # 섹터 군집 최소 종목 수
 TOP_N_DEFAULT    = 5
+BREAKOUT_LOOKBACK = 30    # 피봇(박스 상단) 계산 기간 — VCP 관찰 구간과 동일
+BREAKOUT_VOL_MULT = 1.4   # 돌파일 거래량 ≥ 평균 × 1.4 이상이어야 진성 돌파로 인정
 
 
 # ══════════════════════════════════════════════════════════════
@@ -97,7 +100,7 @@ def get_swing_picks(top_n: int = TOP_N_DEFAULT) -> str:
     ma200_pass: dict[str, float] = {}
 
     filtered = {"total": 0, "f1_ma200": 0, "f2_ma20": 0,
-                "f3_vcp": 0, "f4_vol": 0, "f5_smart": 0}
+                "f3_vcp": 0, "f4_vol": 0, "f5_smart": 0, "f6_breakout": 0}
     passed   = []
 
     # ── 전 종목 순회 ──────────────────────────────────────────
@@ -202,6 +205,18 @@ def get_swing_picks(top_n: int = TOP_N_DEFAULT) -> str:
             filtered["f5_smart"] += 1
             continue
 
+        # ⑥ 피봇 돌파 확인 (거래량 동반) — 웅크린 모양만으로 사지 않고
+        #   실제로 최근 고점을 뚫는 날인지 확인
+        if len(valid_closes) < BREAKOUT_LOOKBACK + 1:
+            filtered["f6_breakout"] += 1
+            continue
+        pivot = max(valid_closes[1:BREAKOUT_LOOKBACK + 1])
+        if curr_price <= pivot or vol_avg_all == 0 or volumes[0] < vol_avg_all * BREAKOUT_VOL_MULT:
+            filtered["f6_breakout"] += 1
+            continue
+        breakout_pct = round((curr_price - pivot) / pivot * 100, 1) if pivot > 0 else 0
+        breakout_vol_ratio = round(volumes[0] / vol_avg_all, 1) if vol_avg_all > 0 else 0
+
         # ════════════════════════════════════════════════
         # ✅ 통과 → ATR 계산
         # ════════════════════════════════════════════════
@@ -244,6 +259,10 @@ def get_swing_picks(top_n: int = TOP_N_DEFAULT) -> str:
             "f_cum":       f_cum,
             "i_cum":       i_cum,
             "themes":      themes[:2],
+            # 피봇 돌파
+            "pivot":       round(pivot, 0),
+            "breakout_pct": breakout_pct,
+            "breakout_vol_ratio": breakout_vol_ratio,
             # ATR
             "atr":         round(atr, 0),
             "stop_price":  stop_price,
@@ -284,6 +303,7 @@ def get_swing_picks(top_n: int = TOP_N_DEFAULT) -> str:
             f"   ③ VCP 미수렴     : {filtered['f3_vcp']}개\n"
             f"   ④ 거래량 살아있음: {filtered['f4_vol']}개\n"
             f"   ⑤ 스마트머니 미감지: {filtered['f5_smart']}개\n"
+            f"   ⑥ 피봇 돌파 미확인: {filtered['f6_breakout']}개\n"
             f"   → 조건 통과 종목 없어. 파라미터 조정을 고려해봐."
         )
 
@@ -337,6 +357,8 @@ def get_swing_picks(top_n: int = TOP_N_DEFAULT) -> str:
             f"    🔻 VCP 수렴    : 이전 {item['prev_amp']}% → 최근 {item['recent_amp']}% "
             f"({round(item['recent_amp']/item['prev_amp']*100) if item['prev_amp'] else 0}% 압축)\n"
             f"    💤 거래량 마름 : 평소 대비 {item['vol_dry_pct']}% 수준\n"
+            f"    🚀 피봇 돌파   : {item['pivot']:,.0f}원 대비 +{item['breakout_pct']}% "
+            f"(거래량 평균×{item['breakout_vol_ratio']})\n"
             f"    🕵️  스마트머니  : {smart_tag} "
             f"(외인 {item['f_pos_days']}일 / 기관 {item['i_pos_days']}일)\n"
             f"------------------------------------------------------------"
@@ -461,6 +483,14 @@ def get_swing_data(top_n: int = 20) -> list:
                           (f_cum > 0 and i_cum > 0) or (f_cum > 0 or i_cum > 0))
         if not smart_ok: continue
 
+        # ⑥ 피봇 돌파 확인 (거래량 동반)
+        if len(valid_closes) < BREAKOUT_LOOKBACK + 1: continue
+        pivot = max(valid_closes[1:BREAKOUT_LOOKBACK + 1])
+        if curr_price <= pivot or vol_avg_all == 0 or volumes[0] < vol_avg_all * BREAKOUT_VOL_MULT:
+            continue
+        breakout_pct = round((curr_price - pivot) / pivot * 100, 1) if pivot > 0 else 0
+        breakout_vol_ratio = round(volumes[0] / vol_avg_all, 1) if vol_avg_all > 0 else 0
+
         atr        = _atr(valid_closes, ATR_PERIOD)
         stop_price = round(curr_price - atr * ATR_STOP_MULT, 0)
         tgt_price  = round(curr_price + atr * ATR_TARGET_MULT, 0)
@@ -493,6 +523,9 @@ def get_swing_data(top_n: int = 20) -> list:
             "i_pos_days":  i_pos_days,
             "f_cum":       f_cum,
             "i_cum":       i_cum,
+            "pivot":       round(pivot, 0),
+            "breakout_pct": breakout_pct,
+            "breakout_vol_ratio": breakout_vol_ratio,
             "cluster_cnt": 0,
             "cluster_stocks": [],
         })
