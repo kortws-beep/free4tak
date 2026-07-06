@@ -29,6 +29,14 @@ import threading
 import datetime
 import requests
 
+# ★ 2026-07-06: 접속키 발급 호출이 core/kis_api.py의 전역 스로틀을 안 거치고
+#   있었음 — 같은 계좌(appkey/cano)에 대한 REST 호출인데 이것만 무제한으로
+#   나가면 KIS "초당 거래건수 초과"에 기여할 수 있어 동일 스로틀 재사용.
+try:
+    from kis_api import _post as _throttled_post
+except Exception:
+    _throttled_post = requests.post
+
 try:
     import websocket
     WS_AVAILABLE = True
@@ -99,7 +107,7 @@ class KisWebSocket:
             "secretkey":  self.secret,
         }
         try:
-            res = requests.post(url, json=body, timeout=10).json()
+            res = _throttled_post(url, json=body, timeout=10).json()
             key = res.get("approval_key", "")
             if key:
                 print(f"✅ [WS] 웹소켓 접속키 발급 완료 [{self.cano}]")
