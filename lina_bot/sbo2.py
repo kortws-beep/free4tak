@@ -497,9 +497,13 @@ def _save_cand_date(date: str):
 def calc_buy_amount(grade: str, psbl_cash: int, score: int = 0) -> int:
     """
     전략별 매수금액:
-    - inter (교집합) → 150만원 (100%) 기준
-    - swing/trend    → 125만원 (83%) 기준
-    - tele (텔레)    → 100만원 (67%) 기준
+    - inter (교집합)        → 150만원 (100%) 기준
+    - swing/trend/sshow    → 125만원 (83%) 기준
+    - 그 외(레거시 tele)   → 100만원 (67%) 기준 — 텔레스윙은 2026-07-06
+      매수 소스에서 제외되어 신규 후보엔 더 이상 생성되지 않음. 이 분기는
+      제거 전에 매수된 기존 보유 종목의 grade가 여전히 "tele"인 경우를
+      위한 폴백일 뿐, 실제로는 도달하지 않음 (calc_buy_amount는 신규
+      후보 매수 시에만 호출되고, 기존 포지션 재계산엔 안 쓰임).
     - 점수 보정: 80점 이상 +20%, 50점 미만 -20%, 그 사이는 기준 그대로
       (★ 2026-06-29 추가 — 기존엔 docstring에 "매수금액: 점수 비례"라고
       적혀 있었으나 실제로는 슬롯 등급으로만 고정금액이 정해져 점수가
@@ -510,7 +514,7 @@ def calc_buy_amount(grade: str, psbl_cash: int, score: int = 0) -> int:
         amount = BASE_BUY_AMT               # 150만원
     elif grade in (SLOT_SWING, SLOT_TREND, SLOT_SSHOW):
         amount = int(BASE_BUY_AMT * 0.83)   # 125만원
-    else:                                    # tele
+    else:                                    # 레거시 tele 폴백 (도달 안 함)
         amount = int(BASE_BUY_AMT * 0.67)   # 100만원
 
     if score >= 80:
@@ -909,8 +913,6 @@ class Sbo2:
         if slots <= 0:
             print("📦 [sbo2] 포지션 FULL")
             return
-
-        # 텔레스윙은 _refresh_candidates에서 처리
 
         # 주문가능금액 — 위에서 이미 조회한 값 재사용 (중복 API 호출 방지)
         psbl_cash = _psbl_check
