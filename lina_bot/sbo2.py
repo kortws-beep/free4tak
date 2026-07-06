@@ -104,7 +104,7 @@ SLOT_INTER  = "inter"   # 교집합 (VCP+추세+촉매)
 SLOT_SWING  = "swing"   # 스윙 (VCP only)
 SLOT_TREND  = "trend"   # 추세 (trend only)
 SLOT_TELE   = "tele"    # 텔레스윙 (매수 소스 제외, 라벨만 유지)
-SLOT_SSHOW  = "sshow"   # 생쇼(전문가추천) ∩ VCP — VCP 통과 못 하면 후보에서 자동 제외됨
+SLOT_SSHOW  = "sshow"   # 생쇼(전문가추천) ∩ (VCP 또는 추세) — 둘 다 통과 못 하면 후보에서 자동 제외됨
 
 SLOT_LABEL = {
     SLOT_INTER: "교집합",
@@ -531,12 +531,12 @@ def get_candidates() -> list:
     - inter (교집합): VCP + 추세 + 촉매 동시 통과 → 슬롯1 최우선
     - swing        : VCP only                     → 슬롯2
     - trend        : 추세 only                    → 슬롯3
-    - sshow        : 생쇼(전문가추천) ∩ VCP        → 슬롯4
-      (★ 2026-07-07: 생쇼 단독으론 매수 근거로 안 쓰고, VCP 필터를
-      통과한 종목 중 생쇼도 같이 추천한 경우에만 후보로 인정 —
-      생쇼 자체 적중률은 낮지만(18.2%, 표본 11건) VCP가 걸러줄 거라는
-      전제로 추가. 옛 텔레(SLOT_TELE)처럼 원본을 그대로 매수 소스로
-      쓰는 게 아니라 반드시 VCP 교집합 조건으로 게이팅한다.)
+    - sshow        : 생쇼(전문가추천) ∩ (VCP 또는 추세) → 슬롯4
+      (★ 2026-07-07: 생쇼 단독으론 매수 근거로 안 쓰고, VCP 또는 추세
+      필터를 통과한 종목 중 생쇼도 같이 추천한 경우에만 후보로 인정 —
+      생쇼 자체 적중률은 낮지만(18.2%, 표본 11건) VCP/추세가 걸러줄
+      거라는 전제로 추가. 옛 텔레(SLOT_TELE)처럼 원본을 그대로 매수
+      소스로 쓰는 게 아니라 반드시 기술적 교집합 조건으로 게이팅한다.)
     """
     from swing_analyzer import get_swing_data
     from trend_analyzer import get_trend_data
@@ -591,17 +591,20 @@ def get_candidates() -> list:
     inter_list.sort(key=lambda x: x["score"], reverse=True)
     candidates += inter_list[:CANDIDATE_CAP_PER_SLOT]
 
-    # ── 슬롯4: 생쇼(전문가추천) ∩ VCP (스윙/교집합과 안 겹치게) ──
-    sshow_vcp_names = (swing_names - trend_names) & sshow_names
+    # ── 슬롯4: 생쇼(전문가추천) ∩ (VCP 또는 추세) ───────────────
+    # ★ 2026-07-07: 처음엔 VCP만 게이팅했으나, 추세 통과 종목도 생쇼가
+    #   같이 추천하면 후보로 인정하도록 확대 (사용자 요청). 교집합에
+    #   이미 들어간 종목은 제외.
+    sshow_gate_names = ((swing_names | trend_names) & sshow_names) - inter_names
     sshow_list = []
-    for name in sshow_vcp_names:
+    for name in sshow_gate_names:
         d = detail_map.get(name, {})
         sshow_list.append({
             "name":     name,
             "grade":    SLOT_SSHOW,
             "score":    d.get("score", 0),
-            "vcp":      True,
-            "trend":    False,
+            "vcp":      name in swing_names,
+            "trend":    name in trend_names,
             "catalyst": name in catalyst_set,
             "curr":     d.get("curr_price", 0),
             "stop":     d.get("stop_price", 0),
@@ -613,7 +616,7 @@ def get_candidates() -> list:
     candidates += sshow_list[:CANDIDATE_CAP_PER_SLOT]
 
     # ── 슬롯2: 스윙 (VCP only, 교집합/생쇼 제외) ────────────────
-    swing_only = (swing_names - trend_names) - sshow_vcp_names
+    swing_only = (swing_names - trend_names) - sshow_gate_names
     swing_list = []
     for name in swing_only:
         d = detail_map.get(name, {})
@@ -633,8 +636,8 @@ def get_candidates() -> list:
     swing_list.sort(key=lambda x: x["score"], reverse=True)
     candidates += swing_list[:CANDIDATE_CAP_PER_SLOT]
 
-    # ── 슬롯3: 추세 (trend only, 교집합 제외) ──────────────────
-    trend_only = trend_names - swing_names
+    # ── 슬롯3: 추세 (trend only, 교집합/생쇼 제외) ──────────────
+    trend_only = (trend_names - swing_names) - sshow_gate_names
     trend_list = []
     for name in trend_only:
         d = detail_map.get(name, {})
