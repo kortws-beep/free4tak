@@ -96,20 +96,22 @@ except Exception:
 # ============================================================
 SEED_MONEY       = 5_000_000   # 시드머니 500만원
 BASE_BUY_AMT     = 1_500_000   # 1종목 기본 매수금액 150만원
-MAX_POSITIONS    = 4            # 최대 보유 종목 (교집합1+스윙1+추세1+텔레1)
+MAX_POSITIONS    = 4            # 최대 보유 종목 (교집합1+스윙1+추세1+생쇼1)
 A_GRADE_RATIO    = 0.7          # A급 상위 70%만 매수
 
 # 슬롯 전략 구분
 SLOT_INTER  = "inter"   # 교집합 (VCP+추세+촉매)
 SLOT_SWING  = "swing"   # 스윙 (VCP only)
 SLOT_TREND  = "trend"   # 추세 (trend only)
-SLOT_TELE   = "tele"    # 텔레스윙
+SLOT_TELE   = "tele"    # 텔레스윙 (매수 소스 제외, 라벨만 유지)
+SLOT_SSHOW  = "sshow"   # 생쇼(전문가추천) ∩ VCP — VCP 통과 못 하면 후보에서 자동 제외됨
 
 SLOT_LABEL = {
     SLOT_INTER: "교집합",
     SLOT_SWING: "스윙",
     SLOT_TREND: "추세",
     SLOT_TELE:  "텔레",
+    SLOT_SSHOW: "생쇼",
     "실계좌":   "실계좌",
     "S":        "S급",
     "A":        "A급",
@@ -506,7 +508,7 @@ def calc_buy_amount(grade: str, psbl_cash: int, score: int = 0) -> int:
     """
     if grade == SLOT_INTER:
         amount = BASE_BUY_AMT               # 150만원
-    elif grade in (SLOT_SWING, SLOT_TREND):
+    elif grade in (SLOT_SWING, SLOT_TREND, SLOT_SSHOW):
         amount = int(BASE_BUY_AMT * 0.83)   # 125만원
     else:                                    # tele
         amount = int(BASE_BUY_AMT * 0.67)   # 100만원
@@ -529,14 +531,27 @@ def get_candidates() -> list:
     - inter (교집합): VCP + 추세 + 촉매 동시 통과 → 슬롯1 최우선
     - swing        : VCP only                     → 슬롯2
     - trend        : 추세 only                    → 슬롯3
-    - tele         : 텔레스윙 (07:50/14:40)       → 슬롯4
+    - sshow        : 생쇼(전문가추천) ∩ VCP        → 슬롯4
+      (★ 2026-07-07: 생쇼 단독으론 매수 근거로 안 쓰고, VCP 필터를
+      통과한 종목 중 생쇼도 같이 추천한 경우에만 후보로 인정 —
+      생쇼 자체 적중률은 낮지만(18.2%, 표본 11건) VCP가 걸러줄 거라는
+      전제로 추가. 옛 텔레(SLOT_TELE)처럼 원본을 그대로 매수 소스로
+      쓰는 게 아니라 반드시 VCP 교집합 조건으로 게이팅한다.)
     """
     from swing_analyzer import get_swing_data
     from trend_analyzer import get_trend_data
+    from sshow_db import get_sshow_stocks
 
     catalyst_set = _get_catalyst_stocks()
     swing_data   = get_swing_data(top_n=20)
     trend_data   = get_trend_data(top_n=20)
+
+    try:
+        sshow_map = get_sshow_stocks(days=5)
+    except Exception as e:
+        print(f"⚠️ [sbo2] 생쇼 조회 오류: {e}")
+        sshow_map = {}
+    sshow_names  = set(sshow_map.keys())
 
     swing_names  = {d["name"] for d in swing_data}
     trend_names  = {d["name"] for d in trend_data}
@@ -576,8 +591,29 @@ def get_candidates() -> list:
     inter_list.sort(key=lambda x: x["score"], reverse=True)
     candidates += inter_list[:CANDIDATE_CAP_PER_SLOT]
 
-    # ── 슬롯2: 스윙 (VCP only, 교집합 제외) ────────────────────
-    swing_only = swing_names - trend_names
+    # ── 슬롯4: 생쇼(전문가추천) ∩ VCP (스윙/교집합과 안 겹치게) ──
+    sshow_vcp_names = (swing_names - trend_names) & sshow_names
+    sshow_list = []
+    for name in sshow_vcp_names:
+        d = detail_map.get(name, {})
+        sshow_list.append({
+            "name":     name,
+            "grade":    SLOT_SSHOW,
+            "score":    d.get("score", 0),
+            "vcp":      True,
+            "trend":    False,
+            "catalyst": name in catalyst_set,
+            "curr":     d.get("curr_price", 0),
+            "stop":     d.get("stop_price", 0),
+            "tgt":      d.get("tgt_price", 0),
+            "rr":       d.get("rr_ratio", 0),
+            "themes":   d.get("themes", []),
+        })
+    sshow_list.sort(key=lambda x: x["score"], reverse=True)
+    candidates += sshow_list[:CANDIDATE_CAP_PER_SLOT]
+
+    # ── 슬롯2: 스윙 (VCP only, 교집합/생쇼 제외) ────────────────
+    swing_only = (swing_names - trend_names) - sshow_vcp_names
     swing_list = []
     for name in swing_only:
         d = detail_map.get(name, {})
@@ -846,7 +882,8 @@ class Sbo2:
         inter = sum(1 for c in self.candidates if c["grade"] == SLOT_INTER)
         swing = sum(1 for c in self.candidates if c["grade"] == SLOT_SWING)
         trend = sum(1 for c in self.candidates if c["grade"] == SLOT_TREND)
-        print(f"   교집합:{inter}개 스윙:{swing}개 추세:{trend}개")
+        sshow = sum(1 for c in self.candidates if c["grade"] == SLOT_SSHOW)
+        print(f"   교집합:{inter}개 스윙:{swing}개 추세:{trend}개 생쇼:{sshow}개")
         for c in self.candidates:
             save_candidate(
                 name=c["name"], grade=c["grade"], score=c["score"],
@@ -923,6 +960,7 @@ class Sbo2:
         has_inter = SLOT_INTER in held_grades
         has_swing = SLOT_SWING in held_grades
         has_trend = SLOT_TREND in held_grades
+        has_sshow = SLOT_SSHOW in held_grades
 
         # ★ 2026-07-06: 텔레스윙을 매수 소스에서 제외 (사용자 결정) —
         #   사후검증 결과 텔레스윙이 표본 1368건 중 손절률 77.3%로 압도적으로
@@ -930,7 +968,10 @@ class Sbo2:
         #   매수 판단에는 더 이상 쓰지 않고, 시장 판단 참고자료로만 남긴다
         #   (텔레스윙 스캔/리포트 자체는 lina_bot.py 07:50·14:40 스케줄러와
         #   !텔레스윙 명령으로 계속 제공됨 — 여기서 빼는 건 sbo2 매수풀뿐).
-        # 우선순위: 교집합 → 점수 높은 순 (스윙/추세)
+        # ★ 2026-07-07: 생쇼(전문가추천)는 단독 적중률이 낮아(18.2%, 표본 11건)
+        #   텔레스윙과 같은 문제가 우려됐으나, VCP 교집합으로만 게이팅해서
+        #   추가 — VCP를 통과 못 하면 애초에 후보 풀에 들어오지 않는다.
+        # 우선순위: 교집합 → 점수 높은 순 (스윙/추세/생쇼)
         buyable = []
         if not has_inter:
             buyable += sorted(_buyable(SLOT_INTER), key=lambda x: x["score"], reverse=True)
@@ -938,9 +979,11 @@ class Sbo2:
             buyable += sorted(_buyable(SLOT_SWING), key=lambda x: x["score"], reverse=True)
         if not has_trend:
             buyable += sorted(_buyable(SLOT_TREND), key=lambda x: x["score"], reverse=True)
+        if not has_sshow:
+            buyable += sorted(_buyable(SLOT_SSHOW), key=lambda x: x["score"], reverse=True)
 
         print(f"   매수후보: 교집합{len(_buyable(SLOT_INTER))} 스윙{len(_buyable(SLOT_SWING))} "
-              f"추세{len(_buyable(SLOT_TREND))} (텔레 제외됨)")
+              f"추세{len(_buyable(SLOT_TREND))} 생쇼{len(_buyable(SLOT_SSHOW))} (텔레 제외됨)")
 
         for cand in buyable:
             if slots <= 0:
