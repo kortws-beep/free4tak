@@ -60,7 +60,6 @@ for _d in ["core", "interface", "bots", ""]:
 # ── 의존 모듈 ─────────────────────────────────────────────────
 from kis_api       import KisAPI
 from swing_master        import get_master_report, _get_catalyst_stocks, _extract_names_from_report
-from tele_swing_analyzer import get_tele_swing_picks
 from swing_analyzer import get_swing_picks
 from trend_analyzer import get_trend_picks
 
@@ -622,33 +621,6 @@ def get_candidates() -> list:
     return candidates
 
 
-def get_tele_candidates() -> list:
-    """
-    슬롯4: 텔레스윙 후보 반환 (07:50, 14:40 갱신용)
-    """
-    try:
-        tele_data = get_tele_swing_picks(top_n=5)
-        result = []
-        for d in tele_data:
-            result.append({
-                "name":     d.get("name", ""),
-                "grade":    SLOT_TELE,
-                "score":    d.get("score", 0),
-                "vcp":      False,
-                "trend":    False,
-                "catalyst": False,
-                "curr":     d.get("curr_price", 0),
-                "stop":     d.get("stop_price", 0),
-                "tgt":      d.get("tgt_price", 0),
-                "rr":       d.get("rr_ratio", 0),
-                "themes":   [],
-            })
-        return result
-    except Exception as e:
-        print(f"⚠️ 텔레스윙 후보 오류: {e}")
-        return []
-
-
 # ============================================================
 # 종목코드 조회 (이름 → 코드)
 # ============================================================
@@ -747,8 +719,6 @@ class Sbo2:
         self.sold_today = st.get("sold_today", {})
         self.candidates = st.get("candidates", [])
         self._cand_date = ""   # 재시작시 무조건 재스캔
-        self._tele_refreshed_am = False  # 07:50 텔레스윙 갱신 플래그
-        self._tele_refreshed_pm = False  # 14:40 텔레스윙 갱신 플래그
         if st.get("sold_today_date") != today_str():
             self.sold_today = {}
 
@@ -855,52 +825,20 @@ class Sbo2:
                 print(f"   ⏭️ 보유중 제외: {', '.join(excluded)}")
             return result
 
-        # ── 07:50 텔레스윙 갱신 ────────────────────────────────
-        if now_t >= "0750" and not getattr(self, '_tele_refreshed_am', False):
-            print(f"\n📡 [sbo2] 07:50 텔레스윙 갱신...")
-            try:
-                tele_cands = _filter(get_tele_candidates())
-                # 기존 tele 슬롯 교체
-                self.candidates = [c for c in self.candidates if c["grade"] != SLOT_TELE]
-                self.candidates += tele_cands
-                self._tele_refreshed_am = True
-                print(f"   텔레스윙: {len(tele_cands)}개")
-            except Exception as e:
-                print(f"⚠️ 텔레스윙 갱신 오류: {e}")
-
-        # ── 14:40 텔레스윙 재갱신 ──────────────────────────────
-        if now_t >= "1440" and not getattr(self, '_tele_refreshed_pm', False):
-            print(f"\n📡 [sbo2] 14:40 텔레스윙 재갱신...")
-            try:
-                tele_cands = _filter(get_tele_candidates())
-                self.candidates = [c for c in self.candidates if c["grade"] != SLOT_TELE]
-                self.candidates += tele_cands
-                self._tele_refreshed_pm = True
-                print(f"   텔레스윙: {len(tele_cands)}개")
-            except Exception as e:
-                print(f"⚠️ 텔레스윙 재갱신 오류: {e}")
+        # ★ 2026-07-06: 텔레스윙 갱신(07:50/14:40) 제거 — 매수 소스에서
+        #   빠졌으니 sbo2 안에서 더 이상 계산할 이유가 없음(사용자 결정).
+        #   텔레스윙 리포트 자체는 lina_bot.py의 07:50/14:40 스케줄러가
+        #   독립적으로 계속 제공하므로 "시장판단 자료" 용도는 그대로 유지됨.
+        #   (부수효과: sbo2 자체 API/연산 부담도 그만큼 줄어듦)
 
         # ── 전체 갱신 (하루 1회, 날짜 바뀌거나 처음 실행 시) ──
         if hasattr(self, '_cand_date') and self._cand_date == today:
             return
-        # ★ 2026-06-29 수정: 재시작 직후 첫 갱신인지(_cand_date가 원래
-        #   ""였던 경우) vs 진짜 날짜가 바뀐 갱신인지 구분.
-        #   재시작 직후라면 위에서 이미 텔레스윙 갱신을 막 끝냈을 수 있는데,
-        #   아래에서 무조건 _tele_refreshed_am/pm을 False로 리셋해버리면
-        #   바로 다음 루프에서 텔레스윙이 불필요하게 한 번 더 실행되는
-        #   버그가 있었음 (날짜 바뀐 경우엔 리셋이 맞지만, 재시작 직후
-        #   첫 갱신에서는 막 처리한 결과를 그대로 유지해야 함).
-        _is_restart_first_run = (self._cand_date == "")
         print(f"\n🔄 [sbo2] 후보 전체 갱신 중...")
         try:
             all_cands = _filter(get_candidates())
-            # tele 슬롯은 유지하고 나머지만 교체
-            tele_slot = [c for c in self.candidates if c["grade"] == SLOT_TELE]
-            self.candidates = all_cands + tele_slot
+            self.candidates = all_cands
             self._cand_date = today
-            if not _is_restart_first_run:
-                self._tele_refreshed_am = False
-                self._tele_refreshed_pm = False
             _save_cand_date(self._cand_date)
         except Exception as e:
             print(f"⚠️ 후보 갱신 오류: {e}")
@@ -908,8 +846,7 @@ class Sbo2:
         inter = sum(1 for c in self.candidates if c["grade"] == SLOT_INTER)
         swing = sum(1 for c in self.candidates if c["grade"] == SLOT_SWING)
         trend = sum(1 for c in self.candidates if c["grade"] == SLOT_TREND)
-        tele  = sum(1 for c in self.candidates if c["grade"] == SLOT_TELE)
-        print(f"   교집합:{inter}개 스윙:{swing}개 추세:{trend}개 텔레:{tele}개")
+        print(f"   교집합:{inter}개 스윙:{swing}개 추세:{trend}개")
         for c in self.candidates:
             save_candidate(
                 name=c["name"], grade=c["grade"], score=c["score"],
@@ -986,9 +923,14 @@ class Sbo2:
         has_inter = SLOT_INTER in held_grades
         has_swing = SLOT_SWING in held_grades
         has_trend = SLOT_TREND in held_grades
-        has_tele  = SLOT_TELE  in held_grades
 
-        # 우선순위: 교집합 → 점수 높은 순 (스윙/추세/텔레)
+        # ★ 2026-07-06: 텔레스윙을 매수 소스에서 제외 (사용자 결정) —
+        #   사후검증 결과 텔레스윙이 표본 1368건 중 손절률 77.3%로 압도적으로
+        #   나빴음. 뉴스/언급 기반이라 사실상 단타에 가까운 신호라 스윙
+        #   매수 판단에는 더 이상 쓰지 않고, 시장 판단 참고자료로만 남긴다
+        #   (텔레스윙 스캔/리포트 자체는 lina_bot.py 07:50·14:40 스케줄러와
+        #   !텔레스윙 명령으로 계속 제공됨 — 여기서 빼는 건 sbo2 매수풀뿐).
+        # 우선순위: 교집합 → 점수 높은 순 (스윙/추세)
         buyable = []
         if not has_inter:
             buyable += sorted(_buyable(SLOT_INTER), key=lambda x: x["score"], reverse=True)
@@ -996,11 +938,9 @@ class Sbo2:
             buyable += sorted(_buyable(SLOT_SWING), key=lambda x: x["score"], reverse=True)
         if not has_trend:
             buyable += sorted(_buyable(SLOT_TREND), key=lambda x: x["score"], reverse=True)
-        if not has_tele:
-            buyable += sorted(_buyable(SLOT_TELE),  key=lambda x: x["score"], reverse=True)
 
         print(f"   매수후보: 교집합{len(_buyable(SLOT_INTER))} 스윙{len(_buyable(SLOT_SWING))} "
-              f"추세{len(_buyable(SLOT_TREND))} 텔레{len(_buyable(SLOT_TELE))}")
+              f"추세{len(_buyable(SLOT_TREND))} (텔레 제외됨)")
 
         for cand in buyable:
             if slots <= 0:
