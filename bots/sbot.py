@@ -1141,26 +1141,6 @@ class SBot:
     # ============================================================
     # 매도 체크
     # ============================================================
-    def _is_over_hold(self, code: str, pos: dict, max_days: int = 11) -> bool:
-        """영업일 기준 max_days 초과 보유 여부"""
-        try:
-            import datetime as _dt
-            buy_date_str = pos.get("buy_date", "")
-            if not buy_date_str:
-                return False
-            buy_date = _dt.datetime.strptime(buy_date_str, "%Y-%m-%d").date()
-            today    = _dt.date.today()
-            # 영업일 계산 (토/일 제외)
-            bdays = 0
-            cur = buy_date
-            while cur < today:
-                cur += _dt.timedelta(days=1)
-                if cur.weekday() < 5:  # 월~금
-                    bdays += 1
-            return bdays >= max_days
-        except Exception:
-            return False
-
     def _get_vol_ratio(self, code: str, mdata: dict) -> float:
         """
         거래량 전일 대비 비율(%) 조회.
@@ -1243,20 +1223,13 @@ class SBot:
                 ma20=ma20, atr_rate=atr_rate,
                 vol_ratio=vol_ratio,
             )
-            # ★ 장기보유 청산 (미너비니 종목은 20영업일, 일반은 11영업일)
+            # ★ 2026-07-06: 기간(보유일수) 기반 강제청산 로직 제거 — 최근 장세에서
+            #   ATR 손절/트레일링/목표가로 이미 충분히 관리되는 포지션을 보유일수만
+            #   초과했다는 이유로 손실 구간에서 강제로 털어버리는 부작용이 반복돼
+            #   ATR 기반 판단으로만 가기로 함 (사용자 결정). buy_tag/is_miner는
+            #   아래 200일선 이탈 청산에서 계속 쓰이므로 유지.
             buy_tag   = self.buy_context.get(code, {}).get("buy_tag", "")
             is_miner  = (buy_tag == "minervini")
-            max_days  = 20 if is_miner else 11
-            if self._is_over_hold(code, pos, max_days=max_days):
-                cur_price = float(mdata.get("stck_prpr", 0))
-                entry     = pos["entry_price"]
-                rate      = (cur_price - entry) / entry if entry else 0
-                # 미너비니: 수익 +3% 이하면 청산 / 일반: +2% 이하
-                thresh = 0.03 if is_miner else 0.02
-                if rate <= thresh:
-                    self._do_sell(code, pos["qty"],
-                                  f"장기보유청산({rate:+.2%})", cur_price)
-                    print(f"📅 {code} {max_days}영업일 초과 → 장기보유청산 ({rate:+.2%})")
             # ★ 미너비니 종목: 200일선 이탈 시 즉시 청산
             if is_miner and ma20 > 0:
                 cur_price = float(mdata.get("stck_prpr", 0))

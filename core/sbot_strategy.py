@@ -273,29 +273,10 @@ class SwingStrategy:
             peak_tracker.pop(code, None)
             return label
 
-        # ----------------------------------------------------------
-        # ④-0 보유기한 초과 (stage==0, 목표가1 미달성 종목만 — 25일)
-        # ----------------------------------------------------------
-        if stage == 0:
-            try:
-                import datetime as _dt
-                buy_date_str = tracker.get("buy_date", "")
-                if buy_date_str:
-                    buy_date = _dt.date.fromisoformat(buy_date_str)
-                    # ★ 백테스트용: tracker에 "_bt_today"가 있으면 그 날짜를 기준으로 사용
-                    #   (실전에서는 이 키가 없으므로 항상 date.today() 그대로 사용 — 영향 없음)
-                    _today = tracker.get("_bt_today") or _dt.date.today()
-                    held_days = (_today - buy_date).days
-                    if held_days >= 25:
-                        label = "기한초과" if rate >= 0 else "기한초과(손실)"
-                        print(f"⏰ {label} {code} | 보유{held_days}일 | {rate:+.2%}")
-                        on_sell(code, qty, f"{label}({rate:+.2%})", current)
-                        if rate < 0:
-                            on_loss()
-                        peak_tracker.pop(code, None)
-                        return label
-            except Exception:
-                pass
+        # ★ 2026-07-06: 보유기한(25일) 강제청산 로직 제거 — ATR 손절/트레일링/
+        #   목표가만으로 관리 (사용자 결정, 최근 장세에서 기간매도가 손실
+        #   구간에서 포지션을 털어버리는 부작용이 반복됨). bots/sbot.py의
+        #   11/20영업일 룰도 같은 이유로 함께 제거함.
 
         # ----------------------------------------------------------
         # ④ 트레일링 스탑 (목표가1 달성 이후)
