@@ -1259,19 +1259,9 @@ class Sbo2:
 
             reason = None
 
-            # ⓪ 보유기한 초과 (stage==0, 목표가1 미달성 종목만 — 25일)
-            if stage == 0:
-                try:
-                    import datetime as _dt
-                    buy_date_str = pos.get("buy_time", "")
-                    if buy_date_str:
-                        buy_date  = _dt.datetime.strptime(buy_date_str, "%Y-%m-%d").date()
-                        held_days = (_dt.date.today() - buy_date).days
-                        if held_days >= 25:
-                            reason = f"기한초과({rate:+.1f}%)"
-                            print(f"⏰ 기한초과 {code} | 보유{held_days}일 | {rate:+.1f}%")
-                except Exception:
-                    pass
+            # ★ 2026-07-07: 보유기한(25일) 강제청산 로직 제거 — sbot과 동일하게
+            #   ATR 손절/트레일링/목표가만으로 관리 (사용자 결정, 최근 장세에서
+            #   기간매도가 손실 구간 포지션을 강제로 털어버리는 부작용 반복됨).
 
             # ② 손절가 이탈
             if not reason and stop > 0 and curr <= stop:
