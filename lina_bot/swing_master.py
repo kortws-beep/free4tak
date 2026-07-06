@@ -155,9 +155,12 @@ def _get_catalyst_stocks_fresh() -> set:
         except Exception:
             pass
 
-    # ── 3. 대장님 전용 왓치리스트 강제 주입 ──────────────────────
-    from watchlist_manager import get_watchlist_stocks
-    hot_kr |= get_watchlist_stocks(priority=1)
+    # ★ 2026-07-07: 고정 왓치리스트 강제 주입 제거 (사용자 결정) —
+    #   왓치리스트 151개가 미장/텔레그램/섹터 상황과 무관하게 항상
+    #   "촉매 통과"로 잡혀서, 교집합(VCP+추세+촉매)의 촉매 조건이 왓치
+    #   종목에겐 사실상 죽은 필터가 되고 있었음(190개 중 151개가 이
+    #   소스 하나). "촉매"는 실제 오늘 벌어진 일(미장 급등/텔레그램
+    #   언급/섹터 급등)만으로 판단하도록 되돌림.
 
     # ── 4. sector_monitor 실시간 급등 테마 연동 ───────────────
     if os.path.exists(DB_PATH_SECTOR):
