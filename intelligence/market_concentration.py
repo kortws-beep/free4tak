@@ -94,9 +94,16 @@ def init_db():
             concentration_gap  REAL DEFAULT 0,
             breadth_ratio      REAL DEFAULT 0,
             rotation_flag      TEXT DEFAULT '',
+            sector_ranking     TEXT DEFAULT '',
             created_at         TEXT DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    # ★ 2026-07-06: 기존 DB에 sector_ranking 컬럼 추가 (신규 설치는 위 CREATE에서
+    #   이미 포함, 기존 DB는 ALTER로 안전하게 추가 — 이미 있으면 무시)
+    try:
+        conn.execute("ALTER TABLE concentration_snapshot ADD COLUMN sector_ranking TEXT DEFAULT ''")
+    except sqlite3.OperationalError:
+        pass
     conn.execute("""
         CREATE TABLE IF NOT EXISTS market_context_summary (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -183,6 +190,40 @@ def _calc_rotation_flag() -> str:
         return ""
 
 
+def _calc_sector_ranking(top_n: int = 5) -> str:
+    """
+    ★ 2026-07-06 추가: sector_monitor.db의 테마별 등락률(flu_rt)로 오늘
+    상승/하락 테마 순위를 뽑는다. 기존엔 breadth_ratio(전체 상승비율)와
+    rotation_flag(급가속/이탈만 감지)만 있어서 "반도체만 오르고 나머지는
+    못 오른다" 같은 섹터 단위 쏠림을 실제로 보여줄 데이터가 없었음 —
+    대형주 워치리스트(S7)와 전체 시장폭만으로는 이런 디테일이 안 나옴.
+    최신 시각 스냅샷 기준 상위/하위 테마를 그대로 보여줘서 LLM 코멘트가
+    구체적인 섹터명을 근거로 쓸 수 있게 한다.
+    """
+    try:
+        conn = sqlite3.connect(SECTOR_DB_PATH, timeout=5)
+        conn.execute("PRAGMA query_only=ON")
+        latest_ts = conn.execute("SELECT MAX(ts) FROM sector_flow").fetchone()[0]
+        if not latest_ts:
+            conn.close()
+            return ""
+        rows = conn.execute("""
+            SELECT theme_nm, flu_rt FROM sector_flow
+            WHERE ts = ? ORDER BY flu_rt DESC
+        """, (latest_ts,)).fetchall()
+        conn.close()
+        if not rows:
+            return ""
+        top    = rows[:top_n]
+        bottom = rows[-top_n:] if len(rows) > top_n else []
+        top_str    = ", ".join(f"{nm}({rt:+.1f}%)" for nm, rt in top)
+        bottom_str = ", ".join(f"{nm}({rt:+.1f}%)" for nm, rt in reversed(bottom))
+        return f"상승상위: {top_str} | 하락상위: {bottom_str}"
+    except Exception as e:
+        print(f"⚠️ 섹터 랭킹 조회 오류: {e}")
+        return ""
+
+
 def compute_snapshot() -> dict:
     """대형주 쏠림 + 시장폭 + 주도주교체 스냅샷 계산."""
     from kis_api import KisAPI
@@ -204,8 +245,9 @@ def compute_snapshot() -> dict:
     mega_avg_rate = round(sum(rates) / len(rates), 2) if rates else 0.0
     concentration_gap = round(mega_avg_rate - kospi_rate, 2)
 
-    breadth_ratio = _calc_breadth_ratio()
-    rotation_flag = _calc_rotation_flag()
+    breadth_ratio  = _calc_breadth_ratio()
+    rotation_flag  = _calc_rotation_flag()
+    sector_ranking = _calc_sector_ranking()
 
     return {
         "ts":                datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
@@ -215,6 +257,7 @@ def compute_snapshot() -> dict:
         "concentration_gap": concentration_gap,
         "breadth_ratio":     breadth_ratio,
         "rotation_flag":     rotation_flag,
+        "sector_ranking":    sector_ranking,
     }
 
 
@@ -224,12 +267,13 @@ def save_snapshot(snapshot: dict):
     conn.execute("""
         INSERT INTO concentration_snapshot
             (ts, kospi_rate, mega_avg_rate, mega_detail,
-             concentration_gap, breadth_ratio, rotation_flag)
-        VALUES (?,?,?,?,?,?,?)
+             concentration_gap, breadth_ratio, rotation_flag, sector_ranking)
+        VALUES (?,?,?,?,?,?,?,?)
     """, (
         snapshot["ts"], snapshot["kospi_rate"], snapshot["mega_avg_rate"],
         snapshot["mega_detail"], snapshot["concentration_gap"],
         snapshot["breadth_ratio"], snapshot["rotation_flag"],
+        snapshot.get("sector_ranking", ""),
     ))
     conn.commit()
     conn.close()
@@ -242,7 +286,7 @@ def get_latest_snapshot() -> dict:
         conn.execute("PRAGMA query_only=ON")
         row = conn.execute("""
             SELECT ts, kospi_rate, mega_avg_rate, mega_detail,
-                   concentration_gap, breadth_ratio, rotation_flag
+                   concentration_gap, breadth_ratio, rotation_flag, sector_ranking
             FROM concentration_snapshot
             ORDER BY id DESC LIMIT 1
         """).fetchone()
@@ -250,7 +294,7 @@ def get_latest_snapshot() -> dict:
         if not row:
             return {}
         cols = ["ts", "kospi_rate", "mega_avg_rate", "mega_detail",
-                "concentration_gap", "breadth_ratio", "rotation_flag"]
+                "concentration_gap", "breadth_ratio", "rotation_flag", "sector_ranking"]
         return dict(zip(cols, row))
     except Exception as e:
         print(f"⚠️ 최신 스냅샷 조회 오류: {e}")
