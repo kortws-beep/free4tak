@@ -1490,6 +1490,19 @@ class Sbo2:
                     existing["name"] = cur_name
                     updated[code] = existing
                 else:
+                    # ★ 2026-07-07: 오늘 이미 매도한 종목이면 재입양하지 않음 —
+                    #   매도 주문 체결 직후 KIS 잔고API가 T+1/T+2 정산 전이라
+                    #   아직 보유수량을 남겨두는 경우가 있어, 방금 판 종목을
+                    #   "신규 종목"으로 오인해 재입양하고 master_positions에도
+                    #   그대로 반영되는 사고가 있었음(다음 루프에서 잔고가
+                    #   정산되며 self.positions에서는 다시 사라졌지만, 그 사이
+                    #   master_positions엔 유령 행이 남음 — 한화엔진 사례,
+                    #   09:00:36 매도 → 09:01:06 오인 재입양 → 09:01:37 재소실).
+                    if code in self.sold_today:
+                        print(f"   ⏭️ {rdata.get('name', code)}({code}) "
+                              f"오늘 이미 매도 — 정산 지연으로 보이는 잔고, 재입양 스킵")
+                        continue
+
                     # 신규 (수동매수 또는 새로 잡힌 종목)
                     entry = rdata["entry_price"]
                     # 종목명: KIS API → DB 조회 → 코드 순으로 폴백
