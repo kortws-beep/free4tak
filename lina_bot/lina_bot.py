@@ -440,23 +440,29 @@ def _fetch_and_summarize_bodies(sess, headers, items: list) -> list:
     return results
 
 
-def _call_llm(prompt: str, max_tokens: int = 1200) -> str:
+def _call_llm(prompt: str, max_tokens: int = 1200, force_claude: bool = False) -> str:
     """로컬 ollama 우선 시도 → 실패 시 Claude API로 폴백 (2026-07-02).
     ★ 2026-07-02: _summarize_report_body 전용이던 이 호출부를 공용 헬퍼로
     추출 — 시장 종합 브리핑(_build_market_context_summary) 등 다른 곳에서도
-    같은 폴백 로직을 재사용하기 위함."""
+    같은 폴백 로직을 재사용하기 위함.
+    ★ 2026-07-07: force_claude 추가 — 로컬 ollama(qwen2.5:14b)가 프롬프트에
+    "보조 참고자료"로만 쓰라고 명시해도, 텔레그램 뉴스 블록이 구조화된
+    쏠림 데이터보다 훨씬 크면 그쪽으로 관심이 쏠려 지시를 무시하는 문제가
+    있었음(시장 쏠림 브리핑이 그냥 뉴스 나열로 나온 사고). 지시 준수가
+    중요한 저빈도 호출은 로컬을 건너뛰고 바로 Claude로 보낸다."""
     ollama_model = os.getenv("OLLAMA_MODEL", "qwen2.5:14b")
     ollama_url   = os.getenv("OLLAMA_URL", "http://localhost:11434")
-    try:
-        import openai as _openai
-        client = _openai.OpenAI(base_url=f"{ollama_url}/v1", api_key="ollama", timeout=120)
-        res = client.chat.completions.create(
-            model=ollama_model, max_tokens=max_tokens,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        return res.choices[0].message.content.strip()
-    except Exception as e:
-        print(f"⚠️ 로컬 LLM 호출 실패({e}) → Claude로 폴백")
+    if not force_claude:
+        try:
+            import openai as _openai
+            client = _openai.OpenAI(base_url=f"{ollama_url}/v1", api_key="ollama", timeout=120)
+            res = client.chat.completions.create(
+                model=ollama_model, max_tokens=max_tokens,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            return res.choices[0].message.content.strip()
+        except Exception as e:
+            print(f"⚠️ 로컬 LLM 호출 실패({e}) → Claude로 폴백")
 
     try:
         import anthropic as _ant
@@ -532,7 +538,13 @@ def _build_market_context_summary() -> str:
         print(f"⚠️ 쏠림지수 스냅샷이 오래됨({age_min:.0f}분 전, ts={snapshot.get('ts')}) — 브리핑 생략")
         return ""
 
-    tele_context = fetch_recent_telegram_events(minutes_back=150)
+    # ★ 2026-07-07: minutes_back=150분치를 통째로 넣으면 51건/9천자까지
+    #   불어나서(장중 IR공시 몰릴 때), "보조 참고자료"라는 지시에도 불구하고
+    #   LLM이 이 뉴스 뭉치를 요약해버리는 사고가 있었음(쏠림 갭/섹터랭킹
+    #   숫자는 무시하고 개별 IR 뉴스만 나열). 최근 8건만 남기고 자른다.
+    tele_raw   = fetch_recent_telegram_events(minutes_back=150)
+    tele_items = [l for l in tele_raw.split("\n\n") if l.strip()]
+    tele_context = "\n\n".join(tele_items[-8:])
     recent = get_recent_summaries(days=3)
     trend_text = "\n".join(
         f"- {r['date']}: {r['summary_text'][:150]}..." for r in recent
@@ -572,7 +584,10 @@ def _build_market_context_summary() -> str:
         f"[최근 텔레그램 속보 — 보조 참고자료]\n{tele_context or '없음'}\n\n"
         f"[최근 3일 종합 코멘트 추세 — 참고용]\n{trend_text}"
     )
-    return _call_llm(prompt, max_tokens=600)
+    # ★ 2026-07-07: 로컬 ollama가 지시(숫자 우선/뉴스는 보조)를 무시하고
+    #   텔레그램 뉴스 나열로 흘러가는 문제가 반복돼, 하루 1회뿐인 이 호출은
+    #   비용 부담이 적으니 바로 Claude로 보낸다 (지시 준수 우선).
+    return _call_llm(prompt, max_tokens=600, force_claude=True)
 
 
 @tasks.loop(minutes=1)
