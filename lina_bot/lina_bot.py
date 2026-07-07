@@ -1352,6 +1352,26 @@ async def on_message(message):
             await send_safe_message(message.channel, report)
         return
 
+    # ── !쏠림 (수동 시장 쏠림 브리핑 확인용, 2026-07-07) ────────
+    #   09:35 스케줄러와 동일한 _build_market_context_summary()를 즉시
+    #   호출 — 시간 체크만 건너뛰고, 스냅샷 신선도(15분) 체크는 그대로
+    #   적용됨. 수동 확인용이라 이력 DB엔 저장하지 않음.
+    if message.content.startswith("!쏠림"):
+        async with message.channel.typing():
+            summary = await asyncio.to_thread(_build_market_context_summary)
+            if summary:
+                await send_safe_message(
+                    message.channel,
+                    f"📐 **[쏠림 브리핑 — 수동 확인]** 📐\n\n{summary}"
+                )
+            else:
+                await send_safe_message(
+                    message.channel,
+                    "💤 쏠림 지수 스냅샷이 없거나 15분 이상 오래됐어 (장 시작 "
+                    "직후이거나 cron 미실행일 수 있음)."
+                )
+        return
+
     # ── !텔레스윙 ──────────────────────────────────────────────
     if message.content.startswith("!텔레스윙"):
         async with message.channel.typing():
