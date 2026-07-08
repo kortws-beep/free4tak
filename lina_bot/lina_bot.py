@@ -559,6 +559,28 @@ def _build_market_context_summary() -> str:
     #   (오늘 상승/하락 테마 상위 랭킹)을 추가해서 섹터 단위 쏠림을 직접
     #   보여주고, 프롬프트도 숫자/섹터 데이터를 먼저 근거로 쓰도록 순서와
     #   지시를 강화. 텔레그램 뉴스는 보조 참고자료로 명시.
+    # ★ 2026-07-08: 평균값(mega_avg_rate)만 주고 종목별 상세는 안 줬더니,
+    #   LLM이 "대형주=삼성전자/SK하이닉스"라는 통념으로 실제 안 맞는 종목을
+    #   지목해 서술하는 사고 발생(그날 SK하이닉스는 +1.68%로 오히려 상승
+    #   했는데 "삼성전자·SK하이닉스가 밀리며"라고 씀 — 실제 하락은 삼성전기/
+    #   삼성생명/삼성물산 쪽이었음). mega_detail(종목별 등락률)을 프롬프트에
+    #   추가해 실제 데이터로만 종목을 지목하도록 함.
+    mega_detail_text = "데이터 없음"
+    try:
+        _mega_raw = snapshot.get("mega_detail")
+        if _mega_raw:
+            _mega_map = json.loads(_mega_raw) if isinstance(_mega_raw, str) else _mega_raw
+            _mega_names = {
+                "005930": "삼성전자", "000660": "SK하이닉스", "402340": "SK스퀘어",
+                "005935": "삼성전자우", "009150": "삼성전기", "032830": "삼성생명",
+                "028260": "삼성물산",
+            }
+            mega_detail_text = ", ".join(
+                f"{_mega_names.get(c, c)}({r:+.2f}%)" for c, r in _mega_map.items()
+            )
+    except Exception as e:
+        print(f"⚠️ mega_detail 파싱 오류: {e}")
+
     prompt = (
         f"오늘은 {datetime.datetime.now(KST).strftime('%Y년 %m월 %d일')}이다. "
         "당신은 한국 주식시장 데이터 분석가입니다. 아래 [쏠림 지수 데이터]를 "
@@ -570,11 +592,15 @@ def _build_market_context_summary() -> str:
         "않는 개별 종목 뉴스 나열로 답을 채우지 마세요. 숫자 자체가 밋밋하면 "
         "'오늘은 특정 섹터로의 뚜렷한 쏠림은 관찰되지 않음'이라고 솔직히 쓰세요.\n"
         "- 숫자를 지어내지 말고 주어진 값만 근거로 삼으세요. 날짜를 언급할 "
-        "일이 있다면 위에 알려준 오늘 날짜만 쓰세요.\n\n"
+        "일이 있다면 위에 알려준 오늘 날짜만 쓰세요.\n"
+        "- 특정 종목을 지목해서 언급할 때는 반드시 [대형주 S7 종목별 등락률]에 "
+        "실제로 나온 수치를 확인하고 쓰세요 — '대형주=삼성전자/SK하이닉스'라는 "
+        "통념으로 추측하지 말고, 평균을 실제로 끌어내리거나 끌어올린 종목이 "
+        "무엇인지 데이터로 확인한 뒤 지목하세요.\n\n"
         f"[쏠림 지수 데이터 — {snapshot.get('ts', '')}]\n"
         f"- 코스피 등락률: {snapshot.get('kospi_rate', 0):+.2f}%\n"
-        f"- 대형주 S7(삼성전자/SK하이닉스/SK스퀘어/삼성전자우/삼성전기/삼성생명/삼성물산) "
-        f"평균 등락률: {snapshot.get('mega_avg_rate', 0):+.2f}%\n"
+        f"- 대형주 S7 평균 등락률: {snapshot.get('mega_avg_rate', 0):+.2f}%\n"
+        f"- 대형주 S7 종목별 등락률: {mega_detail_text}\n"
         f"- 쏠림 갭(대형주-코스피): {snapshot.get('concentration_gap', 0):+.2f}%p "
         f"(클수록 대형주 쏠림)\n"
         f"- 시장 폭(상승종목비율): {snapshot.get('breadth_ratio', 0):.1f}% "
