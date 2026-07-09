@@ -633,45 +633,184 @@ def _build_market_context_summary() -> str:
 #   않는다. 로컬 AI를 쓰는 이유는 비용뿐 아니라 "로컬 AI가 이런 판단을
 #   얼마나 잘하는지" 자체를 관찰하고 싶다는 의도 — force_claude 안 씀.
 
-_PICK_LINE_RE = re.compile(r'종목\s*\d*\s*[:：]\s*(.+?)\s*\|\s*근거\s*[:：]\s*(.+)')
+_THEME_LINE_RE = re.compile(r'테마\s*\d*\s*[:：]\s*(.+)')
 
 
-def _parse_momentum_picks(llm_text: str) -> list:
-    """'종목1: 이름 | 근거: 문장' 라인 포맷 파싱 (JSON은 로컬 모델이 깨뜨리기 쉬워 제외)"""
-    picks = []
+def _parse_themes(llm_text: str) -> list:
+    """'테마1: 전력기기 쇼티지' 라인 포맷 파싱 (AI는 이제 종목이 아니라 테마만 뽑는다)"""
+    themes = []
     for line in llm_text.splitlines():
-        m = _PICK_LINE_RE.search(line)
+        m = _THEME_LINE_RE.search(line)
         if m:
-            name = m.group(1).strip().strip('*').strip()
-            reason = m.group(2).strip()
-            if name:
-                picks.append({"stock_name": name, "reasoning": reason})
-    return picks[:2]  # 하루 2종목만
+            theme = m.group(1).strip().strip('*').strip()
+            if theme:
+                themes.append(theme)
+    return themes[:3]
+
+
+# ★ 2026-07-10: Momentum Router 재설계 — 모듈1 (Market Status Analyzer)
+#   사용자 지적: AI가 직접 종목까지 고르게 하면 (a) 막연한 섹터명을 대거나
+#   (b) 차트 검증을 AI의 텍스트 추론에만 의존하는 문제가 있었음(07-10 아침
+#   세션 결과가 "갸우뚱"했다는 피드백). 대안: AI 역할을 "오늘의 명분(테마)
+#   추출"로 좁히고, 종목 매핑+차트검증은 결정론적 코드(모듈3)에 맡긴다.
+#   모듈1은 그 첫 단계 — 오늘이 애초에 대안주를 찾을 가치가 있는 장인지
+#   진단(대형주가 돈을 다 빨아들이는 날엔 대안주 탐색 자체가 의미 없음).
+def _check_market_phase() -> tuple:
+    """
+    market_concentration 스냅샷의 갭/시장폭/코스피등락률로 오늘 장세를
+    3단계로 분류. 반환: (phase, reason)
+    - 'A' S7 블랙홀   : 대형주 쏠림갭이 크고 시장폭이 좁음 — 대안주 탐색 보류
+    - 'B' 순환매 여지 : 그 외 (기본값) — 대안주 탐색 풀가동
+    - 'C' 약세장      : 코스피 자체가 뚜렷하게 하락 — 방어적 접근
+    ★ 임계치(갭 1.5%p / 시장폭 50% / 코스피 -1.0%)는 이번 주(07-07~09)
+      관찰값 기준 1차 추정치. 데이터 쌓이면 조정 필요.
+    """
+    try:
+        from market_concentration import get_latest_snapshot
+        snap = get_latest_snapshot() or {}
+    except Exception as e:
+        print(f"⚠️ [모멘텀] Phase 진단 오류: {e}")
+        return 'B', "쏠림지수 조회 실패 — 기본값(B)으로 진행"
+
+    gap     = snap.get('concentration_gap', 0)
+    breadth = snap.get('breadth_ratio', 0)
+    kospi   = snap.get('kospi_rate', 0)
+
+    if kospi <= -1.0:
+        return 'C', f"코스피 {kospi:+.2f}% 약세장"
+    if gap >= 1.5 and breadth < 50:
+        return 'A', f"대형주 쏠림갭 {gap:+.2f}%p, 시장폭 {breadth:.1f}% — S7 블랙홀"
+    return 'B', f"쏠림갭 {gap:+.2f}%p, 시장폭 {breadth:.1f}% — 순환매 여지 있음"
 
 
 def _enrich_momentum_picks(picks: list) -> list:
-    """종목명 → 코드 조회 + ATR 기반 매수/손절/목표가 산출 + 컨센서스 보강"""
-    from sbo2 import get_stock_code
-    from sshow_db import _recalc_prices_from_finance_db
+    """
+    컨센서스 보강만 수행 — 코드/가격은 이미 _map_themes_to_candidates()에서
+    VCP/추세 엔진이 계산한 값을 그대로 갖고 들어옴(재계산 불필요).
+    ★ 2026-07-10: Momentum Router 재설계로 AI가 더 이상 종목을 직접 안
+    고르므로, 여기서 하던 get_stock_code/ATR 재계산은 모듈3으로 이동.
+    """
     from consensus import get_consensus
 
-    today = datetime.datetime.now(KST).strftime("%Y-%m-%d")
     enriched = []
     for p in picks:
-        name = p["stock_name"]
-        code = get_stock_code(name)
-        prices = _recalc_prices_from_finance_db(name, today)
-        if not prices:
-            print(f"⚠️ [모멘텀] {name} 가격 재계산 실패 — 스킵")
-            continue
-        p.update(prices)
-        p["code"] = code
+        code = p.get("code", "")
         if code:
-            cons = get_consensus(code, current_price=prices.get("buy_price", 0))
+            cons = get_consensus(code, current_price=p.get("buy_price", 0))
             p["consensus_bonus"]  = cons.get("bonus", 0)
             p["consensus_reason"] = cons.get("reason", "")
         enriched.append(p)
     return enriched
+
+
+# ★ 2026-07-10: Momentum Router 모듈3 (Sector & Stock Sniper)
+def _map_themes_to_candidates(themes: list) -> list:
+    """
+    테마 키워드 → kr_theme_stocks 매칭 → VCP(swing)/추세(trend) 통과 종목만
+    필터링해 최종 후보를 만든다. swing_master.py의 sector_monitor 테마-종목
+    키워드 매칭 패턴(188-213행)과 동일한 방식, 어제 생쇼(SLOT_SSHOW)가
+    했던 "VCP∪추세 교집합 게이팅"과 동일한 원리를 여기도 적용.
+    """
+    if not themes:
+        return []
+
+    from swing_analyzer import get_swing_data
+    from trend_analyzer import get_trend_data
+    from sbo2 import get_stock_code
+
+    swing_data  = get_swing_data(top_n=30)
+    trend_data  = get_trend_data(top_n=30)
+    swing_names = {d["name"] for d in swing_data}
+    trend_names = {d["name"] for d in trend_data}
+    detail_map = {}
+    for d in swing_data + trend_data:
+        detail_map.setdefault(d["name"], d)
+    pass_names = swing_names | trend_names
+    if not pass_names:
+        print("⚠️ [모멘텀] VCP/추세 통과 종목이 오늘 하나도 없음 — 타겟팅 스킵")
+        return []
+
+    conn = sqlite3.connect(DB_PATH_THEME_FINANCE)
+    seen = set()
+    candidates = []
+    for theme in themes:
+        words = [k for k in re.split(r'[\s/·,]+', theme) if len(k) >= 2]
+        if not words:
+            continue
+
+        # 1차: 원단어 그대로 매칭
+        rows = conn.execute(
+            "SELECT DISTINCT stock_name FROM kr_theme_stocks WHERE " +
+            " OR ".join(["theme_name LIKE ?"] * len(words)),
+            [f"%{w}%" for w in words],
+        ).fetchall()
+
+        # ★ 2026-07-10: 공백 기준 단어("전력기기")가 DB 테마명("전력반도체",
+        #   "전력저장장치")과 정확히 안 겹치는 경우가 많음(한글 복합어 특성).
+        #   1차가 0건이면 단어 뒷글자를 하나씩 줄여가며 재시도(2글자까지) —
+        #   전체 bigram을 한꺼번에 OR하면 "기기"(=device, 너무 흔함) 같은
+        #   무의미한 조각이 미용기기 회사까지 끌어오는 오탐이 있었음. 접두어를
+        #   점진적으로만 줄이면 "전력기기"→"전력기"→"전력"처럼 의미 있는
+        #   단위에서 먼저 매칭을 멈출 수 있어 오탐이 훨씬 적음.
+        if not rows:
+            for cut in range(1, max(len(w) for w in words) - 1):
+                prefixes = list(dict.fromkeys(
+                    w[:len(w) - cut] for w in words if len(w) - cut >= 2
+                ))
+                if not prefixes:
+                    break
+                rows = conn.execute(
+                    "SELECT DISTINCT stock_name FROM kr_theme_stocks WHERE " +
+                    " OR ".join(["theme_name LIKE ?"] * len(prefixes)),
+                    [f"%{p}%" for p in prefixes],
+                ).fetchall()
+                if rows:
+                    break
+        for (sname,) in rows:
+            pure = re.sub(r'\s*(KOSPI|KOSDAQ)\s*\d{6}$', '', sname).strip()
+            if pure not in pass_names or pure in seen:
+                continue
+            seen.add(pure)
+            d = detail_map[pure]
+            candidates.append({
+                "stock_name": pure,
+                "code":       get_stock_code(pure),
+                "theme":      theme,
+                "reasoning":  f"'{theme}' 테마 + 기술적 확인({'VCP' if pure in swing_names else '추세'})",
+                "buy_price":  d.get("curr_price", 0),
+                "stop_price": d.get("stop_price", 0),
+                "tgt_price":  d.get("tgt_price", 0),
+                "score":      d.get("score", 0),
+            })
+    conn.close()
+
+    candidates.sort(key=lambda x: x["score"], reverse=True)
+    return candidates[:2]
+
+
+_STOPWORDS_KO = {
+    "있다", "없다", "한다", "하는", "했다", "되는", "된다", "위해", "대한", "대해",
+    "관련", "이번", "지난", "오늘", "지금", "부터", "까지", "에서", "으로", "그리고",
+    "하지만", "이라고", "라고", "이며", "또한", "통해", "같은", "이는", "것으로",
+    "채널", "내용", "키워드", "가산점", "없음",
+}
+
+
+def _extract_top_keywords(text: str, top_n: int = 10) -> str:
+    """
+    ★ 2026-07-10 Momentum Router 모듈2 — 텔레그램/뉴스 원문이 방대해서
+    (07-07 쏠림브리핑 사고, 07-09 젬마4:26b 타임아웃 등) 로컬 AI에게 그대로
+    던지면 관심이 뉴스 나열 쪽으로 쏠리거나 추론이 안 끝나는 문제가 반복됨.
+    파이썬에서 먼저 빈도수 상위 키워드로 1차 압축해 신호 대 잡음비를 높인다.
+    """
+    tokens = re.findall(r'[가-힣]{2,}', text or "")
+    freq = {}
+    for t in tokens:
+        if t in _STOPWORDS_KO:
+            continue
+        freq[t] = freq.get(t, 0) + 1
+    top = sorted(freq.items(), key=lambda x: x[1], reverse=True)[:top_n]
+    return ", ".join(f"{w}({c})" for w, c in top) if top else "없음"
 
 
 def _build_momentum_context_am() -> str:
@@ -685,6 +824,7 @@ def _build_momentum_context_am() -> str:
     us_text = "\n".join(us_lines) if us_lines else "데이터 없음"
 
     tele_raw   = fetch_recent_telegram_events(minutes_back=720)
+    keywords   = _extract_top_keywords(tele_raw)
     tele_items = [l for l in tele_raw.split("\n\n") if l.strip()]
     tele_text  = "\n\n".join(tele_items[-8:]) if tele_items else "없음"
 
@@ -696,6 +836,7 @@ def _build_momentum_context_am() -> str:
 
     return (
         f"[간밤 미국 증시 — 한국 수혜/피해 종목 매핑]\n{us_text}\n\n"
+        f"[핵심 키워드 빈도 — 간밤~아침 텔레그램]\n{keywords}\n\n"
         f"[간밤~아침 텔레그램 속보 (국제정세/전일상황 포함)]\n{tele_text}\n\n"
         f"[최근 며칠 쏠림 흐름 — 참고용]\n{trend_text}"
     )
@@ -709,6 +850,7 @@ def _build_momentum_context_pm() -> str:
     rotation_flag  = _calc_rotation_flag()
 
     tele_raw   = fetch_recent_telegram_events(minutes_back=300)
+    keywords   = _extract_top_keywords(tele_raw)
     tele_items = [l for l in tele_raw.split("\n\n") if l.strip()]
     tele_text  = "\n\n".join(tele_items[-8:]) if tele_items else "없음"
 
@@ -719,12 +861,18 @@ def _build_momentum_context_pm() -> str:
         f"시장폭: {snapshot.get('breadth_ratio', 0):.1f}%\n"
         f"- 섹터 등락률 랭킹: {sector_ranking or '데이터 없음'}\n"
         f"- 주도주/섹터 급변 신호: {rotation_flag or '없음'}\n\n"
+        f"[핵심 키워드 빈도 — 장중 텔레그램]\n{keywords}\n\n"
         f"[장중 텔레그램 속보]\n{tele_text}"
     )
 
 
 def _build_momentum_picks_sync(session: str, mbn_text: str = "") -> str:
-    """동기 파트 — 컨텍스트 조립 → LLM 호출 → 파싱/보강 → DB 저장. asyncio.to_thread로 실행."""
+    """
+    동기 파트 (Momentum Router 4모듈 파이프라인, 2026-07-10 재설계):
+    모듈1(Phase진단, pm만) → 모듈2(컨텍스트+키워드압축→LLM 테마추출)
+    → 모듈3(테마→종목 매핑+VCP/추세 검증) → 컨센서스 보강 → DB저장 → 리포트.
+    asyncio.to_thread로 실행.
+    """
     today_str_kr = datetime.datetime.now(KST).strftime("%Y년 %m월 %d일")
     today_iso    = datetime.datetime.now(KST).strftime("%Y-%m-%d")
 
@@ -733,21 +881,29 @@ def _build_momentum_picks_sync(session: str, mbn_text: str = "") -> str:
         if mbn_text:
             context += f"\n\n[오늘 아침 전문가 시황(MBN 투자전략)]\n{mbn_text[:2000]}"
         session_label = "아침(시초가 판단용)"
+        phase, phase_reason = "B", "아침 세션은 Phase 진단 생략(전일 마감 스냅샷)"
     else:
         context = _build_momentum_context_pm()
         session_label = "오후(종가 임박 판단용)"
+        phase, phase_reason = _check_market_phase()
+
+    if phase == "A":
+        print(f"🧭 [모멘텀-{session}] PHASE_A — 대안주 탐색 보류: {phase_reason}")
+        return (f"🧭 **[AI 모멘텀 스캐너 — {session_label}]** 🧭\n\n"
+                f"💤 오늘은 대형주 쏠림이 심해({phase_reason}) 대안주 탐색을 보류했어.")
 
     prompt = (
         f"오늘은 {today_str_kr}이다. 당신은 한국 주식시장 모멘텀 분석가입니다. "
-        f"아래 자료를 종합해서 오늘({session_label}) 모멘텀상 오를 가능성이 있는 "
-        "한국 상장 종목을 정확히 2개 골라주세요.\n"
+        f"아래 자료를 종합해서 오늘({session_label}) 시장을 관통하는 "
+        "핵심 테마(명분) 2~3개를 뽑아주세요. 종목명이 아니라 테마/키워드만 뽑으면 됩니다.\n"
         "- 지정학적 이슈(예: 중동 갈등), 산업 이슈(예: 하이퍼스케일러 CAPEX, "
         "중국 반도체 정책), 수급 신호 등 여러 모멘텀 축을 실제로 비교해서 "
-        "가장 설득력 있는 2개만 고르세요.\n"
-        "- 숫자나 사실을 지어내지 말고 주어진 자료에 실제로 있는 내용만 근거로 쓰세요.\n"
-        "- 반드시 아래 형식 그대로, 다른 말 없이 딱 이 두 줄만 출력하세요:\n"
-        "종목1: <종목명> | 근거: <한 문장>\n"
-        "종목2: <종목명> | 근거: <한 문장>\n\n"
+        "가장 설득력 있는 테마만 고르세요.\n"
+        "- 숫자나 사실을 지어내지 말고 주어진 자료(특히 [핵심 키워드 빈도])에 "
+        "실제로 있는 내용만 근거로 쓰세요.\n"
+        "- 반드시 아래 형식 그대로, 다른 말 없이 이 줄들만 출력하세요:\n"
+        "테마1: <테마 키워드 2~5자>\n"
+        "테마2: <테마 키워드 2~5자>\n\n"
         f"{context}"
     )
 
@@ -756,19 +912,30 @@ def _build_momentum_picks_sync(session: str, mbn_text: str = "") -> str:
         print(f"⚠️ [모멘텀-{session}] LLM 응답 없음")
         return ""
 
-    picks = _parse_momentum_picks(llm_text)
-    if not picks:
-        print(f"⚠️ [모멘텀-{session}] 픽 파싱 실패 — 원문:\n{llm_text}")
+    themes = _parse_themes(llm_text)
+    if not themes:
+        print(f"⚠️ [모멘텀-{session}] 테마 파싱 실패 — 원문:\n{llm_text}")
         return ""
 
-    enriched = _enrich_momentum_picks(picks)
+    candidates = _map_themes_to_candidates(themes)
+    if not candidates:
+        print(f"💤 [모멘텀-{session}] 테마({', '.join(themes)})에 맞는 "
+              "VCP/추세 통과 종목 없음 — 오늘은 후보 없음")
+        return (f"🧭 **[AI 모멘텀 스캐너 — {session_label}]** 🧭\n\n"
+                f"오늘의 테마({', '.join(themes)})는 뽑혔지만, VCP/추세 기술적 "
+                "확인을 통과한 종목이 없어서 최종 후보는 없어.")
+
+    for c in candidates:
+        c["phase"] = phase
+    enriched = _enrich_momentum_picks(candidates)
     if not enriched:
         return ""
 
     import ai_momentum_db
     ai_momentum_db.save_picks(today_iso, session, enriched)
 
-    lines = [f"🧭 **[AI 모멘텀 스캐너 — {session_label}, 관찰 전용]** 🧭\n"]
+    lines = [f"🧭 **[AI 모멘텀 스캐너 — {session_label}]** 🧭",
+              f"   오늘의 테마: {', '.join(themes)}\n"]
     for p in enriched:
         cons_line = f" | 컨센서스: {p['consensus_reason']}" if p.get("consensus_reason") else ""
         lines.append(

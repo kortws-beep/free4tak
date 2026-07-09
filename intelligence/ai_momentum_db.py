@@ -60,6 +60,17 @@ def init_db():
             UNIQUE(date, session, stock_name)
         )
     """)
+    # ★ 2026-07-10 Momentum Router 재설계 — 어떤 장세(phase)에서 어떤
+    #   테마(theme)를 골랐을 때 승률이 높은지 나중에 분석할 수 있도록
+    #   sshow_db.py 스타일의 안전 마이그레이션으로 컬럼 추가.
+    for col, coltype in [
+        ("phase", "TEXT DEFAULT ''"),
+        ("theme", "TEXT DEFAULT ''"),
+    ]:
+        try:
+            conn.execute(f"ALTER TABLE momentum_picks ADD COLUMN {col} {coltype}")
+        except sqlite3.OperationalError:
+            pass  # 이미 존재
     conn.commit()
     conn.close()
 
@@ -89,12 +100,13 @@ def save_picks(date: str, session: str, picks: list) -> int:
                 INSERT OR IGNORE INTO momentum_picks
                     (date, session, stock_name, code, reasoning,
                      buy_price, stop_price, tgt_price,
-                     consensus_bonus, consensus_reason)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     consensus_bonus, consensus_reason, phase, theme)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 date, session, name, p.get("code", ""), p.get("reasoning", "")[:300],
                 p.get("buy_price", 0), p.get("stop_price", 0), p.get("tgt_price", 0),
                 p.get("consensus_bonus", 0), p.get("consensus_reason", "")[:200],
+                p.get("phase", ""), p.get("theme", "")[:100],
             ))
             if conn.execute("SELECT changes()").fetchone()[0] > 0:
                 saved += 1
