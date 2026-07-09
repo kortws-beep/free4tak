@@ -832,9 +832,13 @@ def _check_light_chart_health(stock_name: str, conn: sqlite3.Connection, api=Non
         그 구간 상단 근처(3% 이내)이거나 이미 돌파
     (C) 거래량 서지 (2026-07-10 추가 — "마이크로 모멘텀" 대안): 200일선 위 +
         52주 고점 대비 -20% 이내인 종목 중, 당일 거래량이 최근 20일
-        평균 대비 300%+ 인 경우. 신선한 속보성 촉매로 "오늘 갑자기" 돈이
+        평균 대비 300%+ 이고 양봉(현재가>시가)이며 윗꼬리가 길지 않은
+        경우(고가 대비 3% 이내). 신선한 속보성 촉매로 "오늘 갑자기" 돈이
         몰리는 종목은 A/B 같은 지난 15일 패턴이 없을 수 있어 이 축을 추가.
         VWAP은 분봉 데이터가 없어서 제외 — 거래량 서지만으로 근사.
+        ★ 2026-07-10 검토 중 발견/수정: 처음엔 거래량 급증만 보고 방향을
+        확인 안 해서, 나쁜 뉴스로 대량 매도가 터져 폭락하는 날에도
+        "거래량서지"로 오판될 수 있는 버그가 있었음 — 양봉+윗꼬리 조건 추가.
         살아있는 KIS API 조회가 필요해 A/B가 이미 실패했을 때만, 그리고
         200일선/52주고점의 저렴한 DB 조건을 먼저 통과했을 때만 시도한다
         (불필요한 API 호출 방지 — 지난주 API 호출빈도 초과 사고 교훈).
@@ -879,7 +883,17 @@ def _check_light_chart_health(stock_name: str, conn: sqlite3.Connection, api=Non
                 if mdata:
                     acml_vol = float(mdata.get("acml_vol", 0) or 0)
                     avg_vol20 = sum(volumes[:20]) / 20
-                    if avg_vol20 > 0 and acml_vol >= avg_vol20 * 3.0:
+                    day_open = float(mdata.get("stck_oprc", 0) or 0)
+                    day_high = float(mdata.get("stck_hgpr", 0) or 0)
+                    # ★ 2026-07-10: 검토 중 발견한 버그 — 거래량 급증만 보고
+                    #   방향(양봉/음봉)을 전혀 확인 안 해서, 나쁜 뉴스로 대량
+                    #   매도가 터져 폭락하는 날에도 "거래량서지"로 오판될 수
+                    #   있었음(사용자 지적). 양봉 확인(현재가>시가) + 윗꼬리
+                    #   배제(고가 대비 3% 이상 밀리면 가짜돌파로 간주) 추가.
+                    is_bullish   = day_open > 0 and curr > day_open
+                    no_long_wick = day_high <= 0 or (day_high - curr) / curr <= 0.03
+                    if (avg_vol20 > 0 and acml_vol >= avg_vol20 * 3.0
+                            and is_bullish and no_long_wick):
                         pattern = "거래량서지"
             except Exception as e:
                 print(f"⚠️ [모멘텀] {stock_name} 거래량서지 조회 오류: {e}")
