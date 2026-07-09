@@ -1637,17 +1637,33 @@ async def on_message(message):
     if message.content.startswith("!모멘텀"):
         async with message.channel.typing():
             import ai_momentum_db
-            picks = await asyncio.to_thread(ai_momentum_db.get_recent_picks, 10)
-            stats = await asyncio.to_thread(ai_momentum_db.get_momentum_stats)
+            picks   = await asyncio.to_thread(ai_momentum_db.get_recent_picks, 10)
+            pending = await asyncio.to_thread(ai_momentum_db.get_pending_with_current_price)
+            stats   = await asyncio.to_thread(ai_momentum_db.get_momentum_stats)
+
+            # 미결 픽은 (date, session, name)으로 실시간 현재가/수익률 매핑
+            pending_map = {(p["date"], p["session"], p["name"]): p for p in pending}
+
             lines = ["🧭 **[AI 모멘텀 스캐너 — 최근 픽 + 적중률]** 🧭\n"]
             if picks:
                 for p in picks:
-                    result_tag = {"pending": "⏳대기", "hit": "🎯적중",
-                                  "stop": "🛑손절", "hold": "⏱️보합"}.get(p["result"], p["result"])
-                    lines.append(
-                        f"[{p['date']} {p['session']}] {p['name']} ({result_tag}) "
-                        f"— {p['reasoning'][:60]}"
-                    )
+                    key = (p["date"], p["session"], p["name"])
+                    if p["result"] == "pending" and key in pending_map:
+                        live = pending_map[key]
+                        pct_str = (f"{live['current_pct']:+.1f}%"
+                                   if live["current_pct"] is not None else "가격조회실패")
+                        lines.append(
+                            f"[{p['date']} {p['session']}] {p['name']} "
+                            f"(⏳{live['checkin_label']}, 현재 {pct_str}) "
+                            f"— {p['reasoning'][:60]}"
+                        )
+                    else:
+                        result_tag = {"hit": "🎯적중", "stop": "🛑손절",
+                                      "hold": "⏱️보합"}.get(p["result"], p["result"])
+                        lines.append(
+                            f"[{p['date']} {p['session']}] {p['name']} ({result_tag}) "
+                            f"— {p['reasoning'][:60]}"
+                        )
             else:
                 lines.append("아직 픽 이력 없음.")
             lines.append(

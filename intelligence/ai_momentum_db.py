@@ -261,6 +261,53 @@ def check_and_update_results(force_today: str = None) -> list:
     return notifications
 
 
+def get_pending_with_current_price(force_today: str = None) -> list:
+    """
+    미결(pending) 픽 전부에 대해 체크인 단계(7/14일) 도달 여부와 무관하게
+    항상 "지금 기준" 현재가/수익률을 계산해서 반환 (sshow_db.py의 동일
+    함수 포팅 — qwen 픽과 생쇼 픽의 현재 성과를 나란히 비교하기 위함).
+    """
+    init_db()
+    today = force_today or datetime.date.today().strftime("%Y-%m-%d")
+    today_d = datetime.date.fromisoformat(today)
+
+    conn = sqlite3.connect(DB_PATH, timeout=10)
+    rows = conn.execute("""
+        SELECT date, session, stock_name, buy_price, stop_price, tgt_price
+        FROM momentum_picks WHERE result='pending'
+        ORDER BY date DESC
+    """).fetchall()
+    conn.close()
+
+    result = []
+    for pick_date, session, name, buy_p, stop_p, tgt_p in rows:
+        days_elapsed = (today_d - datetime.date.fromisoformat(pick_date)).days
+
+        history = _get_price_history(name, pick_date)
+        history = [(d, p) for d, p in history if d >= pick_date]
+        current_price = history[-1][1] if history else None
+        current_pct = (
+            round((current_price - buy_p) / buy_p * 100, 2)
+            if (current_price and buy_p > 0) else None
+        )
+
+        if days_elapsed >= CHECKIN_DAYS[1]:
+            checkin_label = f"{CHECKIN_DAYS[1]}일째(최종)"
+        elif days_elapsed >= CHECKIN_DAYS[0]:
+            checkin_label = f"{CHECKIN_DAYS[0]}일째 체크"
+        else:
+            checkin_label = f"D+{days_elapsed} ({CHECKIN_DAYS[0]}일째 전)"
+
+        result.append({
+            "date": pick_date, "session": session, "name": name,
+            "buy_price": buy_p, "stop_price": stop_p, "tgt_price": tgt_p,
+            "days_elapsed": days_elapsed,
+            "current_price": current_price, "current_pct": current_pct,
+            "checkin_label": checkin_label,
+        })
+    return result
+
+
 # ══════════════════════════════════════════════════════════════
 # 통계/조회
 # ══════════════════════════════════════════════════════════════
