@@ -218,6 +218,43 @@ def _get_catalyst_stocks_fresh() -> set:
     return hot_kr
 
 
+def _get_us_market_movers() -> list:
+    """
+    ★ 2026-07-09 추가 — AI 모멘텀 스캐너(아침 세션)용.
+    _get_catalyst_stocks_fresh()의 미장 스캔 루프를 재사용하되, 3% 임계치
+    필터링 없이 전체 등락률 + 매핑된 한국 수혜종목을 그대로 반환한다.
+    (촉매 계산 로직 자체는 건드리지 않음 — 이 함수는 별도 순수 조회.)
+
+    반환: [(us_ticker, change_pct, [kr_name, ...]), ...] 등락률 내림차순
+    """
+    movers = []
+    if not os.path.exists(DB_PATH_MAPPING):
+        return movers
+
+    map_conn   = sqlite3.connect(DB_PATH_MAPPING)
+    map_cursor = map_conn.cursor()
+    map_cursor.execute("SELECT DISTINCT us_ticker FROM us_kr_mapping")
+    watchlist = [row[0] for row in map_cursor.fetchall()]
+
+    for ticker in watchlist:
+        try:
+            hist = yf.Ticker(ticker).history(period="2d")
+            if len(hist) < 2:
+                continue
+            chg = (hist['Close'].iloc[1] - hist['Close'].iloc[0]) / hist['Close'].iloc[0] * 100
+            map_cursor.execute(
+                "SELECT kr_name FROM us_kr_mapping WHERE us_ticker = ?", (ticker,)
+            )
+            kr_names = [row[0] for row in map_cursor.fetchall()]
+            movers.append((ticker, round(float(chg), 2), kr_names))
+        except Exception:
+            pass
+
+    map_conn.close()
+    movers.sort(key=lambda x: x[1], reverse=True)
+    return movers
+
+
 # ══════════════════════════════════════════════════════════════
 # 종목명 추출 헬퍼
 # ══════════════════════════════════════════════════════════════

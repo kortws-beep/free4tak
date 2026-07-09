@@ -35,6 +35,12 @@ _INTEL_DIR = os.path.join(os.path.dirname(base_dir), "intelligence")
 if _INTEL_DIR not in _sys.path:
     _sys.path.insert(0, _INTEL_DIR)
 
+# ★ 2026-07-09: AI 모멘텀 스캐너에서 core/consensus.py(컨센서스 보강)를
+#   가져오기 위한 경로 추가
+_CORE_DIR = os.path.join(os.path.dirname(base_dir), "core")
+if _CORE_DIR not in _sys.path:
+    _sys.path.insert(0, _CORE_DIR)
+
 # 환경 변수 및 모델 세팅
 DISCORD_TOKEN = os.getenv("DISCORD_BOT_TOKEN_N")
 OLLAMA_API_URL = os.getenv("OLLAMA_API_URL", "http://127.0.0.1:11434/api/chat")
@@ -614,6 +620,228 @@ def _build_market_context_summary() -> str:
     #   텔레그램 뉴스 나열로 흘러가는 문제가 반복돼, 하루 1회뿐인 이 호출은
     #   비용 부담이 적으니 바로 Claude로 보낸다 (지시 준수 우선).
     return _call_llm(prompt, max_tokens=600, force_claude=True)
+
+
+# ══════════════════════════════════════════════════════════════
+# AI 모멘텀 스캐너 (2026-07-09 신규) — 관찰 전용
+# ══════════════════════════════════════════════════════════════
+# ★ VCP/추세/촉매는 전부 "이미 벌어진 기술적 패턴"만 본다. 미국-이란
+#   재격돌/하이퍼스케일러 CAPEX 우려/중국 반도체 부각 같은 거시 모멘텀
+#   내러티브를 종합해 "그래서 오늘 뭐가 뜰까"를 판단하는 축은 없었음.
+#   사용자 제안: 하루 2회(아침/오후) 로컬 ollama에게 종목 2개씩 물어보고,
+#   생쇼처럼 사후검증(체크인)만 하고 sbot/sbo2 스코어링엔 바로 연결하지
+#   않는다. 로컬 AI를 쓰는 이유는 비용뿐 아니라 "로컬 AI가 이런 판단을
+#   얼마나 잘하는지" 자체를 관찰하고 싶다는 의도 — force_claude 안 씀.
+
+_PICK_LINE_RE = re.compile(r'종목\s*\d*\s*[:：]\s*(.+?)\s*\|\s*근거\s*[:：]\s*(.+)')
+
+
+def _parse_momentum_picks(llm_text: str) -> list:
+    """'종목1: 이름 | 근거: 문장' 라인 포맷 파싱 (JSON은 로컬 모델이 깨뜨리기 쉬워 제외)"""
+    picks = []
+    for line in llm_text.splitlines():
+        m = _PICK_LINE_RE.search(line)
+        if m:
+            name = m.group(1).strip().strip('*').strip()
+            reason = m.group(2).strip()
+            if name:
+                picks.append({"stock_name": name, "reasoning": reason})
+    return picks[:2]  # 하루 2종목만
+
+
+def _enrich_momentum_picks(picks: list) -> list:
+    """종목명 → 코드 조회 + ATR 기반 매수/손절/목표가 산출 + 컨센서스 보강"""
+    from sbo2 import get_stock_code
+    from sshow_db import _recalc_prices_from_finance_db
+    from consensus import get_consensus
+
+    today = datetime.datetime.now(KST).strftime("%Y-%m-%d")
+    enriched = []
+    for p in picks:
+        name = p["stock_name"]
+        code = get_stock_code(name)
+        prices = _recalc_prices_from_finance_db(name, today)
+        if not prices:
+            print(f"⚠️ [모멘텀] {name} 가격 재계산 실패 — 스킵")
+            continue
+        p.update(prices)
+        p["code"] = code
+        if code:
+            cons = get_consensus(code, current_price=prices.get("buy_price", 0))
+            p["consensus_bonus"]  = cons.get("bonus", 0)
+            p["consensus_reason"] = cons.get("reason", "")
+        enriched.append(p)
+    return enriched
+
+
+def _build_momentum_context_am() -> str:
+    """아침 세션 컨텍스트 — 전일/미장/국제정세/전문가 시황"""
+    from swing_master import _get_us_market_movers
+    movers = _get_us_market_movers()
+    us_lines = []
+    for ticker, chg, kr_names in (movers[:6] + movers[-4:]):
+        if kr_names:
+            us_lines.append(f"{ticker}({chg:+.1f}%) → {', '.join(kr_names[:3])}")
+    us_text = "\n".join(us_lines) if us_lines else "데이터 없음"
+
+    tele_raw   = fetch_recent_telegram_events(minutes_back=720)
+    tele_items = [l for l in tele_raw.split("\n\n") if l.strip()]
+    tele_text  = "\n\n".join(tele_items[-8:]) if tele_items else "없음"
+
+    from market_concentration import get_recent_summaries
+    recent = get_recent_summaries(days=5)
+    trend_text = "\n".join(
+        f"- {r['date']}: {r['summary_text'][:150]}..." for r in recent
+    ) if recent else "없음"
+
+    return (
+        f"[간밤 미국 증시 — 한국 수혜/피해 종목 매핑]\n{us_text}\n\n"
+        f"[간밤~아침 텔레그램 속보 (국제정세/전일상황 포함)]\n{tele_text}\n\n"
+        f"[최근 며칠 쏠림 흐름 — 참고용]\n{trend_text}"
+    )
+
+
+def _build_momentum_context_pm() -> str:
+    """오후 세션 컨텍스트 — 장중상황/섹터/텔레그램"""
+    from market_concentration import get_latest_snapshot, _calc_sector_ranking, _calc_rotation_flag
+    snapshot = get_latest_snapshot() or {}
+    sector_ranking = _calc_sector_ranking()
+    rotation_flag  = _calc_rotation_flag()
+
+    tele_raw   = fetch_recent_telegram_events(minutes_back=300)
+    tele_items = [l for l in tele_raw.split("\n\n") if l.strip()]
+    tele_text  = "\n\n".join(tele_items[-8:]) if tele_items else "없음"
+
+    return (
+        f"[오늘 장중 쏠림 지수 — {snapshot.get('ts', '')}]\n"
+        f"- 코스피: {snapshot.get('kospi_rate', 0):+.2f}% / "
+        f"대형주평균: {snapshot.get('mega_avg_rate', 0):+.2f}% / "
+        f"시장폭: {snapshot.get('breadth_ratio', 0):.1f}%\n"
+        f"- 섹터 등락률 랭킹: {sector_ranking or '데이터 없음'}\n"
+        f"- 주도주/섹터 급변 신호: {rotation_flag or '없음'}\n\n"
+        f"[장중 텔레그램 속보]\n{tele_text}"
+    )
+
+
+def _build_momentum_picks_sync(session: str, mbn_text: str = "") -> str:
+    """동기 파트 — 컨텍스트 조립 → LLM 호출 → 파싱/보강 → DB 저장. asyncio.to_thread로 실행."""
+    today_str_kr = datetime.datetime.now(KST).strftime("%Y년 %m월 %d일")
+    today_iso    = datetime.datetime.now(KST).strftime("%Y-%m-%d")
+
+    if session == "am":
+        context = _build_momentum_context_am()
+        if mbn_text:
+            context += f"\n\n[오늘 아침 전문가 시황(MBN 투자전략)]\n{mbn_text[:2000]}"
+        session_label = "아침(시초가 판단용)"
+    else:
+        context = _build_momentum_context_pm()
+        session_label = "오후(종가 임박 판단용)"
+
+    prompt = (
+        f"오늘은 {today_str_kr}이다. 당신은 한국 주식시장 모멘텀 분석가입니다. "
+        f"아래 자료를 종합해서 오늘({session_label}) 모멘텀상 오를 가능성이 있는 "
+        "한국 상장 종목을 정확히 2개 골라주세요.\n"
+        "- 지정학적 이슈(예: 중동 갈등), 산업 이슈(예: 하이퍼스케일러 CAPEX, "
+        "중국 반도체 정책), 수급 신호 등 여러 모멘텀 축을 실제로 비교해서 "
+        "가장 설득력 있는 2개만 고르세요.\n"
+        "- 숫자나 사실을 지어내지 말고 주어진 자료에 실제로 있는 내용만 근거로 쓰세요.\n"
+        "- 반드시 아래 형식 그대로, 다른 말 없이 딱 이 두 줄만 출력하세요:\n"
+        "종목1: <종목명> | 근거: <한 문장>\n"
+        "종목2: <종목명> | 근거: <한 문장>\n\n"
+        f"{context}"
+    )
+
+    llm_text = _call_llm(prompt, max_tokens=400)
+    if not llm_text:
+        print(f"⚠️ [모멘텀-{session}] LLM 응답 없음")
+        return ""
+
+    picks = _parse_momentum_picks(llm_text)
+    if not picks:
+        print(f"⚠️ [모멘텀-{session}] 픽 파싱 실패 — 원문:\n{llm_text}")
+        return ""
+
+    enriched = _enrich_momentum_picks(picks)
+    if not enriched:
+        return ""
+
+    import ai_momentum_db
+    ai_momentum_db.save_picks(today_iso, session, enriched)
+
+    lines = [f"🧭 **[AI 모멘텀 스캐너 — {session_label}, 관찰 전용]** 🧭\n"]
+    for p in enriched:
+        cons_line = f" | 컨센서스: {p['consensus_reason']}" if p.get("consensus_reason") else ""
+        lines.append(
+            f"📌 **{p['stock_name']}**({p.get('code', '')})\n"
+            f"   근거: {p['reasoning']}\n"
+            f"   매수:{p['buy_price']:,.0f} 손절:{p['stop_price']:,.0f} "
+            f"목표:{p['tgt_price']:,.0f}{cons_line}"
+        )
+    return "\n\n".join(lines)
+
+
+async def _build_momentum_picks(session: str) -> str:
+    """session: 'am' | 'pm'"""
+    mbn_text = ""
+    if session == "am":
+        try:
+            mbn_text = await fetch_mbn_strategy()
+        except Exception as e:
+            print(f"⚠️ [모멘텀-am] MBN 조회 오류: {e}")
+    return await asyncio.to_thread(_build_momentum_picks_sync, session, mbn_text)
+
+
+@tasks.loop(minutes=1)
+async def daily_momentum_am_report():
+    kst_now = datetime.datetime.now(KST)
+    if kst_now.hour != 8 or kst_now.minute != 55:
+        return
+    print(f"\n🧭 [{kst_now.strftime('%H:%M')}] AI 모멘텀 스캐너(아침) 가동!")
+    try:
+        channel = await client.fetch_channel(REPORT_CHANNEL_ID)
+        report = await _build_momentum_picks("am")
+        if report:
+            await send_safe_message(channel, report)
+            print("✅ AI 모멘텀(아침) 전송 완료!")
+        else:
+            print("💤 AI 모멘텀(아침) — 픽 생성 실패, 생략")
+    except Exception as e:
+        print(f"❌ AI 모멘텀(아침) 에러: {e}")
+
+
+@tasks.loop(minutes=1)
+async def daily_momentum_pm_report():
+    kst_now = datetime.datetime.now(KST)
+    if kst_now.hour != 14 or kst_now.minute != 35:
+        return
+    print(f"\n🧭 [{kst_now.strftime('%H:%M')}] AI 모멘텀 스캐너(오후) 가동!")
+    try:
+        channel = await client.fetch_channel(REPORT_CHANNEL_ID)
+        report = await _build_momentum_picks("pm")
+        if report:
+            await send_safe_message(channel, report)
+            print("✅ AI 모멘텀(오후) 전송 완료!")
+        else:
+            print("💤 AI 모멘텀(오후) — 픽 생성 실패, 생략")
+    except Exception as e:
+        print(f"❌ AI 모멘텀(오후) 에러: {e}")
+
+
+@tasks.loop(minutes=1)
+async def daily_momentum_checkin():
+    """장 마감 후 체크인 — 7/14일 역일 도달 픽 판정 (sshow와 동일 방식)"""
+    kst_now = datetime.datetime.now(KST)
+    if kst_now.hour != 16 or kst_now.minute != 0:
+        return
+    try:
+        import ai_momentum_db
+        notifications = await asyncio.to_thread(ai_momentum_db.check_and_update_results)
+        if notifications:
+            channel = await client.fetch_channel(REPORT_CHANNEL_ID)
+            text = "🧭 **[AI 모멘텀 체크인]** 🧭\n\n" + "\n".join(n["text"] for n in notifications)
+            await send_safe_message(channel, text)
+    except Exception as e:
+        print(f"❌ AI 모멘텀 체크인 에러: {e}")
 
 
 @tasks.loop(minutes=1)
@@ -1259,6 +1487,13 @@ async def on_ready():
     except Exception as e: print(f"⚠️ [에러] 쏠림 브리핑 스케줄러: {e}")
 
     try:
+        daily_momentum_am_report.start()
+        daily_momentum_pm_report.start()
+        daily_momentum_checkin.start()
+        print("✅ [시스템] AI 모멘텀 스캐너(08:55/14:35) + 체크인(16:00) 스케줄러 가동 성공! (관찰 전용)")
+    except Exception as e: print(f"⚠️ [에러] AI 모멘텀 스케줄러: {e}")
+
+    try:
         daily_master_report.start()
         print("✅ [시스템] 07:20 마스터 리포트 스케줄러 가동 성공!")
     except Exception as e: print(f"⚠️ [에러] 마스터 스케줄러: {e}")
@@ -1396,6 +1631,32 @@ async def on_message(message):
                     "💤 쏠림 지수 스냅샷이 없거나 15분 이상 오래됐어 (장 시작 "
                     "직후이거나 cron 미실행일 수 있음)."
                 )
+        return
+
+    # ── !모멘텀 (AI 모멘텀 스캐너 픽 이력 + 적중률 확인용, 2026-07-09) ──
+    if message.content.startswith("!모멘텀"):
+        async with message.channel.typing():
+            import ai_momentum_db
+            picks = await asyncio.to_thread(ai_momentum_db.get_recent_picks, 10)
+            stats = await asyncio.to_thread(ai_momentum_db.get_momentum_stats)
+            lines = ["🧭 **[AI 모멘텀 스캐너 — 최근 픽 + 적중률]** 🧭\n"]
+            if picks:
+                for p in picks:
+                    result_tag = {"pending": "⏳대기", "hit": "🎯적중",
+                                  "stop": "🛑손절", "hold": "⏱️보합"}.get(p["result"], p["result"])
+                    lines.append(
+                        f"[{p['date']} {p['session']}] {p['name']} ({result_tag}) "
+                        f"— {p['reasoning'][:60]}"
+                    )
+            else:
+                lines.append("아직 픽 이력 없음.")
+            lines.append(
+                f"\n📊 최근 30일: 총 {stats['total']}건 "
+                f"(적중 {stats['hit']} / 손절 {stats['stop']} / 보합 {stats['hold']}) "
+                f"— 적중률 {stats['hit_rate']*100:.1f}%"
+                + ("" if stats["sample_size_ok"] else " (표본 20건 미만, 참고만)")
+            )
+            await send_safe_message(message.channel, "\n".join(lines))
         return
 
     # ── !텔레스윙 ──────────────────────────────────────────────
