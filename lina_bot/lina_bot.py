@@ -733,6 +733,7 @@ def _map_themes_to_candidates(themes: list) -> list:
         print("   VCP/추세 통과 종목 0개 — 완화트랙으로만 진행")
 
     conn = sqlite3.connect(DB_PATH_THEME_FINANCE)
+    api = None  # 완화트랙 패턴C(거래량서지)에서만 지연 생성 — 불필요한 토큰/API 부담 방지
     seen = set()
     candidates = []
     light_candidates = []
@@ -795,7 +796,14 @@ def _map_themes_to_candidates(themes: list) -> list:
                 #   "차트가 완전히 망가지진 않았다" 수준의 가벼운 조건만
                 #   확인하는 별도 트랙을 둔다 — 하락 전환 or 박스권 상단
                 #   돌파 임박 두 패턴만 인정.
-                light = _check_light_chart_health(pure, conn)
+                if api is None:
+                    try:
+                        from kis_api import KisAPI
+                        api = KisAPI()
+                    except Exception as e:
+                        print(f"⚠️ [모멘텀] 완화트랙 거래량서지용 KIS API 초기화 실패: {e}")
+                        api = False  # 재시도 방지용 sentinel
+                light = _check_light_chart_health(pure, conn, api or None)
                 if light:
                     seen.add(pure)
                     light_candidates.append({
@@ -815,21 +823,30 @@ def _map_themes_to_candidates(themes: list) -> list:
     return (candidates + light_candidates)[:2]
 
 
-def _check_light_chart_health(stock_name: str, conn: sqlite3.Connection) -> dict:
+def _check_light_chart_health(stock_name: str, conn: sqlite3.Connection, api=None) -> dict:
     """
     촉매 전용 완화 트랙 — VCP/추세의 다단계 조건 대신 "차트가 완전히
-    망가지지 않았다" 수준만 가볍게 확인. 두 패턴 중 하나만 만족하면 통과:
+    망가지지 않았다" 수준만 가볍게 확인. 세 패턴 중 하나만 만족하면 통과:
     (A) 하락 전환: 최근 저점이 2일 이상 전에 찍혔고 현재가가 그보다 위
     (B) 박스권 상단 돌파 임박: 최근 15일 변동폭이 좁고(≤15%) 현재가가
         그 구간 상단 근처(3% 이내)이거나 이미 돌파
+    (C) 거래량 서지 (2026-07-10 추가 — "마이크로 모멘텀" 대안): 200일선 위 +
+        52주 고점 대비 -20% 이내인 종목 중, 당일 거래량이 최근 20일
+        평균 대비 300%+ 인 경우. 신선한 속보성 촉매로 "오늘 갑자기" 돈이
+        몰리는 종목은 A/B 같은 지난 15일 패턴이 없을 수 있어 이 축을 추가.
+        VWAP은 분봉 데이터가 없어서 제외 — 거래량 서지만으로 근사.
+        살아있는 KIS API 조회가 필요해 A/B가 이미 실패했을 때만, 그리고
+        200일선/52주고점의 저렴한 DB 조건을 먼저 통과했을 때만 시도한다
+        (불필요한 API 호출 방지 — 지난주 API 호출빈도 초과 사고 교훈).
     + 최소 안전장치: 60일선 대비 15% 이상 못 빠져있어야 함(완전 붕괴 배제).
-    통과 시 {"pattern": "하락전환"|"박스돌파임박", "curr_price", "stop_price", "tgt_price"} 반환, 아니면 {}.
+    통과 시 {"pattern": ..., "curr_price", "stop_price", "tgt_price"} 반환, 아니면 {}.
     """
     rows = conn.execute("""
-        SELECT close_price FROM kr_stock_daily_data
-        WHERE stock_name = ? ORDER BY date DESC LIMIT 60
+        SELECT close_price, volume FROM kr_stock_daily_data
+        WHERE stock_name = ? ORDER BY date DESC LIMIT 260
     """, (stock_name,)).fetchall()
-    closes = [r[0] for r in rows if r[0] and r[0] > 0]
+    closes  = [r[0] for r in rows if r[0] and r[0] > 0]
+    volumes = [r[1] for r in rows if r[1] and r[1] > 0]
     if len(closes) < 30:
         return {}
 
@@ -849,6 +866,23 @@ def _check_light_chart_health(stock_name: str, conn: sqlite3.Connection) -> dict
     # (B) 박스권 상단 돌파 임박 — 최근 변동폭 좁고 상단 근접/돌파
     elif lo > 0 and (hi - lo) / lo <= 0.15 and curr >= hi * 0.97:
         pattern = "박스돌파임박"
+
+    # (C) 거래량 서지 — A/B 둘 다 실패했을 때만 시도
+    if not pattern and api and len(closes) >= 200 and len(volumes) >= 20:
+        ma200 = sum(closes[:200]) / 200
+        week52_high = max(closes[:252]) if len(closes) >= 252 else max(closes)
+        if curr > ma200 and curr >= week52_high * 0.8:
+            try:
+                from sbo2 import get_stock_code
+                code = get_stock_code(stock_name)
+                mdata = api.get_market_data(code) if code else None
+                if mdata:
+                    acml_vol = float(mdata.get("acml_vol", 0) or 0)
+                    avg_vol20 = sum(volumes[:20]) / 20
+                    if avg_vol20 > 0 and acml_vol >= avg_vol20 * 3.0:
+                        pattern = "거래량서지"
+            except Exception as e:
+                print(f"⚠️ [모멘텀] {stock_name} 거래량서지 조회 오류: {e}")
 
     if not pattern:
         return {}
