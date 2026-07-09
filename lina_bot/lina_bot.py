@@ -727,12 +727,15 @@ def _map_themes_to_candidates(themes: list) -> list:
         detail_map.setdefault(d["name"], d)
     pass_names = swing_names | trend_names
     if not pass_names:
-        print("⚠️ [모멘텀] VCP/추세 통과 종목이 오늘 하나도 없음 — 타겟팅 스킵")
-        return []
+        # ★ 2026-07-10: 예전엔 여기서 바로 리턴했으나, 그러면 완화트랙(아래)도
+        #   전혀 시도 못 하고 끝나버림 — VCP/추세가 0개인 날에도 완화트랙은
+        #   독립적으로 동작해야 하므로 조기 종료하지 않고 계속 진행.
+        print("   VCP/추세 통과 종목 0개 — 완화트랙으로만 진행")
 
     conn = sqlite3.connect(DB_PATH_THEME_FINANCE)
     seen = set()
     candidates = []
+    light_candidates = []
     for theme in themes:
         words = [k for k in re.split(r'[\s/·,]+', theme) if len(k) >= 2]
         if not words:
@@ -768,24 +771,94 @@ def _map_themes_to_candidates(themes: list) -> list:
                     break
         for (sname,) in rows:
             pure = re.sub(r'\s*(KOSPI|KOSDAQ)\s*\d{6}$', '', sname).strip()
-            if pure not in pass_names or pure in seen:
+            if pure in seen:
                 continue
-            seen.add(pure)
-            d = detail_map[pure]
-            candidates.append({
-                "stock_name": pure,
-                "code":       get_stock_code(pure),
-                "theme":      theme,
-                "reasoning":  f"'{theme}' 테마 + 기술적 확인({'VCP' if pure in swing_names else '추세'})",
-                "buy_price":  d.get("curr_price", 0),
-                "stop_price": d.get("stop_price", 0),
-                "tgt_price":  d.get("tgt_price", 0),
-                "score":      d.get("score", 0),
-            })
+            if pure in pass_names:
+                seen.add(pure)
+                d = detail_map[pure]
+                candidates.append({
+                    "stock_name": pure,
+                    "code":       get_stock_code(pure),
+                    "theme":      theme,
+                    "reasoning":  f"'{theme}' 테마 + 기술적 확인({'VCP' if pure in swing_names else '추세'})",
+                    "buy_price":  d.get("curr_price", 0),
+                    "stop_price": d.get("stop_price", 0),
+                    "tgt_price":  d.get("tgt_price", 0),
+                    "score":      d.get("score", 0),
+                })
+            else:
+                # ★ 2026-07-10 완화 트랙 — VCP/추세는 "이미 만들어진 차트
+                #   패턴"만 잡아서, 오늘 막 터진 속보성 촉매(전쟁/제재 등)에
+                #   반응하는 종목은 애초에 그런 패턴이 생길 시간이 없어
+                #   놓치는 딜레마가 있음(사용자 지적). 완전 방치하면
+                #   텔레스윙(손절률 77.3%)처럼 확인 없이 사는 문제가 재현되니,
+                #   "차트가 완전히 망가지진 않았다" 수준의 가벼운 조건만
+                #   확인하는 별도 트랙을 둔다 — 하락 전환 or 박스권 상단
+                #   돌파 임박 두 패턴만 인정.
+                light = _check_light_chart_health(pure, conn)
+                if light:
+                    seen.add(pure)
+                    light_candidates.append({
+                        "stock_name": pure,
+                        "code":       get_stock_code(pure),
+                        "theme":      theme,
+                        "reasoning":  f"'{theme}' 테마 + 완화조건({light['pattern']})",
+                        "buy_price":  light["curr_price"],
+                        "stop_price": light["stop_price"],
+                        "tgt_price":  light["tgt_price"],
+                        "score":      0,  # 완화트랙은 항상 후순위
+                    })
     conn.close()
 
     candidates.sort(key=lambda x: x["score"], reverse=True)
-    return candidates[:2]
+    # 기술적 확인(VCP/추세) 통과 종목을 우선하고, 부족하면 완화트랙으로 채움
+    return (candidates + light_candidates)[:2]
+
+
+def _check_light_chart_health(stock_name: str, conn: sqlite3.Connection) -> dict:
+    """
+    촉매 전용 완화 트랙 — VCP/추세의 다단계 조건 대신 "차트가 완전히
+    망가지지 않았다" 수준만 가볍게 확인. 두 패턴 중 하나만 만족하면 통과:
+    (A) 하락 전환: 최근 저점이 2일 이상 전에 찍혔고 현재가가 그보다 위
+    (B) 박스권 상단 돌파 임박: 최근 15일 변동폭이 좁고(≤15%) 현재가가
+        그 구간 상단 근처(3% 이내)이거나 이미 돌파
+    + 최소 안전장치: 60일선 대비 15% 이상 못 빠져있어야 함(완전 붕괴 배제).
+    통과 시 {"pattern": "하락전환"|"박스돌파임박", "curr_price", "stop_price", "tgt_price"} 반환, 아니면 {}.
+    """
+    rows = conn.execute("""
+        SELECT close_price FROM kr_stock_daily_data
+        WHERE stock_name = ? ORDER BY date DESC LIMIT 60
+    """, (stock_name,)).fetchall()
+    closes = [r[0] for r in rows if r[0] and r[0] > 0]
+    if len(closes) < 30:
+        return {}
+
+    curr = closes[0]
+    ma60 = sum(closes[:60]) / len(closes[:60]) if len(closes) >= 30 else 0
+    if ma60 > 0 and curr < ma60 * 0.85:
+        return {}  # 60일선 대비 15%+ 이탈 — 완전 붕괴, 완화트랙도 배제
+
+    window = closes[0:15]
+    lo, hi = min(window), max(window)
+
+    pattern = None
+    # (A) 하락 전환 — 저점이 2일 이상 전, 현재가가 그 저점보다 위
+    idx_lo = window.index(lo)
+    if idx_lo >= 2 and curr > lo:
+        pattern = "하락전환"
+    # (B) 박스권 상단 돌파 임박 — 최근 변동폭 좁고 상단 근접/돌파
+    elif lo > 0 and (hi - lo) / lo <= 0.15 and curr >= hi * 0.97:
+        pattern = "박스돌파임박"
+
+    if not pattern:
+        return {}
+
+    return {
+        "pattern": pattern,
+        "curr_price": curr,
+        "stop_price": round(curr * 0.93, 0),
+        "tgt_price":  round(curr * 1.12, 0),
+    }
 
 
 _STOPWORDS_KO = {
