@@ -634,17 +634,30 @@ def _build_market_context_summary() -> str:
 #   얼마나 잘하는지" 자체를 관찰하고 싶다는 의도 — force_claude 안 씀.
 
 _THEME_LINE_RE = re.compile(r'테마\s*\d*\s*[:：]\s*(.+)')
+MOMENTUM_MIN_PRICE = 5000  # ★ 2026-07-14: 동전주 배제 최소가 (사용자 지적)
 
 
 def _parse_themes(llm_text: str) -> list:
-    """'테마1: 전력기기 쇼티지' 라인 포맷 파싱 (AI는 이제 종목이 아니라 테마만 뽑는다)"""
+    """
+    '테마1: 전력기기 쇼티지' 라인 포맷 파싱 (AI는 이제 종목이 아니라 테마만 뽑는다).
+    ★ 2026-07-14: 실제 운영에서 로컬 모델이 "테마2:" 뒤에 중국어로 된 긴
+    추론 과정("...但根据提供的格式要求只能选择两个关键词主题。因此：")을
+    그대로 흘려보낸 사고 발견 — 이게 그대로 테마로 쓰이면서 접두어 축소
+    매칭(_map_themes_to_candidates)이 사실상 무작위로 종목을 엮어버림
+    (유아이엘/인터지스가 이 오염된 테마로 잘못 매칭됨). 정상적인 테마는
+    "반도체", "전력기기 쇼티지"처럼 15자 이내 한글 키워드이므로, 그보다
+    길거나 한자(CJK 통합 한자)가 섞인 건 오염된 것으로 보고 버린다.
+    """
     themes = []
     for line in llm_text.splitlines():
         m = _THEME_LINE_RE.search(line)
         if m:
             theme = m.group(1).strip().strip('*').strip()
-            if theme:
-                themes.append(theme)
+            if not theme or len(theme) > 15:
+                continue
+            if re.search(r'[一-鿿]', theme):  # 한자(중국어) 섞이면 배제
+                continue
+            themes.append(theme)
     return themes[:3]
 
 
@@ -773,6 +786,20 @@ def _map_themes_to_candidates(themes: list) -> list:
         for (sname,) in rows:
             pure = re.sub(r'\s*(KOSPI|KOSDAQ)\s*\d{6}$', '', sname).strip()
             if pure in seen:
+                continue
+            # ★ 2026-07-14: 동전주(초저가주) 배제 — 사용자 지적으로 실제
+            #   운영 픽에서 3,000~5,000원대 저가주가 나온 걸 발견. 유동성/
+            #   변동성 리스크가 커서 최소가 기준 미달 종목은 아예 후보에서
+            #   제외한다.
+            if pure in detail_map:
+                _price_check = detail_map[pure].get("curr_price", 0)
+            else:
+                _row = conn.execute(
+                    "SELECT close_price FROM kr_stock_daily_data WHERE stock_name=? "
+                    "ORDER BY date DESC LIMIT 1", (pure,)
+                ).fetchone()
+                _price_check = _row[0] if _row and _row[0] else 0
+            if _price_check < MOMENTUM_MIN_PRICE:
                 continue
             if pure in pass_names:
                 seen.add(pure)
