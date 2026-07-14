@@ -1577,7 +1577,7 @@ async def daily_tele_swing_afternoon():
     try:
         channel = await client.fetch_channel(REPORT_CHANNEL_ID)
         from tele_swing_analyzer import get_tele_swing_report
-        report = await asyncio.to_thread(get_tele_swing_report, 3)
+        report = await asyncio.to_thread(get_tele_swing_report, 3, True)
         await send_safe_message(channel, f"📡 **[대장! 14:40 텔레스윙 업데이트]** 📡\n\n{report}")
         print("✅ 14:40 텔레스윙 전송 완료!")
     except Exception as e:

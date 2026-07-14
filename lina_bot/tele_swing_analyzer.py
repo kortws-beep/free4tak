@@ -510,9 +510,50 @@ def get_tele_swing_picks(top_n: int = TOP_N, min_score: int = MIN_SCORE) -> list
     return top
 
 
-def get_tele_swing_report(top_n: int = TOP_N) -> str:
+def _apply_live_prices(picks: list) -> None:
+    """
+    ★ 2026-07-14: 07:50/14:40 리포트가 둘 다 kr_stock_daily_data(전일
+    마감 기준 일봉) 데이터로 curr_price를 계산해서, 당일 안에서는 항상
+    같은 결과가 나오는 문제 발견(사용자 지적 — 두 리포트 내용 완전 동일).
+    선정 로직(점수/RSI/MACD/피보나치)은 일봉 기준을 그대로 유지하되,
+    오후(14:40) 리포트에서만 KIS 실시간 시세로 현재가를 갱신하고 손절/
+    목표가는 기존 ATR 폭(curr-stop, tgt-curr)을 그대로 유지한 채 새
+    현재가 기준으로 재계산한다.
+    """
+    try:
+        from sbo2 import get_stock_code
+        from kis_api import KisAPI
+    except Exception as e:
+        print(f"⚠️ [텔레스윙] 실시간 갱신 모듈 로드 실패: {e}")
+        return
+
+    api = None
+    for item in picks:
+        try:
+            code = get_stock_code(item["name"])
+            if not code:
+                continue
+            if api is None:
+                api = KisAPI()
+            data = api.get_market_data(code)
+            if not data:
+                continue
+            live_price = float(data.get("stck_prpr", 0) or 0)
+            if live_price <= 0:
+                continue
+            stop_delta = item["curr_price"] - item["stop_price"]
+            tgt_delta  = item["tgt_price"] - item["curr_price"]
+            item["curr_price"] = live_price
+            item["stop_price"] = round(live_price - stop_delta, 0)
+            item["tgt_price"]  = round(live_price + tgt_delta, 0)
+        except Exception as e:
+            print(f"⚠️ [텔레스윙] {item.get('name')} 실시간 시세 갱신 실패: {e}")
+
+
+def get_tele_swing_report(top_n: int = TOP_N, live: bool = False) -> str:
     """
     텔레그램 스윙 리포트 (디스코드 출력용)
+    live=True면 현재가/손절가/목표가를 KIS 실시간 시세로 갱신 (14:40 오후용)
     """
     picks = get_tele_swing_picks(top_n=top_n)
 
@@ -522,6 +563,9 @@ def get_tele_swing_report(top_n: int = TOP_N) -> str:
             f"   현재 {MIN_SCORE}점 이상 후보 없어.\n"
             f"   텔레그램 언급 + 정통 스윙 조건 동시 충족 종목 대기 중!"
         )
+
+    if live:
+        _apply_live_prices(picks)
 
     report  = "📡 **[텔레그램 정통 스윙 엔진 — 실시간 모멘텀 × 기술적 분석]** 📡\n"
     report += "=" * 60 + "\n"
