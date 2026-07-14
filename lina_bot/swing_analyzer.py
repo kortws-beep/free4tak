@@ -207,15 +207,19 @@ def get_swing_picks(top_n: int = TOP_N_DEFAULT) -> str:
 
         # ⑥ 피봇 돌파 확인 (거래량 동반) — 웅크린 모양만으로 사지 않고
         #   실제로 최근 고점을 뚫는 날인지 확인
+        # ★ 2026-07-14: 비교기준을 220일 전체평균→최근10일(당일제외) 평균으로
+        #   변경 (get_swing_data()와 동일 수정, 사유는 그쪽 주석 참고)
         if len(valid_closes) < BREAKOUT_LOOKBACK + 1:
             filtered["f6_breakout"] += 1
             continue
         pivot = max(valid_closes[1:BREAKOUT_LOOKBACK + 1])
-        if curr_price <= pivot or vol_avg_all == 0 or volumes[0] < vol_avg_all * BREAKOUT_VOL_MULT:
+        recent_quiet_vols = [v for v in volumes[1:11] if v > 0]
+        quiet_vol_avg = sum(recent_quiet_vols) / len(recent_quiet_vols) if recent_quiet_vols else 0
+        if curr_price <= pivot or quiet_vol_avg == 0 or volumes[0] < quiet_vol_avg * BREAKOUT_VOL_MULT:
             filtered["f6_breakout"] += 1
             continue
         breakout_pct = round((curr_price - pivot) / pivot * 100, 1) if pivot > 0 else 0
-        breakout_vol_ratio = round(volumes[0] / vol_avg_all, 1) if vol_avg_all > 0 else 0
+        breakout_vol_ratio = round(volumes[0] / quiet_vol_avg, 1) if quiet_vol_avg > 0 else 0
 
         # ════════════════════════════════════════════════
         # ✅ 통과 → ATR 계산
@@ -484,9 +488,19 @@ def get_swing_data(top_n: int = 20) -> list:
         if not smart_ok: continue
 
         # ⑥ 피봇 돌파 확인 (거래량 동반)
+        # ★ 2026-07-14: 기존엔 돌파일 거래량을 220일 전체평균(vol_avg_all)과
+        #   비교했는데, 바로 앞 ④ 거래량마름 조건이 "최근5일평균 < 전체평균
+        #   ×50%"을 이미 요구하고 있어서, 두 조건을 같이 만족하려면 오늘
+        #   거래량이 최근5일평균의 2.8배 이상 폭증해야 하는 셈 — 사실상
+        #   불가능한 조합이라 이 단계에서 항상 전멸(07-07~14 7거래일 연속
+        #   0개 확인, 사용자 지적으로 발견). VCP 이론상 돌파거래량은 "조용
+        #   했던 최근 구간 평균"과 비교하는 게 맞으므로, 당일 제외 최근
+        #   10일 평균을 기준으로 변경.
         if len(valid_closes) < BREAKOUT_LOOKBACK + 1: continue
         pivot = max(valid_closes[1:BREAKOUT_LOOKBACK + 1])
-        if curr_price <= pivot or vol_avg_all == 0 or volumes[0] < vol_avg_all * BREAKOUT_VOL_MULT:
+        recent_quiet_vols = [v for v in volumes[1:11] if v > 0]
+        quiet_vol_avg = sum(recent_quiet_vols) / len(recent_quiet_vols) if recent_quiet_vols else 0
+        if curr_price <= pivot or quiet_vol_avg == 0 or volumes[0] < quiet_vol_avg * BREAKOUT_VOL_MULT:
             continue
         breakout_pct = round((curr_price - pivot) / pivot * 100, 1) if pivot > 0 else 0
         breakout_vol_ratio = round(volumes[0] / vol_avg_all, 1) if vol_avg_all > 0 else 0

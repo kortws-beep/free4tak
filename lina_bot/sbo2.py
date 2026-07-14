@@ -3,7 +3,7 @@ sbo2.py — 리나 관리 스윙봇 (3단 콤보 연동 버전)
 ================================================================
 [설계 원칙]
 - 후보 소스  : swing_master.py S/A급 종목만
-- 시드머니   : 500만원 / 1종목 기본 150만원 / 최대 4종목
+- 시드머니   : 500만원 / 1종목 기본 150만원 / 최대 5종목 (2026-07-14: 완화트랙 추가로 4→5)
 - 매수금액   : 점수 비례 (150만 기준 ±조정)
 - 매도 기준  : ATR 자동 (swing_analyzer 계산값)
 - S급        : 무조건 매수
@@ -96,7 +96,7 @@ except Exception:
 # ============================================================
 SEED_MONEY       = 5_000_000   # 시드머니 500만원
 BASE_BUY_AMT     = 1_500_000   # 1종목 기본 매수금액 150만원
-MAX_POSITIONS    = 4            # 최대 보유 종목 (교집합1+스윙1+추세1+생쇼1)
+MAX_POSITIONS    = 5            # 최대 보유 종목 (교집합1+스윙1+추세1+생쇼1+완화1)
 A_GRADE_RATIO    = 0.7          # A급 상위 70%만 매수
 
 # 슬롯 전략 구분
@@ -105,6 +105,12 @@ SLOT_SWING  = "swing"   # 스윙 (VCP only)
 SLOT_TREND  = "trend"   # 추세 (trend only)
 SLOT_TELE   = "tele"    # 텔레스윙 (매수 소스 제외, 라벨만 유지)
 SLOT_SSHOW  = "sshow"   # 생쇼(전문가추천) ∩ (VCP 또는 추세) — 둘 다 통과 못 하면 후보에서 자동 제외됨
+SLOT_LIGHT  = "light"   # 완화트랙 (★ 2026-07-14 추가) — 촉매종목 중 VCP/추세
+                        # 정식조건은 못 채웠지만 차트가 안 망가진 종목. 7/7
+                        # VCP 돌파확인 필터 추가 이후 쏠림장에서 VCP/추세가
+                        # 7거래일 연속 0개를 내는 문제 발견(사용자 지적) —
+                        # 모멘텀 스캐너의 완화트랙(_check_light_chart_health)과
+                        # 동일 로직을 실거래 후보에도 최하위 우선순위로 도입.
 
 SLOT_LABEL = {
     SLOT_INTER: "교집합",
@@ -112,6 +118,7 @@ SLOT_LABEL = {
     SLOT_TREND: "추세",
     SLOT_TELE:  "텔레",
     SLOT_SSHOW: "생쇼",
+    SLOT_LIGHT: "완화",
     "실계좌":   "실계좌",
     "S":        "S급",
     "A":        "A급",
@@ -514,6 +521,8 @@ def calc_buy_amount(grade: str, psbl_cash: int, score: int = 0) -> int:
         amount = BASE_BUY_AMT               # 150만원
     elif grade in (SLOT_SWING, SLOT_TREND, SLOT_SSHOW):
         amount = int(BASE_BUY_AMT * 0.83)   # 125만원
+    elif grade == SLOT_LIGHT:
+        amount = int(BASE_BUY_AMT * 0.67)   # 100만원 — 완화트랙(2026-07-14), 정식조건 미충족이라 최소 사이즈
     else:                                    # 레거시 tele 폴백 (도달 안 함)
         amount = int(BASE_BUY_AMT * 0.67)   # 100만원
 
@@ -526,12 +535,82 @@ def calc_buy_amount(grade: str, psbl_cash: int, score: int = 0) -> int:
     return amount
 
 
+def _check_light_chart_health(stock_name: str, conn: sqlite3.Connection, api=None) -> dict:
+    """
+    완화트랙 (★ 2026-07-14 추가, lina_bot.py 모멘텀 스캐너의 동일 로직 포팅) —
+    VCP/추세의 다단계 조건 대신 "차트가 완전히 망가지지 않았다" 수준만
+    가볍게 확인. 세 패턴 중 하나만 만족하면 통과:
+    (A) 하락 전환: 최근 저점이 2일 이상 전에 찍혔고 현재가가 그보다 위
+    (B) 박스권 상단 돌파 임박: 최근 15일 변동폭이 좁고(≤15%) 현재가가
+        그 구간 상단 근처(3% 이내)이거나 이미 돌파
+    (C) 거래량 서지: 200일선 위 + 52주 고점 대비 -20% 이내인 종목 중,
+        당일 거래량이 최근 20일 평균 대비 300%+ 이고 양봉(현재가>시가)이며
+        윗꼬리가 길지 않은 경우(고가 대비 3% 이내) — 방향 확인 없이
+        거래량만 보면 폭락도 서지로 오판될 수 있어 양봉+윗꼬리 조건 필수.
+    + 최소 안전장치: 60일선 대비 15% 이상 못 빠져있어야 함(완전 붕괴 배제).
+    통과 시 {"pattern": ..., "curr_price", "stop_price", "tgt_price"} 반환, 아니면 {}.
+    """
+    rows = conn.execute("""
+        SELECT close_price, volume FROM kr_stock_daily_data
+        WHERE stock_name = ? ORDER BY date DESC LIMIT 260
+    """, (stock_name,)).fetchall()
+    closes  = [r[0] for r in rows if r[0] and r[0] > 0]
+    volumes = [r[1] for r in rows if r[1] and r[1] > 0]
+    if len(closes) < 30:
+        return {}
+
+    curr = closes[0]
+    ma60 = sum(closes[:60]) / len(closes[:60]) if len(closes) >= 30 else 0
+    if ma60 > 0 and curr < ma60 * 0.85:
+        return {}  # 60일선 대비 15%+ 이탈 — 완전 붕괴, 완화트랙도 배제
+
+    window = closes[0:15]
+    lo, hi = min(window), max(window)
+
+    pattern = None
+    idx_lo = window.index(lo)
+    if idx_lo >= 2 and curr > lo:
+        pattern = "하락전환"
+    elif lo > 0 and (hi - lo) / lo <= 0.15 and curr >= hi * 0.97:
+        pattern = "박스돌파임박"
+
+    if not pattern and api and len(closes) >= 200 and len(volumes) >= 20:
+        ma200 = sum(closes[:200]) / 200
+        week52_high = max(closes[:252]) if len(closes) >= 252 else max(closes)
+        if curr > ma200 and curr >= week52_high * 0.8:
+            try:
+                code = get_stock_code(stock_name)
+                mdata = api.get_market_data(code) if code else None
+                if mdata:
+                    acml_vol = float(mdata.get("acml_vol", 0) or 0)
+                    avg_vol20 = sum(volumes[:20]) / 20
+                    day_open = float(mdata.get("stck_oprc", 0) or 0)
+                    day_high = float(mdata.get("stck_hgpr", 0) or 0)
+                    is_bullish   = day_open > 0 and curr > day_open
+                    no_long_wick = day_high <= 0 or (day_high - curr) / curr <= 0.03
+                    if (avg_vol20 > 0 and acml_vol >= avg_vol20 * 3.0
+                            and is_bullish and no_long_wick):
+                        pattern = "거래량서지"
+            except Exception as e:
+                print(f"⚠️ [sbo2] {stock_name} 거래량서지 조회 오류: {e}")
+
+    if not pattern:
+        return {}
+
+    return {
+        "pattern": pattern,
+        "curr_price": curr,
+        "stop_price": round(curr * 0.93, 0),
+        "tgt_price":  round(curr * 1.12, 0),
+    }
+
+
 # ============================================================
 # swing_master 결과 파싱 (후보 상세 추출)
 # ============================================================
-def get_candidates() -> list:
+def get_candidates(api=None) -> list:
     """
-    4슬롯 전략별 후보 반환
+    5슬롯 전략별 후보 반환
     - inter (교집합): VCP + 추세 + 촉매 동시 통과 → 슬롯1 최우선
     - swing        : VCP only                     → 슬롯2
     - trend        : 추세 only                    → 슬롯3
@@ -541,6 +620,16 @@ def get_candidates() -> list:
       생쇼 자체 적중률은 낮지만(18.2%, 표본 11건) VCP/추세가 걸러줄
       거라는 전제로 추가. 옛 텔레(SLOT_TELE)처럼 원본을 그대로 매수
       소스로 쓰는 게 아니라 반드시 기술적 교집합 조건으로 게이팅한다.)
+    - light         : 촉매 종목 중 VCP/추세 정식조건 미충족 + 완화조건 통과
+                      → 슬롯5 최하위 우선순위 (★ 2026-07-14 추가)
+      (7/7 VCP 피봇돌파 확인 필터 추가 이후 지금 같은 쏠림장에서 VCP/추세가
+      7거래일 연속 0개를 내는 문제 발견 — 스마트머니까지 통과한 종목은
+      있어도 "실제 30일 신고가 돌파"까지 요구하면 2,111개 중 1개만 남을
+      정도로 장 자체가 얕음. 촉매(실시간 뉴스/수급 신호)는 있는데 아직
+      정식 기술적 패턴을 못 갖춘 종목을 완화조건(_check_light_chart_health,
+      모멘텀 스캐너와 동일 로직)으로 최소한만 걸러 최하위 슬롯으로 편입.
+    api: KisAPI 인스턴스 (완화트랙의 거래량서지 패턴에서 실시간 시세 조회용,
+         없으면 해당 패턴은 건너뜀 — 나머지 슬롯엔 영향 없음)
     """
     from swing_analyzer import get_swing_data
     from trend_analyzer import get_trend_data
@@ -660,6 +749,34 @@ def get_candidates() -> list:
         })
     trend_list.sort(key=lambda x: x["score"], reverse=True)
     candidates += trend_list[:CANDIDATE_CAP_PER_SLOT]
+
+    # ── 슬롯5: 완화트랙 (촉매 종목 중 VCP/추세 미충족 + 완화조건 통과) ──
+    already_covered = swing_names | trend_names | sshow_names
+    light_pool = catalyst_set - already_covered
+    light_list = []
+    if light_pool:
+        conn = sqlite3.connect(os.path.join(BASE_DIR, "kr_theme_finance.db"), timeout=5)
+        for name in light_pool:
+            light = _check_light_chart_health(name, conn, api)
+            if light:
+                light_list.append({
+                    "name":     name,
+                    "grade":    SLOT_LIGHT,
+                    "score":    50,
+                    "vcp":      False,
+                    "trend":    False,
+                    "catalyst": True,
+                    "curr":     light["curr_price"],
+                    "stop":     light["stop_price"],
+                    "tgt":      light["tgt_price"],
+                    "rr":       round((light["tgt_price"] - light["curr_price"]) /
+                                       (light["curr_price"] - light["stop_price"]), 1)
+                                if light["curr_price"] > light["stop_price"] else 0,
+                    "themes":   [f"완화조건:{light['pattern']}"],
+                })
+        conn.close()
+    light_list.sort(key=lambda x: x["score"], reverse=True)
+    candidates += light_list[:CANDIDATE_CAP_PER_SLOT]
 
     return candidates
 
@@ -879,7 +996,7 @@ class Sbo2:
             return
         print(f"\n🔄 [sbo2] 후보 전체 갱신 중...")
         try:
-            all_cands = _filter(get_candidates())
+            all_cands = _filter(get_candidates(api=self.api))
             self.candidates = all_cands
             self._cand_date = today
             _save_cand_date(self._cand_date)
@@ -890,7 +1007,8 @@ class Sbo2:
         swing = sum(1 for c in self.candidates if c["grade"] == SLOT_SWING)
         trend = sum(1 for c in self.candidates if c["grade"] == SLOT_TREND)
         sshow = sum(1 for c in self.candidates if c["grade"] == SLOT_SSHOW)
-        print(f"   교집합:{inter}개 스윙:{swing}개 추세:{trend}개 생쇼:{sshow}개")
+        light = sum(1 for c in self.candidates if c["grade"] == SLOT_LIGHT)
+        print(f"   교집합:{inter}개 스윙:{swing}개 추세:{trend}개 생쇼:{sshow}개 완화:{light}개")
         for c in self.candidates:
             save_candidate(
                 name=c["name"], grade=c["grade"], score=c["score"],
@@ -966,6 +1084,7 @@ class Sbo2:
         has_swing = SLOT_SWING in held_grades
         has_trend = SLOT_TREND in held_grades
         has_sshow = SLOT_SSHOW in held_grades
+        has_light = SLOT_LIGHT in held_grades
 
         # ★ 2026-07-06: 텔레스윙을 매수 소스에서 제외 (사용자 결정) —
         #   사후검증 결과 텔레스윙이 표본 1368건 중 손절률 77.3%로 압도적으로
@@ -976,7 +1095,9 @@ class Sbo2:
         # ★ 2026-07-07: 생쇼(전문가추천)는 단독 적중률이 낮아(18.2%, 표본 11건)
         #   텔레스윙과 같은 문제가 우려됐으나, VCP 교집합으로만 게이팅해서
         #   추가 — VCP를 통과 못 하면 애초에 후보 풀에 들어오지 않는다.
-        # 우선순위: 교집합 → 점수 높은 순 (스윙/추세/생쇼)
+        # ★ 2026-07-14: 완화트랙(SLOT_LIGHT) 추가 — 정식조건 미충족 최하위
+        #   신뢰도 슬롯이라 우선순위 맨 뒤에 둔다.
+        # 우선순위: 교집합 → 점수 높은 순 (스윙/추세/생쇼/완화)
         buyable = []
         if not has_inter:
             buyable += sorted(_buyable(SLOT_INTER), key=lambda x: x["score"], reverse=True)
@@ -986,9 +1107,12 @@ class Sbo2:
             buyable += sorted(_buyable(SLOT_TREND), key=lambda x: x["score"], reverse=True)
         if not has_sshow:
             buyable += sorted(_buyable(SLOT_SSHOW), key=lambda x: x["score"], reverse=True)
+        if not has_light:
+            buyable += sorted(_buyable(SLOT_LIGHT), key=lambda x: x["score"], reverse=True)
 
         print(f"   매수후보: 교집합{len(_buyable(SLOT_INTER))} 스윙{len(_buyable(SLOT_SWING))} "
-              f"추세{len(_buyable(SLOT_TREND))} 생쇼{len(_buyable(SLOT_SSHOW))} (텔레 제외됨)")
+              f"추세{len(_buyable(SLOT_TREND))} 생쇼{len(_buyable(SLOT_SSHOW))} "
+              f"완화{len(_buyable(SLOT_LIGHT))} (텔레 제외됨)")
 
         for cand in buyable:
             if slots <= 0:
