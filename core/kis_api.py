@@ -262,7 +262,14 @@ class KisAPI:
         headers = {"authorization": f"Bearer {self.token}",
                    "appkey": self.appkey, "appsecret": self.secret,
                    "tr_id": "FHKST01010100"}
-        params  = {"FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": code}
+        # ★ 2026-07-16: FID_COND_MRKT_DIV_CODE를 "J"(KRX 전용)→"UN"(통합,
+        #   KRX+NXT)로 변경. 넥스트레이드(NXT) 대체거래소가 08:00~09:00/
+        #   18:00~20:00 시간대에 실거래를 제공하는데, "J"로 조회하면 이
+        #   시간대엔 KRX 쪽에 거래가 없어 전일종가로 완전히 고정된 값을
+        #   반환함 — sbo2 매도체크(SELL_START_TIME=0800)가 이 시간대에
+        #   실제 NXT 가격 급등/급락을 못 보고 있었음(사용자 지적, 실측
+        #   확인: J=82000/0.00%, UN=86900/+5.98% 동시조회 시).
+        params  = {"FID_COND_MRKT_DIV_CODE": "UN", "FID_INPUT_ISCD": code}
         try:
             result = _get(url, headers=headers, params=params, timeout=10).json().get("output")
             if result:
@@ -292,7 +299,8 @@ class KisAPI:
         headers = {"authorization": f"Bearer {self.token}",
                    "appkey": self.appkey, "appsecret": self.secret,
                    "tr_id": "FHKST01010200"}
-        params  = {"FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": code}
+        # ★ 2026-07-16: get_market_data()와 동일 사유로 "J"→"UN" 변경 (NXT 반영)
+        params  = {"FID_COND_MRKT_DIV_CODE": "UN", "FID_INPUT_ISCD": code}
         try:
             res = _get(url, headers=headers,
                                params=params, timeout=5).json()
