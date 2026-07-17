@@ -606,6 +606,54 @@ def _check_light_chart_health(stock_name: str, conn: sqlite3.Connection, api=Non
 
 
 # ============================================================
+# 키움 조건검색식 풀 (★ 2026-07-17 추가)
+# ============================================================
+_KIWOOM_POOL_CACHE = {"date": "", "names": set()}
+KIWOOM_POOL_KEYWORDS = ["추세", "VCP", "눌림목"]
+
+def _get_kiwoom_condition_pool() -> set:
+    """
+    sbot과 동일하게 키움 조건검색식으로 1차 후보 풀을 받아온다. sbot은
+    모든 검색식(단타 제외)을 그대로 종목 풀로 쓰지만, sbo2는 사용자가
+    별도로 만든 "추세"/"VCP"/"눌림목" 검색식만 골라 쓴다 — 전체 시장을
+    EOD 데이터로 스캔하며 반복 발견됐던 자기모순/과필터링 버그의 근본
+    원인(라이브 사전검증이 아예 없었음)을 없애기 위함. VCP/추세 스코어링
+    자체는 그대로 유지하되, 스캔 범위를 이 "이미 실시간으로 살아있다고
+    확인된" 풀로 좁힌다.
+    검색식이 아직 없으면(사용자가 준비 중) 빈 set 반환 — 호출부가
+    자동으로 전체시장 스캔(기존 동작)으로 폴백한다.
+    """
+    today = today_str()
+    if _KIWOOM_POOL_CACHE["date"] == today:
+        return _KIWOOM_POOL_CACHE["names"]
+
+    names = set()
+    try:
+        import asyncio
+        from kiwoom_api import KiwoomAPI
+        kapi = KiwoomAPI()
+        if kapi.enabled:
+            name_map = {}
+            loop = asyncio.new_event_loop()
+            try:
+                codes = loop.run_until_complete(kapi.get_condition_codes(
+                    use_keywords=KIWOOM_POOL_KEYWORDS, code_name_map=name_map))
+            finally:
+                loop.close()
+            names = {name_map[c] for c in codes if name_map.get(c)}
+            if names:
+                print(f"   🔍 키움 조건검색 풀({'/'.join(KIWOOM_POOL_KEYWORDS)}): {len(names)}종목")
+            else:
+                print(f"   ⚠️ 키움 조건검색식({'/'.join(KIWOOM_POOL_KEYWORDS)}) 미발견 — 전체시장 스캔으로 폴백")
+    except Exception as e:
+        print(f"⚠️ [sbo2] 키움 조건검색 풀 조회 오류: {e}")
+
+    _KIWOOM_POOL_CACHE["names"] = names
+    _KIWOOM_POOL_CACHE["date"]  = today
+    return names
+
+
+# ============================================================
 # swing_master 결과 파싱 (후보 상세 추출)
 # ============================================================
 def get_candidates(api=None) -> list:
@@ -635,9 +683,10 @@ def get_candidates(api=None) -> list:
     from trend_analyzer import get_trend_data
     from sshow_db import get_sshow_stocks
 
+    kiwoom_pool  = _get_kiwoom_condition_pool()
     catalyst_set = _get_catalyst_stocks()
-    swing_data   = get_swing_data(top_n=20)
-    trend_data   = get_trend_data(top_n=20)
+    swing_data   = get_swing_data(top_n=20, name_filter=kiwoom_pool or None)
+    trend_data   = get_trend_data(top_n=20, name_filter=kiwoom_pool or None)
 
     try:
         sshow_map = get_sshow_stocks(days=5)

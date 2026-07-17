@@ -441,9 +441,11 @@ def get_trend_picks(top_n: int = TOP_N_DEFAULT) -> str:
 # sbo2 등 자동매매용 — 딕셔너리 리스트 직접 반환
 # ══════════════════════════════════════════════════════════════
 
-def get_trend_data(top_n: int = 20) -> list:
+def get_trend_data(top_n: int = 20, name_filter: set = None) -> list:
     """
     상승추세 눌림목 필터 통과 종목을 딕셔너리 리스트로 반환
+    name_filter: 주어지면 이 종목명 집합으로만 스캔 범위 제한 (★ 2026-07-17
+    추가 — 키움 조건검색식 풀 전용, get_swing_data()와 동일 사유)
 
     반환 형식:
     [
@@ -475,6 +477,9 @@ def get_trend_data(top_n: int = 20) -> list:
 
     cursor.execute("SELECT DISTINCT stock_name FROM kr_stock_daily_data")
     all_stocks = [r[0] for r in cursor.fetchall()]
+    if name_filter:
+        all_stocks = [s for s in all_stocks
+                      if re.sub(r"\s*(KOSPI|KOSDAQ)\s*\d{6}$", "", s).strip() in name_filter]
 
     cursor.execute("SELECT stock_name, theme_name FROM kr_theme_stocks")
     theme_map: dict = {}
