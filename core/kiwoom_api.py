@@ -67,6 +67,13 @@ class KiwoomAPI:
         use_keywords:  이 키워드 포함된 검색식만 사용 (None이면 전체)
         skip_keywords: 이 키워드 포함된 검색식 제외 (단타봇 조건식 제외 등)
         code_tag_map:  {code: cond_name} — 종목별 검색식명 저장 (buy_tag 추적용)
+
+        ★ 2026-07-17: 기존엔 한 WebSocket 세션에서 여러 조건검색을 연달아
+        (CNSRREQ) 요청했는데, 두 번째 조건부터 응답이 오류/빈값으로
+        씹히는 버그 발견(사용자가 sbo2용으로 새로 만든 "VCP" 검색식이
+        "눌림목" 다음 순서라 항상 0건으로 나오다가, 격리해서 단독조회하면
+        정상 4건 나옴을 확인). 조건검색은 실시간 구독 성격이라 세션
+        재사용이 안전하지 않은 것으로 보여 조건마다 새 연결로 분리.
         """
         import websockets as _ws
         token = self.get_token()
@@ -74,6 +81,8 @@ class KiwoomAPI:
 
         codes = []
         seen  = set()
+
+        cond_list = []
         try:
             async with _ws.connect(KIWOOM_WS_URL) as ws:
                 await ws.send(json.dumps({"trnm": "LOGIN", "token": token}))
@@ -82,7 +91,6 @@ class KiwoomAPI:
                     print(f"⚠️ 키움 로그인 실패: {res.get('return_msg')}"); return []
 
                 await ws.send(json.dumps({"trnm": "CNSRLST"}))
-                cond_list = []
                 while True:
                     try:
                         res = json.loads(await asyncio.wait_for(ws.recv(), timeout=5))
@@ -91,21 +99,33 @@ class KiwoomAPI:
                         if res.get("trnm") == "CNSRLST":
                             cond_list = res.get("data", []); break
                     except asyncio.TimeoutError: break
+        except Exception as e:
+            print(f"⚠️ 키움 WebSocket 오류(검색식 목록): {e}")
+            return []
 
-                print(f"  🔍 키움 조건검색식: {len(cond_list)}개")
+        print(f"  🔍 키움 조건검색식: {len(cond_list)}개")
 
-                for cond in cond_list:
-                    seq  = cond[0] if isinstance(cond, list) else cond.get("seq", "")
-                    name = cond[1] if isinstance(cond, list) else cond.get("name", "")
+        targets = []
+        for cond in cond_list:
+            seq  = cond[0] if isinstance(cond, list) else cond.get("seq", "")
+            name = cond[1] if isinstance(cond, list) else cond.get("name", "")
+            if use_keywords and not any(kw in name for kw in use_keywords):
+                print(f"  ⏭️ 제외: [{seq}]{name}")
+                continue
+            if skip_keywords and any(kw in name for kw in skip_keywords):
+                print(f"  ⏭️ 스킵: [{seq}]{name}")
+                continue
+            targets.append((seq, name))
 
-                    # 사용할 조건검색식 필터링
-                    if use_keywords and not any(kw in name for kw in use_keywords):
-                        print(f"  ⏭️ 제외: [{seq}]{name}")
-                        continue
-                    # ★ skip_keywords: 이 키워드 포함 검색식 제외
-                    if skip_keywords and any(kw in name for kw in skip_keywords):
-                        print(f"  ⏭️ 스킵: [{seq}]{name}")
-                        continue
+        for i, (seq, name) in enumerate(targets):
+            if i > 0:
+                await asyncio.sleep(5)   # ★ 연속 조회 간 최소 간격 (세션 간섭/레이트리밋 방지)
+            try:
+                async with _ws.connect(KIWOOM_WS_URL) as ws:
+                    await ws.send(json.dumps({"trnm": "LOGIN", "token": token}))
+                    res = json.loads(await asyncio.wait_for(ws.recv(), timeout=10))
+                    if res.get("return_code") != 0:
+                        print(f"  ⚠️ [{name}] 로그인 실패: {res.get('return_msg')}"); continue
 
                     await ws.send(json.dumps({
                         "trnm": "CNSRREQ", "seq": seq,
@@ -114,10 +134,11 @@ class KiwoomAPI:
                     fetched = 0
                     while True:
                         try:
-                            res = json.loads(await asyncio.wait_for(ws.recv(), timeout=5))
+                            res = json.loads(await asyncio.wait_for(ws.recv(), timeout=8))
                             if res.get("trnm") == "PING":
                                 await ws.send(json.dumps(res)); continue
-                            if res.get("return_code") != 0: break
+                            if res.get("return_code") != 0:
+                                print(f"  ⚠️ [{name}] 조회 오류: {res.get('return_msg')}"); break
                             for item in (res.get("data") or []):
                                 raw   = item.get("9001", "") if isinstance(item, dict) else (item[0] if item else "")
                                 code  = raw.lstrip("A") if raw.startswith("A") else raw
@@ -126,16 +147,16 @@ class KiwoomAPI:
                                     seen.add(code); codes.append(code)
                                     if code_name_map is not None:
                                         code_name_map[code] = iname
-                                    # ★ 검색식명 태그 저장 (첫 번째 검색식 우선)
                                     if code_tag_map is not None and code not in code_tag_map:
                                         code_tag_map[code] = name
                                     fetched += 1
                             if res.get("cont_yn") != "Y": break
-                        except asyncio.TimeoutError: break
+                        except asyncio.TimeoutError:
+                            print(f"  ⚠️ [{name}] 응답 타임아웃"); break
                     print(f"  📊 조건검색 [{seq}]{name}: +{fetched}개")
+            except Exception as e:
+                print(f"  ⚠️ 키움 WebSocket 오류 [{name}]: {e}")
 
-        except Exception as e:
-            print(f"⚠️ 키움 WebSocket 오류: {e}")
         return codes
 
     # ============================================================
