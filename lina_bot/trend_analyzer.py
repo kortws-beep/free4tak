@@ -27,10 +27,17 @@ DB_PATH  = os.path.join(BASE_DIR, "kr_theme_finance.db")
 
 # ── 튜닝 파라미터 ────────────────────────────────────────────
 MA60_SLOPE_DAYS  = 10     # 60일선 우상향 확인 기간
-PULLBACK_BAND    = 0.08   # 현재가가 최근 저점 ±8% 이내
-RSI_LOW          = 40     # RSI 하한
-RSI_HIGH         = 60     # RSI 상한
-VOL_PULL_RATIO   = 0.85   # 눌림 구간 거래량 < 전체 평균 × 85% (★ 2026-07-14: 0.70→0.85 완화 — 7/7 이후 7거래일 연속 0개 확인, 반등확인 필터 추가로 이미 좁아진 깔때기에서 이 조건이 마지막 병목이었음)
+# ★ 2026-07-17: 백테스트(10개월치 2052종목 + 2.5년치 200종목 교차검증)로
+#   재튜닝 — PULLBACK_BAND 8%→10%(완화), RSI 40~60→45~55(좁힘),
+#   VOL_PULL_RATIO 0.85→0.70(07-14 완화분 원복). 두 데이터셋 모두에서
+#   일관되게 MDD 축소(-29%대→-12~22%대)+PF 개선 확인(backtest/
+#   sbo2_signal_backtest_engine.py). 참고로 "고점권+RSI강세" 식의 순수
+#   모멘텀추격 버전도 별도 테스트했으나 훨씬 나쁨(PF0.42/-52%) — 눌림목
+#   매수 프레임 자체는 유지하는 게 맞다는 결론.
+PULLBACK_BAND    = 0.10   # 현재가가 최근 저점 ±10% 이내
+RSI_LOW          = 45     # RSI 하한
+RSI_HIGH         = 55     # RSI 상한
+VOL_PULL_RATIO   = 0.70   # 눌림 구간 거래량 < 전체 평균 × 70%
 MIN_TRADING_VALUE_EOK = 50    # 최소 거래대금(억원) — 잡주 방지
 SMART_DAYS       = 10
 SMART_MIN_DAYS   = 3
