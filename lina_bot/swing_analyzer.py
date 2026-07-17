@@ -146,20 +146,22 @@ def get_swing_picks(top_n: int = TOP_N_DEFAULT) -> str:
         # 200일선 통과 종목 사전에 등록 (군집 계산용)
         ma200_pass[pure_name] = curr_price
 
-        # ② 20일선 밀집
-        ma20 = _ma(valid_closes, 20)
+        # ② 20일선 밀집 + ③ VCP 수렴 — ★ 2026-07-17: 돌파일(오늘) 포함 윈도우
+        #   대신 전일까지(prior)로 이동. get_swing_data()와 동일 사유 참고.
+        if len(valid_closes) < 31:
+            continue
+        prior = valid_closes[1:]
+        ma20 = _ma(prior, 20)
         if ma20 == 0:
             continue
-        dist_ma20 = abs(curr_price - ma20) / ma20
+        dist_ma20 = abs(prior[0] - ma20) / ma20
         if dist_ma20 > MA20_BAND:
             filtered["f2_ma20"] += 1
             continue
 
         # ③ VCP 수렴
-        if len(valid_closes) < 30:
-            continue
-        recent_amp = (max(valid_closes[0:15]) - min(valid_closes[0:15])) / min(valid_closes[0:15]) if min(valid_closes[0:15]) > 0 else 0
-        prev_amp   = (max(valid_closes[15:30]) - min(valid_closes[15:30])) / min(valid_closes[15:30]) if min(valid_closes[15:30]) > 0 else 0
+        recent_amp = (max(prior[0:15]) - min(prior[0:15])) / min(prior[0:15]) if min(prior[0:15]) > 0 else 0
+        prev_amp   = (max(prior[15:30]) - min(prior[15:30])) / min(prior[15:30]) if min(prior[15:30]) > 0 else 0
         if prev_amp == 0 or recent_amp >= prev_amp * VCP_RATIO:
             filtered["f3_vcp"] += 1
             continue
@@ -450,14 +452,25 @@ def get_swing_data(top_n: int = 20) -> list:
         if ma200 == 0 or curr_price < ma200: continue
         ma200_pass[pure_name] = curr_price
 
-        ma20 = _ma(valid_closes, 20)
+        # ★ 2026-07-17: "조용한 베이스" 판단(20일선 밴드 + VCP 진폭수축)을
+        #   돌파일(오늘) 포함 윈도우로 계산하던 걸 전일까지(prior)로 이동.
+        #   피봇 계산은 원래도 valid_closes[1:31](전일까지)였는데, 밴드/수축
+        #   조건만 오늘 포함이라 "오늘 신고가 돌파"와 "오늘 20일선 근처"가
+        #   같은 날 동시에 요구되는 자기모순이 있었음 — 전체 10개월치
+        #   funnel 진단 결과 스마트머니 300건→가격돌파 5건으로 붕괴 확인,
+        #   구조 수정 후 5건→12건으로 개선(백테스트 backtest/
+        #   sbo2_signal_backtest_engine.py로 검증). 단, 파라미터(VCP_RATIO
+        #   등) 자체를 더 완화하는 건 2.5년/200종목 장기 백테스트에서 오히려
+        #   승률/PF 악화로 확인되어 반영 안 함 — 구조 수정만 반영.
+        if len(valid_closes) < 31: continue
+        prior = valid_closes[1:]
+        ma20 = _ma(prior, 20)
         if ma20 == 0: continue
-        dist_ma20 = abs(curr_price - ma20) / ma20
+        dist_ma20 = abs(prior[0] - ma20) / ma20
         if dist_ma20 > MA20_BAND: continue
 
-        if len(valid_closes) < 30: continue
-        recent_amp = (max(valid_closes[0:15]) - min(valid_closes[0:15])) / min(valid_closes[0:15]) if min(valid_closes[0:15]) > 0 else 0
-        prev_amp   = (max(valid_closes[15:30]) - min(valid_closes[15:30])) / min(valid_closes[15:30]) if min(valid_closes[15:30]) > 0 else 0
+        recent_amp = (max(prior[0:15]) - min(prior[0:15])) / min(prior[0:15]) if min(prior[0:15]) > 0 else 0
+        prev_amp   = (max(prior[15:30]) - min(prior[15:30])) / min(prior[15:30]) if min(prior[15:30]) > 0 else 0
         if prev_amp == 0 or recent_amp >= prev_amp * VCP_RATIO: continue
 
         valid_volumes = [v for v in volumes if v > 0]
