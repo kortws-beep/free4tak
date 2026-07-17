@@ -342,22 +342,6 @@ class KisAPI:
             if not output: return True
             is_open = output[0].get("bzdy_yn", "Y") == "Y"
             if not is_open:
-                # ★ 2026-07-17: chk-holiday API 자체가 오늘 데이터를
-                #   틀리게 갖고 있던 사고 발견 — 실제로는 정규장이 정상
-                #   개장해서 삼성전자가 4천만주+ 거래되며 -9%대로 폭락
-                #   중이었는데, 이 API는 개장일=N으로 응답해 sbot이
-                #   하루종일 휴장 판단하고 대기만 하고 있었음(사용자 지적).
-                #   삼성전자 실거래량으로 교차검증해서 이런 외부 API
-                #   데이터 오류에도 실제 개장 여부를 놓치지 않게 함.
-                try:
-                    check    = self.get_market_data("005930")
-                    real_vol = float(check.get("acml_vol", 0) or 0) if check else 0
-                except Exception:
-                    real_vol = 0
-                if real_vol > 100_000:
-                    print(f"⚠️ 휴장일 API 응답(개장일 아님)과 달리 삼성전자 실거래량 "
-                          f"{real_vol:,.0f}주 감지 — 정규장으로 판단")
-                    return True
                 print(f"🎌 오늘은 휴장일입니다")
             return is_open
         except Exception as e:
