@@ -96,7 +96,7 @@ except Exception:
 # ============================================================
 SEED_MONEY       = 5_000_000   # 시드머니 500만원
 BASE_BUY_AMT     = 1_500_000   # 1종목 기본 매수금액 150만원
-MAX_POSITIONS    = 5            # 최대 보유 종목 (교집합1+스윙1+추세1+생쇼1+완화1)
+MAX_POSITIONS    = 6            # 최대 보유 종목 (교집합1+스윙1+추세1+생쇼1+완화1+관심종목1)
 A_GRADE_RATIO    = 0.7          # A급 상위 70%만 매수
 
 # 슬롯 전략 구분
@@ -111,6 +111,11 @@ SLOT_LIGHT  = "light"   # 완화트랙 (★ 2026-07-14 추가) — 촉매종목 
                         # 7거래일 연속 0개를 내는 문제 발견(사용자 지적) —
                         # 모멘텀 스캐너의 완화트랙(_check_light_chart_health)과
                         # 동일 로직을 실거래 후보에도 최하위 우선순위로 도입.
+SLOT_WATCHLIST = "watchlist"  # 한투 관심그룹 'new' (★ 2026-07-17 추가) — sbot과
+                        # 동일하게, 사용자가 직접 계속 갱신하는 한투 'new'
+                        # 관심그룹을 전체 후보가 적거나 없을 때만 보조로 사용.
+                        # 사용자가 직접 큐레이션한 목록이라 완전 무필터는
+                        # 아니고 완화트랙과 동일한 최소 안전장치만 적용.
 
 SLOT_LABEL = {
     SLOT_INTER: "교집합",
@@ -119,6 +124,7 @@ SLOT_LABEL = {
     SLOT_TELE:  "텔레",
     SLOT_SSHOW: "생쇼",
     SLOT_LIGHT: "완화",
+    SLOT_WATCHLIST: "관심종목",
     "실계좌":   "실계좌",
     "S":        "S급",
     "A":        "A급",
@@ -523,6 +529,8 @@ def calc_buy_amount(grade: str, psbl_cash: int, score: int = 0) -> int:
         amount = int(BASE_BUY_AMT * 0.83)   # 125만원
     elif grade == SLOT_LIGHT:
         amount = int(BASE_BUY_AMT * 0.67)   # 100만원 — 완화트랙(2026-07-14), 정식조건 미충족이라 최소 사이즈
+    elif grade == SLOT_WATCHLIST:
+        amount = int(BASE_BUY_AMT * 0.67)   # 100만원 — 한투 관심그룹(2026-07-17), 완화트랙과 동일 사이즈
     else:                                    # 레거시 tele 폴백 (도달 안 함)
         amount = int(BASE_BUY_AMT * 0.67)   # 100만원
 
@@ -654,11 +662,56 @@ def _get_kiwoom_condition_pool() -> set:
 
 
 # ============================================================
+# 한투 관심그룹 'new' (★ 2026-07-17 추가)
+# ============================================================
+_KIS_WATCHLIST_CACHE = {"date": "", "names": set()}
+
+def _get_kis_new_watchlist_names(api) -> set:
+    """
+    sbot(_load_new_codes)과 동일하게 한투 'new' 관심그룹에서 종목명을
+    받아온다. 사용자가 직접 계속 갱신하는(유망종목 추가/제거) 목록이라
+    sbo2 전체 후보가 적거나 없을 때 보조 소스로 사용 — 전체 시장 스캔
+    실패 시의 안전망.
+    """
+    today = today_str()
+    if _KIS_WATCHLIST_CACHE["date"] == today:
+        return _KIS_WATCHLIST_CACHE["names"]
+
+    names = set()
+    try:
+        if api is None:
+            return set()
+        hts_id = os.getenv("KIS_HTS_ID2", os.getenv("KIS_HTS_ID", ""))
+        if not hts_id:
+            return set()
+        groups = api.get_watchlist_groups(hts_id)
+        target = next(
+            ((gc, gn) for gc, gn in groups.items()
+             if gn.lower() in ("new", "신규추천", "신규", "new추천")),
+            None,
+        )
+        if not target:
+            print("   ⚠️ 한투 'new' 관심그룹 없음")
+        else:
+            grp_code, _ = target
+            stocks = api.get_watchlist_stocks(grp_code, hts_id)
+            names = {name for _, name in stocks if name}
+            if names:
+                print(f"   🆕 한투 관심그룹 'new': {len(names)}종목")
+    except Exception as e:
+        print(f"⚠️ [sbo2] 한투 관심그룹 조회 오류: {e}")
+
+    _KIS_WATCHLIST_CACHE["names"] = names
+    _KIS_WATCHLIST_CACHE["date"]  = today
+    return names
+
+
+# ============================================================
 # swing_master 결과 파싱 (후보 상세 추출)
 # ============================================================
 def get_candidates(api=None) -> list:
     """
-    5슬롯 전략별 후보 반환
+    6슬롯 전략별 후보 반환
     - inter (교집합): VCP + 추세 + 촉매 동시 통과 → 슬롯1 최우선
     - swing        : VCP only                     → 슬롯2
     - trend        : 추세 only                    → 슬롯3
@@ -826,6 +879,40 @@ def get_candidates(api=None) -> list:
         conn.close()
     light_list.sort(key=lambda x: x["score"], reverse=True)
     candidates += light_list[:CANDIDATE_CAP_PER_SLOT]
+
+    # ── 슬롯6: 한투 'new' 관심종목 (전체 후보가 적거나 없을 때만 보조) ──
+    # ★ 2026-07-17 추가: "sbo2 종목이 적거나 없으면 한투 new관심종목도
+    #   같이 걸어도 된다 — 내가 계속 갱신하는 유망종목이니까"(사용자
+    #   결정). 항상 쓰지 않고 위 5개 슬롯 합쳐서 min_positions 미만일
+    #   때만 안전망으로 사용. 사용자가 직접 큐레이션한 목록이라도 실거래
+    #   진입이라 완화트랙과 동일한 최소 안전장치(_check_light_chart_health)
+    #   는 그대로 적용.
+    if len(candidates) < MAX_POSITIONS:
+        watchlist_names = _get_kis_new_watchlist_names(api) - already_covered - set(light_pool if light_pool else [])
+        watchlist_list = []
+        if watchlist_names:
+            conn = sqlite3.connect(os.path.join(BASE_DIR, "kr_theme_finance.db"), timeout=5)
+            for name in watchlist_names:
+                wl = _check_light_chart_health(name, conn, api)
+                if wl:
+                    watchlist_list.append({
+                        "name":     name,
+                        "grade":    SLOT_WATCHLIST,
+                        "score":    50,
+                        "vcp":      False,
+                        "trend":    False,
+                        "catalyst": False,
+                        "curr":     wl["curr_price"],
+                        "stop":     wl["stop_price"],
+                        "tgt":      wl["tgt_price"],
+                        "rr":       round((wl["tgt_price"] - wl["curr_price"]) /
+                                           (wl["curr_price"] - wl["stop_price"]), 1)
+                                    if wl["curr_price"] > wl["stop_price"] else 0,
+                        "themes":   [f"관심종목:{wl['pattern']}"],
+                    })
+            conn.close()
+        watchlist_list.sort(key=lambda x: x["score"], reverse=True)
+        candidates += watchlist_list[:CANDIDATE_CAP_PER_SLOT]
 
     return candidates
 
@@ -1136,6 +1223,7 @@ class Sbo2:
         has_trend = SLOT_TREND in held_grades
         has_sshow = SLOT_SSHOW in held_grades
         has_light = SLOT_LIGHT in held_grades
+        has_watchlist = SLOT_WATCHLIST in held_grades
 
         # ★ 2026-07-06: 텔레스윙을 매수 소스에서 제외 (사용자 결정) —
         #   사후검증 결과 텔레스윙이 표본 1368건 중 손절률 77.3%로 압도적으로
@@ -1160,10 +1248,12 @@ class Sbo2:
             buyable += sorted(_buyable(SLOT_SSHOW), key=lambda x: x["score"], reverse=True)
         if not has_light:
             buyable += sorted(_buyable(SLOT_LIGHT), key=lambda x: x["score"], reverse=True)
+        if not has_watchlist:
+            buyable += sorted(_buyable(SLOT_WATCHLIST), key=lambda x: x["score"], reverse=True)
 
         print(f"   매수후보: 교집합{len(_buyable(SLOT_INTER))} 스윙{len(_buyable(SLOT_SWING))} "
               f"추세{len(_buyable(SLOT_TREND))} 생쇼{len(_buyable(SLOT_SSHOW))} "
-              f"완화{len(_buyable(SLOT_LIGHT))} (텔레 제외됨)")
+              f"완화{len(_buyable(SLOT_LIGHT))} 관심종목{len(_buyable(SLOT_WATCHLIST))} (텔레 제외됨)")
 
         for cand in buyable:
             if slots <= 0:
