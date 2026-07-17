@@ -861,6 +861,8 @@ class Sbo2:
         self._last_sell_prices = {}      # {code: curr} — _check_sell에서 조회한 현재가, 상태출력에서 재사용
         self._cand_ts    = 0        # 후보 마지막 갱신 시각
         self._cand_date  = ""       # 후보 마지막 갱신 날짜
+        self._is_holiday      = False    # 휴장일 판단 결과 (★ 2026-07-17 추가)
+        self._holiday_checked = ""       # 마지막으로 휴장일 체크한 날짜 (하루 1회만 조회)
         self._pending_orders = {}   # 미체결 주문 {code: (orgno, odno, qty)}
         # ★ 매수 직후 qty 동기화 보호 (2026-06-29 추가)
         #   한투 API가 매수 체결을 즉시 잔고에 반영하지 못하는 경우가 있어,
@@ -1672,6 +1674,20 @@ class Sbo2:
                 if is_weekend():
                     print(f"💤 주말 — 대기 중")
                     time.sleep(3600)
+                    continue
+
+                # ── 휴장일 (★ 2026-07-17 추가 — sbot과 동일 패턴) ──
+                #   기존엔 sbo2가 주말만 체크하고 공휴일 체크가 아예 없어서,
+                #   제헌절 같은 공휴일에도 정상 개장으로 착각하고 하루종일
+                #   후보갱신/매수매도 체크를 계속 돌렸음(전일 마감 스냅샷을
+                #   그대로 실시간 데이터로 오인). sbot처럼 하루 1회만 조회.
+                today = today_str()
+                if self._holiday_checked != today:
+                    self._is_holiday      = not self.api.is_market_open()
+                    self._holiday_checked = today
+                if self._is_holiday:
+                    print(f"🎌 [{now_hms()}] 휴장일 — 대기 중...")
+                    time.sleep(300)
                     continue
 
                 # 장외 시간

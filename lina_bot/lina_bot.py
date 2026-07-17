@@ -49,6 +49,27 @@ MODEL_NAME = os.getenv("MODEL_NAME", "gemma4:e4b")
 # 🚨 대한민국 표준시(KST) 타임존
 KST = datetime.timezone(datetime.timedelta(hours=9))
 
+# ★ 2026-07-17 추가: 리나의 스케줄 리포트들이 주말/공휴일 체크가 아예
+#   없어서, 공휴일에도 전일 마감 스냅샷을 실시간 데이터로 오인해 정상
+#   리포트를 그대로 내보내던 문제 발견(제헌절 사고, 사용자 지적) —
+#   sbot/sbo2와 동일하게 하루 1회만 KIS 휴장일 API 조회하는 캐시 헬퍼.
+_TRADING_DAY_CACHE = {"date": "", "is_open": True}
+
+def _is_trading_day() -> bool:
+    kst_now = datetime.datetime.now(KST)
+    if kst_now.weekday() >= 5:   # 토(5)/일(6)
+        return False
+    today = kst_now.strftime("%Y-%m-%d")
+    if _TRADING_DAY_CACHE["date"] != today:
+        try:
+            from kis_api import KisAPI
+            _TRADING_DAY_CACHE["is_open"] = KisAPI().is_market_open()
+        except Exception as e:
+            print(f"⚠️ [리나] 휴장일 체크 오류: {e}")
+            _TRADING_DAY_CACHE["is_open"] = True  # 조회 실패시 기존 동작 유지(리포트 진행)
+        _TRADING_DAY_CACHE["date"] = today
+    return _TRADING_DAY_CACHE["is_open"]
+
 # 💡 리나의 텔레그램 중복 방지용 단기 기억 장치 (마지막 처리한 ID 기억)
 LAST_TELEGRAM_ID = 0
 
@@ -1111,6 +1132,9 @@ async def daily_momentum_am_report():
     kst_now = datetime.datetime.now(KST)
     if kst_now.hour != 8 or kst_now.minute != 55:
         return
+    if not _is_trading_day():
+        print(f"🎌 [모멘텀-am] 주말/휴장일 — 스킵")
+        return
     print(f"\n🧭 [{kst_now.strftime('%H:%M')}] AI 모멘텀 스캐너(아침) 가동!")
     try:
         channel = await client.fetch_channel(REPORT_CHANNEL_ID)
@@ -1128,6 +1152,9 @@ async def daily_momentum_am_report():
 async def daily_momentum_pm_report():
     kst_now = datetime.datetime.now(KST)
     if kst_now.hour != 14 or kst_now.minute != 35:
+        return
+    if not _is_trading_day():
+        print(f"🎌 [모멘텀-pm] 주말/휴장일 — 스킵")
         return
     print(f"\n🧭 [{kst_now.strftime('%H:%M')}] AI 모멘텀 스캐너(오후) 가동!")
     try:
@@ -1148,6 +1175,9 @@ async def daily_momentum_checkin():
     kst_now = datetime.datetime.now(KST)
     if kst_now.hour != 16 or kst_now.minute != 0:
         return
+    if not _is_trading_day():
+        print(f"🎌 [모멘텀-체크인] 주말/휴장일 — 스킵")
+        return
     try:
         import ai_momentum_db
         notifications = await asyncio.to_thread(ai_momentum_db.check_and_update_results)
@@ -1166,6 +1196,9 @@ async def daily_market_context_report():
     #   실행되므로, API 호출 몇 개(1~2분 소요 가능) 끝날 시간을 벌어주기 위함.
     #   (그래도 늦어질 수 있어 위 신선도 체크가 최종 안전장치)
     if kst_now.hour != 9 or kst_now.minute != 35:
+        return
+    if not _is_trading_day():
+        print(f"🎌 [쏠림브리핑] 주말/휴장일 — 스킵")
         return
     print(f"\n📐 [{kst_now.strftime('%H:%M')}] 시장 쏠림 종합 브리핑 가동!")
     try:
@@ -1278,7 +1311,10 @@ async def daily_morning_report():
     
     if kst_now.hour != 7 or kst_now.minute != 30:
         return
-        
+    if not _is_trading_day():
+        print(f"🎌 [융합브리핑] 주말/휴장일 — 스킵")
+        return
+
     print(f"\n☀️ [{kst_now.strftime('%H:%M')}] 텔레그램+미국장+뉴스+수급 통합 융합 마스터 브리핑 가동!")
     
     try:
@@ -1347,7 +1383,10 @@ async def daily_afternoon_report():
     kst_now = datetime.datetime.now(KST)
     if kst_now.hour != 14 or kst_now.minute != 30:
         return
-        
+    if not _is_trading_day():
+        print(f"🎌 [생쇼] 주말/휴장일 — 스킵")
+        return
+
     print(f"\n🔔 [디버그] {kst_now.strftime('%H:%M')} 생쇼 브리핑 출발! 채널 접속 중...")
     
     try:
@@ -1442,6 +1481,9 @@ async def daily_news_report():
     kst_now = datetime.datetime.now(KST)
     if kst_now.hour != 7 or kst_now.minute != 0:
         return
+    if not _is_trading_day():
+        print(f"🎌 [아침뉴스] 주말/휴장일 — 스킵")
+        return
 
     print(f"\n📰 [{kst_now.strftime('%H:%M')}] 아침 뉴스 브리핑 가동!")
     try:
@@ -1500,6 +1542,9 @@ async def daily_strategy_report():
     kst_now = datetime.datetime.now(KST)
     if kst_now.hour != 8 or kst_now.minute != 50:
         return
+    if not _is_trading_day():
+        print(f"🎌 [MBN전략] 주말/휴장일 — 스킵")
+        return
     print(f"\n📊 [{kst_now.strftime('%H:%M')}] MBN 투자전략 요약 가동!")
     try:
         channel = await client.fetch_channel(REPORT_CHANNEL_ID)
@@ -1529,6 +1574,9 @@ async def daily_master_report():
     kst_now = datetime.datetime.now(KST)
     if kst_now.hour != 7 or kst_now.minute != 20:
         return
+    if not _is_trading_day():
+        print(f"🎌 [마스터리포트] 주말/휴장일 — 스킵")
+        return
 
     print(f"\n🎯 [{kst_now.strftime('%H:%M')}] 스윙 마스터 리포트 가동!")
     try:
@@ -1554,6 +1602,9 @@ async def daily_tele_swing_report():
     kst_now = datetime.datetime.now(KST)
     if kst_now.hour != 7 or kst_now.minute != 50:
         return
+    if not _is_trading_day():
+        print(f"🎌 [텔레스윙] 주말/휴장일 — 스킵")
+        return
     print(f"\n📡 [{kst_now.strftime('%H:%M')}] 텔레스윙 리포트 가동!")
     try:
         channel = await client.fetch_channel(REPORT_CHANNEL_ID)
@@ -1572,6 +1623,9 @@ async def before_daily_tele_swing_report():
 async def daily_tele_swing_afternoon():
     kst_now = datetime.datetime.now(KST)
     if kst_now.hour != 14 or kst_now.minute != 40:
+        return
+    if not _is_trading_day():
+        print(f"🎌 [텔레스윙PM] 주말/휴장일 — 스킵")
         return
     print(f"\n📡 [{kst_now.strftime('%H:%M')}] 텔레스윙 오후 재기동!")
     try:
