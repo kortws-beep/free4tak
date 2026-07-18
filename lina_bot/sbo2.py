@@ -96,7 +96,7 @@ except Exception:
 # ============================================================
 SEED_MONEY       = 5_000_000   # 시드머니 500만원
 BASE_BUY_AMT     = 1_500_000   # 1종목 기본 매수금액 150만원
-MAX_POSITIONS    = 6            # 최대 보유 종목 (교집합1+스윙1+추세1+생쇼1+완화1+관심종목1)
+MAX_POSITIONS    = 7            # 최대 보유 종목 (교집합1+스윙1+추세1+생쇼1+완화1+관심종목1+키움풀1)
 A_GRADE_RATIO    = 0.7          # A급 상위 70%만 매수
 
 # 슬롯 전략 구분
@@ -116,6 +116,12 @@ SLOT_WATCHLIST = "watchlist"  # 한투 관심그룹 'new' (★ 2026-07-17 추가
                         # 관심그룹을 전체 후보가 적거나 없을 때만 보조로 사용.
                         # 사용자가 직접 큐레이션한 목록이라 완전 무필터는
                         # 아니고 완화트랙과 동일한 최소 안전장치만 적용.
+SLOT_POOL   = "pool"    # 키움풀 최소게이트 (★ 2026-07-18 추가) — 키움
+                        # 조건검색(눌림목/VCP/상승추세)이 이미 기술적
+                        # 패턴을 검증했다는 전제로, VCP/추세 엄격조건
+                        # 통과 못 한 풀 종목엔 최소게이트(_check_minimal_gate)
+                        # 만 적용하고 텔레그램/한경컨센서스/MBN뉴스/생쇼/촉매
+                        # 겹침 점수(_calc_overlap_boost)로 순위를 매긴다.
 
 SLOT_LABEL = {
     SLOT_INTER: "교집합",
@@ -125,6 +131,7 @@ SLOT_LABEL = {
     SLOT_SSHOW: "생쇼",
     SLOT_LIGHT: "완화",
     SLOT_WATCHLIST: "관심종목",
+    SLOT_POOL:  "키움풀",
     "실계좌":   "실계좌",
     "S":        "S급",
     "A":        "A급",
@@ -531,6 +538,8 @@ def calc_buy_amount(grade: str, psbl_cash: int, score: int = 0) -> int:
         amount = int(BASE_BUY_AMT * 0.67)   # 100만원 — 완화트랙(2026-07-14), 정식조건 미충족이라 최소 사이즈
     elif grade == SLOT_WATCHLIST:
         amount = int(BASE_BUY_AMT * 0.67)   # 100만원 — 한투 관심그룹(2026-07-17), 완화트랙과 동일 사이즈
+    elif grade == SLOT_POOL:
+        amount = int(BASE_BUY_AMT * 0.67)   # 100만원 — 키움풀 최소게이트(2026-07-18), 완화트랙과 동일 사이즈
     else:                                    # 레거시 tele 폴백 (도달 안 함)
         amount = int(BASE_BUY_AMT * 0.67)   # 100만원
 
@@ -611,6 +620,136 @@ def _check_light_chart_health(stock_name: str, conn: sqlite3.Connection, api=Non
         "stop_price": round(curr * 0.93, 0),
         "tgt_price":  round(curr * 1.12, 0),
     }
+
+
+def _check_minimal_gate(stock_name: str, conn: sqlite3.Connection) -> dict:
+    """
+    ★ 2026-07-18 추가 — 키움 조건검색 풀 전용 최소 게이트.
+    사용자 지적: "키움 검색식이 이미 많은 걸 체크해서 나온 종목인데,
+    우리 내부에서 VCP/추세의 20일선밴드+VCP수축+거래량마름+돌파확인
+    같은 무거운 조건을 또 걸면 이중필터링이 된다" — 키움 풀 종목엔
+    "완전히 망가지지 않았는지"만 최소로 확인하고, 대신 텔레그램/한경
+    컨센서스/MBN뉴스/생쇼/촉매 겹침으로 점수를 매긴다(_calc_overlap_boost).
+    체크: 200일선 위 + 60일선 -15%+ 붕괴 배제 + 최소 거래대금(잡주 방지)
+    """
+    rows = conn.execute("""
+        SELECT close_price, volume FROM kr_stock_daily_data
+        WHERE stock_name = ? ORDER BY date DESC LIMIT 220
+    """, (stock_name,)).fetchall()
+    closes  = [r[0] for r in rows if r[0] and r[0] > 0]
+    volumes = [r[1] for r in rows if r[1] and r[1] > 0]
+    if len(closes) < 60:
+        return {}
+
+    curr = closes[0]
+    ma60 = sum(closes[:60]) / 60
+    if curr < ma60 * 0.85:
+        return {}  # 완전 붕괴 배제
+
+    if len(closes) >= 200:
+        ma200 = sum(closes[:200]) / 200
+        if curr < ma200:
+            return {}  # 장기추세 최소확인
+
+    if len(volumes) >= 5:
+        vol_avg5 = sum(volumes[:5]) / 5
+        trading_value_eok = (curr * vol_avg5) / 100_000_000
+        if trading_value_eok < 50:
+            return {}  # 잡주 배제 (swing_analyzer MIN_TRADING_VALUE_EOK와 동일 기준)
+
+    if len(closes) < 15:
+        return {}
+    atr = sum(abs(closes[i] - closes[i+1]) for i in range(14)) / 14 if len(closes) >= 15 else 0
+    stop_price = round(curr - atr * 1.5, 0)
+    tgt_price  = round(curr + atr * 3.0, 0)
+    if stop_price <= 0 or atr <= 0:
+        return {}
+
+    return {"curr_price": curr, "stop_price": stop_price, "tgt_price": tgt_price, "atr_val": atr}
+
+
+def _get_mbn_news_names() -> set:
+    """
+    ★ 2026-07-18 추가 — MBN골드 뉴스(service_id=10001)에서 종목명 매칭.
+    lina_bot.py의 fetch_mbngold_async()와 동일 로그인/크롤링 흐름을
+    동기 버전으로 축소 포팅(lina_bot.py 전체를 import하면 디스코드
+    클라이언트 등 무거운 부작용이 있어 자체 구현).
+    """
+    names = set()
+    try:
+        import requests as _req
+        from bs4 import BeautifulSoup as _BS
+
+        base_url = "https://www.mbngold.com"
+        headers  = {"User-Agent": "Mozilla/5.0", "Referer": f"{base_url}/mg/mypage/login.php"}
+        sess = _req.Session()
+        sess.post(f"{base_url}/mg/mypage/login_action.php", headers=headers, data={
+            "mode": "login", "rURL": f"{base_url}/mg/news/",
+            "mID": os.getenv("MBNGOLD_ID", ""), "mPWD": os.getenv("MBNGOLD_PW", ""),
+        }, timeout=10)
+
+        list_url = f"{base_url}/mg/news/index.php?news_service_id=10001"
+        res  = sess.get(list_url, headers=headers, timeout=10)
+        soup = _BS(res.content.decode("utf-8", errors="ignore"), "html.parser")
+
+        titles = []
+        for a in soup.find_all("a", href=True):
+            if "view.php" in a["href"] and "news_no=MM" in a["href"]:
+                t = a.get_text(strip=True)
+                if t:
+                    titles.append(t)
+            if len(titles) >= 15:
+                break
+
+        if not titles:
+            return names
+
+        conn = sqlite3.connect(os.path.join(BASE_DIR, "kr_theme_finance.db"), timeout=5)
+        cur  = conn.execute("SELECT DISTINCT stock_name FROM kr_stock_daily_data")
+        stock_names = set()
+        for (sname,) in cur.fetchall():
+            import re as _re
+            pure = _re.sub(r"\s*(KOSPI|KOSDAQ)\s*\d{6}$", "", sname).strip()
+            if len(pure) >= 2:
+                stock_names.add(pure)
+        conn.close()
+
+        combined = " ".join(titles)
+        for name in stock_names:
+            if name in combined:
+                names.add(name)
+        if names:
+            print(f"   📰 MBN뉴스 종목 매칭: {len(names)}종목")
+    except Exception as e:
+        print(f"⚠️ [sbo2] MBN뉴스 조회 오류: {e}")
+    return names
+
+
+def _calc_overlap_boost(name: str, code: str, curr_price: float,
+                        tele_scores: dict, sshow_names: set,
+                        catalyst_names: set, news_names: set) -> tuple:
+    """
+    ★ 2026-07-18 추가 — 5개 소스(텔레그램/한경컨센서스/MBN뉴스/생쇼/촉매)
+    겹침 점수 가산. 반환: (가산점, 겹친소스 라벨 리스트)
+    """
+    boost = 0
+    reasons = []
+    if tele_scores.get(name, 0) >= 30:
+        boost += 10; reasons.append("텔레그램")
+    if name in sshow_names:
+        boost += 15; reasons.append("생쇼")
+    if name in catalyst_names:
+        boost += 10; reasons.append("촉매")
+    if name in news_names:
+        boost += 10; reasons.append("MBN뉴스")
+    try:
+        from consensus import apply_consensus_bonus
+        cbonus, creason = apply_consensus_bonus(code, 0, curr_price) if code else (0, "")
+        if cbonus > 0:
+            boost += cbonus; reasons.append(f"한경컨센서스({creason})")
+    except Exception as e:
+        print(f"⚠️ [sbo2] 한경컨센서스 조회 오류 {name}: {e}")
+    return boost, reasons
 
 
 # ============================================================
@@ -747,6 +886,17 @@ def get_candidates(api=None) -> list:
         print(f"⚠️ [sbo2] 생쇼 조회 오류: {e}")
         sshow_map = {}
     sshow_names  = set(sshow_map.keys())
+
+    # ★ 2026-07-18 추가 — 겹침점수 보정용 소스 (텔레그램/MBN뉴스, 나머지
+    #   3개는 위에서 이미 조회한 sshow_names/catalyst_set + 한경컨센서스는
+    #   종목별 실시간 조회라 _calc_overlap_boost 안에서 호출)
+    try:
+        from tele_swing_analyzer import _get_tele_stocks
+        tele_scores = _get_tele_stocks()
+    except Exception as e:
+        print(f"⚠️ [sbo2] 텔레그램 조회 오류: {e}")
+        tele_scores = {}
+    news_names = _get_mbn_news_names()
 
     swing_names  = {d["name"] for d in swing_data}
     trend_names  = {d["name"] for d in trend_data}
@@ -913,6 +1063,48 @@ def get_candidates(api=None) -> list:
             conn.close()
         watchlist_list.sort(key=lambda x: x["score"], reverse=True)
         candidates += watchlist_list[:CANDIDATE_CAP_PER_SLOT]
+
+    # ── 슬롯7: 키움풀 최소게이트 ──────────────────────────────
+    # ★ 2026-07-18 추가: 키움 조건검색(눌림목/VCP/상승추세)이 이미
+    #   기술적 패턴을 검증했다는 전제로, VCP/추세 엄격조건을 통과 못 한
+    #   나머지 풀 종목엔 최소게이트만 적용(이중필터링 방지, 사용자 결정).
+    pool_only = kiwoom_pool - already_covered
+    pool_list = []
+    if pool_only:
+        conn = sqlite3.connect(os.path.join(BASE_DIR, "kr_theme_finance.db"), timeout=5)
+        for name in pool_only:
+            mg = _check_minimal_gate(name, conn)
+            if mg:
+                pool_list.append({
+                    "name":     name,
+                    "grade":    SLOT_POOL,
+                    "score":    50,
+                    "vcp":      False,
+                    "trend":    False,
+                    "catalyst": name in catalyst_set,
+                    "curr":     mg["curr_price"],
+                    "stop":     mg["stop_price"],
+                    "tgt":      mg["tgt_price"],
+                    "rr":       round((mg["tgt_price"] - mg["curr_price"]) /
+                                       (mg["curr_price"] - mg["stop_price"]), 1)
+                                if mg["curr_price"] > mg["stop_price"] else 0,
+                    "themes":   ["키움풀:최소게이트"],
+                })
+        conn.close()
+    pool_list.sort(key=lambda x: x["score"], reverse=True)
+    candidates += pool_list[:CANDIDATE_CAP_PER_SLOT]
+
+    # ── 겹침 점수 보정 (전체 슬롯 공통) ────────────────────────
+    # ★ 2026-07-18 추가: 텔레그램/한경컨센서스/MBN뉴스/생쇼/촉매 중
+    #   겹치는 소스가 있으면 점수 가산 — 슬롯 내 우선순위(상위 N개 캡)에
+    #   반영되도록 재정렬은 각 슬롯에서 이미 끝난 뒤 점수만 보정.
+    for c in candidates:
+        code = get_stock_code(c["name"])
+        boost, reasons = _calc_overlap_boost(
+            c["name"], code, c["curr"], tele_scores, sshow_names, catalyst_set, news_names)
+        if boost:
+            c["score"] += boost
+            c["themes"] = list(c.get("themes", [])) + [f"겹침:{'/'.join(reasons)}"]
 
     return candidates
 
@@ -1224,6 +1416,7 @@ class Sbo2:
         has_sshow = SLOT_SSHOW in held_grades
         has_light = SLOT_LIGHT in held_grades
         has_watchlist = SLOT_WATCHLIST in held_grades
+        has_pool = SLOT_POOL in held_grades
 
         # ★ 2026-07-06: 텔레스윙을 매수 소스에서 제외 (사용자 결정) —
         #   사후검증 결과 텔레스윙이 표본 1368건 중 손절률 77.3%로 압도적으로
@@ -1250,10 +1443,13 @@ class Sbo2:
             buyable += sorted(_buyable(SLOT_LIGHT), key=lambda x: x["score"], reverse=True)
         if not has_watchlist:
             buyable += sorted(_buyable(SLOT_WATCHLIST), key=lambda x: x["score"], reverse=True)
+        if not has_pool:
+            buyable += sorted(_buyable(SLOT_POOL), key=lambda x: x["score"], reverse=True)
 
         print(f"   매수후보: 교집합{len(_buyable(SLOT_INTER))} 스윙{len(_buyable(SLOT_SWING))} "
               f"추세{len(_buyable(SLOT_TREND))} 생쇼{len(_buyable(SLOT_SSHOW))} "
-              f"완화{len(_buyable(SLOT_LIGHT))} 관심종목{len(_buyable(SLOT_WATCHLIST))} (텔레 제외됨)")
+              f"완화{len(_buyable(SLOT_LIGHT))} 관심종목{len(_buyable(SLOT_WATCHLIST))} "
+              f"키움풀{len(_buyable(SLOT_POOL))} (텔레 제외됨)")
 
         for cand in buyable:
             if slots <= 0:
