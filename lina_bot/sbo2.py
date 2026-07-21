@@ -1915,9 +1915,28 @@ class Sbo2:
             self._check_api_health(True)        # ★ API 정상
             # new_pos가 {} (빈 딕셔너리)인 경우 → 진짜로 보유종목 0개. 정상 진행.
 
+            # ★ 2026-07-21: 매수 직후 qty 동기화 보호(BUY_SYNC_GUARD_SEC)와
+            #   동일한 기준시간을 여기서도 써야 해서 위로 이동 — 아래
+            #   "수동매도 감지" 루프가 이 값을 참조.
+            BUY_SYNC_GUARD_SEC = 90
+
             # ── 수동매도/손절 감지 ─────────────────────────────
+            # ★ 2026-07-21 버그 수정: 방금 매수한 종목이 한투 체결반영
+            #   지연(정정취소 API에서도 "정정취소 가능수량 없음"으로 확인
+            #   되듯, 주문 자체는 정상 체결됐는데 잔고 조회 API에 아직
+            #   반영이 안 된 경우)으로 new_pos에 잠깐 안 잡히면, 실제로는
+            #   멀쩡히 보유 중인데 "수동매도"로 오판해 포지션을 잃어버리는
+            #   사고가 있었음(피에스케이/코스맥스 실사례, 매수 30초만에
+            #   오탐 — 사용자가 HTS에서 정상 보유 확인해줌). 아래 qty
+            #   동기화 보호와 동일하게, 매수 직후 BUY_SYNC_GUARD_SEC 동안은
+            #   이 종목을 수동매도 감지 대상에서 제외.
             for code in list(self.positions.keys()):
+                guard_until = self._buy_sync_guard.get(code, 0) + BUY_SYNC_GUARD_SEC
                 if code not in new_pos and code not in self.sold_today:
+                    if time.time() < guard_until:
+                        print(f"   🛡️ {self.positions[code].get('name', code)}({code}) "
+                              f"매수직후 동기화 보호 중 — 수동매도 감지 스킵")
+                        continue
                     self.sold_today[code] = now_hms()
                     print(f"   🔍 수동매도 감지: {code} → sold_today 추가")
                     if _master_remove:
@@ -1928,7 +1947,6 @@ class Sbo2:
             # ★ 매수 직후 BUY_SYNC_GUARD_SEC 동안은 qty 동기화 스킵
             #   (한투 체결반영 지연으로 잘못된 qty가 들어와 50% 익절 수량
             #   계산이 망가지는 레이스컨디션 방지 — 2026-06-29)
-            BUY_SYNC_GUARD_SEC = 90
             now_ts = time.time()
             updated = {}
             for code, rdata in new_pos.items():
