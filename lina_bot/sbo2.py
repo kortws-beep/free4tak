@@ -1871,14 +1871,24 @@ class Sbo2:
             self._pending_orders.pop(code, None)
 
         # 2. 남은 pending = 미체결 → 취소
+        # ★ 2026-07-23 버그 수정: 취소 성공/실패와 무관하게 무조건
+        #   sold_today에 등록하고 있었음. cancel_order()가 실패하는 이유가
+        #   "정정취소 가능수량이 없습니다"(=주문이 이미 전량 체결됨)인
+        #   경우가 있는데, 이 경우는 미체결이 아니라 정상 체결된 포지션
+        #   이라 sold_today 등록이 완전히 틀림(KB금융 실사례 - 체결됐는데
+        #   sold_today 등록되어 재입양 영구 차단됨). 취소가 실제로
+        #   성공했을 때만(=진짜 미체결이었을 때만) sold_today 등록.
         for code, (orgno, odno, qty) in list(self._pending_orders.items()):
             name = get_stock_name(code)
             print(f"   🚫 미체결 취소: {name}({code}) odno:{odno}")
             ok = self.api.cancel_order(orgno, odno, code, qty)
             if ok:
                 _notify(f"🚫 [sbo2] 미체결 취소 {name}({code}) → 자금 반환 / 재매수 방지 등록")
-            # 재매수 방지
-            self.sold_today[code] = now_hms()
+                # 재매수 방지 — 취소가 실제로 성공(=진짜 미체결)했을 때만
+                self.sold_today[code] = now_hms()
+            else:
+                print(f"   ℹ️ {name}({code}) 취소 실패 — 이미 체결된 것으로 보여 "
+                      f"sold_today 등록 안 함 (다음 동기화에서 정상 포지션으로 반영됨)")
             self._pending_orders.pop(code, None)
             self._save_state()
 
