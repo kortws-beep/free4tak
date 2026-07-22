@@ -117,45 +117,61 @@ class KiwoomAPI:
                 continue
             targets.append((seq, name))
 
+        # ★ 2026-07-22: 타임아웃/오류가 조회 시점(특히 장초반 서버혼잡 추정)에
+        #   따라 간헐적으로 발생함을 확인(사용자 지적 - "눌림목/VCP에서
+        #   종목이 나오는데 못 가져온다") - 세션분리 수정(07-17) 이후에도
+        #   완전히 해소되진 않아, 실패 시 조건당 최대 2회 재시도 추가.
+        MAX_RETRY = 2
         for i, (seq, name) in enumerate(targets):
             if i > 0:
                 await asyncio.sleep(5)   # ★ 연속 조회 간 최소 간격 (세션 간섭/레이트리밋 방지)
-            try:
-                async with _ws.connect(KIWOOM_WS_URL) as ws:
-                    await ws.send(json.dumps({"trnm": "LOGIN", "token": token}))
-                    res = json.loads(await asyncio.wait_for(ws.recv(), timeout=10))
-                    if res.get("return_code") != 0:
-                        print(f"  ⚠️ [{name}] 로그인 실패: {res.get('return_msg')}"); continue
 
-                    await ws.send(json.dumps({
-                        "trnm": "CNSRREQ", "seq": seq,
-                        "search_type": "0", "stex_tp": "K",
-                    }))
-                    fetched = 0
-                    while True:
-                        try:
-                            res = json.loads(await asyncio.wait_for(ws.recv(), timeout=8))
-                            if res.get("trnm") == "PING":
-                                await ws.send(json.dumps(res)); continue
-                            if res.get("return_code") != 0:
-                                print(f"  ⚠️ [{name}] 조회 오류: {res.get('return_msg')}"); break
-                            for item in (res.get("data") or []):
-                                raw   = item.get("9001", "") if isinstance(item, dict) else (item[0] if item else "")
-                                code  = raw.lstrip("A") if raw.startswith("A") else raw
-                                iname = item.get("302", "") if isinstance(item, dict) else (item[1] if len(item) > 1 else "")
-                                if code and code not in seen:
-                                    seen.add(code); codes.append(code)
-                                    if code_name_map is not None:
-                                        code_name_map[code] = iname
-                                    if code_tag_map is not None and code not in code_tag_map:
-                                        code_tag_map[code] = name
-                                    fetched += 1
-                            if res.get("cont_yn") != "Y": break
-                        except asyncio.TimeoutError:
-                            print(f"  ⚠️ [{name}] 응답 타임아웃"); break
-                    print(f"  📊 조건검색 [{seq}]{name}: +{fetched}개")
-            except Exception as e:
-                print(f"  ⚠️ 키움 WebSocket 오류 [{name}]: {e}")
+            fetched = 0
+            for attempt in range(1, MAX_RETRY + 2):
+                fetched = 0
+                success = False
+                try:
+                    async with _ws.connect(KIWOOM_WS_URL) as ws:
+                        await ws.send(json.dumps({"trnm": "LOGIN", "token": token}))
+                        res = json.loads(await asyncio.wait_for(ws.recv(), timeout=10))
+                        if res.get("return_code") != 0:
+                            print(f"  ⚠️ [{name}] 로그인 실패({attempt}회차): {res.get('return_msg')}")
+                        else:
+                            await ws.send(json.dumps({
+                                "trnm": "CNSRREQ", "seq": seq,
+                                "search_type": "0", "stex_tp": "K",
+                            }))
+                            while True:
+                                try:
+                                    res = json.loads(await asyncio.wait_for(ws.recv(), timeout=8))
+                                    if res.get("trnm") == "PING":
+                                        await ws.send(json.dumps(res)); continue
+                                    if res.get("return_code") != 0:
+                                        print(f"  ⚠️ [{name}] 조회 오류({attempt}회차): {res.get('return_msg')}"); break
+                                    success = True
+                                    for item in (res.get("data") or []):
+                                        raw   = item.get("9001", "") if isinstance(item, dict) else (item[0] if item else "")
+                                        code  = raw.lstrip("A") if raw.startswith("A") else raw
+                                        iname = item.get("302", "") if isinstance(item, dict) else (item[1] if len(item) > 1 else "")
+                                        if code and code not in seen:
+                                            seen.add(code); codes.append(code)
+                                            if code_name_map is not None:
+                                                code_name_map[code] = iname
+                                            if code_tag_map is not None and code not in code_tag_map:
+                                                code_tag_map[code] = name
+                                            fetched += 1
+                                    if res.get("cont_yn") != "Y": break
+                                except asyncio.TimeoutError:
+                                    print(f"  ⚠️ [{name}] 응답 타임아웃({attempt}회차)"); break
+                except Exception as e:
+                    print(f"  ⚠️ 키움 WebSocket 오류 [{name}]({attempt}회차): {e}")
+
+                if success:
+                    break
+                if attempt <= MAX_RETRY:
+                    await asyncio.sleep(3)   # 재시도 전 잠깐 대기
+
+            print(f"  📊 조건검색 [{seq}]{name}: +{fetched}개")
 
         return codes
 
