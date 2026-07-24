@@ -61,12 +61,18 @@ class KiwoomAPI:
     async def get_condition_codes(self, use_keywords: list = None,
                                    code_name_map: dict = None,
                                    skip_keywords: list = None,
-                                   code_tag_map: dict = None) -> list:
+                                   code_tag_map: dict = None,
+                                   code_multi_tag_map: dict = None) -> list:
         """
         키움 조건검색식으로 종목 조회.
         use_keywords:  이 키워드 포함된 검색식만 사용 (None이면 전체)
         skip_keywords: 이 키워드 포함된 검색식 제외 (단타봇 조건식 제외 등)
-        code_tag_map:  {code: cond_name} — 종목별 검색식명 저장 (buy_tag 추적용)
+        code_tag_map:  {code: cond_name} — 종목별 검색식명 저장 (buy_tag 추적용,
+                       종목이 여러 검색식에 걸려도 처음 매칭된 것 하나만 기록)
+        code_multi_tag_map: {code: [cond_name, ...]} — code_tag_map과 달리
+                       한 종목이 여러 검색식에 걸리면 전부 기록 (★ 2026-07-25
+                       추가, 키움풀 히스토리 추적용 — 검색식별로 소스를
+                       구분해 누적 저장하려면 첫 매칭만으론 부족함)
 
         ★ 2026-07-17: 기존엔 한 WebSocket 세션에서 여러 조건검색을 연달아
         (CNSRREQ) 요청했는데, 두 번째 조건부터 응답이 오류/빈값으로
@@ -153,7 +159,11 @@ class KiwoomAPI:
                                         raw   = item.get("9001", "") if isinstance(item, dict) else (item[0] if item else "")
                                         code  = raw.lstrip("A") if raw.startswith("A") else raw
                                         iname = item.get("302", "") if isinstance(item, dict) else (item[1] if len(item) > 1 else "")
-                                        if code and code not in seen:
+                                        if not code:
+                                            continue
+                                        if code_multi_tag_map is not None:
+                                            code_multi_tag_map.setdefault(code, []).append(name)
+                                        if code not in seen:
                                             seen.add(code); codes.append(code)
                                             if code_name_map is not None:
                                                 code_name_map[code] = iname
