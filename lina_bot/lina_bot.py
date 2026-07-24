@@ -292,7 +292,7 @@ def get_weather_kma_pure() -> str:
     except Exception as e: return f"기상청 수신 지연 중 ({e})"
 
 async def fetch_mbngold_async(service_id="10001", limit=5):
-    """MBN골드 로그인 후 생쇼/뉴스 크롤링 (새 URL 구조)"""
+    """MBN골드 로그인 후 뉴스 크롤링 (새 URL 구조)"""
     import requests as _req
     from dotenv import load_dotenv as _load
     _load(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
@@ -1295,7 +1295,6 @@ async def web_search_hybrid(query):
     if any(kw in query for kw in ["입출금", "출금", "내역", "수입", "지출", "가계부", "장부"]): return get_monthly_report()
     if any(kw in query for kw in ["날씨", "기온", "온도", "비와", "눈와", "기상"]): return f"[국내 대한민국 기상청]:\n{get_weather_kma_pure()}"
     if any(kw in query for kw in ["뉴스", "속보", "mbn", "모닝", "브리핑"]): return "[MBN골드 뉴스]:\n" + await fetch_mbngold_async("10001", 6)
-    if any(kw in query for kw in ["생쇼", "추천종목"]): return "[생쇼 공략주]:\n" + await fetch_mbngold_async("10020", 4)
     if any(kw in query for kw in ["텔레그램", "텔레", "실시간속보"]): return "[텔레그램 속보]:\n" + fetch_recent_telegram_events()
     return ""
 
@@ -1377,56 +1376,11 @@ async def daily_morning_report():
 async def before_daily_morning_report():
     await client.wait_until_ready()
 
-# 2. 오후 2시 30분 생쇼 관심종목 루프
-@tasks.loop(minutes=1)
-async def daily_afternoon_report():
-    kst_now = datetime.datetime.now(KST)
-    if kst_now.hour != 14 or kst_now.minute != 30:
-        return
-    if not _is_trading_day():
-        print(f"🎌 [생쇼] 주말/휴장일 — 스킵")
-        return
+# ★ 2026-07-25: 오후 2시 30분 생쇼 관심종목 루프 제거 — MBN이 생쇼
+#   뉴스 코너(news_service_id=10020) 자체를 폐지해서(게시글 0건, 사이트
+#   뉴스탭에서도 카테고리 소실 확인됨) 소스가 영구 중단됨.
 
-    print(f"\n🔔 [디버그] {kst_now.strftime('%H:%M')} 생쇼 브리핑 출발! 채널 접속 중...")
-    
-    try:
-        channel = await client.fetch_channel(REPORT_CHANNEL_ID)
-    except Exception as e:
-        print(f"❌ [디버그 에러] 14시 30분 채널 접속 실패: {e}")
-        return
-
-    extracted_picks = await fetch_mbngold_async(service_id="10020", limit=4)
-    if not extracted_picks or "텅 비어" in extracted_picks: return
-
-    # 생쇼 DB 저장
-    try:
-        from sshow_db import save_sshow_picks
-        saved = save_sshow_picks(extracted_picks)
-        print(f"💾 생쇼 DB 저장: {saved}건")
-    except Exception as e:
-        print(f"⚠️ 생쇼 DB 저장 오류: {e}")
-
-    prompt = (
-        f"너는 오후 생쇼 공략주를 보고하는 리나야.\n"
-        f"🚨 **'종목명(코드번호 생략가능)'**와 **'핵심 공략 사유'**만 칼같이 리스트로 만들어서 대령해줘.\n\n"
-        f"[추출된 공략주 데이터]:\n{extracted_picks}"
-    )
-    payload = {"model": MODEL_NAME, "messages": [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": prompt}], "stream": False, "options": {"temperature": 0.0}}
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(OLLAMA_API_URL, json=payload) as response:
-                if response.status == 200:
-                    res_json = await response.json()
-                    reply_text = res_json.get("message", {}).get("content", "").strip()
-                    await send_safe_message(channel, f"🔔 **[대장! 오후 2시 30분 생쇼 관심종목 배달이야]** 🔔\n\n{reply_text}")
-                    print(f"✅ [디버그] 14시 30분 생쇼 브리핑 전송 완료!")
-    except Exception as e: print(f"❌ 생쇼 리포트 에러: {e}")
-
-@daily_afternoon_report.before_loop
-async def before_daily_afternoon_report():
-    await client.wait_until_ready()
-
-# 3. 매 시간 30분 텔레그램 속보 루프 
+# 3. 매 시간 30분 텔레그램 속보 루프
 @tasks.loop(minutes=1)
 async def hourly_telegram_event_report():
     global LAST_TELEGRAM_ID
@@ -1824,11 +1778,6 @@ async def on_ready():
         print("✅ [시스템] 7시 30분 융합 브리핑 스케줄러 가동 성공!")
     except Exception as e: print(f"⚠️ [에러] 7시 30분 스케줄러: {e}")
 
-    try:
-        daily_afternoon_report.start()
-        print("✅ [시스템] 14시 30분 생쇼 스케줄러 가동 성공!")
-    except Exception as e: print(f"⚠️ [에러] 생쇼 스케줄러: {e}")
-
     # ★ 2026-07-01: hourly_telegram_event_report 비활성화
     #   텔레그램 메시지는 이미 1분마다 DB에 수집/저장 중이므로
     #   매 시간 30분마다 자동으로 디스코드에 요약을 보낼 필요 없음.
@@ -2191,8 +2140,6 @@ async def on_message(message):
             if context_data and "실패" not in context_data and "텅 비어" not in context_data:
                 if any(k in user_input for k in ["텔레", "속보"]):
                     지시문 = "제공된 텔레그램 속보를 각 뉴스당 '5줄 코드블록 포맷'으로 엄격하게 요약해."
-                elif any(k in user_input for k in ["생쇼"]):
-                    지시문 = "추출된 공략주 데이터를 깔끔한 리스트로 정리해."
                 elif any(k in user_input for k in ["뉴스", "mbn", "아침"]):
                     지시문 = "수집된 실제 데이터(기사 내용)만을 바탕으로 다정하게 요약 보고해줘. 절대 지어내지 마."
                 else:

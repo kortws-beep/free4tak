@@ -194,55 +194,10 @@ def _get_tele_stocks() -> dict:
 
 
 # ══════════════════════════════════════════════════════════════
-# 생쇼 종목 조회
-# ══════════════════════════════════════════════════════════════
-
-def _get_sshow_stocks() -> dict:
-    """생쇼 DB에서 최근 5영업일 종목 반환"""
-    try:
-        from sshow_db import get_sshow_stocks
-        return get_sshow_stocks(days=7)
-    except Exception as e:
-        print(f"⚠️ [텔레스윙] 생쇼 조회 오류: {e}")
-        return {}
-
-
-def _get_sshow_bonus_score() -> int:
-    """
-    생쇼(전문가4인) 추천 가산점을 최근 30일 적중률 기반으로 산출.
-    (★ 2026-06-30 추가 — 기존엔 고정 +8점이었으나, 결과추적 데이터가
-    쌓이면서 실제 성과에 따라 가변 적용하도록 변경)
-    - 표본 20건 미만(sample_size_ok=False) → 고정 +8 (기존과 동일,
-      통계가 신뢰할 만큼 안 쌓였을 때는 보수적으로 유지)
-    - 적중률 60% 이상 → +10
-    - 적중률 40~60%  → +8 (기존과 동일)
-    - 적중률 40% 미만 → +5
-    """
-    try:
-        from sshow_db import get_sshow_stats
-        stats = get_sshow_stats(days=30)
-    except Exception as e:
-        print(f"⚠️ [텔레스윙] 생쇼 통계 조회 오류: {e}")
-        return 8  # 통계 조회 실패 시 기존 고정값으로 안전하게 폴백
-
-    if not stats.get("sample_size_ok", False):
-        return 8
-
-    hit_rate = stats.get("hit_rate", 0.0)
-    if hit_rate >= 0.6:
-        return 10
-    elif hit_rate >= 0.4:
-        return 8
-    else:
-        return 5
-
-
-# ══════════════════════════════════════════════════════════════
 # 정통 스윙 점수 계산
 # ══════════════════════════════════════════════════════════════
 
-def _calc_swing_score(stock_name: str, tele_score: int, is_sshow: bool = False,
-                       sshow_bonus: int = 8) -> dict:
+def _calc_swing_score(stock_name: str, tele_score: int) -> dict:
     """
     정통 스윙 트레이딩 원칙 기반 점수 산출
     """
@@ -372,11 +327,6 @@ def _calc_swing_score(stock_name: str, tele_score: int, is_sshow: bool = False,
         score += tele_pts
         detail["텔레그램"] = f"+{tele_pts} (원점수:{tele_score})"
 
-        # ── 8. 생쇼 추천 (적중률 기반 가변 가산점) ──────────────
-        if is_sshow:
-            score += sshow_bonus
-            detail["생쇼추천"] = f"+{sshow_bonus} (전문가추천, 30일적중률 기반)"
-
         # ── ATR 손절/목표 ─────────────────────────────────────
         atr        = _atr(closes)
         stop_price = round(curr - atr * ATR_STOP_MULT, 0)
@@ -459,40 +409,21 @@ def get_tele_swing_picks(top_n: int = TOP_N, min_score: int = MIN_SCORE) -> list
     """
     print("\n📡 [텔레스윙] 텔레그램 언급 종목 스캔 중...")
 
-    # 1. 텔레그램 언급 종목 + 생쇼(전문가 추천) 종목 추출
-    # ★ 2026-07-03 변경: 기존엔 생쇼 단독 종목(텔레그램 언급 없음)은
-    #   후보 풀에서 통째로 제외되고, 텔레그램 언급 종목에만 생쇼
-    #   가산점을 얹어주는 방식이었음. 이러면 생쇼에서 뽑힌 멀쩡한
-    #   종목이 "텔레그램에 안 나왔다"는 이유만으로 점수표에 아예 안
-    #   올라가는 문제가 있었음(사용자 지적 — 실제로 07/02 생쇼 픽업
-    #   4종목이 텔레그램 미언급으로 전부 후보 제외 확인됨). 이제
-    #   텔레그램 언급 종목 ∪ 생쇼 종목을 후보 풀로 하고, 텔레그램
-    #   언급이 있으면(tele_score) 그 부분 가산점만 추가로 받는다.
-    tele_stocks  = _get_tele_stocks()
-    sshow_stocks = _get_sshow_stocks()
-    if not tele_stocks and not sshow_stocks:
-        print("   ⚠️ 텔레그램 언급/생쇼 추천 종목 모두 없음")
+    # ★ 2026-07-25: MBN이 생쇼(전문가추천) 뉴스 코너 자체를 폐지해서
+    #   (news_service_id=10020 접근 시 게시글 0건, 사이트 뉴스탭에서도
+    #   해당 카테고리 소실 확인됨) 생쇼 소스가 영구 중단됨. 후보 풀을
+    #   텔레그램 언급 종목 단독으로 되돌림.
+    tele_stocks = _get_tele_stocks()
+    if not tele_stocks:
+        print("   ⚠️ 텔레그램 언급 종목 없음")
         return []
 
-    print(f"   텔레그램 언급 종목: {len(tele_stocks)}개 | 생쇼 추천 종목: {len(sshow_stocks)}개")
-
-    all_names = set(tele_stocks.keys()) | set(sshow_stocks.keys())
-    overlap   = set(tele_stocks.keys()) & set(sshow_stocks.keys())
-    print(f"   교집합(텔레그램+생쇼 동시언급): {len(overlap)}개")
-
-    # ★ 2026-06-30: 생쇼 가산점을 적중률 기반으로 — 종목마다 매번 통계를
-    #   다시 조회하면 비효율이므로 루프 시작 전 한 번만 조회
-    sshow_bonus = _get_sshow_bonus_score()
-    if sshow_stocks:
-        print(f"   생쇼 가산점: +{sshow_bonus} (30일 적중률 기반)")
+    print(f"   텔레그램 언급 종목: {len(tele_stocks)}개")
 
     # 2. 정통 스윙 점수 계산
     results = []
-    for name in all_names:
-        tele_score = tele_stocks.get(name, 0)
-        is_sshow   = name in sshow_stocks
-        data = _calc_swing_score(name, tele_score, is_sshow=is_sshow,
-                                  sshow_bonus=sshow_bonus)
+    for name, tele_score in tele_stocks.items():
+        data = _calc_swing_score(name, tele_score)
         if data["curr_price"] > 0 and data["rr_ratio"] >= 1.5:
             results.append(data)
 

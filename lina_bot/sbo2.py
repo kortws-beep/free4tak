@@ -96,7 +96,7 @@ except Exception:
 # ============================================================
 SEED_MONEY       = 5_000_000   # 시드머니 500만원
 BASE_BUY_AMT     = 1_500_000   # 1종목 기본 매수금액 150만원
-MAX_POSITIONS    = 7            # 최대 보유 종목 (교집합1+스윙1+추세1+생쇼1+완화1+관심종목1+키움풀1)
+MAX_POSITIONS    = 7            # 최대 보유 종목 (교집합1+스윙1+추세1+완화1+관심종목1+키움풀1+예비1)
 A_GRADE_RATIO    = 0.7          # A급 상위 70%만 매수
 
 # 슬롯 전략 구분
@@ -104,7 +104,6 @@ SLOT_INTER  = "inter"   # 교집합 (VCP+추세+촉매)
 SLOT_SWING  = "swing"   # 스윙 (VCP only)
 SLOT_TREND  = "trend"   # 추세 (trend only)
 SLOT_TELE   = "tele"    # 텔레스윙 (매수 소스 제외, 라벨만 유지)
-SLOT_SSHOW  = "sshow"   # 생쇼(전문가추천) ∩ (VCP 또는 추세) — 둘 다 통과 못 하면 후보에서 자동 제외됨
 SLOT_LIGHT  = "light"   # 완화트랙 (★ 2026-07-14 추가) — 촉매종목 중 VCP/추세
                         # 정식조건은 못 채웠지만 차트가 안 망가진 종목. 7/7
                         # VCP 돌파확인 필터 추가 이후 쏠림장에서 VCP/추세가
@@ -120,7 +119,7 @@ SLOT_POOL   = "pool"    # 키움풀 최소게이트 (★ 2026-07-18 추가) — 
                         # 조건검색(눌림목/VCP/상승추세)이 이미 기술적
                         # 패턴을 검증했다는 전제로, VCP/추세 엄격조건
                         # 통과 못 한 풀 종목엔 최소게이트(_check_minimal_gate)
-                        # 만 적용하고 텔레그램/한경컨센서스/MBN뉴스/생쇼/촉매
+                        # 만 적용하고 텔레그램/한경컨센서스/MBN뉴스/촉매
                         # 겹침 점수(_calc_overlap_boost)로 순위를 매긴다.
 
 SLOT_LABEL = {
@@ -128,7 +127,6 @@ SLOT_LABEL = {
     SLOT_SWING: "스윙",
     SLOT_TREND: "추세",
     SLOT_TELE:  "텔레",
-    SLOT_SSHOW: "생쇼",
     SLOT_LIGHT: "완화",
     SLOT_WATCHLIST: "관심종목",
     SLOT_POOL:  "키움풀",
@@ -518,7 +516,7 @@ def calc_buy_amount(grade: str, psbl_cash: int, score: int = 0) -> int:
     """
     전략별 매수금액:
     - inter (교집합)        → 150만원 (100%) 기준
-    - swing/trend/sshow    → 125만원 (83%) 기준
+    - swing/trend          → 125만원 (83%) 기준
     - 그 외(레거시 tele)   → 100만원 (67%) 기준 — 텔레스윙은 2026-07-06
       매수 소스에서 제외되어 신규 후보엔 더 이상 생성되지 않음. 이 분기는
       제거 전에 매수된 기존 보유 종목의 grade가 여전히 "tele"인 경우를
@@ -532,7 +530,7 @@ def calc_buy_amount(grade: str, psbl_cash: int, score: int = 0) -> int:
     """
     if grade == SLOT_INTER:
         amount = BASE_BUY_AMT               # 150만원
-    elif grade in (SLOT_SWING, SLOT_TREND, SLOT_SSHOW):
+    elif grade in (SLOT_SWING, SLOT_TREND):
         amount = int(BASE_BUY_AMT * 0.83)   # 125만원
     elif grade == SLOT_LIGHT:
         amount = int(BASE_BUY_AMT * 0.67)   # 100만원 — 완화트랙(2026-07-14), 정식조건 미충족이라 최소 사이즈
@@ -629,7 +627,7 @@ def _check_minimal_gate(stock_name: str, conn: sqlite3.Connection) -> dict:
     우리 내부에서 VCP/추세의 20일선밴드+VCP수축+거래량마름+돌파확인
     같은 무거운 조건을 또 걸면 이중필터링이 된다" — 키움 풀 종목엔
     "완전히 망가지지 않았는지"만 최소로 확인하고, 대신 텔레그램/한경
-    컨센서스/MBN뉴스/생쇼/촉매 겹침으로 점수를 매긴다(_calc_overlap_boost).
+    컨센서스/MBN뉴스/촉매 겹침으로 점수를 매긴다(_calc_overlap_boost).
     체크: 200일선 위 + 60일선 -15%+ 붕괴 배제 + 최소 거래대금(잡주 방지)
     """
     rows = conn.execute("""
@@ -726,18 +724,17 @@ def _get_mbn_news_names() -> set:
 
 
 def _calc_overlap_boost(name: str, code: str, curr_price: float,
-                        tele_scores: dict, sshow_names: set,
+                        tele_scores: dict,
                         catalyst_names: set, news_names: set) -> tuple:
     """
-    ★ 2026-07-18 추가 — 5개 소스(텔레그램/한경컨센서스/MBN뉴스/생쇼/촉매)
-    겹침 점수 가산. 반환: (가산점, 겹친소스 라벨 리스트)
+    ★ 2026-07-18 추가, 2026-07-25 생쇼 소스 폐지로 4개로 축소 —
+    4개 소스(텔레그램/한경컨센서스/MBN뉴스/촉매) 겹침 점수 가산.
+    반환: (가산점, 겹친소스 라벨 리스트)
     """
     boost = 0
     reasons = []
     if tele_scores.get(name, 0) >= 30:
         boost += 10; reasons.append("텔레그램")
-    if name in sshow_names:
-        boost += 15; reasons.append("생쇼")
     if name in catalyst_names:
         boost += 10; reasons.append("촉매")
     if name in news_names:
@@ -854,12 +851,9 @@ def get_candidates(api=None) -> list:
     - inter (교집합): VCP + 추세 + 촉매 동시 통과 → 슬롯1 최우선
     - swing        : VCP only                     → 슬롯2
     - trend        : 추세 only                    → 슬롯3
-    - sshow        : 생쇼(전문가추천) ∩ (VCP 또는 추세) → 슬롯4
-      (★ 2026-07-07: 생쇼 단독으론 매수 근거로 안 쓰고, VCP 또는 추세
-      필터를 통과한 종목 중 생쇼도 같이 추천한 경우에만 후보로 인정 —
-      생쇼 자체 적중률은 낮지만(18.2%, 표본 11건) VCP/추세가 걸러줄
-      거라는 전제로 추가. 옛 텔레(SLOT_TELE)처럼 원본을 그대로 매수
-      소스로 쓰는 게 아니라 반드시 기술적 교집합 조건으로 게이팅한다.)
+      (★ 2026-07-25: 생쇼(전문가추천) 슬롯 제거 — MBN이 생쇼 뉴스
+      코너 자체를 폐지해서(news_service_id=10020 게시글 0건, 사이트
+      뉴스탭에서도 카테고리 소실 확인) 영구 중단된 소스가 됨.)
     - light         : 촉매 종목 중 VCP/추세 정식조건 미충족 + 완화조건 통과
                       → 슬롯5 최하위 우선순위 (★ 2026-07-14 추가)
       (7/7 VCP 피봇돌파 확인 필터 추가 이후 지금 같은 쏠림장에서 VCP/추세가
@@ -873,23 +867,15 @@ def get_candidates(api=None) -> list:
     """
     from swing_analyzer import get_swing_data
     from trend_analyzer import get_trend_data
-    from sshow_db import get_sshow_stocks
 
     kiwoom_pool  = _get_kiwoom_condition_pool()
     catalyst_set = _get_catalyst_stocks()
     swing_data   = get_swing_data(top_n=20, name_filter=kiwoom_pool or None)
     trend_data   = get_trend_data(top_n=20, name_filter=kiwoom_pool or None)
 
-    try:
-        sshow_map = get_sshow_stocks(days=5)
-    except Exception as e:
-        print(f"⚠️ [sbo2] 생쇼 조회 오류: {e}")
-        sshow_map = {}
-    sshow_names  = set(sshow_map.keys())
-
-    # ★ 2026-07-18 추가 — 겹침점수 보정용 소스 (텔레그램/MBN뉴스, 나머지
-    #   3개는 위에서 이미 조회한 sshow_names/catalyst_set + 한경컨센서스는
-    #   종목별 실시간 조회라 _calc_overlap_boost 안에서 호출)
+    # ★ 2026-07-18 추가 — 겹침점수 보정용 소스 (텔레그램/MBN뉴스, catalyst_set은
+    #   위에서 이미 조회, 한경컨센서스는 종목별 실시간 조회라
+    #   _calc_overlap_boost 안에서 호출)
     try:
         from tele_swing_analyzer import _get_tele_stocks
         tele_scores = _get_tele_stocks()
@@ -936,32 +922,8 @@ def get_candidates(api=None) -> list:
     inter_list.sort(key=lambda x: x["score"], reverse=True)
     candidates += inter_list[:CANDIDATE_CAP_PER_SLOT]
 
-    # ── 슬롯4: 생쇼(전문가추천) ∩ (VCP 또는 추세) ───────────────
-    # ★ 2026-07-07: 처음엔 VCP만 게이팅했으나, 추세 통과 종목도 생쇼가
-    #   같이 추천하면 후보로 인정하도록 확대 (사용자 요청). 교집합에
-    #   이미 들어간 종목은 제외.
-    sshow_gate_names = ((swing_names | trend_names) & sshow_names) - inter_names
-    sshow_list = []
-    for name in sshow_gate_names:
-        d = detail_map.get(name, {})
-        sshow_list.append({
-            "name":     name,
-            "grade":    SLOT_SSHOW,
-            "score":    d.get("score", 0),
-            "vcp":      name in swing_names,
-            "trend":    name in trend_names,
-            "catalyst": name in catalyst_set,
-            "curr":     d.get("curr_price", 0),
-            "stop":     d.get("stop_price", 0),
-            "tgt":      d.get("tgt_price", 0),
-            "rr":       d.get("rr_ratio", 0),
-            "themes":   d.get("themes", []),
-        })
-    sshow_list.sort(key=lambda x: x["score"], reverse=True)
-    candidates += sshow_list[:CANDIDATE_CAP_PER_SLOT]
-
-    # ── 슬롯2: 스윙 (VCP only, 교집합/생쇼 제외) ────────────────
-    swing_only = (swing_names - trend_names) - sshow_gate_names
+    # ── 슬롯2: 스윙 (VCP only, 교집합 제외) ─────────────────────
+    swing_only = swing_names - trend_names
     swing_list = []
     for name in swing_only:
         d = detail_map.get(name, {})
@@ -981,8 +943,8 @@ def get_candidates(api=None) -> list:
     swing_list.sort(key=lambda x: x["score"], reverse=True)
     candidates += swing_list[:CANDIDATE_CAP_PER_SLOT]
 
-    # ── 슬롯3: 추세 (trend only, 교집합/생쇼 제외) ──────────────
-    trend_only = (trend_names - swing_names) - sshow_gate_names
+    # ── 슬롯3: 추세 (trend only, 교집합 제외) ───────────────────
+    trend_only = trend_names - swing_names
     trend_list = []
     for name in trend_only:
         d = detail_map.get(name, {})
@@ -1003,7 +965,7 @@ def get_candidates(api=None) -> list:
     candidates += trend_list[:CANDIDATE_CAP_PER_SLOT]
 
     # ── 슬롯5: 완화트랙 (촉매 종목 중 VCP/추세 미충족 + 완화조건 통과) ──
-    already_covered = swing_names | trend_names | sshow_names
+    already_covered = swing_names | trend_names
     light_pool = catalyst_set - already_covered
     light_list = []
     if light_pool:
@@ -1095,13 +1057,14 @@ def get_candidates(api=None) -> list:
     candidates += pool_list[:CANDIDATE_CAP_PER_SLOT]
 
     # ── 겹침 점수 보정 (전체 슬롯 공통) ────────────────────────
-    # ★ 2026-07-18 추가: 텔레그램/한경컨센서스/MBN뉴스/생쇼/촉매 중
-    #   겹치는 소스가 있으면 점수 가산 — 슬롯 내 우선순위(상위 N개 캡)에
-    #   반영되도록 재정렬은 각 슬롯에서 이미 끝난 뒤 점수만 보정.
+    # ★ 2026-07-18 추가, 2026-07-25 생쇼 소스 폐지로 4개로 축소:
+    #   텔레그램/한경컨센서스/MBN뉴스/촉매 중 겹치는 소스가 있으면
+    #   점수 가산 — 슬롯 내 우선순위(상위 N개 캡)에 반영되도록 재정렬은
+    #   각 슬롯에서 이미 끝난 뒤 점수만 보정.
     for c in candidates:
         code = get_stock_code(c["name"])
         boost, reasons = _calc_overlap_boost(
-            c["name"], code, c["curr"], tele_scores, sshow_names, catalyst_set, news_names)
+            c["name"], code, c["curr"], tele_scores, catalyst_set, news_names)
         if boost:
             c["score"] += boost
             c["themes"] = list(c.get("themes", [])) + [f"겹침:{'/'.join(reasons)}"]
@@ -1336,9 +1299,8 @@ class Sbo2:
         inter = sum(1 for c in self.candidates if c["grade"] == SLOT_INTER)
         swing = sum(1 for c in self.candidates if c["grade"] == SLOT_SWING)
         trend = sum(1 for c in self.candidates if c["grade"] == SLOT_TREND)
-        sshow = sum(1 for c in self.candidates if c["grade"] == SLOT_SSHOW)
         light = sum(1 for c in self.candidates if c["grade"] == SLOT_LIGHT)
-        print(f"   교집합:{inter}개 스윙:{swing}개 추세:{trend}개 생쇼:{sshow}개 완화:{light}개")
+        print(f"   교집합:{inter}개 스윙:{swing}개 추세:{trend}개 완화:{light}개")
         for c in self.candidates:
             save_candidate(
                 name=c["name"], grade=c["grade"], score=c["score"],
@@ -1413,7 +1375,6 @@ class Sbo2:
         has_inter = SLOT_INTER in held_grades
         has_swing = SLOT_SWING in held_grades
         has_trend = SLOT_TREND in held_grades
-        has_sshow = SLOT_SSHOW in held_grades
         has_light = SLOT_LIGHT in held_grades
         has_watchlist = SLOT_WATCHLIST in held_grades
         has_pool = SLOT_POOL in held_grades
@@ -1424,12 +1385,11 @@ class Sbo2:
         #   매수 판단에는 더 이상 쓰지 않고, 시장 판단 참고자료로만 남긴다
         #   (텔레스윙 스캔/리포트 자체는 lina_bot.py 07:50·14:40 스케줄러와
         #   !텔레스윙 명령으로 계속 제공됨 — 여기서 빼는 건 sbo2 매수풀뿐).
-        # ★ 2026-07-07: 생쇼(전문가추천)는 단독 적중률이 낮아(18.2%, 표본 11건)
-        #   텔레스윙과 같은 문제가 우려됐으나, VCP 교집합으로만 게이팅해서
-        #   추가 — VCP를 통과 못 하면 애초에 후보 풀에 들어오지 않는다.
         # ★ 2026-07-14: 완화트랙(SLOT_LIGHT) 추가 — 정식조건 미충족 최하위
         #   신뢰도 슬롯이라 우선순위 맨 뒤에 둔다.
-        # 우선순위: 교집합 → 점수 높은 순 (스윙/추세/생쇼/완화)
+        # ★ 2026-07-25: 생쇼(SLOT_SSHOW) 슬롯 제거 — MBN이 생쇼 뉴스 코너
+        #   자체를 폐지해서 소스가 영구 중단됨.
+        # 우선순위: 교집합 → 점수 높은 순 (스윙/추세/완화)
         buyable = []
         if not has_inter:
             buyable += sorted(_buyable(SLOT_INTER), key=lambda x: x["score"], reverse=True)
@@ -1437,8 +1397,6 @@ class Sbo2:
             buyable += sorted(_buyable(SLOT_SWING), key=lambda x: x["score"], reverse=True)
         if not has_trend:
             buyable += sorted(_buyable(SLOT_TREND), key=lambda x: x["score"], reverse=True)
-        if not has_sshow:
-            buyable += sorted(_buyable(SLOT_SSHOW), key=lambda x: x["score"], reverse=True)
         if not has_light:
             buyable += sorted(_buyable(SLOT_LIGHT), key=lambda x: x["score"], reverse=True)
         if not has_watchlist:
@@ -1447,7 +1405,7 @@ class Sbo2:
             buyable += sorted(_buyable(SLOT_POOL), key=lambda x: x["score"], reverse=True)
 
         print(f"   매수후보: 교집합{len(_buyable(SLOT_INTER))} 스윙{len(_buyable(SLOT_SWING))} "
-              f"추세{len(_buyable(SLOT_TREND))} 생쇼{len(_buyable(SLOT_SSHOW))} "
+              f"추세{len(_buyable(SLOT_TREND))} "
               f"완화{len(_buyable(SLOT_LIGHT))} 관심종목{len(_buyable(SLOT_WATCHLIST))} "
               f"키움풀{len(_buyable(SLOT_POOL))} (텔레 제외됨)")
 
