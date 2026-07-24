@@ -1189,6 +1189,60 @@ async def daily_momentum_checkin():
         print(f"❌ AI 모멘텀 체크인 에러: {e}")
 
 
+_KIWOOM_POOL_SCAN_TIMES = {(9, 30), (12, 30), (15, 0)}
+_kiwoom_pool_scan_state = {"date": "", "done": set(), "retry_at": None, "retry_label": None}
+
+
+@tasks.loop(minutes=1)
+async def kiwoom_pool_scan_loop():
+    """키움 조건검색식 전체 스캔 → 소스별 누적 저장(kiwoom_pool_tracker.py).
+    09:30/12:30/15:00 하루 3회, 실패 시 5분 뒤 1회 재시도 (2026-07-25 사용자 결정).
+    당일 중복은 kiwoom_pool_tracker.py의 UNIQUE(scan_date,stock_name,source)로 제거."""
+    kst_now = datetime.datetime.now(KST)
+    if not _is_trading_day():
+        return
+
+    today = kst_now.strftime("%Y-%m-%d")
+    if _kiwoom_pool_scan_state["date"] != today:
+        _kiwoom_pool_scan_state.update(
+            {"date": today, "done": set(), "retry_at": None, "retry_label": None})
+
+    hm = (kst_now.hour, kst_now.minute)
+    label = f"{kst_now.hour:02d}:{kst_now.minute:02d}"
+
+    if hm in _KIWOOM_POOL_SCAN_TIMES and label not in _kiwoom_pool_scan_state["done"]:
+        _kiwoom_pool_scan_state["done"].add(label)
+        print(f"\n🔍 [키움풀] {label} 스캔 시작")
+        try:
+            from kiwoom_pool_tracker import scan_and_log
+            ok = await scan_and_log()
+        except Exception as e:
+            print(f"❌ [키움풀] {label} 스캔 에러: {e}")
+            ok = False
+        if not ok:
+            _kiwoom_pool_scan_state["retry_at"] = kst_now + datetime.timedelta(minutes=5)
+            _kiwoom_pool_scan_state["retry_label"] = label
+            print(f"⚠️ [키움풀] {label} 스캔 실패 — 5분 뒤 재시도 예정")
+        return
+
+    if (_kiwoom_pool_scan_state["retry_at"] is not None and
+            kst_now >= _kiwoom_pool_scan_state["retry_at"]):
+        retry_label = _kiwoom_pool_scan_state["retry_label"]
+        _kiwoom_pool_scan_state["retry_at"] = None
+        _kiwoom_pool_scan_state["retry_label"] = None
+        print(f"🔁 [키움풀] {retry_label} 스캔 재시도")
+        try:
+            from kiwoom_pool_tracker import scan_and_log
+            await scan_and_log()
+        except Exception as e:
+            print(f"❌ [키움풀] {retry_label} 재시도 에러: {e}")
+
+
+@kiwoom_pool_scan_loop.before_loop
+async def before_kiwoom_pool_scan_loop():
+    await client.wait_until_ready()
+
+
 @tasks.loop(minutes=1)
 async def daily_market_context_report():
     kst_now = datetime.datetime.now(KST)
@@ -1810,6 +1864,11 @@ async def on_ready():
         daily_momentum_checkin.start()
         print("✅ [시스템] AI 모멘텀 스캐너(08:55/14:35) + 체크인(16:00) 스케줄러 가동 성공! (관찰 전용)")
     except Exception as e: print(f"⚠️ [에러] AI 모멘텀 스케줄러: {e}")
+
+    try:
+        kiwoom_pool_scan_loop.start()
+        print("✅ [시스템] 키움풀 스캔 스케줄러(09:30/12:30/15:00) 가동 성공! (관찰 전용)")
+    except Exception as e: print(f"⚠️ [에러] 키움풀 스캔 스케줄러: {e}")
 
     try:
         daily_master_report.start()

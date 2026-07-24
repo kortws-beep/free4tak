@@ -100,14 +100,17 @@ def _calc_atr(stock_name: str, conn: sqlite3.Connection) -> dict:
     }
 
 
-async def scan_and_log():
-    """오늘자 키움 전체 조건검색(단타성 제외) 스캔 → 검색식별로 구분해 누적 저장"""
+async def scan_and_log() -> bool:
+    """오늘자 키움 전체 조건검색(단타성 제외) 스캔 → 검색식별로 구분해 누적 저장.
+    반환값은 스케줄러의 실패 재시도 판단용 — 조건검색 결과를 하나라도
+    정상적으로 받아왔으면 True, API 비활성화/전체 타임아웃 등으로
+    아무것도 못 받아왔으면 False."""
     from kiwoom_api import KiwoomAPI
 
     api = KiwoomAPI()
     if not api.enabled:
         print("⚠️ 키움 API 비활성화 — 스캔 스킵")
-        return
+        return False
 
     code_name_map = {}
     code_multi_tag_map = {}
@@ -120,7 +123,7 @@ async def scan_and_log():
 
     if not code_multi_tag_map:
         print("⚠️ 조건검색 결과 없음")
-        return
+        return False
 
     init_db()
     today = datetime.date.today().strftime("%Y-%m-%d")
@@ -152,6 +155,7 @@ async def scan_and_log():
     conn.close()
     fin_conn.close()
     print(f"✅ 키움풀 스캔 저장 완료: {saved}건 저장 ({skipped}건 가격데이터 부족으로 스킵)")
+    return True
 
 
 def checkin_pool_log():
