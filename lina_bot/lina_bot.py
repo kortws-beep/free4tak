@@ -487,7 +487,16 @@ def _call_llm(prompt: str, max_tokens: int = 1200, force_claude: bool = False) -
                 model=ollama_model, max_tokens=max_tokens,
                 messages=[{"role": "user", "content": prompt}],
             )
-            return res.choices[0].message.content.strip()
+            result = res.choices[0].message.content.strip()
+            # ★ 2026-08-04: 로컬 LLM이 가끔 요약 도중 문단 단위로 중국어로
+            #   새는 현상 발견(사용자 지적 — MBN 08:50 리포트 일부 문단이
+            #   중국어로 나옴). 한국어 본문엔 한자가 거의 안 나오므로,
+            #   한자(CJK 통합 한자) 개수가 일정 수준 넘으면 오염된 출력으로
+            #   보고 Claude로 재시도한다.
+            han_count = sum(1 for ch in result if '一' <= ch <= '鿿')
+            if han_count <= 20:
+                return result
+            print(f"⚠️ 로컬 LLM 출력에 한자/중국어 혼입 감지({han_count}자) → Claude로 재시도")
         except Exception as e:
             print(f"⚠️ 로컬 LLM 호출 실패({e}) → Claude로 폴백")
 
@@ -518,7 +527,9 @@ def _summarize_report_body(text: str) -> str:
         "(1000~1500자)으로 한국어로 요약해라. 숫자·종목명·원인-결과 관계는 "
         "유지하고 불필요한 수식어만 줄여라. 요약에 날짜를 표기해야 한다면 "
         f"반드시 {today_str}만 써라 — 원문 안에 다른 날짜가 있어도 그건 "
-        "무시하고 절대 지어내지 마라.\n\n"
+        "무시하고 절대 지어내지 마라. 반드시 한국어로만 작성해라 — 원문에 "
+        "중국어/영어가 섞여 있어도 요약은 전부 한국어로만 쓰고 절대 중국어를 "
+        "섞지 마라.\n\n"
         f"[원문]\n{text[:4000]}"
     )
     result = _call_llm(prompt, max_tokens=1200)
