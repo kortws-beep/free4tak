@@ -26,7 +26,7 @@ import datetime
 
 BASE_DIR         = os.path.dirname(os.path.abspath(__file__))
 DB_PATH          = os.path.join(BASE_DIR, "kr_theme_finance.db")
-DB_PATH_TELEGRAM = os.path.join(BASE_DIR, "intelligence", "telegram_events.db")
+DB_PATH_TELEGRAM = os.path.join(os.path.dirname(BASE_DIR), "intelligence", "telegram_events.db")
 
 # ── 튜닝 파라미터 ─────────────────────────────────────
 MIN_SCORE        = 50     # 최소 통과 점수

@@ -28,7 +28,7 @@ import yfinance as yf
 BASE_DIR         = os.path.dirname(os.path.abspath(__file__))
 DB_PATH          = os.path.join(BASE_DIR, "kr_theme_finance.db")
 DB_PATH_MAPPING  = os.path.join(BASE_DIR, "us_kr_mapping.db")
-DB_PATH_TELEGRAM = os.path.join(BASE_DIR, "intelligence", "telegram_events.db")
+DB_PATH_TELEGRAM = os.path.join(os.path.dirname(BASE_DIR), "intelligence", "telegram_events.db")
 # sector_monitor DB — 여러 경로 중 존재하는 것 사용
 _sector_candidates = [
     os.path.join(BASE_DIR, "..", "intelligence", "sector_monitor.db"),
