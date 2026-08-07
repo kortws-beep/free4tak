@@ -555,7 +555,11 @@ def _check_light_chart_health(stock_name: str, conn: sqlite3.Connection, api=Non
     완화트랙 (★ 2026-07-14 추가, lina_bot.py 모멘텀 스캐너의 동일 로직 포팅) —
     VCP/추세의 다단계 조건 대신 "차트가 완전히 망가지지 않았다" 수준만
     가볍게 확인. 세 패턴 중 하나만 만족하면 통과:
-    (A) 하락 전환: 최근 저점이 2일 이상 전에 찍혔고 현재가가 그보다 위
+    (A) 하락 전환: 최근 저점이 2~7일 전(너무 오래된 저점 제외)에 찍혔고
+        현재가가 그 저점보다 3% 이상 위(★ 2026-08-07 강화 — lina_bot.py
+        모멘텀 스캐너에서 발견된 문제(같은 종목이 며칠씩 연속 픽되는
+        현상, 사용자 지적)를 여기도 동일하게 반영 — 저점 유효기간 상한 +
+        반등폭 최소 기준 추가)
     (B) 박스권 상단 돌파 임박: 최근 15일 변동폭이 좁고(≤15%) 현재가가
         그 구간 상단 근처(3% 이내)이거나 이미 돌파
     (C) 거래량 서지: 200일선 위 + 52주 고점 대비 -20% 이내인 종목 중,
@@ -583,8 +587,9 @@ def _check_light_chart_health(stock_name: str, conn: sqlite3.Connection, api=Non
     lo, hi = min(window), max(window)
 
     pattern = None
+    # (A) 하락 전환 — 저점이 2~7일 전(상한 있음)이고, 저점 대비 3%+ 반등
     idx_lo = window.index(lo)
-    if idx_lo >= 2 and curr > lo:
+    if 2 <= idx_lo <= 7 and lo > 0 and curr >= lo * 1.03:
         pattern = "하락전환"
     elif lo > 0 and (hi - lo) / lo <= 0.15 and curr >= hi * 0.97:
         pattern = "박스돌파임박"

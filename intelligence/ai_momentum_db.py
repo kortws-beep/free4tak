@@ -391,6 +391,32 @@ def get_recent_picks(limit: int = 10) -> list:
     ]
 
 
+def get_recent_pick_names(trading_days: int = 5) -> set:
+    """★ 2026-08-07 추가 — 최근 N거래일(momentum_picks에 실제 기록이 남은
+    날짜 기준) 안에 픽된 종목명 집합. 같은 종목이 반등폭이 크다는 이유로
+    며칠씩 연속 픽되는 걸 막기 위한 제외 목록 용도(사용자 지적 "매일 같네")."""
+    init_db()
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=5)
+        dates = [r[0] for r in conn.execute(
+            "SELECT DISTINCT date FROM momentum_picks ORDER BY date DESC LIMIT ?",
+            (trading_days,)
+        ).fetchall()]
+        if not dates:
+            conn.close()
+            return set()
+        placeholders = ",".join("?" * len(dates))
+        names = {r[0] for r in conn.execute(
+            f"SELECT DISTINCT stock_name FROM momentum_picks WHERE date IN ({placeholders})",
+            dates
+        ).fetchall()}
+        conn.close()
+        return names
+    except Exception as e:
+        print(f"⚠️ 최근 픽 종목 조회 오류: {e}")
+        return set()
+
+
 if __name__ == "__main__":
     init_db()
     print("모멘텀픽 DB 초기화 완료:", DB_PATH)

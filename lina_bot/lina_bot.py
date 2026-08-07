@@ -749,15 +749,20 @@ def _enrich_momentum_picks(picks: list) -> list:
 
 
 # ★ 2026-07-10: Momentum Router 모듈3 (Sector & Stock Sniper)
-def _map_themes_to_candidates(themes: list) -> list:
+def _map_themes_to_candidates(themes: list, exclude_names: set = None) -> list:
     """
     테마 키워드 → kr_theme_stocks 매칭 → VCP(swing)/추세(trend) 통과 종목만
     필터링해 최종 후보를 만든다. swing_master.py의 sector_monitor 테마-종목
     키워드 매칭 패턴(188-213행)과 동일한 방식, 어제 생쇼(SLOT_SSHOW)가
     했던 "VCP∪추세 교집합 게이팅"과 동일한 원리를 여기도 적용.
+    exclude_names: 최근 픽된 종목명 집합 — 반등폭이 커서 계속 1등으로
+      뽑히는 종목이 며칠씩 연속 픽되는 문제(2026-08-07, 사용자 지적
+      "매일 같네")를 막기 위해, top-2 자르기 전에 아예 후보 풀에서
+      제외해서 그다음 순위 종목이 자연스럽게 올라오도록 한다.
     """
     if not themes:
         return []
+    exclude_names = exclude_names or set()
 
     from swing_analyzer import get_swing_data
     from trend_analyzer import get_trend_data
@@ -817,7 +822,7 @@ def _map_themes_to_candidates(themes: list) -> list:
                     break
         for (sname,) in rows:
             pure = re.sub(r'\s*(KOSPI|KOSDAQ)\s*\d{6}$', '', sname).strip()
-            if pure in seen:
+            if pure in seen or pure in exclude_names:
                 continue
             # ★ 2026-07-14: 동전주(초저가주) 배제 — 사용자 지적으로 실제
             #   운영 픽에서 3,000~5,000원대 저가주가 나온 걸 발견. 유동성/
@@ -886,7 +891,12 @@ def _check_light_chart_health(stock_name: str, conn: sqlite3.Connection, api=Non
     """
     촉매 전용 완화 트랙 — VCP/추세의 다단계 조건 대신 "차트가 완전히
     망가지지 않았다" 수준만 가볍게 확인. 세 패턴 중 하나만 만족하면 통과:
-    (A) 하락 전환: 최근 저점이 2일 이상 전에 찍혔고 현재가가 그보다 위
+    (A) 하락 전환: 최근 저점이 2~7일 전(너무 오래된 저점 제외)에 찍혔고
+        현재가가 그 저점보다 3% 이상 위(★ 2026-08-07 강화 — 기존엔
+        상한선 없이 "2일 이상 전"+"저점보다 아주 조금 위"만 봐서, 장기
+        눌림 구간에서 같은 종목이 며칠씩 연속으로 픽되는 문제 발견
+        (사용자 지적 — "매일 같네"). 저점 유효기간에 상한을 두고 반등폭
+        최소 기준을 추가해 "진짜 갓 전환된" 종목만 통과하도록 함)
     (B) 박스권 상단 돌파 임박: 최근 15일 변동폭이 좁고(≤15%) 현재가가
         그 구간 상단 근처(3% 이내)이거나 이미 돌파
     (C) 거래량 서지 (2026-07-10 추가 — "마이크로 모멘텀" 대안): 200일선 위 +
@@ -922,9 +932,9 @@ def _check_light_chart_health(stock_name: str, conn: sqlite3.Connection, api=Non
     lo, hi = min(window), max(window)
 
     pattern = None
-    # (A) 하락 전환 — 저점이 2일 이상 전, 현재가가 그 저점보다 위
+    # (A) 하락 전환 — 저점이 2~7일 전(상한 있음)이고, 저점 대비 3%+ 반등
     idx_lo = window.index(lo)
-    if idx_lo >= 2 and curr > lo:
+    if 2 <= idx_lo <= 7 and lo > 0 and curr >= lo * 1.03:
         pattern = "하락전환"
     # (B) 박스권 상단 돌파 임박 — 최근 변동폭 좁고 상단 근접/돌파
     elif lo > 0 and (hi - lo) / lo <= 0.15 and curr >= hi * 0.97:
@@ -1097,13 +1107,16 @@ def _build_momentum_picks_sync(session: str, mbn_text: str = "") -> str:
         print(f"⚠️ [모멘텀-{session}] 테마 파싱 실패 — 원문:\n{llm_text}")
         return ""
 
-    candidates = _map_themes_to_candidates(themes)
+    import ai_momentum_db
+    recent_names = ai_momentum_db.get_recent_pick_names(trading_days=5)
+    candidates = _map_themes_to_candidates(themes, exclude_names=recent_names)
     if not candidates:
         print(f"💤 [모멘텀-{session}] 테마({', '.join(themes)})에 맞는 "
-              "VCP/추세 통과 종목 없음 — 오늘은 후보 없음")
+              "VCP/추세 통과 종목 없음(최근 5거래일 픽 제외 반영) — 오늘은 후보 없음")
         return (f"🧭 **[AI 모멘텀 스캐너 — {session_label}]** 🧭\n\n"
-                f"오늘의 테마({', '.join(themes)})는 뽑혔지만, VCP/추세 기술적 "
-                "확인을 통과한 종목이 없어서 최종 후보는 없어.")
+                f"오늘의 테마({', '.join(themes)})는 뽑혔지만, 최근 5거래일 내 "
+                "이미 나온 종목을 빼면 VCP/추세 기술적 확인을 통과한 새 종목이 "
+                "없어서 최종 후보는 없어.")
 
     for c in candidates:
         c["phase"] = phase
