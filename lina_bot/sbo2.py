@@ -1933,8 +1933,26 @@ class Sbo2:
                               f"매수직후 동기화 보호 중 — qty 유지 "
                               f"(실계좌:{rdata['qty']}, 메모리:{existing['qty']})")
                     else:
+                        old_entry = existing["entry_price"]
                         existing["qty"]         = rdata["qty"]
                         existing["entry_price"] = rdata["entry_price"]
+                        # ★ 2026-08-07: 평단가가 바뀌면(추가매수) 손절/목표도
+                        #   같은 비율(-10%/+15%)로 재계산 — 기존엔 최초 진입가
+                        #   기준으로 고정돼서, 평단이 바뀌어도 손절/목표가 그대로
+                        #   남아 원래 의도한 리스크 비율에서 벗어나고 있었음
+                        #   (사용자 지적 — 삼성전자 20만원 매수 후 18만원 추가매수
+                        #   사례). "실계좌"(수동매수 추적) 포지션에만 적용 — sbo2
+                        #   자체 신호 매수는 ATR 기반 별도 로직(_check_sell 단계별
+                        #   피라미딩)이라 건드리지 않음.
+                        new_entry = existing["entry_price"]
+                        if (existing.get("grade") == "실계좌"
+                                and abs(new_entry - old_entry) > 1):
+                            existing["stop_price"] = round(new_entry * 0.90, 0)
+                            existing["tgt_price"]  = round(new_entry * 1.15, 0)
+                            print(f"   🔄 {existing.get('name', code)}({code}) 평단 변경 "
+                                  f"({old_entry:,.0f}→{new_entry:,.0f}) — 손절/목표 재계산 "
+                                  f"(손절:{existing['stop_price']:,.0f} "
+                                  f"목표:{existing['tgt_price']:,.0f})")
                     # 종목명이 코드 그대로면 DB에서 다시 조회
                     cur_name = existing.get("name", code)
                     if cur_name == code:
