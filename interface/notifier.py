@@ -34,7 +34,11 @@ class Notifier:
 
     def __init__(self, name: str = "bot"):
         self.name      = name  # 어느 봇이 보내는지 (디버깅용)
-        self.webhook   = os.getenv("DISCORD_WEBHOOK_URL")
+        # ★ 2026-08-08: 웹훅+봇채널이 둘 다 설정되어 있으면 알림마다 2번씩
+        #   나가는 구조였음(cbot 매수 알림이 4번 중복 발송된 사고로 발견 —
+        #   웹훅+봇채널 이중발송에 재시도 중복까지 겹친 것). 사용자 결정으로
+        #   봇채널만 사용, 웹훅은 비활성화.
+        self.webhook   = None
         self.bot_token = os.getenv("DISCORD_BOT_TOKEN")
         self.channel   = os.getenv("DISCORD_CHANNEL_ID")
         self._last_send = 0  # rate limit 회피용 타임스탬프
