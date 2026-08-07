@@ -27,6 +27,18 @@ from kiki_briefing import read_state, write_state, update_state
 send_long = None
 execute_command = None
 
+# ★ 2026-08-07 추가 — 개별 봇 재시작(!재시작 자연어)용 서비스명 매핑.
+#   기존엔 cmd_restart_all()에만 이 목록이 있고 개별 재시작 명령은
+#   아예 없었음(사용자 지적 — "전체재시작은 잘 되는데 개별 cbot 등
+#   재시작은 안 먹히네"). cmd_restart_all()도 이 상수를 재사용하도록 변경.
+RESTART_SERVICES = {
+    "sbo2":     "yeongam9-sbo2",
+    "sbot":     "yeongam9-sbot",
+    "cbot":     "yeongam9-cbot",
+    "telegram": "yeongam9-telegram",
+    "sector":   "yeongam9-sector",
+}
+
 async def wait_cmd_result(bot_name: str, max_attempts: int = 12,
                            interval: float = 5.0) -> str:
     """pending_cmd 처리 결과 폴링 — 자체 구현"""
@@ -503,18 +515,10 @@ async def cmd_restart_all(ctx):
     import subprocess as _sp
     import asyncio as _ac
 
-    SERVICES = [
-        ("sbo2",     "yeongam9-sbo2"),
-        ("sbot",     "yeongam9-sbot"),
-        ("cbot",     "yeongam9-cbot"),
-        ("telegram", "yeongam9-telegram"),
-        ("sector",   "yeongam9-sector"),
-    ]
-
     await ctx.send("🔄 전체 재시작 시작... (kiki 제외)")
     results = []
 
-    for name, svc in SERVICES:
+    for name, svc in RESTART_SERVICES.items():
         try:
             ret = _sp.run(["sudo", "systemctl", "restart", svc],
                           capture_output=True, timeout=15)
@@ -532,6 +536,28 @@ async def cmd_restart_all(ctx):
     # ★ 재시작 후 5초 대기 후 상태 자동 출력
     await _ac.sleep(5)
     await cmd_all_status(ctx)
+
+
+async def cmd_restart(ctx, bot_name: str):
+    """★ 2026-08-07 추가 — 개별 봇 재시작. bot_name: sbo2/sbot/cbot/telegram/sector"""
+    import subprocess as _sp
+
+    svc = RESTART_SERVICES.get(bot_name)
+    if not svc:
+        await ctx.send(f"❌ 알 수 없는 봇: {bot_name} (가능: {', '.join(RESTART_SERVICES)})")
+        return
+
+    await ctx.send(f"🔄 {bot_name} 재시작 중...")
+    try:
+        ret = _sp.run(["sudo", "systemctl", "restart", svc],
+                      capture_output=True, timeout=15)
+        if ret.returncode == 0:
+            await ctx.send(f"✅ {bot_name} 재시작 완료!")
+        else:
+            err = ret.stderr.decode('utf-8', errors='ignore').strip()[:200]
+            await ctx.send(f"❌ {bot_name} 재시작 실패: {err or 'returncode=' + str(ret.returncode)}")
+    except Exception as e:
+        await ctx.send(f"❌ {bot_name} 재시작 오류: {e}")
 
 
 # ============================================================
@@ -1252,9 +1278,10 @@ async def cmd_help(ctx):
   "반도체 강해?"        → 업종 분석
 
 ━━━ ⌨️ 명령어 직접 입력 ━━━
-**📈 sbot**   `!상태`(=`!s상태`) `!정지`(=`!s정지`) `!시작`(=`!s시작`) `!s매도 코드` `!점수기준 숫자` `!s관심 [코드]`
-**📊 sbo2**   `!sbo2상태` `!sbo2매도 코드` `!sbo2정지` `!sbo2시작`
-**🪙 코인봇** `!c상태` `!c정지` `!c시작` `!c매도 BTC` `!c성과`
+**📈 sbot**   `!상태`(=`!s상태`) `!정지`(=`!s정지`) `!시작`(=`!s시작`) `!재시작`(=`!s재시작`) `!s매도 코드` `!점수기준 숫자` `!s관심 [코드]`
+**📊 sbo2**   `!sbo2상태` `!sbo2매도 코드` `!sbo2정지` `!sbo2시작` `!sbo2재시작`
+**🪙 코인봇** `!c상태` `!c정지` `!c시작` `!c재시작` `!c매도 BTC` `!c성과`
+**📡 텔레그램/섹터** `!t재시작`  `!섹터재시작`
 
 **📊 성과/분석**
   `!성과`          — 오늘 손익

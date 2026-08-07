@@ -105,7 +105,7 @@ from kiki_cmd import (
     cmd_analyze_today, cmd_analyze_period,
     cmd_watchlist, cmd_watchlist_show,
     cmd_all_status,
-    cmd_restart_all,
+    cmd_restart_all, cmd_restart,
     cmd_cbot_status, cmd_cbot_sell, cmd_cbot_performance,
     cmd_theme_status, cmd_watchlist_hts, cmd_help,
     cmd_total_performance,
@@ -724,6 +724,14 @@ class AIAssistant:
 "코인봇 시작" → CMD:!c시작
 "스윙 멈춰" → CMD:!s정지
 
+[재시작] (systemd 서비스 자체를 완전히 새로 켬 — 시작/정지와 다름)
+"스윙/스윙봇 재시작해줘/다시 켜줘(정지 안 된 상태에서)" → CMD:!s재시작
+"sbo2/스윙2 재시작해줘" → CMD:!sbo2재시작
+"코인봇/cbot 재시작해줘" → CMD:!c재시작
+"텔레그램/텔레 재시작해줘" → CMD:!t재시작
+"섹터/섹터모니터 재시작해줘" → CMD:!섹터재시작
+"전체 다 재시작해줘" → CMD:!전체재시작
+
 [설정]
 "점수 X로/기준 X점" → CMD:!점수기준 X
 
@@ -880,6 +888,8 @@ async def execute_command(ctx, cmd: str):
         await cmd_pause(ctx, True, "sbot")
     elif cmd == "!시작":
         await cmd_pause(ctx, False, "sbot")
+    elif cmd == "!재시작":
+        await cmd_restart(ctx, "sbot")
 
     # ── 스윙봇 ───────────────────────────────────────────────
     elif cmd in ("!s상태", "!상태 sbot"):
@@ -894,6 +904,8 @@ async def execute_command(ctx, cmd: str):
         await cmd_pause(ctx, True, "sbot")
     elif cmd == "!s시작":
         await cmd_pause(ctx, False, "sbot")
+    elif cmd == "!s재시작":
+        await cmd_restart(ctx, "sbot")
     # ── sbo2 (스윙봇2) ───────────────────────────────────────
     elif cmd in ("!sbo2상태", "!상태 sbo2"):
         await cmd_status(ctx, "sbo2")
@@ -907,6 +919,8 @@ async def execute_command(ctx, cmd: str):
         await cmd_pause(ctx, True, "sbo2")
     elif cmd == "!sbo2시작":
         await cmd_pause(ctx, False, "sbo2")
+    elif cmd == "!sbo2재시작":
+        await cmd_restart(ctx, "sbo2")
     elif cmd.startswith("!s관심"):
         parts = cmd.split()
         if len(parts) == 2:
@@ -931,8 +945,16 @@ async def execute_command(ctx, cmd: str):
         await cmd_pause(ctx, True, "cbot")
     elif cmd == "!c시작":
         await cmd_pause(ctx, False, "cbot")
+    elif cmd == "!c재시작":
+        await cmd_restart(ctx, "cbot")
     elif cmd == "!c성과":
         await cmd_cbot_performance(ctx)
+
+    # ── 텔레그램 모니터 / 섹터 모니터 (재시작만 지원) ─────────
+    elif cmd in ("!t재시작", "!텔레재시작", "!텔레그램재시작"):
+        await cmd_restart(ctx, "telegram")
+    elif cmd in ("!섹터재시작", "!sector재시작"):
+        await cmd_restart(ctx, "sector")
 
     # ── 업종/테마 ───────────────────────────────────────────
     elif cmd == "!이벤트":
