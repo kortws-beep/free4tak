@@ -4,7 +4,7 @@ cbot.py — 영암9 코인 자동매매 봇 v2.3 (전면 재구성판)
 [이 파일이 하는 일 — 비개발자용 설명]
 
 업비트에서 24시간 코인을 자동매매하는 봇입니다.
-30만원 소액 시드 기준으로 안전하게 운영되도록 설계되었습니다.
+300만원 시드(2026-08-07, 종목당 100만원 × 3종목) 기준으로 운영됩니다.
 
 ▶ 종목 풀 자동 확장 (5분 캐시)
   - 업비트 KRW 마켓 전체에서 거래대금 상위 20개 자동 선별
@@ -133,11 +133,12 @@ MIN_CHANGE_RATE   = -20.0           # 폭락 (-20% 이하) 제외
 # 레버리지/ETF 제외 키워드
 EXCLUDE_KEYWORDS = ["UP", "DOWN", "BEAR", "BULL"]
 
-# 매수/매도 금액 (40만원 단일 매수 — 추매 없음)
-BUY_1ST_AMT       = 400_000     # 1차 매수 40만원 (단일, 추매 없음)
+# 매수/매도 금액 (100만원 단일 매수 — 추매 없음)
+# ★ 2026-08-07: 300만원 시드 재투입 예정에 맞춰 40만원→100만원, 4→3종목으로 조정
+BUY_1ST_AMT       = 1_000_000   # 1차 매수 100만원 (단일, 추매 없음)
 BUY_2ND_AMT       = 0           # 추매 비활성화
 BUY_2ND_THRESHOLD = -9999       # 추매 비활성화 (절대 도달 안 하는 값)
-MAX_POSITIONS     = 4           # 최대 4코인 (3→4, 마지막 슬롯은 잔액만큼 매수)
+MAX_POSITIONS     = 3           # 최대 3코인 (종목당 100만원 × 3 = 300만원)
 MAX_ALT_POSITIONS = 3           # BTC/ETH 외 알트 동시 보유 최대 3개
 MIN_ORDER_AMT     = 5_000       # 업비트 최소 주문 금액
 
@@ -1559,7 +1560,7 @@ class CBot:
             "is_night":      self._is_night(),
             "coin_pool":     self.coin_pool,
             "coins":         self.coin_pool,  # kiki 호환용
-            "seed":          "30만원 소액 모드",
+            "seed":          "300만원 모드",
         }
 
     # ============================================================
@@ -1740,12 +1741,12 @@ class CBot:
                     _write_status(self._build_status(krw, total_profit))
                     time.sleep(LOOP_SLEEP); continue
 
-                # ── 매수 슬롯 (1차 익절 후 슬롯 반환, 주문가능금액 40만원 이상일 때만) ──
+                # ── 매수 슬롯 (1차 익절 후 슬롯 반환, 주문가능금액 100만원 이상일 때만) ──
                 익절중 = sum(
                     1 for m in self.positions
                     if self.peak_tracker.get(m, {}).get("stage", 0) >= 1
                 )
-                보너스 = 익절중 if krw >= 400_000 else 0
+                보너스 = 익절중 if krw >= BUY_1ST_AMT else 0
                 available_slots = MAX_POSITIONS - len(self.positions) + 보너스
                 if 보너스:
                     print(f"  ♻️ 익절진행중 {보너스}코인 슬롯 반환 → 가용:{available_slots}")
@@ -1800,7 +1801,7 @@ class CBot:
                             print(f"  ❌ AI점수 부족({ai_score}점 < {ai_threshold})")
                             continue
 
-                        # ★ 마지막 슬롯(포지션 4개째)이면 잔액만큼만 매수
+                        # ★ 마지막 슬롯(포지션 MAX_POSITIONS번째)이면 잔액만큼만 매수
                         _is_last_slot = (len(self.positions) + 1) >= MAX_POSITIONS
                         _buy_amt = min(BUY_1ST_AMT, int(krw * 0.98)) if _is_last_slot else BUY_1ST_AMT
                         if _buy_amt < MIN_ORDER_AMT:
