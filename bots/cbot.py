@@ -82,6 +82,7 @@ import uuid
 import jwt
 import sqlite3
 import hashlib
+import pathlib
 import requests
 import datetime
 from dotenv import load_dotenv
@@ -176,6 +177,10 @@ NIGHT_END   = 6
 
 LOOP_SLEEP  = 30                # 30초마다 루프 (WebSocket 실시간 현재가 연동)
 CANDLE_UNIT = 240               # 4시간봉
+HB_FILE     = "/tmp/hb_cbot"    # heartbeat 파일 (★ 2026-08-09 추가 —
+                                 # sbot/sbo2와 동일하게 watchdog_cbot.sh가
+                                 # 감시. fd고갈로 멈춰있어도 systemd에는
+                                 # active로 보이던 사고를 계기로 도입)
 
 # 파일
 BOT_STATE_FILE = "cbot_state.json"
@@ -1664,6 +1669,9 @@ class CBot:
                 today = today_str()
                 now   = now_hms()
                 print(f"\n⏰ [{now}] 코인봇 루프")
+
+                # ── Heartbeat 기록 ────────────────────────
+                pathlib.Path(HB_FILE).touch()
 
                 # ── 상태 읽기 ────────────────────────────────
                 bot_state       = _read_state()
