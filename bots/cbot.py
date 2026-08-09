@@ -247,6 +247,14 @@ class CBot:
         self.notifier = Notifier(name="cbot")
         self.model    = DEFAULT_MODEL
 
+        # ★ 2026-08-09: 매 호출마다 requests.get/post()로 새 연결을 맺던 걸
+        #   공유 Session으로 변경 — 장시간(24시간 상시가동) 운영 중 파일
+        #   디스크립터가 서서히 누적돼 "Too many open files"로 상태파일
+        #   읽기/WebSocket 재연결까지 전부 막히는 사고가 있었음(발견 계기:
+        #   사용자가 로그에서 발견해 알려줌). Session 재사용으로 커넥션
+        #   풀링이 정상 동작해 fd 누적을 방지한다.
+        self.session  = requests.Session()
+
         # ── 거래 상태 ─────────────────────────────────────
         self.positions        = {}
         self.peak_tracker     = {}
@@ -551,7 +559,7 @@ class CBot:
     def get_balances(self) -> dict:
         """전체 잔고 조회"""
         try:
-            res = requests.get(
+            res = self.session.get(
                 f"{BASE_URL}/accounts",
                 headers=self._get_headers(), timeout=5,
             ).json()
@@ -611,7 +619,7 @@ class CBot:
 
         try:
             # 1) KRW 마켓 목록
-            markets_res = requests.get(
+            markets_res = self.session.get(
                 f"{BASE_URL}/market/all",
                 params={"isDetails": "false"}, timeout=5,
             ).json()
@@ -631,7 +639,7 @@ class CBot:
             for i in range(0, len(krw_markets), 100):
                 chunk = krw_markets[i:i + 100]
                 try:
-                    res = requests.get(
+                    res = self.session.get(
                         f"{BASE_URL}/ticker",
                         params={"markets": ",".join(chunk)}, timeout=5,
                     ).json()
@@ -657,7 +665,7 @@ class CBot:
                 # 고정 코인은 항상 통과 (아래 6단계에서 강제 포함)
                 if market not in FIXED_COINS:
                     try:
-                        res_c = requests.get(
+                        res_c = self.session.get(
                             f"{BASE_URL}/candles/minutes/{CANDLE_UNIT}",
                             params={"market": market, "count": 21}, timeout=3,
                         ).json()
@@ -706,7 +714,7 @@ class CBot:
         if time.time() - self._last_market_check < 600:
             return
         try:
-            res = requests.get(
+            res = self.session.get(
                 f"{BASE_URL}/ticker",
                 params={"markets": "KRW-BTC"}, timeout=5,
             ).json()
@@ -792,7 +800,7 @@ class CBot:
         if time.time() - self._last_feargreed_check < 3600:
             return
         try:
-            res = requests.get(
+            res = self.session.get(
                 "https://api.alternative.me/fng/?limit=1", timeout=5,
             ).json()
             val  = int(res["data"][0]["value"])
@@ -868,6 +876,13 @@ class CBot:
             {"ticket": "cbot_ticker"},
             {"type": "ticker", "codes": markets},
         ])
+        # ★ 2026-08-09: 연결이 계속 실패하는 상태(예: fd 고갈 등)에서 5초
+        #   간격으로 무한 재시도만 하다 보니, 하루에 3만 건 넘는 에러로그를
+        #   찍으며 몇 시간을 조용히 먹통 상태로 있던 사고가 있었음(사용자가
+        #   로그 보고 발견) — 연속 실패가 쌓이면 백오프를 늘리고, 한 번만
+        #   디스코드로 알림을 보내 사람이 알아챌 수 있게 한다.
+        consecutive_fail = 0
+        alerted = False
         while self._ws_running:
             try:
                 async with websockets.connect(
@@ -877,6 +892,8 @@ class CBot:
                 ) as ws:
                     await ws.send(subscribe_msg)
                     print(f"✅ WebSocket 연결됨 ({len(markets)}개)")
+                    consecutive_fail = 0
+                    alerted = False
                     while self._ws_running:
                         try:
                             msg = await asyncio.wait_for(ws.recv(), timeout=60)
@@ -890,8 +907,17 @@ class CBot:
                         except Exception:
                             break
             except Exception as e:
-                print(f"⚠️ WebSocket 재연결 중: {e}")
-                await asyncio.sleep(5)
+                consecutive_fail += 1
+                print(f"⚠️ WebSocket 재연결 중({consecutive_fail}회 연속): {e}")
+                if consecutive_fail >= 20 and not alerted:
+                    alerted = True
+                    self.notify(
+                        f"🚨 WebSocket 연결이 {consecutive_fail}회 연속 실패 중이야 — "
+                        f"현재가 실시간 갱신이 멈췄을 수 있어, 확인 필요해 ({e})",
+                        critical=True,
+                    )
+                backoff = min(5 * consecutive_fail, 60)
+                await asyncio.sleep(backoff)
 
     def get_current_price(self, markets: list) -> dict:
         """현재가 조회 — WebSocket 우선, 없으면 REST 폴백"""
@@ -907,7 +933,7 @@ class CBot:
         # REST 폴백
         if rest_needed:
             try:
-                res = requests.get(
+                res = self.session.get(
                     f"{BASE_URL}/ticker",
                     params={"markets": ",".join(rest_needed)},
                     timeout=5,
@@ -930,7 +956,7 @@ class CBot:
             if time.time() - ts < 300:
                 return data
         try:
-            res = requests.get(
+            res = self.session.get(
                 f"{BASE_URL}/candles/minutes/60",
                 params={"market": market, "count": count}, timeout=5,
             ).json()
@@ -975,7 +1001,7 @@ class CBot:
             if time.time() - ts < 300:
                 return data
         try:
-            res = requests.get(
+            res = self.session.get(
                 f"{BASE_URL}/candles/minutes/{CANDLE_UNIT}",
                 params={"market": market, "count": count}, timeout=5,
             ).json()
@@ -1263,7 +1289,7 @@ class CBot:
         hdrs["Content-Type"] = "application/json"
 
         try:
-            res = requests.post(
+            res = self.session.post(
                 f"{BASE_URL}/orders", headers=hdrs, json=params, timeout=5,
             ).json()
             if res.get("uuid"):
@@ -1324,7 +1350,7 @@ class CBot:
         hdrs["Content-Type"] = "application/json"
 
         try:
-            res = requests.post(
+            res = self.session.post(
                 f"{BASE_URL}/orders", headers=hdrs, json=params, timeout=5,
             ).json()
             if res.get("uuid"):
