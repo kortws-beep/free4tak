@@ -1484,6 +1484,39 @@ class Sbo2:
             except Exception as _e:
                 print(f"⚠️ MA40 조회 오류 {name}: {_e}")
 
+            # ★ 2026-08-10 추가 — 시가총액/거래량 최소 기준 (사용자 지적:
+            #   "거래량이 거의 없는데 매수를 하는듯 하더군.. 기본체크를
+            #   거의 빼버리니까 발생한 문제 같아"). 완화트랙/키움풀 등
+            #   여러 슬롯이 늘면서 정작 잡주 배제 안전장치가 약해진 걸
+            #   보완 — 모든 매수 경로가 거치는 이 지점에 공통 게이트로 추가.
+            MIN_MARKET_CAP_EOK = 3000     # 시가총액 3,000억원 이상
+            MIN_PREV_VOLUME    = 300_000  # 전일거래량 30만주 이상
+            _mkt_cap = float(mdata.get("hts_avls", 0) or 0)  # 억원 단위 (KIS 시가총액)
+            if _mkt_cap > 0 and _mkt_cap < MIN_MARKET_CAP_EOK:
+                print(f"⏭️ {name} 패스 — 시가총액({_mkt_cap:,.0f}억) < 최소기준({MIN_MARKET_CAP_EOK:,}억)")
+                save_candidate(name=name, grade=cand["grade"], score=cand["score"],
+                               vcp=cand["vcp"], trend=cand["trend"], catalyst=cand["catalyst"],
+                               curr=curr_price, stop=cand["stop"], tgt=cand["tgt"], rr=cand["rr"],
+                               bought=False, skip_reason="시총미달")
+                continue
+            try:
+                _vconn = sqlite3.connect(os.path.join(BASE_DIR, "kr_theme_finance.db"), timeout=5)
+                _vrow = _vconn.execute("""
+                    SELECT volume FROM kr_stock_daily_data
+                    WHERE stock_name = ? ORDER BY date DESC LIMIT 1
+                """, (name,)).fetchone()
+                _vconn.close()
+                _prev_vol = _vrow[0] if _vrow and _vrow[0] else 0
+                if _prev_vol and _prev_vol < MIN_PREV_VOLUME:
+                    print(f"⏭️ {name} 패스 — 전일거래량({_prev_vol:,}주) < 최소기준({MIN_PREV_VOLUME:,}주)")
+                    save_candidate(name=name, grade=cand["grade"], score=cand["score"],
+                                   vcp=cand["vcp"], trend=cand["trend"], catalyst=cand["catalyst"],
+                                   curr=curr_price, stop=cand["stop"], tgt=cand["tgt"], rr=cand["rr"],
+                                   bought=False, skip_reason="거래량미달")
+                    continue
+            except Exception as _e:
+                print(f"⚠️ 거래량 조회 오류 {name}: {_e}")
+
             # 매수금액 계산 — 예수금 부족시 있는 만큼 매수
             # ★ score 전달 — 점수 기반 매수금액 보정 적용 (2026-06-29)
             amount = calc_buy_amount(cand["grade"], psbl_cash, score=cand.get("score", 0))
@@ -1538,9 +1571,16 @@ class Sbo2:
                 _tgt_cap  = curr_price * 1.20
                 _tgt      = round(min(_tgt_atr, _tgt_cap), 0)
             else:
-                # ATR 없을 때 후보에서 제공한 값 or 폴백
-                _stop = cand["stop"] or round(curr_price * 0.93, 0)
-                _tgt  = cand["tgt"]  or round(curr_price * 1.12, 0)
+                # ★ 2026-08-10 수정 — ATR 조회 실패 시 후보의 고정 손절/목표가
+                #   (cand["stop"]/cand["tgt"])를 그대로 쓰던 게 문제였음: 후보는
+                #   하루 한 번만 갱신되는데, 스캔 시점 가격 기준으로 계산된
+                #   절대가라서 실제 매수 체결가와 시간차가 벌어지면 손절가가
+                #   매수가 바로 코앞까지 붙어버릴 수 있었음(화일약품 3원차,
+                #   프로티아 49원차로 매수 직후 바로 손절된 실사례 — 사용자
+                #   지적). 항상 실제 체결가(curr_price) 기준 고정비율로
+                #   재계산해 이 문제를 근본적으로 차단.
+                _stop = round(curr_price * 0.90, 0)   # -10% 고정 손절
+                _tgt  = round(curr_price * 1.15, 0)   # +15% 고정 목표
                 _atr_val = 0
 
             # 포지션 등록
@@ -1606,12 +1646,17 @@ class Sbo2:
 
     # ── 매도 체크 ─────────────────────────────────────────────
     def _get_atr_rate(self, code: str) -> float:
-        """ATR/현재가 비율 (30분 캐시)"""
+        """ATR/현재가 비율 (성공 시 30분 캐시, 실패 시 60초만 — 2026-08-10 수정:
+        기존엔 API 조회 실패도 30분씩 캐싱해서, 장시작 직후처럼 일시적으로
+        조회가 막히면 그 30분 내내 ATR=0으로 취급돼 손절/목표가 폴백
+        경로로 계속 새는 문제가 있었음(화일약품/프로티아 실사례)."""
         import time as _time
         now_ts = _time.time()
+        FAIL_CACHE_SEC = 60
         if code in self.atr_cache:
             cached_rate, ts = self.atr_cache[code]
-            if now_ts - ts < 1800:
+            ttl = 1800 if cached_rate > 0 else FAIL_CACHE_SEC
+            if now_ts - ts < ttl:
                 return cached_rate
         try:
             ohlc = self.api.get_daily_ohlc(code, days=20) if hasattr(self.api, 'get_daily_ohlc') else []
