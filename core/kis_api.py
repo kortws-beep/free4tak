@@ -611,7 +611,14 @@ class KisAPI:
     # 주문
     # ============================================================
     def buy(self, code: str, price: float, amount: int,
-            code_name_map: dict = None, psbl_cash: int = None) -> bool:
+            code_name_map: dict = None, psbl_cash: int = None,
+            extra_ticks: int = 0) -> bool:
+        # extra_ticks: 기본 +1호가에 추가로 더 얹을 호가 수 (기본 0 =
+        #   기존과 동일한 +1호가). ★ 2026-08-10: sbo2에서 지정가가 너무
+        #   타이트해 일부만 체결되고 나머지가 취소되는 사고가 있어(사용자
+        #   지적 — 1주만 매수되고 끝나는 경우), sbo2 호출부에서만
+        #   extra_ticks=1(총 +2호가)로 넘겨 체결 확률을 높인다. sbot은
+        #   기존 그대로(+1호가) 유지 — 정상 동작 중이라 안 건드림.
         # ★ 반환값은 항상 (성공여부, orgno, odno, qty) 4-튜플로 통일.
         #   (2026-06-29 추가: qty) — 기존엔 실제 주문에 사용한 수량을
         #   호출부에 알려주지 않아서, sbot.py의 _do_buy()가 amount/price로
@@ -635,7 +642,7 @@ class KisAPI:
         elif price < 100000: hoga = 100
         elif price < 500000: hoga = 500
         else:                hoga = 1000
-        limit_price = int(price / hoga) * hoga + hoga
+        limit_price = int(price / hoga) * hoga + hoga * (1 + extra_ticks)
 
         qty = int(order_cash / (limit_price * 1.00015))
         if qty <= 0:
