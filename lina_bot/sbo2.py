@@ -2046,6 +2046,26 @@ class Sbo2:
                     print(f"   📥 신규: {rdata.get('name', code)}({code}) "
                           f"{entry:,}원 × {rdata['qty']}주")
 
+            # ★ 2026-08-11 추가 — 위 루프는 new_pos(실계좌 조회 결과)에 있는
+            #   코드만 처리하므로, 매수 직후 정산 지연으로 실계좌 조회에
+            #   아직 안 잡힌 종목은 new_pos에 없다는 이유만으로 이 루프에서
+            #   통째로 누락되어 self.positions에서 조용히 사라졌음. 위쪽
+            #   "수동매도 감지" 루프는 이 정산지연 가드가 있어 sold_today엔
+            #   안 들어갔지만, 이 재구성 자체는 가드 없이 new_pos 기준으로만
+            #   덮어써서 결과적으로 포지션이 사라지는 건 똑같았음 — 그 다음
+            #   루프에서 "보유 안 함"으로 보여 같은 종목을 또 매수하는 사고로
+            #   이어짐(하나금융지주 실사례: 09:27:23 매수 → 33초 뒤 실계좌
+            #   미반영으로 사라짐 → 09:27:54 재매수, 총 2배 매수됨).
+            #   가드 기간 내에는 new_pos에 없어도 메모리 포지션을 유지한다.
+            for code, pos in self.positions.items():
+                if code in updated or code in self.sold_today:
+                    continue
+                guard_until = self._buy_sync_guard.get(code, 0) + BUY_SYNC_GUARD_SEC
+                if now_ts < guard_until:
+                    updated[code] = pos
+                    print(f"   🛡️ {pos.get('name', code)}({code}) 매수직후 동기화 보호 중 "
+                          f"— 실계좌 미반영이지만 포지션 유지(재매수 방지)")
+
             self.positions = updated
             # ★ 더 이상 보유하지 않는 종목의 가드 기록 정리 (메모리 누적 방지)
             for _code in list(self._buy_sync_guard.keys()):
