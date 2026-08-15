@@ -106,8 +106,18 @@ A_GRADE_RATIO    = 0.7          # A급 상위 70%만 매수
 
 # 슬롯 전략 구분
 SLOT_INTER  = "inter"   # 교집합 (VCP+추세+촉매)
-SLOT_SWING  = "swing"   # 스윙 (VCP only)
 SLOT_TREND  = "trend"   # 추세 (trend only)
+SLOT_MOMENTUM = "momentum"  # ★ 2026-08-15 추가 — VCP(SLOT_SWING) 대체.
+                        # VCP는 백테스트 퍼널 진단 결과 7개월간 1건만
+                        # 나올 정도로 사실상 죽은 소스였음(30일 신고가
+                        # 돌파+거래량서지 동시조건이 너무 희귀 — 사용자
+                        # 판단으로 과감히 제외). 대신 07-10부터 관찰전용
+                        # 으로 돌던 AI 모멘텀 스캐너(lina_bot.py 08:55/
+                        # 14:35, ai_momentum_db 저장)가 60일 61.3% 적중률
+                        # (31건 판정)로 검증됐다고 보고 실거래에 투입.
+                        # 테마추출+매핑 로직은 lina_bot.py에 그대로 두고,
+                        # sbo2는 당일 저장된 결과만 읽어 자체 게이트
+                        # (MA40/시총/거래량/ATR 손절목표)를 거쳐 매수.
 SLOT_TELE   = "tele"    # 텔레스윙 (매수 소스 제외, 라벨만 유지)
 SLOT_LIGHT  = "light"   # 완화트랙 (★ 2026-07-14 추가) — 촉매종목 중 VCP/추세
                         # 정식조건은 못 채웠지만 차트가 안 망가진 종목. 7/7
@@ -129,7 +139,7 @@ SLOT_POOL   = "pool"    # 키움풀 최소게이트 (★ 2026-07-18 추가) — 
 
 SLOT_LABEL = {
     SLOT_INTER: "교집합",
-    SLOT_SWING: "스윙",
+    SLOT_MOMENTUM: "모멘텀",
     SLOT_TREND: "추세",
     SLOT_TELE:  "텔레",
     SLOT_LIGHT: "완화",
@@ -521,7 +531,7 @@ def calc_buy_amount(grade: str, psbl_cash: int, score: int = 0) -> int:
     """
     전략별 매수금액:
     - inter (교집합)        → 150만원 (100%) 기준
-    - swing/trend          → 125만원 (83%) 기준
+    - momentum/trend       → 125만원 (83%) 기준
     - 그 외(레거시 tele)   → 100만원 (67%) 기준 — 텔레스윙은 2026-07-06
       매수 소스에서 제외되어 신규 후보엔 더 이상 생성되지 않음. 이 분기는
       제거 전에 매수된 기존 보유 종목의 grade가 여전히 "tele"인 경우를
@@ -535,7 +545,7 @@ def calc_buy_amount(grade: str, psbl_cash: int, score: int = 0) -> int:
     """
     if grade == SLOT_INTER:
         amount = BASE_BUY_AMT               # 150만원
-    elif grade in (SLOT_SWING, SLOT_TREND):
+    elif grade in (SLOT_MOMENTUM, SLOT_TREND):
         amount = int(BASE_BUY_AMT * 0.83)   # 125만원
     elif grade == SLOT_LIGHT:
         amount = int(BASE_BUY_AMT * 0.67)   # 100만원 — 완화트랙(2026-07-14), 정식조건 미충족이라 최소 사이즈
@@ -858,8 +868,18 @@ def _get_kis_new_watchlist_names(api) -> set:
 def get_candidates(api=None) -> list:
     """
     6슬롯 전략별 후보 반환
-    - inter (교집합): VCP + 추세 + 촉매 동시 통과 → 슬롯1 최우선
-    - swing        : VCP only                     → 슬롯2
+    - inter (교집합): 추세 + 촉매 동시 통과 → 슬롯1 최우선 (★ 2026-08-15:
+      VCP 레그 제거 — 아래 momentum 슬롯 설명 참고, 원래 vcp∩추세∩촉매
+      였으나 VCP가 빠지며 추세∩촉매로 재정의됨)
+    - momentum     : AI 모멘텀 스캐너 당일 픽 (VCP 대체)  → 슬롯2
+      (★ 2026-08-15: VCP(SLOT_SWING) 제거 — 백테스트 퍼널 진단 결과
+      7개월간 30일 신고가 돌파+거래량 서지 동시조건을 통과한 게 2건뿐,
+      최종 거래량서지까지 걸리면 0건으로 사실상 죽은 소스였음(사용자
+      판단으로 과감히 제외). 대신 07-10부터 관찰전용으로 돌던 AI 모멘텀
+      스캐너(lina_bot.py 08:55/14:35 테마추출→종목매핑, ai_momentum_db
+      저장)가 60일 61.3% 적중률(31건 판정)로 검증되어 투입. AI가 테마를
+      뽑고 결정론적 코드가 VCP∪추세로 게이팅해 저장한 결과를 그대로
+      읽어와 sbo2 자체 게이트(MA40/시총/거래량/ATR)만 거쳐 매수.)
     - trend        : 추세 only                    → 슬롯3
       (★ 2026-07-25: 생쇼(전문가추천) 슬롯 제거 — MBN이 생쇼 뉴스
       코너 자체를 폐지해서(news_service_id=10020 게시글 0건, 사이트
@@ -875,12 +895,10 @@ def get_candidates(api=None) -> list:
     api: KisAPI 인스턴스 (완화트랙의 거래량서지 패턴에서 실시간 시세 조회용,
          없으면 해당 패턴은 건너뜀 — 나머지 슬롯엔 영향 없음)
     """
-    from swing_analyzer import get_swing_data
     from trend_analyzer import get_trend_data
 
     kiwoom_pool  = _get_kiwoom_condition_pool()
     catalyst_set = _get_catalyst_stocks()
-    swing_data   = get_swing_data(top_n=20, name_filter=kiwoom_pool or None)
     trend_data   = get_trend_data(top_n=20, name_filter=kiwoom_pool or None)
 
     # ★ 2026-07-18 추가 — 겹침점수 보정용 소스 (텔레그램/MBN뉴스, catalyst_set은
@@ -894,25 +912,22 @@ def get_candidates(api=None) -> list:
         tele_scores = {}
     news_names = _get_mbn_news_names()
 
-    swing_names  = {d["name"] for d in swing_data}
     trend_names  = {d["name"] for d in trend_data}
 
     # 상세 데이터 맵 (name → dict)
     detail_map = {}
-    for d in swing_data:
-        detail_map[d["name"]] = d
     for d in trend_data:
         if d["name"] not in detail_map:
             detail_map[d["name"]] = d
 
     candidates = []
 
-    # ── 슬롯1: 교집합 (VCP + 추세 + 촉매) ──────────────────────
+    # ── 슬롯1: 교집합 (추세 + 촉매, ★ 08-15 VCP 레그 제거) ──────
     # ★ 2026-07-02: 스윙/추세 슬롯과 달리 캡이 없어서 교집합에 걸리는 종목이
     #   많은 날엔 _check_buy가 매 루프(30초)마다 그 후보 전체를 현재가+MA40
     #   조회하며 KIS API 호출이 몰리는 원인이 됐음 — 다른 슬롯과 동일하게
     #   점수 상위 N개로 캡.
-    inter_names = swing_names & trend_names & catalyst_set
+    inter_names = trend_names & catalyst_set
     inter_list = []
     for name in inter_names:
         d = detail_map.get(name, {})
@@ -920,7 +935,7 @@ def get_candidates(api=None) -> list:
             "name":     name,
             "grade":    SLOT_INTER,
             "score":    d.get("score", 100),  # 교집합 최고 우선순위
-            "vcp":      True,
+            "vcp":      False,
             "trend":    True,
             "catalyst": True,
             "curr":     d.get("curr_price", 0),
@@ -932,29 +947,46 @@ def get_candidates(api=None) -> list:
     inter_list.sort(key=lambda x: x["score"], reverse=True)
     candidates += inter_list[:CANDIDATE_CAP_PER_SLOT]
 
-    # ── 슬롯2: 스윙 (VCP only, 교집합 제외) ─────────────────────
-    swing_only = swing_names - trend_names
-    swing_list = []
-    for name in swing_only:
-        d = detail_map.get(name, {})
-        swing_list.append({
+    # ── 슬롯2: 모멘텀 (AI 모멘텀 스캐너 당일 픽, 교집합 제외, ★ 08-15 VCP 대체) ──
+    momentum_names = set()
+    try:
+        _mconn = sqlite3.connect(
+            os.path.join(os.path.dirname(BASE_DIR), "intelligence", "ai_momentum_picks.db"),
+            timeout=5)
+        _mrows = _mconn.execute("""
+            SELECT stock_name, buy_price, stop_price, tgt_price, theme
+            FROM momentum_picks WHERE date = ? ORDER BY id DESC
+        """, (today_str(),)).fetchall()
+        _mconn.close()
+    except Exception as e:
+        print(f"⚠️ [sbo2] 모멘텀픽 조회 오류: {e}")
+        _mrows = []
+
+    momentum_list = []
+    for name, buy_price, stop_price, tgt_price, theme in _mrows:
+        if name in momentum_names or name in inter_names:
+            continue
+        momentum_names.add(name)
+        momentum_list.append({
             "name":     name,
-            "grade":    SLOT_SWING,
-            "score":    d.get("score", 0),
-            "vcp":      True,
-            "trend":    False,
+            "grade":    SLOT_MOMENTUM,
+            "score":    75,   # 60일 61.3% 적중률 기준 — VCP처럼 vcp/trend
+                              # 게이트를 다시 태우지 않고 일단 고정값 사용,
+                              # 실거래 데이터 쌓이면 재검증
+            "vcp":      False,
+            "trend":    name in trend_names,
             "catalyst": name in catalyst_set,
-            "curr":     d.get("curr_price", 0),
-            "stop":     d.get("stop_price", 0),
-            "tgt":      d.get("tgt_price", 0),
-            "rr":       d.get("rr_ratio", 0),
-            "themes":   d.get("themes", []),
+            "curr":     buy_price or 0,
+            "stop":     stop_price or 0,
+            "tgt":      tgt_price or 0,
+            "rr":       round((tgt_price - buy_price) / (buy_price - stop_price), 1)
+                        if buy_price and stop_price and buy_price > stop_price else 0,
+            "themes":   [theme] if theme else [],
         })
-    swing_list.sort(key=lambda x: x["score"], reverse=True)
-    candidates += swing_list[:CANDIDATE_CAP_PER_SLOT]
+    candidates += momentum_list[:CANDIDATE_CAP_PER_SLOT]
 
     # ── 슬롯3: 추세 (trend only, 교집합 제외) ───────────────────
-    trend_only = trend_names - swing_names
+    trend_only = trend_names - momentum_names
     trend_list = []
     for name in trend_only:
         d = detail_map.get(name, {})
@@ -975,7 +1007,7 @@ def get_candidates(api=None) -> list:
     candidates += trend_list[:CANDIDATE_CAP_PER_SLOT]
 
     # ── 슬롯5: 완화트랙 (촉매 종목 중 VCP/추세 미충족 + 완화조건 통과) ──
-    already_covered = swing_names | trend_names
+    already_covered = trend_names | momentum_names
     light_pool = catalyst_set - already_covered
     light_list = []
     if light_pool:
@@ -1306,11 +1338,11 @@ class Sbo2:
         except Exception as e:
             print(f"⚠️ 후보 갱신 오류: {e}")
 
-        inter = sum(1 for c in self.candidates if c["grade"] == SLOT_INTER)
-        swing = sum(1 for c in self.candidates if c["grade"] == SLOT_SWING)
-        trend = sum(1 for c in self.candidates if c["grade"] == SLOT_TREND)
-        light = sum(1 for c in self.candidates if c["grade"] == SLOT_LIGHT)
-        print(f"   교집합:{inter}개 스윙:{swing}개 추세:{trend}개 완화:{light}개")
+        inter    = sum(1 for c in self.candidates if c["grade"] == SLOT_INTER)
+        momentum = sum(1 for c in self.candidates if c["grade"] == SLOT_MOMENTUM)
+        trend    = sum(1 for c in self.candidates if c["grade"] == SLOT_TREND)
+        light    = sum(1 for c in self.candidates if c["grade"] == SLOT_LIGHT)
+        print(f"   교집합:{inter}개 모멘텀:{momentum}개 추세:{trend}개 완화:{light}개")
         for c in self.candidates:
             save_candidate(
                 name=c["name"], grade=c["grade"], score=c["score"],
@@ -1383,7 +1415,7 @@ class Sbo2:
 
         # 슬롯별 이미 보유 여부 확인
         has_inter = SLOT_INTER in held_grades
-        has_swing = SLOT_SWING in held_grades
+        has_momentum = SLOT_MOMENTUM in held_grades
         has_trend = SLOT_TREND in held_grades
         has_light = SLOT_LIGHT in held_grades
         has_watchlist = SLOT_WATCHLIST in held_grades
@@ -1399,12 +1431,13 @@ class Sbo2:
         #   신뢰도 슬롯이라 우선순위 맨 뒤에 둔다.
         # ★ 2026-07-25: 생쇼(SLOT_SSHOW) 슬롯 제거 — MBN이 생쇼 뉴스 코너
         #   자체를 폐지해서 소스가 영구 중단됨.
-        # 우선순위: 교집합 → 점수 높은 순 (스윙/추세/완화)
+        # ★ 2026-08-15: VCP(SLOT_SWING) 제거 → SLOT_MOMENTUM으로 대체.
+        # 우선순위: 교집합 → 점수 높은 순 (모멘텀/추세/완화)
         buyable = []
         if not has_inter:
             buyable += sorted(_buyable(SLOT_INTER), key=lambda x: x["score"], reverse=True)
-        if not has_swing:
-            buyable += sorted(_buyable(SLOT_SWING), key=lambda x: x["score"], reverse=True)
+        if not has_momentum:
+            buyable += sorted(_buyable(SLOT_MOMENTUM), key=lambda x: x["score"], reverse=True)
         if not has_trend:
             buyable += sorted(_buyable(SLOT_TREND), key=lambda x: x["score"], reverse=True)
         if not has_light:
@@ -1414,7 +1447,7 @@ class Sbo2:
         if not has_pool:
             buyable += sorted(_buyable(SLOT_POOL), key=lambda x: x["score"], reverse=True)
 
-        print(f"   매수후보: 교집합{len(_buyable(SLOT_INTER))} 스윙{len(_buyable(SLOT_SWING))} "
+        print(f"   매수후보: 교집합{len(_buyable(SLOT_INTER))} 모멘텀{len(_buyable(SLOT_MOMENTUM))} "
               f"추세{len(_buyable(SLOT_TREND))} "
               f"완화{len(_buyable(SLOT_LIGHT))} 관심종목{len(_buyable(SLOT_WATCHLIST))} "
               f"키움풀{len(_buyable(SLOT_POOL))} (텔레 제외됨)")
