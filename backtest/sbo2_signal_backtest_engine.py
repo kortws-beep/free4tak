@@ -17,12 +17,21 @@ sbo2_signal_backtest_engine.py — sbo2 실제 신호소스(VCP/추세) 백테�
      뉴스 코너 폐지). 이 엔진도 애초에 반영한 적 없어 추가 조치 불필요.
 
 [매도 로직] sbo2.py _check_sell()과 동일한 ATR 단계별 피라미딩 재현:
-  - 손절: 최초 ATR×1.5 손절가 이탈
-  - 목표1(ATR×3) 도달 → 50% 매도, 손절↑(entry+ATR×1.0), 목표2=curr+ATR×3
+  - 손절: 체결가 기준 ATR×2.0 이탈 (★ 2026-08-15 수정 — 예전엔 스캔용
+    ATR×1.5를 그대로 썼는데, 실전 _check_buy()는 체결 시점에 ATR을
+    다시 계산해 ×2.0/목표×3.0(상한 +20%)을 쓰고 있어 백테스트가 실전
+    보다 손절폭을 좁게 시뮬레이션하고 있었음 — "정비" 요청 계기로 확인/수정)
+  - 목표1(ATR×3, 상한 +20%) 도달 → 50% 매도, 손절↑(entry+ATR×1.0), 목표2=curr+ATR×3
   - 목표2+ 도달 → 추가매도 없이 손절↑(이전목표가), 목표 재상향 (무한 피라미딩)
   - stage>=1 이후엔 고점-ATR×1.5 트레일링도 병행
 
 [매수 타이밍] VCP/추세 조건을 만족한 날의 T+1 시가 매수 (기존 엔진과 동일 관례)
+
+[08-15 반영] 전일거래량 30만주 미만 제외(08-07 실전 필터와 동일),
+  --initial-cash/--max-positions 기본값을 현재 실전(600만원/4종목)에 맞춤.
+  ⚠️ 시가총액 3,000억 필터는 kr_stock_daily_data에 과거 시가총액 데이터가
+  없어(종가/거래량만 있음) 백테스트엔 반영 못함 — 실전보다 소형주가 더
+  많이 통과할 수 있다는 점 감안해서 결과 해석할 것.
 
 [사용법]
   python3 sbo2_signal_backtest_engine.py --start 2025-10-01 --end 2026-07-16 --slot both
@@ -61,10 +70,22 @@ VOL_DRY_RATIO     = 0.50
 SMART_DAYS        = 10
 SMART_MIN_DAYS    = 2
 ATR_PERIOD        = 14
-ATR_STOP_MULT     = 1.5
-ATR_TARGET_MULT   = 3.0
+ATR_STOP_MULT     = 1.5    # ★ 후보 스캔(swing_analyzer.py)용 — 실제 포지션
+ATR_TARGET_MULT   = 3.0    #   손절/목표엔 안 쓰임(아래 TRADE_* 참고)
 BREAKOUT_LOOKBACK = 30
 BREAKOUT_VOL_MULT = 1.4
+
+# ★ 2026-08-15 추가 — 실제 매수 체결 시 손절/목표 (sbo2.py _check_buy()와
+#   동일). 기존엔 위 스캔용 ATR_STOP_MULT(1.5)를 포지션 손절에도 그대로
+#   썼는데, 실전은 매수 체결가 기준으로 ATR을 다시 계산해 손절×2.0/
+#   목표×3.0(상한 +20%)을 쓰고 있어 백테스트가 실전보다 손절폭을 좁게
+#   시뮬레이션하고 있었음(사용자 지적 — "정비" 요청 계기로 확인).
+TRADE_ATR_STOP_MULT   = 2.0
+TRADE_ATR_TARGET_MULT = 3.0
+TRADE_TARGET_CAP_RATE = 0.20
+# 08-07 추가된 전일거래량 최소기준(시가총액은 과거 데이터가 없어 백테스트
+# 반영 불가 — 아래 main()의 안내 참고)
+MIN_PREV_VOLUME = 300_000
 
 # 추세 파라미터 (trend_analyzer.py, 2026-07-14 수정본 반영: VOL_PULL_RATIO 0.85)
 PULLBACK_BAND   = 0.08
@@ -490,11 +511,33 @@ class Sbo2SignalBacktest:
                 if name in self.positions:
                     continue
                 cursor = idx_map.get(name, 0)
+
+                # ★ 2026-08-15 추가 — 전일거래량 30만주 미만 제외 (sbo2.py
+                #   _check_buy()의 08-07 필터와 동일 기준)
+                d = self.data[name]
+                if cursor > 0 and d["volume"][cursor - 1] < MIN_PREV_VOLUME:
+                    continue
+
                 buy_price = self._next_open(name, cursor)
                 if buy_price <= 0:
                     continue
-                self._buy(name, buy_price, cursor + 1, c["atr_val"],
-                          c["stop_price"], c["tgt_price"], c["score"])
+
+                # ★ 체결가 기준으로 손절/목표 재계산 (sbo2.py _check_buy()와
+                #   동일 — 스캔일의 ATR×1.5 대신 체결일 ATR×2.0/3.0 사용)
+                fill_cursor = cursor + 1
+                closes_desc_fill = d["close"][:fill_cursor][::-1]
+                atr_fill = _atr(closes_desc_fill, ATR_PERIOD)
+                if atr_fill > 0:
+                    stop_price = round(buy_price - atr_fill * TRADE_ATR_STOP_MULT, 0)
+                    tgt_atr    = buy_price + atr_fill * TRADE_ATR_TARGET_MULT
+                    tgt_cap    = buy_price * (1 + TRADE_TARGET_CAP_RATE)
+                    tgt_price  = round(min(tgt_atr, tgt_cap), 0)
+                else:
+                    stop_price = round(buy_price * 0.90, 0)
+                    tgt_price  = round(buy_price * 1.15, 0)
+
+                self._buy(name, buy_price, fill_cursor, atr_fill,
+                          stop_price, tgt_price, c["score"])
 
             if (day_i + 1) % 50 == 0:
                 print(f"   진행 {day_i+1}/{len(calendar)} | 보유 {len(self.positions)}개 | "
@@ -521,8 +564,9 @@ def main():
     parser.add_argument("--start", default="2025-12-01")
     parser.add_argument("--end", default="")
     parser.add_argument("--slot", default="both", choices=["vcp", "trend", "both"])
-    parser.add_argument("--initial-cash", type=int, default=5_000_000)
-    parser.add_argument("--max-positions", type=int, default=2)
+    # ★ 2026-08-15: sbo2 실전 현재값(600만원 시드, 4종목 상한)에 맞춤
+    parser.add_argument("--initial-cash", type=int, default=6_000_000)
+    parser.add_argument("--max-positions", type=int, default=4)
     args = parser.parse_args()
 
     end = args.end or datetime.date.today().strftime("%Y-%m-%d")
