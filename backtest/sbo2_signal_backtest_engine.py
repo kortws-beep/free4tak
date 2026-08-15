@@ -1,16 +1,22 @@
 """
-sbo2_signal_backtest_engine.py — sbo2 실제 신호소스(VCP/추세) 백테스트
+sbo2_signal_backtest_engine.py — sbo2 실제 신호소스(추세) 백테스트
 ================================================================
 [배경]
 기존 sbo2_backtest_engine.py는 SwingStrategy(sbot 룰스코어)를 재사용하는
-완전히 다른 모델이라, sbo2 실전이 실제로 쓰는 VCP(swing_analyzer.py)/
-추세(trend_analyzer.py) 필터 체인을 전혀 반영하지 못했음(2026-07-17
-사용자 지적). 이 엔진은 그 두 필터를 "특정 날짜까지의 데이터만" 기준으로
-그대로 재현해 day-by-day 재현(replay)한다.
+완전히 다른 모델이라, sbo2 실전이 실제로 쓰는 필터 체인을 전혀 반영하지
+못했음(2026-07-17 사용자 지적). 이 엔진은 trend_analyzer.py의 추세 필터를
+"특정 날짜까지의 데이터만" 기준으로 그대로 재현해 day-by-day 재현(replay)한다.
 
 [반영 범위]
-  ✅ VCP(스윙) — swing_analyzer.py get_swing_data()와 동일 필터체인
   ✅ 추세      — trend_analyzer.py get_trend_data()와 동일 필터체인
+  ⏹ VCP(스윙) — ★ 2026-08-15 완전 제거. 퍼널 진단 결과 7개월(141거래일)간
+     "30일 신고가 돌파+거래량서지 동시조건" 통과가 2건, 최종 거래량서지까지
+     걸리면 0건 — 사실상 죽은 소스였음(실거래도 141일 중 VCP발 거래 단
+     1건, -19.77% 손실). sbo2 실전에서도 SLOT_SWING 자체가 제거되고 AI
+     모멘텀 스캐너(SLOT_MOMENTUM)로 교체됨. 모멘텀은 매일 AI 테마추출이
+     들어가는 방식이라 이 엔진처럼 수식 재현이 안 됨 — 과거 재현 대신
+     lina_bot.py의 "AI 모멘텀 체크인" 알림으로 매일 실거래 사후검증 중
+     (사용자 결정, 백테스트 반영은 스코프 아웃).
   ⏸ 교집합/완화 — 촉매(실시간 뉴스/텔레그램) 과거기록이 없어 재현 불가.
      데이터가 쌓이면(라이브 사후검증으로) 추후 반영.
   ⏹ 생쇼 — sbo2 실전에서 슬롯 자체가 삭제됨(2026-07-25, MBN이 생쇼
@@ -34,7 +40,7 @@ sbo2_signal_backtest_engine.py — sbo2 실제 신호소스(VCP/추세) 백테�
   많이 통과할 수 있다는 점 감안해서 결과 해석할 것.
 
 [사용법]
-  python3 sbo2_signal_backtest_engine.py --start 2025-10-01 --end 2026-07-16 --slot both
+  python3 sbo2_signal_backtest_engine.py --start 2025-10-01 --end 2026-07-16
 """
 import os
 import sys
@@ -58,22 +64,17 @@ DB_PATH = os.path.join(LINA_DIR, "kr_theme_finance.db")
 
 # ── sbo2 실전과 동일 상수 ────────────────────────────────────
 BASE_BUY_AMT     = 1_500_000
-SLOT_BUY_AMT     = int(BASE_BUY_AMT * 0.83)   # 스윙/추세 슬롯 125만원
+SLOT_BUY_AMT     = int(BASE_BUY_AMT * 0.83)   # 추세 슬롯 125만원
 FEE_RATE         = 0.00015
 TAX_RATE         = 0.0015
 SLIPPAGE         = 0.0005
 
-# VCP 파라미터 (swing_analyzer.py, 2026-07-14 수정본 반영)
-MA20_BAND         = 0.10
-VCP_RATIO         = 0.70
-VOL_DRY_RATIO     = 0.50
+# 추세 파라미터 공용 (trend_analyzer.py)
 SMART_DAYS        = 10
 SMART_MIN_DAYS    = 2
 ATR_PERIOD        = 14
-ATR_STOP_MULT     = 1.5    # ★ 후보 스캔(swing_analyzer.py)용 — 실제 포지션
+ATR_STOP_MULT     = 1.5    # ★ 후보 스캔(trend_analyzer.py)용 — 실제 포지션
 ATR_TARGET_MULT   = 3.0    #   손절/목표엔 안 쓰임(아래 TRADE_* 참고)
-BREAKOUT_LOOKBACK = 30
-BREAKOUT_VOL_MULT = 1.4
 
 # ★ 2026-08-15 추가 — 실제 매수 체결 시 손절/목표 (sbo2.py _check_buy()와
 #   동일). 기존엔 위 스캔용 ATR_STOP_MULT(1.5)를 포지션 손절에도 그대로
@@ -184,89 +185,6 @@ def _smart_ok(f_net_desc, i_net_desc, supply_len):
 
 
 # ============================================================
-# VCP(스윙) — as-of 스캔
-# ============================================================
-def scan_vcp(data: dict, idx_map: dict, *, ma20_band=None, vcp_ratio=None,
-             vol_dry_ratio=None, breakout_lookback=None, breakout_vol_mult=None) -> list:
-    """idx_map: {name: cursor} — 각 종목의 '오늘까지 포함' 인덱스(ascending 배열 기준, exclusive 상한)
-    파라미터 override — 백테스트 튜닝용(None이면 모듈 기본 상수 사용)"""
-    ma20_band         = MA20_BAND if ma20_band is None else ma20_band
-    vcp_ratio         = VCP_RATIO if vcp_ratio is None else vcp_ratio
-    vol_dry_ratio     = VOL_DRY_RATIO if vol_dry_ratio is None else vol_dry_ratio
-    breakout_lookback = BREAKOUT_LOOKBACK if breakout_lookback is None else breakout_lookback
-    breakout_vol_mult = BREAKOUT_VOL_MULT if breakout_vol_mult is None else breakout_vol_mult
-    out = []
-    for name, d in data.items():
-        cursor = idx_map.get(name, 0)
-        if cursor < 30:
-            continue
-        closes_desc  = d["close"][:cursor][::-1]
-        volumes_desc = d["volume"][:cursor][::-1]
-        curr = closes_desc[0]
-        if curr <= 0:
-            continue
-
-        ma200 = _ma(closes_desc, 200)
-        if ma200 == 0 or curr < ma200:
-            continue
-
-        # ★ 2026-07-17: "조용한 베이스" 판단(20일선 밴드 + VCP 진폭수축)을
-        #   돌파일(오늘) 포함 윈도우로 계산하던 걸 전일까지(prior)로 이동.
-        #   피봇 계산은 원래도 valid_closes[1:31](전일까지)였는데, 밴드/수축
-        #   조건만 오늘 포함이라 "오늘 신고가 돌파"와 "오늘 20일선 근처"가
-        #   같은 날 동시에 요구되는 자기모순이 있었음(전체 10개월 funnel
-        #   진단 결과 스마트머니 300건→가격돌파 5건으로 붕괴, 원인 확인).
-        #   베이스는 어제까지로 판단하고, 오늘은 순수히 "돌파했는지"만 본다.
-        if len(closes_desc) < 31:
-            continue
-        prior = closes_desc[1:]
-        ma20 = _ma(prior, 20)
-        if ma20 == 0 or abs(prior[0] - ma20) / ma20 > ma20_band:
-            continue
-        w1, w2 = prior[0:15], prior[15:30]
-        if min(w1) <= 0 or min(w2) <= 0:
-            continue
-        recent_amp = (max(w1) - min(w1)) / min(w1)
-        prev_amp   = (max(w2) - min(w2)) / min(w2)
-        if prev_amp == 0 or recent_amp >= prev_amp * vcp_ratio:
-            continue
-
-        valid_vol = volumes_desc[volumes_desc > 0]
-        if len(valid_vol) < 10:
-            continue
-        vol_avg_all    = float(np.mean(valid_vol))
-        vol_avg_recent = float(np.mean(volumes_desc[:5]))
-        if vol_avg_all == 0 or vol_avg_recent >= vol_avg_all * vol_dry_ratio:
-            continue
-
-        f_net_desc = d["f_net"][:cursor][::-1]
-        i_net_desc = d["i_net"][:cursor][::-1]
-        supply_len = max(int(np.sum(f_net_desc != 0)), int(np.sum(i_net_desc != 0)))
-        if not _smart_ok(f_net_desc, i_net_desc, supply_len):
-            continue
-
-        if len(closes_desc) < breakout_lookback + 1:
-            continue
-        pivot = float(np.max(closes_desc[1:breakout_lookback+1]))
-        if curr <= pivot:
-            continue
-        recent_quiet = volumes_desc[1:11]
-        recent_quiet = recent_quiet[recent_quiet > 0]
-        quiet_avg = float(np.mean(recent_quiet)) if len(recent_quiet) else 0
-        if quiet_avg == 0 or volumes_desc[0] < quiet_avg * breakout_vol_mult:
-            continue
-
-        atr = _atr(closes_desc, ATR_PERIOD)
-        stop_price = round(curr - atr * ATR_STOP_MULT, 0)
-        tgt_price  = round(curr + atr * ATR_TARGET_MULT, 0)
-        if stop_price <= 0:
-            continue
-        out.append({"name": name, "curr_price": curr, "stop_price": stop_price,
-                    "tgt_price": tgt_price, "atr_val": atr, "score": 70})
-    return out
-
-
-# ============================================================
 # 추세 — as-of 스캔
 # ============================================================
 def scan_trend(data: dict, idx_map: dict) -> list:
@@ -335,14 +253,11 @@ def scan_trend(data: dict, idx_map: dict) -> list:
 # 포트폴리오 시뮬레이션
 # ============================================================
 class Sbo2SignalBacktest:
-    def __init__(self, data: dict, slot: str, initial_cash: int, max_positions: int,
-                 vcp_params: dict = None):
+    def __init__(self, data: dict, initial_cash: int, max_positions: int):
         self.data          = data
-        self.slot          = slot   # "vcp" | "trend" | "both"
         self.cash          = initial_cash
         self.initial_cash  = initial_cash
         self.max_positions = max_positions
-        self.vcp_params    = vcp_params or {}
         self.positions     = {}   # name -> dict
         self.trades        = []
         self.equity_curve  = []
@@ -497,12 +412,8 @@ class Sbo2SignalBacktest:
             if len(self.positions) >= self.max_positions:
                 continue
 
-            # ③ 후보 스캔 (오늘까지 데이터로 VCP/추세)
-            cands = []
-            if self.slot in ("vcp", "both"):
-                cands += [(c, "vcp") for c in scan_vcp(self.data, idx_map, **self.vcp_params)]
-            if self.slot in ("trend", "both"):
-                cands += [(c, "trend") for c in scan_trend(self.data, idx_map)]
+            # ③ 후보 스캔 (오늘까지 데이터로 추세만 — VCP는 08-15 제거)
+            cands = [(c, "trend") for c in scan_trend(self.data, idx_map)]
 
             for c, tag in cands:
                 if len(self.positions) >= self.max_positions:
@@ -563,8 +474,8 @@ def main():
     parser = argparse.ArgumentParser(description="sbo2 VCP/추세 실신호 백테스트")
     parser.add_argument("--start", default="2025-12-01")
     parser.add_argument("--end", default="")
-    parser.add_argument("--slot", default="both", choices=["vcp", "trend", "both"])
-    # ★ 2026-08-15: sbo2 실전 현재값(600만원 시드, 4종목 상한)에 맞춤
+    # ★ 2026-08-15: sbo2 실전 현재값(600만원 시드, 4종목 상한)에 맞춤.
+    #   --slot 옵션 제거 — VCP 완전 제거로 추세만 남아 선택지가 무의미해짐.
     parser.add_argument("--initial-cash", type=int, default=6_000_000)
     parser.add_argument("--max-positions", type=int, default=4)
     args = parser.parse_args()
@@ -572,18 +483,15 @@ def main():
     end = args.end or datetime.date.today().strftime("%Y-%m-%d")
     data = load_all_stocks()
     calendar = sorted({dt for d in data.values() for dt in d["dates"] if args.start <= dt <= end})
-    print(f"🚀 [SBO2-신호] {args.start} ~ {end} | {len(calendar)}일 | slot={args.slot}")
+    print(f"🚀 [SBO2-신호(추세)] {args.start} ~ {end} | {len(calendar)}일")
 
-    results = []
-    for slot in (["vcp", "trend"] if args.slot == "both_separate" else [args.slot]):
-        bt = Sbo2SignalBacktest(data, slot, args.initial_cash, args.max_positions)
-        bt.run(calendar)
-        metrics = calc_metrics(bt.get_trades(), bt.get_equity_curve(), args.initial_cash)
-        results.append({"name": slot, "metrics": metrics, "trades": bt.get_trades(),
-                        "equity": bt.get_equity_curve()})
-        print(format_report(metrics, slot))
+    bt = Sbo2SignalBacktest(data, args.initial_cash, args.max_positions)
+    bt.run(calendar)
+    metrics = calc_metrics(bt.get_trades(), bt.get_equity_curve(), args.initial_cash)
+    print(format_report(metrics, "trend"))
 
-    return results
+    return [{"name": "trend", "metrics": metrics, "trades": bt.get_trades(),
+             "equity": bt.get_equity_curve()}]
 
 
 if __name__ == "__main__":
