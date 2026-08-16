@@ -12,13 +12,16 @@ cbot.py 운영 로직(ATR 추세추종 + 25일기한 + 목표1 50%매도)을 그
 - 알트코인 동시보유 한도 → 생략
 - 야간 매수 제한 → 생략
 
-[검증 핵심 — 그대로 재현]
-- MA5 > MA20 (정배열) / RSI 40~70 / 거래량 ≥ 20봉 평균 × 1.3배 / 현재가 > MA20
-- ATR 기반 손절(ATR×2)/목표(ATR×3) 산정
+[검증 핵심 — 그대로 재현, 2026-08-17 실전값 재동기화]
+- MA5 > MA20 (정배열) / RSI 40~79 / 거래량 ≥ 20봉 평균 × 1.2배 / 현재가 > MA20
+- ATR 기반 손절(ATR×2)/목표(ATR×3) 산정, ATR 미사용 시 폴백 -7%/+15%
 - 목표1 달성 → 50% 매도 + 손절 상향(ATR×1) + 목표 재설정(ATR×3)
 - 목표2+ 달성 → 손절을 직전 목표가로, 목표 재설정
 - 트레일링 스탑 (목표1 달성 이후, 고점 대비 ATR×1.5)
 - 25일(캘린더일) 보유기한 초과 시 강제 청산 (stage==0 한정)
+- 매수금액 100만원(★2026-08-17: 40만→100만, 08-07 실전 변경) / 시딩 300만원
+  ("300만원 모드") / 최대 3코인 — 예전엔 40만원×1000만원 기준으로 어긋나
+  있었음(정비 전 실제로는 늘 700만원이 놀아 수익률이 실제보다 희석됨)
 
 [사용법]
   from cbot_backtest_engine import CBotBacktestEngine, CBotBacktestConfig
@@ -46,9 +49,18 @@ ATR_RAISE_MULT  = 1.0
 ATR_TRAIL_MULT  = 1.5
 
 FALLBACK_STOP   = -0.07
-FALLBACK_TARGET = 0.12
+# ★ 2026-08-17: 0.12 → 0.15 (cbot.py FALLBACK_TARGET과 불일치했음 — 정비 중 발견)
+FALLBACK_TARGET = 0.15
 
 MIN_ORDER_AMT = 5_000  # 업비트 최소 주문금액 근사치
+
+# ★ 2026-08-17: cbot.py 매수필터 값과 정비 — RSI_MAX/VOL_MULT가 옛날 값으로
+#   하드코딩돼 있어 실전과 어긋났음(RSI_MAX 70→79, VOL_MULT 1.3→1.2 둘 다
+#   실전에서 완화된 이후 백테스터에 반영 안 됨)
+RSI_MIN  = 40
+RSI_MAX  = 79
+VOL_MULT = 1.2
+STOP_LOSS_CRASH = -0.05   # 직전봉 급락 즉시손절 기준 (주간 기준 — 4시간봉 백테스트는 야간 -0.08 예외 미반영)
 
 
 # ============================================================
@@ -78,8 +90,8 @@ class CoinTrade:
 # ============================================================
 @dataclass
 class CBotBacktestConfig:
-    initial_cash:    int   = 10_000_000
-    base_buy_amt:    int   = 400_000      # cbot 실전: 단일매수 40만원
+    initial_cash:    int   = 3_000_000    # cbot 실전 시딩 "300만원 모드" (★2026-08-17: 1000만→300만, 실전 반영)
+    base_buy_amt:    int   = 1_000_000    # cbot 실전: 단일매수 100만원 (★2026-08-17: 40만→100만, 08-07 실전 변경 반영)
     max_positions:   int   = 3            # cbot 실전: 최대 3코인
     buy_score_min:   int   = 55           # AI 점수 기준선 (룰점수로 대체)
 
@@ -191,13 +203,13 @@ class CBotBacktestEngine:
     # 매수 신호 (cbot.check_buy_signal 단순화 재현)
     # ----------------------------------------------------------
     def _check_buy_signal(self, ind: dict) -> tuple:
-        if ind["candle_rate"] <= -0.05:
+        if ind["candle_rate"] <= STOP_LOSS_CRASH:
             return False, "직전봉 급락"
         if ind["ma5"] <= ind["ma20"]:
             return False, "MA 역배열"
-        if not (40 <= ind["rsi"] <= 70):
+        if not (RSI_MIN <= ind["rsi"] <= RSI_MAX):
             return False, "RSI 범위 밖"
-        if ind["vol_ratio"] < 1.3:
+        if ind["vol_ratio"] < VOL_MULT:
             return False, "거래량 부족"
         if ind["current"] <= ind["ma20"]:
             return False, "현재가 MA20 이하"
@@ -351,7 +363,10 @@ class CBotBacktestEngine:
             tracker["peak_rate"] = rate
 
         # ① 직전봉 급락 즉시 손절
-        if ind["candle_rate"] <= -0.08:
+        # ★ 2026-08-17: -0.08 하드코딩은 cbot.py의 "야간(23~06시)" 완화
+        #   기준이었음 — 주간 기본값은 STOP_LOSS_CRASH(-0.05). 백테스트는
+        #   4시간봉이라 야간을 구분 못 하므로 주간 기준(더 흔한 상황)을 씀.
+        if ind["candle_rate"] <= STOP_LOSS_CRASH:
             self._simulate_sell(market, qty, current,
                                f"급락감지({ind['candle_rate']:+.2%})", date_str)
             return

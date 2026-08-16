@@ -72,14 +72,17 @@ def print_cbot_summary(results: list):
     print("🎯 [CBOT] 판단 기준")
     print('=' * 70)
     print(f"\n  현재(임계치55) 성과:")
-    print(f"    수익률: {m.get('total_return_pct',0):+.2f}% | "
+    # ★ 2026-08-17: calc_metrics()가 만드는 키는 "total_return_pct"가 아니라
+    #   "total_return" — 잘못된 키 때문에 이 요약란만 항상 +0.00%로 표시되고
+    #   있었음(상세 리포트/비교표는 정상 키를 써서 문제없었음)
+    print(f"    수익률: {m.get('total_return',0):+.2f}% | "
           f"승률: {m.get('win_rate',0):.1f}% | "
           f"MDD: {m.get('mdd',0):.2f}% | PF: {m.get('profit_factor',0) or 0:.2f}")
 
     best = max(results, key=lambda r: r["metrics"].get("profit_factor", 0) or 0)
     bm = best["metrics"]
     print(f"\n  최고 PF 시나리오: {best['name']}")
-    print(f"    수익률: {bm.get('total_return_pct',0):+.2f}% | "
+    print(f"    수익률: {bm.get('total_return',0):+.2f}% | "
           f"승률: {bm.get('win_rate',0):.1f}% | "
           f"MDD: {bm.get('mdd',0):.2f}% | PF: {bm.get('profit_factor',0) or 0:.2f}")
 
@@ -92,8 +95,12 @@ def main():
     parser.add_argument("--end",   default="")
     parser.add_argument("--codes", default="")
     parser.add_argument("--max-codes",     type=int, default=30)
-    parser.add_argument("--initial-cash",  type=int, default=10_000_000)
-    parser.add_argument("--base-buy-amt",  type=int, default=400_000)
+    # ★ 2026-08-17: cbot 실전 시딩(3,000,000원 "300만원 모드")/매수금액
+    #   (100만원, 08-07 변경)에 맞춰 기본값 갱신 — 옛날 값(1000만/40만)으론
+    #   포지션 3개(최대 300만원)만 굴려도 700만원이 항상 놀아 수익률이
+    #   실제보다 낮게 계산됐음
+    parser.add_argument("--initial-cash",  type=int, default=3_000_000)
+    parser.add_argument("--base-buy-amt",  type=int, default=1_000_000)
     parser.add_argument("--max-positions", type=int, default=3)
     parser.add_argument("--buy-score-min", type=int, default=55)
     parser.add_argument("--compare", action="store_true")

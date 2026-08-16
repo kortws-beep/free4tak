@@ -131,7 +131,7 @@ def print_sbot_summary(results: list):
     pf        = m.get("profit_factor", 0)
     win_rate  = m.get("win_rate", 0)
     mdd       = m.get("mdd", 0)
-    ret       = m.get("total_return_pct", 0)
+    ret       = m.get("total_return", 0)  # ★ 2026-08-17: 잘못된 키(total_return_pct) 수정
 
     print(f"\n  현재(임계치75) 성과:")
     print(f"    수익률: {ret:+.2f}% | 승률: {win_rate:.1f}% | "
@@ -141,7 +141,7 @@ def print_sbot_summary(results: list):
     best = max(results, key=lambda r: r["metrics"].get("profit_factor", 0))
     best_m = best["metrics"]
     print(f"\n  최고 PF 시나리오: {best['name']}")
-    print(f"    수익률: {best_m.get('total_return_pct',0):+.2f}% | "
+    print(f"    수익률: {best_m.get('total_return',0):+.2f}% | "
           f"승률: {best_m.get('win_rate',0):.1f}% | "
           f"MDD: {best_m.get('mdd',0):.2f}% | "
           f"PF: {best_m.get('profit_factor',0):.2f}")
