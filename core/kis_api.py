@@ -7,6 +7,7 @@ import json
 import threading
 import requests
 import datetime
+from typing import Optional
 
 
 TOKEN_TTL = 86400
@@ -328,8 +329,19 @@ class KisAPI:
             print(f"⚠️ 호가 조회 오류 {code}: {e}")
             return {}
 
-    def is_market_open(self) -> bool:
-        """오늘 장 개설 여부 체크 (공휴일/휴장일 포함)"""
+    def is_market_open(self) -> Optional[bool]:
+        """오늘 장 개설 여부 체크 (공휴일/휴장일 포함).
+        ★ 2026-08-17: 실패 시 반환값을 True(개장)에서 None(판단불가)으로
+          변경 — 기존엔 API 오류/빈응답 시 "장 열림"으로 fail-open 처리
+          했는데, sbot이 3일째(08-14부터) 재시작 없이 돌던 중 08-17 광복절
+          대체공휴일 아침에 이 호출이 일시적으로 실패해 "휴장 아님"으로
+          잘못 캐시되고, sbot.py가 하루 1회만 재확인하는 구조라 그날 내내
+          (08:50 넘도록 매수시도 직전까지) 휴장일을 정상 개장일로 착각한
+          채 계속 돌았던 사고가 있었음(사용자 발견). 호출부(sbot.py/
+          sbo2.py)가 None이면 그날 캐시하지 않고 다음 루프(30초 후)에
+          바로 재시도하도록 수정 — 실패해도 노출 구간이 하루가 아니라
+          최대 한 루프로 줄어듦.
+        """
         try:
             url = f"{self.base_url}/uapi/domestic-stock/v1/quotations/chk-holiday"
             headers = {"authorization": f"Bearer {self.token}",
@@ -339,13 +351,16 @@ class KisAPI:
             params = {"BASS_DT": today, "CTX_AREA_NK": "", "CTX_AREA_FK": ""}
             res    = _get(url, headers=headers, params=params, timeout=5).json()
             output = res.get("output", [])
-            if not output: return True
+            if not output:
+                print("⚠️ 휴장일 체크 응답 없음 — 판단불가(다음 루프 재시도)")
+                return None
             is_open = output[0].get("bzdy_yn", "Y") == "Y"
             if not is_open:
                 print(f"🎌 오늘은 휴장일입니다")
             return is_open
         except Exception as e:
-            print(f"⚠️ 휴장일 체크 오류: {e}"); return True
+            print(f"⚠️ 휴장일 체크 오류: {e} — 판단불가(다음 루프 재시도)")
+            return None
 
     def get_market_index(self) -> dict:
         """

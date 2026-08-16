@@ -1351,11 +1351,20 @@ class SBot:
                     time.sleep(SLEEP_INTERVAL); continue
 
                 # ── 휴장일 ───────────────────────────────
+                # ★ 2026-08-17: is_market_open()이 None(API 실패/판단불가)이면
+                #   그날 캐시하지 않고 다음 루프에 재시도 — 예전엔 실패 시에도
+                #   무조건 "휴장 아님"으로 캐시해서, 하필 그날 첫 체크가 실패하면
+                #   진짜 휴장일에도 하루 종일(다음 재시작 전까지) 정상 개장으로
+                #   착각한 채 도는 사고가 있었음(08-17 광복절 대체공휴일 실사례).
                 if self._holiday_checked != today:
-                    self._is_holiday      = not self.api.is_market_open()
-                    self._holiday_checked = today
-                    if self._is_holiday:
-                        self._notify(f"🎌 오늘은 휴장일 — 봇 대기")
+                    _open = self.api.is_market_open()
+                    if _open is None:
+                        print(f"⚠️ [{now}] 휴장일 판단 실패 — 다음 루프 재시도")
+                    else:
+                        self._is_holiday      = not _open
+                        self._holiday_checked = today
+                        if self._is_holiday:
+                            self._notify(f"🎌 오늘은 휴장일 — 봇 대기")
                 if self._is_holiday:
                     print(f"🎌 [{now}] 휴장일 — 대기 중...")
                     time.sleep(300); continue

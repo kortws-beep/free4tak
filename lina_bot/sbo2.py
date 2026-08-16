@@ -2170,10 +2170,18 @@ class Sbo2:
                 #   제헌절 같은 공휴일에도 정상 개장으로 착각하고 하루종일
                 #   후보갱신/매수매도 체크를 계속 돌렸음(전일 마감 스냅샷을
                 #   그대로 실시간 데이터로 오인). sbot처럼 하루 1회만 조회.
+                # ★ 2026-08-17: is_market_open()이 None(API 실패/판단불가)이면
+                #   그날 캐시하지 않고 다음 루프 재시도 — sbot과 동일 사유
+                #   (08-17 광복절 대체공휴일에 sbot에서 실제로 발생한 사고,
+                #   sbo2도 같은 구조라 예방 차원에서 동일 적용)
                 today = today_str()
                 if self._holiday_checked != today:
-                    self._is_holiday      = not self.api.is_market_open()
-                    self._holiday_checked = today
+                    _open = self.api.is_market_open()
+                    if _open is None:
+                        print(f"⚠️ [{now_hms()}] 휴장일 판단 실패 — 다음 루프 재시도")
+                    else:
+                        self._is_holiday      = not _open
+                        self._holiday_checked = today
                 if self._is_holiday:
                     print(f"🎌 [{now_hms()}] 휴장일 — 대기 중...")
                     time.sleep(300)

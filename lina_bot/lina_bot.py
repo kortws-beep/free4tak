@@ -61,13 +61,23 @@ def _is_trading_day() -> bool:
         return False
     today = kst_now.strftime("%Y-%m-%d")
     if _TRADING_DAY_CACHE["date"] != today:
+        # ★ 2026-08-17: is_market_open()이 None(API 실패/판단불가)이면 그날
+        #   캐시하지 않고 다음 호출 때 재시도 — sbot/sbo2와 동일 사유
+        #   (08-17 광복절 대체공휴일에 sbot에서 실제로 발생한 사고, 예방
+        #   차원에서 리나도 동일 적용). 실패해도 무조건 True로 캐시하던
+        #   기존 동작은 하필 그날 첫 체크가 실패하면 하루 종일 잘못된
+        #   판단이 굳어버리는 문제가 있었음.
         try:
             from kis_api import KisAPI
-            _TRADING_DAY_CACHE["is_open"] = KisAPI().is_market_open()
+            _open = KisAPI().is_market_open()
         except Exception as e:
             print(f"⚠️ [리나] 휴장일 체크 오류: {e}")
-            _TRADING_DAY_CACHE["is_open"] = True  # 조회 실패시 기존 동작 유지(리포트 진행)
-        _TRADING_DAY_CACHE["date"] = today
+            _open = None
+        if _open is None:
+            print("⚠️ [리나] 휴장일 판단 실패 — 다음 호출 재시도")
+        else:
+            _TRADING_DAY_CACHE["is_open"] = _open
+            _TRADING_DAY_CACHE["date"]    = today
     return _TRADING_DAY_CACHE["is_open"]
 
 # 💡 리나의 텔레그램 중복 방지용 단기 기억 장치 (마지막 처리한 ID 기억)
