@@ -131,79 +131,7 @@ def signal_check_card(data):
     <tbody>{rows}</tbody></table></div>'''
 
 
-def sshow_card(data):
-    """run_sshow_backtest.py 결과(체크인 알림/통계/pending)를 카드로 표시
-    (2026-06-30 추가 — 생쇼 전문가4인 추천 적중률 백테스터)"""
-    if not data:
-        return '<div class="card"><h2>📺 생쇼(전문가4인) 추천 결과 체크인</h2><p class="empty">결과 없음</p></div>'
-
-    stats = data.get("stats", {}) or {}
-    total = stats.get("total", 0)
-    hit   = stats.get("hit", 0)
-    stop  = stats.get("stop", 0)
-    hold  = stats.get("hold", 0)
-    hit_rate = stats.get("hit_rate", 0) * 100
-    sample_ok = stats.get("sample_size_ok", False)
-
-    summary = f'''<div class="summary">
-      <div class="stat"><div class="label">판정 건수</div><div class="value">{total}</div></div>
-      <div class="stat"><div class="label">적중률</div><div class="value" style="color:{color(hit_rate-50)}">{hit_rate:.1f}%</div></div>
-      <div class="stat"><div class="label">적중/손절/보합</div><div class="value" style="font-size:1.1rem">{hit}/{stop}/{hold}</div></div>
-      <div class="stat"><div class="label">표본 신뢰도</div><div class="value" style="font-size:1.1rem;color:{"#26a69a" if sample_ok else "#888"}">{"충분(20+)" if sample_ok else "부족(20미만)"}</div></div>
-    </div>'''
-
-    # 이번 체크인에서 새로 판정/알림된 건들
-    notis = data.get("checkin_notifications", []) or []
-    noti_rows = ""
-    kind_label = {"hit": "🎯 적중", "stop": "🛑 손절", "hold": "⏱️ 보합", "progress": "📍 진행중"}
-    for n in notis:
-        noti_rows += (f'<tr><td>{n.get("name","")}</td>'
-                      f'<td>{n.get("stage","")}일</td>'
-                      f'<td>{kind_label.get(n.get("kind",""), n.get("kind",""))}</td>'
-                      f'<td style="text-align:left;color:#ccc">{n.get("text","")}</td></tr>')
-    noti_table = (f'<table><thead><tr><th>종목</th><th>경과</th><th>구분</th><th style="text-align:left">내용</th></tr></thead>'
-                  f'<tbody>{noti_rows}</tbody></table>') if noti_rows else '<p class="empty">이번 체크인 신규 판정 없음</p>'
-
-    # 현재 미확정(pending) 추천 목록 — 현재가/현재수익률 포함
-    pending = data.get("pending", []) or []
-    pend_rows = ""
-    for p in pending:
-        valid_tag = "" if p.get("price_valid", True) else ' style="color:#ef5350"'
-        src_tag = "ATR" if p.get("price_source") == "atr" else "원문"
-        cur_price = p.get("current_price")
-        cur_pct = p.get("current_pct")
-        cur_price_str = f'{cur_price:,.0f}' if cur_price is not None else "-"
-        cur_pct_str = fmt_pct(cur_pct) if cur_pct is not None else "-"
-        pct_color = color(cur_pct) if cur_pct is not None else "#888"
-        pend_rows += (f'<tr{valid_tag}><td>{p.get("date","")}</td><td>{p.get("name","")}</td>'
-                      f'<td>{safe(p.get("buy_price")):,.0f}</td>'
-                      f'<td>{safe(p.get("stop_price")):,.0f}</td>'
-                      f'<td>{safe(p.get("tgt_price")):,.0f}</td>'
-                      f'<td>{cur_price_str}</td>'
-                      f'<td style="color:{pct_color};font-weight:700">{cur_pct_str}</td>'
-                      f'<td>{p.get("checkin_label", "")}</td>'
-                      f'<td>{src_tag}</td></tr>')
-    pend_table = (f'<table><thead><tr><th>추천일</th><th>종목</th><th>매수가</th><th>손절가</th><th>목표가</th>'
-                  f'<th>현재가</th><th>현재수익률</th><th>경과</th><th>가격출처</th></tr></thead>'
-                  f'<tbody>{pend_rows}</tbody></table>') if pend_rows else '<p class="empty">미확정 추천 없음</p>'
-
-    note = ('<p style="color:#888;font-size:.85rem;margin:12px 0">'
-            '※ 매수가는 mbn 원문 대신 kr_theme_finance.db 실제 종가 기준, '
-            '목표/손절가는 ATR(stop×2.0/target×3.0) 재계산값 사용 — '
-            '액면분할 등으로 원문 가격이 오염되는 문제 방지. '
-            '적중률 = 적중/(적중+손절), 보합은 무승부로 분모 제외. '
-            '7/14일 역일 기준 체크인, pending은 실행 시점 현재가/수익률 항상 표시.</p>')
-
-    return f'''<div class="card"><h2>📺 생쇼(전문가4인) 추천 결과 체크인</h2>
-    {summary}{note}
-    <h3 style="color:#90CAF9;margin:16px 0 10px;font-size:1.1rem">이번 체크인 신규 판정</h3>
-    {noti_table}
-    <h3 style="color:#90CAF9;margin:20px 0 10px;font-size:1.1rem">미확정(pending) 추천 목록</h3>
-    {pend_table}
-    </div>'''
-
-
-def build_html(sbot,sbo2,date_str,signal_check=None,sshow=None):
+def build_html(sbot,sbo2,date_str,signal_check=None):
     return f'''<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8">
     <title>영암9 주간 백테스트 {date_str}</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -214,7 +142,6 @@ def build_html(sbot,sbo2,date_str,signal_check=None,sshow=None):
     {scenario_table(sbo2,"📊 리나 스윙봇 (sbo2)")}
     {equity_chart(sbot,sbo2)}
     {signal_check_card(signal_check)}
-    {sshow_card(sshow)}
     </body></html>'''
 
 def main():
@@ -223,20 +150,16 @@ def main():
     parser.add_argument("--sbo2",default="none")
     parser.add_argument("--signal-check",default="none",
                          help="run_sbo2_signal_check.py 결과 JSON (sbo2 실거래 신호 사후검증)")
-    parser.add_argument("--sshow",default="none",
-                         help="run_sshow_backtest.py 결과 JSON (생쇼 전문가추천 적중률)")
     parser.add_argument("--date",default=datetime.date.today().strftime("%Y-%m-%d"))
     parser.add_argument("--out",default="")
     args=parser.parse_args()
     sbot=load_json(args.sbot); sbo2=load_json(args.sbo2)
     signal_check=load_json_dict(args.signal_check)
-    sshow=load_json_dict(args.sshow)
     if not sbot and not sbo2: print("❌ 결과 없음"); sys.exit(1)
     print(f"✅ sbot 시나리오: {len(sbot)}개")
     print(f"✅ sbo2 시나리오: {len(sbo2)}개")
     print(f"✅ sbo2 신호검증: {'있음' if signal_check else '없음'}")
-    print(f"✅ 생쇼 체크인: {'있음' if sshow else '없음'}")
-    html=build_html(sbot,sbo2,args.date,signal_check,sshow)
+    html=build_html(sbot,sbo2,args.date,signal_check)
     rd=os.path.join(os.path.dirname(__file__),"results"); os.makedirs(rd,exist_ok=True)
     out=args.out or os.path.join(rd,f"weekly_report_{args.date}.html")
     with open(out,"w",encoding="utf-8") as f: f.write(html)

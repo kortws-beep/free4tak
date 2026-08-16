@@ -127,7 +127,7 @@ def simulate_one(history: list, scan_date: str, hold_days: int) -> dict:
 # ============================================================
 def main():
     parser = argparse.ArgumentParser(description="sbo2 신호 사후검증")
-    parser.add_argument("--grade", default="", help="swing/trend/tele/inter/sshow/light 중 하나만 (비우면 전체)")
+    parser.add_argument("--grade", default="", help="swing/trend/tele/inter/light 중 하나만 (비우면 전체)")
     parser.add_argument("--hold-days", type=int, default=25, help="추적 기간 (sbo2 기한초과 기준 기본 25일)")
     parser.add_argument("--min-score", type=int, default=0, help="이 점수 이상만 분석")
     args = parser.parse_args()
@@ -144,19 +144,21 @@ def main():
     params = [args.grade] if args.grade else []
 
     # ★ 2026-07-17: 기존엔 swing/trend/tele 3개만 검증하고 있었음 — 사용자
-    #   지적으로 확인해보니 교집합(inter)/생쇼(sshow)/완화(light, 07-17
-    #   신규)가 애초에 검증 대상에서 통째로 빠져 있었음. sbo2_candidates에
-    #   실제 존재하는 모든 슬롯을 검증하도록 확대.
+    #   지적으로 확인해보니 교집합(inter)/완화(light, 07-17 신규)가 애초에
+    #   검증 대상에서 통째로 빠져 있었음. sbo2_candidates에 실제 존재하는
+    #   모든 슬롯을 검증하도록 확대.
+    # ★ 2026-08-16: 생쇼(sshow) 슬롯은 07-25에 실전에서 제거됨(MBN 피드
+    #   자체가 없어짐) — 검증 대상에서도 제외.
     rows = cand_conn.execute(f"""
         SELECT DISTINCT scan_date, stock_name, grade, score, curr_price
         FROM sbo2_candidates
-        WHERE grade IN ('swing','trend','tele','inter','sshow','light') {grade_filter}
+        WHERE grade IN ('swing','trend','tele','inter','light') {grade_filter}
         AND score >= ?
         ORDER BY scan_date, stock_name
     """, params + [args.min_score]).fetchall()
 
     print(f"📋 중복 제거 후 분석 대상: {len(rows)}건 "
-          f"(슬롯: {args.grade or 'swing/trend/tele/inter/sshow/light 전체'}, "
+          f"(슬롯: {args.grade or 'swing/trend/tele/inter/light 전체'}, "
           f"점수 {args.min_score}점 이상, 추적 {args.hold_days}일)")
 
     results = []

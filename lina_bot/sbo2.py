@@ -1988,6 +1988,7 @@ class Sbo2:
             #   오탐 — 사용자가 HTS에서 정상 보유 확인해줌). 아래 qty
             #   동기화 보호와 동일하게, 매수 직후 BUY_SYNC_GUARD_SEC 동안은
             #   이 종목을 수동매도 감지 대상에서 제외.
+            manual_sold_codes = []
             for code in list(self.positions.keys()):
                 guard_until = self._buy_sync_guard.get(code, 0) + BUY_SYNC_GUARD_SEC
                 if code not in new_pos and code not in self.sold_today:
@@ -1995,10 +1996,41 @@ class Sbo2:
                         print(f"   🛡️ {self.positions[code].get('name', code)}({code}) "
                               f"매수직후 동기화 보호 중 — 수동매도 감지 스킵")
                         continue
-                    self.sold_today[code] = now_hms()
-                    print(f"   🔍 수동매도 감지: {code} → sold_today 추가")
-                    if _master_remove:
-                        _master_remove("sbo2", code)
+                    manual_sold_codes.append(code)
+
+            # ★ 2026-08-15: 수동매도가 감지만 되고 DB에 기록되지 않던 문제 수정
+            #   (사용자 지적 — "모든 거래가 우리 디비에 기록되어야 의미있는
+            #   통계가 만들어질거야"). 실계좌 기간별손익 API(정확한 매도가/
+            #   실현손익)를 조회해 save_sell_trade()로 기록한다. 이 함수는
+            #   매수 기록이 없어도(수동매수) INSERT로 처리하는 로직이 이미
+            #   있었는데, 이 감지 루프가 애초에 호출을 안 하고 있었음.
+            _prows = {}
+            if manual_sold_codes:
+                today_ymd = datetime.datetime.now().strftime("%Y%m%d")
+                _pdata = self.api.get_period_trade_profit(today_ymd, today_ymd)
+                _prows = {r["pdno"]: r for r in _pdata.get("trades", [])}
+            for code in manual_sold_codes:
+                self.sold_today[code] = now_hms()
+                print(f"   🔍 수동매도 감지: {code} → sold_today 추가")
+                pos = self.positions.get(code, {})
+                row = _prows.get(code)
+                if row and int(row.get("sll_qty", 0) or 0) > 0:
+                    sell_price = float(row.get("sll_pric", 0) or 0)
+                    sell_qty   = int(row.get("sll_qty", 0) or 0) or pos.get("qty", 0)
+                else:
+                    # 기간별손익 API에 아직 반영 안 됨 — 최근 시세로 추정 기록
+                    mdata = self.api.get_market_data(code)
+                    sell_price = float(mdata.get("stck_prpr", 0)) if mdata else pos.get("entry_price", 0)
+                    sell_qty   = pos.get("qty", 0)
+                save_sell_trade(
+                    code=code, sell_price=sell_price, reason="수동매도",
+                    entry_price=pos.get("entry_price", 0), qty=sell_qty,
+                    buy_time=pos.get("buy_time", ""),
+                    stock_name=pos.get("name", code), grade=pos.get("grade", "실계좌"),
+                    stage=pos.get("stage", 0),
+                )
+                if _master_remove:
+                    _master_remove("sbo2", code)
 
             # ── 실계좌 기준으로 포지션 갱신 ───────────────────
             # 기존 포지션 메타(손절/목표/등급) 보존하면서 수량/평단 갱신

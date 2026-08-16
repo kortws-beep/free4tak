@@ -456,12 +456,40 @@ class CBot:
                 print(f"⚠️ master_db 기록 오류: {_e}")
         return profit_krw
 
+    def _save_manual_trade(self, market: str, buy_price: float, sell_price: float,
+                            qty: float, sell_reason: str = "수동매도"):
+        """수동매매(업비트 앱/웹 직접 거래) 완결 기록을 매수/매도 한 번에 INSERT.
+        _save_buy_history/_save_sell_history는 봇이 만든 매수 행이 있어야
+        매도를 매칭하는데, 수동매매는 그 행이 없어 이 경로로 따로 기록한다.
+        ai_score=-1을 수동매매 표식으로 써서 _get_recent_performance()의
+        동적 임계치 계산에서 제외한다(사용자 개인 판단이 봇 신호 품질
+        통계를 흔들지 않도록)."""
+        try:
+            now = datetime.datetime.now().isoformat(timespec="seconds")
+            profit_rate = (sell_price - buy_price) / buy_price * 100 if buy_price else 0
+            profit_krw  = (sell_price - buy_price) * qty
+            conn = _db_connect(TRADE_HIST_DB)
+            conn.execute("""
+                INSERT INTO trades
+                    (market, buy_price, buy_time, qty, sell_price, sell_time,
+                     profit_rate, profit_krw, sell_reason, ai_score, ai_reason,
+                     market_status, fear_greed)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """, (market, buy_price, now, qty, sell_price, now,
+                  round(profit_rate, 2), round(profit_krw), sell_reason, -1, "수동매매",
+                  self.market_status, self.fear_greed))
+            conn.commit(); conn.close()
+            emoji = "✅" if profit_rate >= 0 else "❌"
+            print(f"   {emoji} 수동거래 기록 {market} | {profit_rate:+.2f}% | {sell_reason}")
+        except Exception as e:
+            print(f"⚠️ 수동거래 저장 오류 {market}: {e}")
+
     def _get_recent_performance(self, limit: int = 20):
         try:
             conn = _db_connect(TRADE_HIST_DB)
             rows = conn.execute("""
                 SELECT profit_rate, profit_krw FROM trades
-                WHERE sell_price IS NOT NULL
+                WHERE sell_price IS NOT NULL AND (ai_score IS NULL OR ai_score >= 0)
                 ORDER BY id DESC LIMIT ?
             """, (limit,)).fetchall()
             conn.close()
@@ -1711,10 +1739,21 @@ class CBot:
                 # ── 포지션 / KRW 잔고 ────────────────────────
                 new_pos = self.get_current_positions()
                 # ★ 수동매도 감지
+                # ★ 2026-08-15: 감지만 되고 DB에 전혀 기록되지 않던 문제 수정
+                #   (사용자 지적 — "모든 거래가 우리 디비에 기록되어야
+                #   의미있는 통계가 만들어질거야"). 업비트는 아직 KIS처럼
+                #   정확한 실현손익 조회 API가 없어, 감지 시점의 최신 시세로
+                #   추정 기록한다(엄밀한 체결가는 아니지만 없는 것보단 낫다).
                 for _code in list(self.positions.keys()):
                     if _code not in new_pos and _code not in self.sold_today:
                         self.sold_today[_code] = now_hms()
                         print(f"🔍 수동매도 감지: {_code} → sold_today 추가")
+                        _old_pos = self.positions.get(_code, {})
+                        _prices = self.get_current_price([_code])
+                        _sell_price = _prices.get(_code, _old_pos.get("entry_price", 0))
+                        self._save_manual_trade(
+                            _code, _old_pos.get("entry_price", 0), _sell_price,
+                            _old_pos.get("qty", 0))
                         # ★ 2026-07-02: master_positions 정리 누락 수정 —
                         #   기존엔 감지만 하고 지우질 않아 수동매도된 코인이
                         #   master_positions에 유령으로 계속 남아있었음.

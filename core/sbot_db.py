@@ -129,14 +129,54 @@ class SwingDB:
         except Exception as e:
             print(f"⚠️ 스윙 매도 저장 오류 {code}: {e}")
 
-    def get_recent_performance(self, limit: int = 20) -> Optional[dict]:
+    def save_manual_trade(self, code: str, stock_name: str, buy_price: float,
+                           sell_price: float, qty: int, sell_reason: str,
+                           buy_tag: str = "수동"):
+        """수동매매(HTS/MTS 직접 거래) 완결 기록을 매수/매도 한 번에 INSERT.
+        save_buy/save_sell은 봇이 만든 매수 행이 있어야 매도를 매칭하는데,
+        수동매매는 봇이 매수 행을 만든 적이 없어 이 경로로 따로 기록한다."""
+        try:
+            now = datetime.datetime.now().isoformat(timespec="seconds")
+            profit_rate = ((sell_price - buy_price) / buy_price * 100
+                           if buy_price else 0)
+            conn = _connect()
+            conn.execute("""
+                INSERT INTO trades
+                    (code, stock_name, buy_price, buy_time, qty,
+                     sell_price, sell_time, profit_rate, sell_reason, buy_tag)
+                VALUES (?,?,?,?,?,?,?,?,?,?)
+            """, (code, stock_name, buy_price, now, qty,
+                  sell_price, now, round(profit_rate, 2), sell_reason, buy_tag))
+            conn.commit(); conn.close()
+            emoji = "✅" if profit_rate >= 0 else "❌"
+            print(f"   {emoji} 수동거래 기록 {code} | {profit_rate:+.2f}% | {sell_reason}")
+        except Exception as e:
+            print(f"⚠️ 수동거래 저장 오류 {code}: {e}")
+
+    def get_recent_performance(self, days: int = 30) -> Optional[dict]:
+        """최근 N일(달력 기준) 실현손익 통계.
+        ★ 2026-08-16: 기존엔 "최근 거래 20건"(건수 기준)이었는데, 이게
+        자기강화 루프를 만드는 걸 발견 — 매수임계치가 승률 낮다고 올라가면
+        거래가 뜸해지고, 거래가 뜸해지면 오래된 나쁜 거래(07-21~29 급락기
+        손절들)가 last-20 창에서 안 빠지고 계속 남아 승률이 영원히 낮게
+        고정됨(08-16 확인 시점 승률 15%, 그 사이 신규 거래 0건으로 2주+
+        정체). 날짜 기준 창으로 바꾸면 거래가 아예 없어도 시간이 지나면
+        오래된 나쁜 거래가 자동으로 빠져나가 임계치가 스스로 풀린다."""
         try:
             conn = _connect()
+            cutoff = (datetime.datetime.now()
+                      - datetime.timedelta(days=days)).isoformat(timespec="seconds")
+            # ★ 2026-08-15: 수동매매(buy_tag='수동')는 봇 전략의 신호 품질이
+            #   아니라 사용자 개인 판단이므로, 매수점수 동적 조정(승률 기반)
+            #   신호에서는 제외 — 안 그러면 봇 성과와 무관한 판단이 임계치를
+            #   흔들게 됨. 전체 실현손익 통계(get_today_realized 등)는 여전히
+            #   수동매매 포함해서 계산한다(그건 "실제 성과" 질문에 맞는 값).
             rows = conn.execute("""
                 SELECT profit_rate, buy_tag FROM trades
-                WHERE sell_price IS NOT NULL
-                ORDER BY id DESC LIMIT ?
-            """, (limit,)).fetchall()
+                WHERE sell_price IS NOT NULL AND sell_time >= ?
+                      AND (buy_tag IS NULL OR buy_tag != '수동')
+                ORDER BY id DESC
+            """, (cutoff,)).fetchall()
             conn.close()
             if not rows:
                 return None

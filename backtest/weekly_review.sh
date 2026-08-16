@@ -61,18 +61,6 @@ sleep 1
 SIGNAL_CHECK_LATEST=$(ls -t results/sbo2_signal_check_*.json 2>/dev/null | head -1)
 echo "📋 sbo2 신호검증 결과: ${SIGNAL_CHECK_LATEST:-없음}"
 
-# ── Step 3.5: 생쇼(전문가4인 추천) 결과 체크 & 적중률 ─────
-#   ★ 2026-06-30 추가 — lina_bot.py 자동알림에서 분리한 독립 백테스터
-echo ""
-echo "🚀 [3.5/4] 생쇼(전문가4인) 추천 결과 체크 중..."
-cd $BACKTEST_DIR
-$VENV run_sshow_backtest.py \
-    2>&1 | grep -E "체크인|판정|적중률|결과 저장|⚠️"
-
-sleep 1
-SSHOW_LATEST=$(ls -t results/sshow_backtest_*.json 2>/dev/null | head -1)
-echo "📋 생쇼 체크인 결과: ${SSHOW_LATEST:-없음}"
-
 # ── Step 4: 통합 리포트 ──────────────────────────────────
 echo ""
 echo "📊 [4/4] 통합 HTML 리포트 생성..."
@@ -82,7 +70,6 @@ $VENV generate_combined_report.py \
     --sbot  "${SBOT_LATEST:-none}" \
     --sbo2  "${SBO2_LATEST:-none}" \
     --signal-check "${SIGNAL_CHECK_LATEST:-none}" \
-    --sshow "${SSHOW_LATEST:-none}" \
     --date  "$TODAY"
 
 echo ""

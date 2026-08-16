@@ -843,6 +843,42 @@ class KisAPI:
             print(f"⚠️ 일봉 조회 오류 {code}: {e}"); return []
 
     # ============================================================
+    # 기간별 실현손익 (수동매매 포함 실계좌 기준 조회)
+    # ============================================================
+    def get_period_trade_profit(self, start_date: str, end_date: str) -> dict:
+        """
+        기간별매매손익현황조회 (TTTC8715R). 봇 자체 거래기록 DB가 아니라
+        실계좌 자체를 조회하므로 수동매매(HTS/MTS)까지 전부 포함된
+        진짜 실현손익을 얻을 수 있다. start_date/end_date는 "YYYYMMDD".
+        반환: {"total_profit": int, "trades": [{"code","name","profit","date"}...]}
+        """
+        url = f"{self.base_url}/uapi/domestic-stock/v1/trading/inquire-period-trade-profit"
+        headers = {"authorization": f"Bearer {self.token}",
+                   "appkey": self.appkey, "appsecret": self.secret,
+                   "tr_id": "TTTC8715R"}
+        params = {
+            "CANO": self.cano, "ACNT_PRDT_CD": self.acnt,
+            "SORT_DVSN": "00", "PDNO": "",
+            "INQR_STRT_DT": start_date, "INQR_END_DT": end_date,
+            "CBLC_DVSN": "00",
+            "CTX_AREA_FK100": "", "CTX_AREA_NK100": "",
+        }
+        try:
+            res = _get(url, headers=headers, params=params, timeout=10).json()
+            if res.get("rt_cd") != "0":
+                print(f"⚠️ 기간별손익 조회 실패: {res.get('msg1', '')}")
+                return {"total_profit": 0, "trades": [], "raw": res}
+            trades = res.get("output1", [])
+            summary = res.get("output2", [{}])
+            if isinstance(summary, list):
+                summary = summary[0] if summary else {}
+            return {"total_profit": int(float(summary.get("tot_rlzt_pfls", 0) or 0)),
+                    "trades": trades, "summary": summary}
+        except Exception as e:
+            print(f"⚠️ 기간별손익 조회 예외: {e}")
+            return {"total_profit": 0, "trades": []}
+
+    # ============================================================
     # 거래량 순위 (폴백)
     # ============================================================
     def get_volume_rank_codes(self, seen: set, code_name_map: dict = None) -> list:

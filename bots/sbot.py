@@ -1387,8 +1387,10 @@ class SBot:
                             self.sold_today = saved
 
                 # ── 동적 매수 임계치 (스윙은 db.SwingDB.get_recent_performance) ──
+                # ★ 2026-08-16: 건수(20건) 기준 → 날짜(30일) 기준으로 변경.
+                #   자세한 사유는 core/sbot_db.py의 get_recent_performance 참고.
                 base_score = st.get("score_enter", BUY_SCORE_ENTER)
-                perf       = self.db.get_recent_performance(limit=20)
+                perf       = self.db.get_recent_performance(days=30)
                 if perf and perf["total"] >= 10:
                     if perf["win_rate"] < 40:
                         score_enter = base_score + 5
@@ -1442,15 +1444,43 @@ class SBot:
                     self._check_api_health(True)
                     # ★ 수동매도 감지 — 이전 포지션에 있었는데 실계좌에 없으면 감지
                     # ★ 수동매도는 재매수 허용 — sold_today 등록 안 함
-                    for _code in list(self.positions.keys()):
-                        if _code not in new_pos and _code not in self.sold_today:
-                            print(f"🔍 수동매도 감지: {_code} → 재매수 허용")
-                            # ★ 2026-07-02: master_positions 정리 누락 수정 —
-                            #   기존엔 여기서 감지만 하고 지우질 않아 수동매도된
-                            #   종목이 master_positions에 유령으로 계속 남아있었음
-                            #   (sbo2는 이미 정리하고 있었음, sbot만 누락).
-                            if _master_remove:
-                                _master_remove("sbot", _code)
+                    _manual_sold = [
+                        _code for _code in list(self.positions.keys())
+                        if _code not in new_pos and _code not in self.sold_today
+                    ]
+                    # ★ 2026-08-15: 수동매도가 감지만 되고 DB에 전혀 기록되지
+                    #   않던 문제 수정(사용자 지적 — "모든 거래가 우리 디비에
+                    #   기록되어야 의미있는 통계가 만들어질거야, 백테스터등에도
+                    #   활용될수 있고"). 실계좌 기간별손익 API로 정확한 매도가/
+                    #   실현손익을 가져와 sbot_trade_history.db에도 남긴다.
+                    _profit_rows = {}
+                    if _manual_sold:
+                        _today_ymd = datetime.datetime.now().strftime("%Y%m%d")
+                        _pdata = self.api.get_period_trade_profit(_today_ymd, _today_ymd)
+                        _profit_rows = {r["pdno"]: r for r in _pdata.get("trades", [])}
+                    for _code in _manual_sold:
+                        print(f"🔍 수동매도 감지: {_code} → 재매수 허용")
+                        _old_pos = self.positions.get(_code, {})
+                        _row = _profit_rows.get(_code)
+                        if _row and int(_row.get("sll_qty", 0) or 0) > 0:
+                            _sell_price = float(_row.get("sll_pric", 0) or 0)
+                            _buy_price  = float(_row.get("pchs_unpr", 0) or 0) or _old_pos.get("entry_price", 0)
+                            _sell_qty   = int(_row.get("sll_qty", 0) or 0) or _old_pos.get("qty", 0)
+                        else:
+                            # 기간별손익 API에 아직 반영 안 됨 — 최근 시세로 추정 기록
+                            _mdata = self.api.get_market_data(_code)
+                            _sell_price = safe_float(_mdata.get("stck_prpr", 0)) if _mdata else _old_pos.get("entry_price", 0)
+                            _buy_price  = _old_pos.get("entry_price", 0)
+                            _sell_qty   = _old_pos.get("qty", 0)
+                        self.db.save_manual_trade(
+                            _code, self._name(_code), _buy_price, _sell_price,
+                            _sell_qty, "수동매도")
+                        # ★ 2026-07-02: master_positions 정리 누락 수정 —
+                        #   기존엔 여기서 감지만 하고 지우질 않아 수동매도된
+                        #   종목이 master_positions에 유령으로 계속 남아있었음
+                        #   (sbo2는 이미 정리하고 있었음, sbot만 누락).
+                        if _master_remove:
+                            _master_remove("sbot", _code)
                     self.positions.clear()
                     self.positions.update(new_pos)
                 psbl_cash      = self.api.get_psbl_order_cash("005930")

@@ -162,7 +162,7 @@ class AIAnalyzer:
             hist_text += "없음 (첫 거래)\n"
 
         # 봇의 최근 성과
-        perf = self.db.get_recent_performance(limit=20)
+        perf = self.db.get_recent_performance(days=30)
         perf_text = ""
         if perf:
             perf_text = (
