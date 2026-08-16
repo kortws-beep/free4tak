@@ -82,6 +82,7 @@ import uuid
 import jwt
 import sqlite3
 import hashlib
+from collections import deque
 import pathlib
 import requests
 import datetime
@@ -186,6 +187,24 @@ HB_FILE     = "/tmp/hb_cbot"    # heartbeat 파일 (★ 2026-08-09 추가 —
 BOT_STATE_FILE = "cbot_state.json"
 TRADE_HIST_DB  = "cbot_trade_history.db"
 AI_CACHE_DB    = "cbot_ai_cache.db"
+TICK_DB        = "coin_price_ticks.db"   # ★ 2026-08-17: 실시간 시세틱 저장
+                                          #   (수급주체 불필요 — 코인은 주식과
+                                          #   달리 외국인/기관 데이터가 없어
+                                          #   market/ts/price만 저장하면 됨)
+
+# ★ 2026-08-17: 급락감지 재설계 — 기존엔 4시간봉 직전 완결봉 등락률(최대
+#   4시간+5분 캐시만큼 지연된 정보)로 판단해서, 이미 다 지나간 급락에
+#   뒤늦게 물려 -5% 기준인데 실제론 -7~-11%에 손절되는 경우가 잦았음
+#   (사용자 지적, cbot_trade_history.db 확인 결과 급락감지 12건 중 다수가
+#   기준치보다 훨씬 큰 손실). WebSocket 실시간가(_ws_prices)를 짧은
+#   구간(10분) 롤링 히스토리로 들고 있다가, 그 구간 고점 대비 하락폭을
+#   ATR 배수로 비교하는 방식으로 교체 — 코인별 변동성에 맞게 스케일되고
+#   지연도 없어짐. 배수는 정상 손절(ATR×2)보다 타이트하게(ATR×1.0) 잡아
+#   "더 빨리 빠져나오는 조기경보" 역할 유지. 4시간봉 데이터로는 이 짧은
+#   구간을 백테스트할 수 없어 실거래로 관찰하며 튜닝 필요.
+CRASH_WINDOW_SEC     = 600   # 최근 10분 롤링 윈도우
+CRASH_ATR_MULT       = 1.0   # 주간: 윈도우 고점 대비 ATR×1.0 하락 시 즉시손절
+CRASH_ATR_MULT_NIGHT = 1.4   # 야간: 완화 (기존 -5%/-8% 비율감안, 유동성 낮아 노이즈 큼)
 
 # AI 캐시 — ★ 4시간 → 가격 변동 5% 시 무효화 추가
 AI_CACHE_HOURS    = 4
@@ -283,6 +302,7 @@ class CBot:
         self._ws_prices            = {}   # ★ WebSocket 실시간 현재가
         self._ws_running           = False # WebSocket 실행 여부
         self._ws_markets           = set() # 현재 구독 중인 종목
+        self._price_history        = {}   # ★ {market: deque[(ts, price)]} 최근 CRASH_WINDOW_SEC 롤링 — 급락감지용
         self._candle_cache_1h      = {}   # ★ 1시간봉 캐시
         self.atr_cache             = {}   # {market: (atr_rate, ts)}
         self._tech_cache           = {}
@@ -292,6 +312,7 @@ class CBot:
         # ── DB 초기화 ────────────────────────────────────
         self._init_trade_db()
         self._init_ai_db()
+        self._init_tick_db()
         self._restore_positions()  # ★ 재시작 시 포지션 복구
 
     # ============================================================
@@ -366,6 +387,72 @@ class CBot:
             print(f"✅ AI DB ({AI_CACHE_DB})")
         except Exception as e:
             print(f"❌ AI DB 오류: {e}")
+
+    def _init_tick_db(self):
+        """실시간 시세틱 DB — 급락감지 재설계(ATR×실시간창)의 원본이자
+        4시간봉(coin_backtest.db, 33일치)보다 촘촘한 백테스트 데이터셋으로
+        시간이 지날수록 쌓여감."""
+        try:
+            conn = _db_connect(TICK_DB)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS price_ticks (
+                    id     INTEGER PRIMARY KEY AUTOINCREMENT,
+                    market TEXT NOT NULL,
+                    ts     TEXT NOT NULL,
+                    price  REAL NOT NULL
+                )
+            """)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_ticks_market_ts ON price_ticks(market, ts)")
+            conn.commit(); conn.close()
+            print(f"✅ 시세틱 DB ({TICK_DB})")
+        except Exception as e:
+            print(f"❌ 시세틱 DB 오류: {e}")
+
+    def _save_price_ticks(self, prices: dict):
+        """coin_pool 전체의 30초 단위 시세 스냅샷을 저장 (메인루프 주기와
+        동일 — 매 WS 틱마다 쓰면 I/O가 과함). 급락감지 자체는 메모리상의
+        _price_history(더 촘촘함)를 쓰고, 이 DB는 향후 백테스트/통계용."""
+        if not prices:
+            return
+        try:
+            now  = datetime.datetime.now().isoformat(timespec="seconds")
+            conn = _db_connect(TICK_DB)
+            conn.executemany(
+                "INSERT INTO price_ticks (market, ts, price) VALUES (?,?,?)",
+                [(m, now, p) for m, p in prices.items()],
+            )
+            conn.commit(); conn.close()
+        except Exception as e:
+            print(f"⚠️ 시세틱 저장 오류: {e}")
+
+    # ============================================================
+    # 급락감지 (ATR × 최근 10분 실시간창)
+    # ============================================================
+    def _record_price_history(self, market: str, price: float):
+        """WS 틱마다 호출 — 최근 CRASH_WINDOW_SEC만 남기는 롤링 히스토리"""
+        now = time.time()
+        buf = self._price_history.setdefault(market, deque())
+        buf.append((now, price))
+        cutoff = now - CRASH_WINDOW_SEC
+        while buf and buf[0][0] < cutoff:
+            buf.popleft()
+
+    def _check_recent_crash(self, market: str, current: float, atr_val: float) -> tuple:
+        """최근 CRASH_WINDOW_SEC(10분) 내 고점 대비 하락폭을 ATR 배수로
+        판단. 4시간봉 대신 실시간가라서 지연이 없고, ATR 배수라서 코인별
+        변동성에 맞게 스케일됨(고정 %보다 정교)."""
+        buf = self._price_history.get(market)
+        if not buf or atr_val <= 0:
+            return False, 0.0
+        window_high = max(p for _, p in buf)
+        if window_high <= 0:
+            return False, 0.0
+        drop = window_high - current
+        mult = CRASH_ATR_MULT_NIGHT if self._is_night() else CRASH_ATR_MULT
+        if drop >= atr_val * mult:
+            drop_rate = -drop / window_high
+            return True, drop_rate
+        return False, 0.0
 
     # ============================================================
     # 매매이력 저장
@@ -935,6 +1022,7 @@ class CBot:
                             price  = float(data.get("trade_price", 0))
                             if market and price > 0:
                                 self._ws_prices[market] = price
+                                self._record_price_history(market, price)
                         except asyncio.TimeoutError:
                             await ws.ping()
                         except Exception:
@@ -1471,17 +1559,20 @@ class CBot:
         if rate > tracker["peak_rate"]:
             tracker["peak_rate"] = rate
 
-        # ① 직전봉 급락 즉시 손절 ──────────────────────────
-        ind         = self.get_indicators(market)
-        candle_rate = ind.get("candle_rate", 0) if ind else 0
-        crash_threshold = -0.08 if self._is_night() else STOP_LOSS_CRASH
-        if candle_rate <= crash_threshold:
+        # ① 급락 즉시 손절 — ★ 2026-08-17: 4시간봉 직전완결봉 등락률(최대
+        #   4시간+5분 지연) 대신, WS 실시간가 기반 최근 10분 롤링창 고점
+        #   대비 ATR×배수 하락으로 판단하도록 재설계(사용자 지적 — 급락
+        #   감지가 자주 발동하는데 정작 -5% 기준인데 실제 -7~11%로 손절되는
+        #   경우가 잦았음, 지연된 신호 탓). 자세한 배경은 CRASH_WINDOW_SEC
+        #   상단 주석 참고.
+        is_crash, crash_rate = self._check_recent_crash(market, current, atr_val)
+        if is_crash:
             self.notify(
                 f"💥 급락감지 즉시손절 {market}\n"
-                f"직전봉:{candle_rate:+.2%} | 현재:{rate:+.2%}",
+                f"최근10분낙폭:{crash_rate:+.2%} | 현재:{rate:+.2%}",
                 critical=True,
             )
-            if self.sell(market, qty, f"급락감지({candle_rate:+.2%})",
+            if self.sell(market, qty, f"급락감지({crash_rate:+.2%})",
                          sell_price=current, force_all=True):
                 self.daily_loss_count += 1
                 self.peak_tracker.pop(market, None)
@@ -1732,6 +1823,13 @@ class CBot:
                 self._update_coin_pool()
                 self._update_market_status()
                 self._update_fear_greed()
+
+                # ★ 2026-08-17: 시세틱 스냅샷 저장 (30초 주기, coin_pool
+                #   전체 — WS가 이미 실시간으로 채워둔 _ws_prices 그대로 씀,
+                #   추가 API 호출 없음). 향후 백테스트/통계용 데이터 축적.
+                self._save_price_ticks({
+                    m: self._ws_prices[m] for m in self.coin_pool if m in self._ws_prices
+                })
 
                 # ── 동적 AI 임계치 ────────────────────────────
                 ai_threshold = self._get_dynamic_ai_threshold()
