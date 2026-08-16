@@ -11,7 +11,8 @@ sbot_strategy.py — 스윙봇 매수/매도 전략 (v3 — ATR 추세추종)
 [v3 전략 — ATR 추세추종]
 매수 시:
   손절가  = 매수가 - ATR × 2
-  목표가1 = 매수가 + ATR × 3
+  목표가1 = 매수가 + ATR × 3  (★ 2026-08-17: sbo2처럼 2.0 하향 검토했으나
+    backtest_data.db 검증 결과 표본별로 최적값이 뒤바뀌어 3.0 유지로 결정)
 
 목표가1 달성:
   손절가  = 매수가 + ATR × 1  (본전 위로 올림)
@@ -40,7 +41,16 @@ from typing import Optional, Callable
 # ATR 배수 설정
 # ==========================================================
 ATR_STOP_MULT    = 2.0    # 손절: 매수가 - ATR × 2
-ATR_TARGET_MULT  = 3.0    # 목표: 매수가 + ATR × 3
+# ★ 2026-08-17: sbo2에서 목표1을 3.0→2.0으로 낮춰 개선된 걸 보고 sbot도
+#   같은 조치를 검토했으나, backtest_data.db(2024-01~2026-08, 2.5년치)로
+#   2.0/2.5/3.0 비교 백테스트 해보니 sbo2처럼 "낮출수록 좋아지는" 깔끔한
+#   패턴이 아니라 종목 표본에 따라 최적값이 뒤바뀜(50종목 샘플=3.0이
+#   최고 PF2.80, 전체종목=2.5가 최고지만 2.0은 오히려 PF0.91/MDD-13%로
+#   최악) — 신뢰할 신호가 아니라고 판단해 **3.0 유지로 결정**(사용자
+#   확인, 다음 주말 재검토 예정). 목표1/목표2+ 배수를 분리해둔 인프라만
+#   남겨서 나중에 데이터 더 쌓이면 다시 테스트하기 쉽게 해둠.
+ATR_TARGET1_MULT = 3.0    # 목표1(최초): 매수가 + ATR × 3 (2026-08-17 재검토, 유지 결정)
+ATR_TARGET_MULT  = 3.0    # 목표2+(재상향): 현재가 + ATR × 3
 TARGET1_CAP_RATE = 0.20   # ★ 목표가1 상한 +20% (ATR×3과 비교해 작은 값 사용)
 ATR_RAISE_MULT   = 1.0    # 목표1 달성 후 손절 올림: 매수가 + ATR × 1
 ATR_TRAIL_MULT   = 1.5    # 트레일링: 고점 - ATR × 1.5
@@ -166,7 +176,7 @@ class SwingStrategy:
             # ★ 목표가1 상한 캡 (2026-06-23) — ATR×3과 +20% 중 작은 값
             #   고변동성 종목(예: 테크윙)은 ATR×3이 +50~80%까지 치솟아
             #   1차 목표가 사실상 도달불가능해지는 문제 방지
-            target1_atr = entry + atr_val * ATR_TARGET_MULT
+            target1_atr = entry + atr_val * ATR_TARGET1_MULT
             target1_cap = entry * (1 + TARGET1_CAP_RATE)
             target1     = round(min(target1_atr, target1_cap), 0)
         else:
@@ -226,6 +236,28 @@ class SwingStrategy:
             }
 
         tracker     = peak_tracker[code]
+
+        # ★ 2026-08-17: 평단가 변동 시 손절/목표 재계산 — 2차매수(물타기,
+        #   아래 ①)든 수동 추가매수든 entry_price가 바뀌면 손절/목표가
+        #   원래 진입가 기준으로 고정된 채 남아있던 문제(sbo2의 "실계좌"
+        #   평단변경 재계산 기능과 동일 취지, 08-07 sbo2에 먼저 적용됐던
+        #   걸 사용자 요청으로 sbot에도 포팅). stage==0(목표1 미달성)일
+        #   때만 적용 — stage>=1은 이미 트레일링/재상향으로 진행 중인
+        #   보호 손절을 되돌리면 안 되므로 건드리지 않음.
+        if tracker["stage"] == 0:
+            last_entry = tracker.get("last_entry", entry)
+            if abs(entry - last_entry) > 1:
+                levels = self.calc_atr_levels(entry, atr_rate)
+                tracker["stop_price"]  = levels["stop_price"]
+                tracker["target1"]     = levels["target1"]
+                tracker["target_next"] = levels["target1"]
+                tracker["atr_val"]     = levels["atr_val"]
+                tracker["buy1_price"]  = entry
+                print(f"   🔄 {code} 평단 변경({last_entry:,.0f}→{entry:,.0f}) — "
+                      f"손절/목표 재계산(손절:{levels['stop_price']:,.0f} "
+                      f"목표:{levels['target1']:,.0f})")
+        tracker["last_entry"] = entry
+
         stage       = tracker["stage"]
         stop_price  = tracker["stop_price"]
         target1     = tracker["target1"]
