@@ -1405,7 +1405,14 @@ class Sbo2:
         # ── 4슬롯 전략별 매수 후보 구성 ────────────────────────
         held_codes = set(self.positions.keys())
         held_names = {p.get("name") for p in self.positions.values()}
-        held_grades = {p.get("grade", "") for p in self.positions.values()}
+        # ★ 2026-08-18: 슬롯당 보유 1종목 제한 → 슬롯당 최대 2종목으로 완화
+        #   (사용자 지적 — "하나의 슬롯은 계속 놀아.. 같은 종류는 2개까지
+        #   허용하자"). 슬롯별 후보가 마르면(예: 교집합 0건) 그 슬롯 자리가
+        #   MAX_POSITIONS 안 채워진 채로 계속 비어있는 문제가 있었음 — 다른
+        #   슬롯이 후보가 있으면 그 슬롯에서 2번째 종목을 채울 수 있게 함.
+        MAX_PER_SLOT_TYPE = 2
+        from collections import Counter as _Counter
+        grade_counts = _Counter(p.get("grade", "") for p in self.positions.values())
 
         def _buyable(grade):
             return [c for c in self.candidates
@@ -1413,13 +1420,13 @@ class Sbo2:
                     and c["name"] not in held_names
                     and get_stock_code(c["name"]) not in held_codes]
 
-        # 슬롯별 이미 보유 여부 확인
-        has_inter = SLOT_INTER in held_grades
-        has_momentum = SLOT_MOMENTUM in held_grades
-        has_trend = SLOT_TREND in held_grades
-        has_light = SLOT_LIGHT in held_grades
-        has_watchlist = SLOT_WATCHLIST in held_grades
-        has_pool = SLOT_POOL in held_grades
+        # 슬롯별 이미 상한(2개) 도달 여부 확인
+        has_inter = grade_counts[SLOT_INTER] >= MAX_PER_SLOT_TYPE
+        has_momentum = grade_counts[SLOT_MOMENTUM] >= MAX_PER_SLOT_TYPE
+        has_trend = grade_counts[SLOT_TREND] >= MAX_PER_SLOT_TYPE
+        has_light = grade_counts[SLOT_LIGHT] >= MAX_PER_SLOT_TYPE
+        has_watchlist = grade_counts[SLOT_WATCHLIST] >= MAX_PER_SLOT_TYPE
+        has_pool = grade_counts[SLOT_POOL] >= MAX_PER_SLOT_TYPE
 
         # ★ 2026-07-06: 텔레스윙을 매수 소스에서 제외 (사용자 결정) —
         #   사후검증 결과 텔레스윙이 표본 1368건 중 손절률 77.3%로 압도적으로
@@ -1455,6 +1462,13 @@ class Sbo2:
         for cand in buyable:
             if slots <= 0:
                 break
+
+            # ★ 2026-08-18: buyable 리스트는 루프 시작 시점 스냅샷이라,
+            #   같은 루프 안에서 한 슬롯의 후보 여러 개를 연달아 사고
+            #   MAX_PER_SLOT_TYPE(2) 상한을 넘겨버릴 수 있음 — 매수 성공할
+            #   때마다 grade_counts를 갱신해 실시간으로 다시 체크.
+            if grade_counts[cand["grade"]] >= MAX_PER_SLOT_TYPE:
+                continue
 
             name = cand["name"]
             code = get_stock_code(name)
@@ -1650,6 +1664,7 @@ class Sbo2:
                 "trend":       cand["trend"],
                 "catalyst":    cand["catalyst"],
             }
+            grade_counts[cand["grade"]] += 1   # ★ 슬롯당 상한(2) 실시간 반영
             self._save_state()
 
             # DB 저장
