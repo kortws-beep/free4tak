@@ -1419,8 +1419,22 @@ class SBot:
                     score_enter = base_score
 
                 # 손절 카운터 리셋
-                if (st.get("daily_loss") == 0 and self.daily_loss_count > 0
-                        and st.get("loss_date") != today):
+                # ★ 2026-08-19: "and loss_date != today" 조건 제거 — 이 조건
+                #   때문에 KiKi "!s시작"(cmd_pause의 daily_loss=0 리셋)이
+                #   무력화되고 있었음. cmd_pause는 리셋할 때 loss_date를
+                #   "오늘"로 같이 쓰는데(재개 시점 기록 목적), 이 체크는
+                #   반대로 loss_date가 "오늘이 아닐 때만" 동기화하도록 돼
+                #   있어서 — 정작 그날 리셋해야 하는 유일한 시나리오(수동
+                #   재개)에서 매번 조건이 거짓이 돼 self.daily_loss_count가
+                #   메모리에서 절대 안 풀리고, 다음 루프에서 should_stop_
+                #   trading()이 여전히 True → 1073행에서 paused=True로 바로
+                #   되돌려써서 "!s시작"이 30초 안에 저절로 취소된 것처럼
+                #   보였음(사용자 신고 — "키키가 정지나 시작을 못한다").
+                #   _daily_reset()의 자정 리셋은 self.daily_loss_count를
+                #   직접 0으로 만들어서 이 체크와 무관하게 이미 처리됨 —
+                #   그러니 날짜 조건 없이 "파일이 0인데 메모리는 아직
+                #   0이 아니면 동기화"만으로 충분하고 안전함.
+                if st.get("daily_loss") == 0 and self.daily_loss_count > 0:
                     self.daily_loss_count = 0
                     print("♻️ 손절카운터 초기화")
 

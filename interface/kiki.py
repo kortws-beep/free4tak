@@ -1140,7 +1140,10 @@ async def on_message(message):
                 )
                 if reply.startswith("CMD:"):
                     cmd = reply.split("\n")[0][4:].strip()
-                    danger_cmds = ["!매도","!s매도","!c매도","!정지","!s정지","!c정지","!e정지"]
+                    # ★ 2026-08-19: sbo2매도/sbo2정지가 빠져있어서 확인 없이
+                    #   바로 실행되고 있었음 — 다른 봇들과 동일하게 추가.
+                    danger_cmds = ["!매도","!s매도","!sbo2매도","!c매도",
+                                   "!정지","!s정지","!sbo2정지","!c정지","!e정지"]
                     is_danger   = any(cmd.startswith(d) for d in danger_cmds)
                     if is_danger:
                         _pending_confirm[user_id] = (cmd, time.time())

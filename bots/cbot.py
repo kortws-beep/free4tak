@@ -1830,11 +1830,16 @@ class CBot:
                 if today != self._sold_today_date:
                     self._daily_reset(today)
 
-                # ── !c시작 시 카운터 초기화 (loss_date 추가 체크) ─
+                # ── !c시작 시 카운터 초기화 ─────────────────────
+                # ★ 2026-08-19: "and loss_date != today" 조건 제거 — sbot과
+                #   동일 버그(자세한 사유는 bots/sbot.py 동일 지점 주석
+                #   참고). cmd_pause가 재개할 때 loss_date를 "오늘"로 같이
+                #   쓰는데, 이 체크는 반대로 "오늘이 아닐 때만" 동기화하게
+                #   돼있어 정작 "!c시작"이 손절카운터를 절대 못 풀고, 다음
+                #   루프에서 일손실한도 체크가 다시 paused=True로 되돌려써
+                #   "!c시작"이 곧바로 취소된 것처럼 보였음.
                 saved_loss = bot_state.get("daily_loss")
-                if (saved_loss == 0
-                        and self.daily_loss_count > 0
-                        and bot_state.get("loss_date") != today):
+                if saved_loss == 0 and self.daily_loss_count > 0:
                     self.daily_loss_count = 0
                     self.daily_pnl        = 0
                     print("♻️ 손절카운터/손익 초기화")
