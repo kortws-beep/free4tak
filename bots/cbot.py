@@ -604,21 +604,34 @@ class CBot:
             return None
 
     def _save_positions(self):
-        """포지션·피크트래커를 cbot_state.json에 영속화"""
+        """포지션·피크트래커·당일매도이력을 cbot_state.json에 영속화"""
         try:
             state = _read_state()
-            state["positions"]    = self.positions
-            state["peak_tracker"] = self.peak_tracker
+            state["positions"]       = self.positions
+            state["peak_tracker"]    = self.peak_tracker
+            # ★ 2026-08-18: sold_today는 메모리에만 있고 저장 안 돼서,
+            #   재시작하면 당일 재매수 금지가 통째로 풀리는 사고가 있었음
+            #   (KRW-LA를 21:26 급락손절 직후, 하필 그 직후에 재시작이
+            #   일어나 21:36에 더 비싼 가격으로 바로 재매수됨 — 사용자
+            #   신고로 발견). positions/peak_tracker와 같이 저장.
+            state["sold_today"]      = self.sold_today
+            state["sold_today_date"] = self._sold_today_date
             _update_state(**state)
         except Exception as e:
             print(f"⚠️ 포지션 저장 오류: {e}")
 
     def _restore_positions(self):
-        """재시작 시 포지션·피크트래커 복구"""
+        """재시작 시 포지션·피크트래커·당일매도이력 복구"""
         try:
             state = _read_state()
             saved_pos = state.get("positions", {})
             saved_peak = state.get("peak_tracker", {})
+            # ★ 2026-08-18: 같은 날짜 저장분만 복구 — 날짜가 다르면(자정
+            #   경과) 새로 시작하는 게 맞음(_daily_reset과 동일 의미).
+            if state.get("sold_today_date") == today_str():
+                self.sold_today = state.get("sold_today", {})
+                if self.sold_today:
+                    print(f"♻️ 당일매도이력 복구: {list(self.sold_today.keys())}")
             if saved_pos:
                 # 실제 잔고와 교차 검증
                 balances = self.get_balances()
@@ -1484,19 +1497,21 @@ class CBot:
                 pos_qty      = self.positions.get(market, {}).get("qty", 0)
                 is_full_sell = (qty >= pos_qty - 1e-8)
 
-                is_loss = "손절" in reason or "본절" in reason
-                emoji   = "💔" if is_loss else "💰"
-                self.notify(
-                    f"{emoji} [매도] {market} | {reason} | {qty:.6f}개",
-                    critical=True,
-                )
-
                 # DB 저장 — sold_qty 명시
                 profit_krw = self._save_sell_history(
                     market, sell_price, reason,
                     sold_qty=0 if is_full_sell else qty,
                 )
                 self.daily_pnl += profit_krw
+                # ★ 2026-08-18: emoji를 reason 문자열 키워드("손절"/"본절")
+                #   매칭으로 판단하던 걸 실제 손익 부호로 변경 — "급락감지"
+                #   손절이 이 키워드에 안 걸려 손실인데도 💰(익절)로
+                #   잘못 표시되고 있었음(사용자가 보낸 알림에서 발견).
+                emoji = "💔" if profit_krw < 0 else "💰"
+                self.notify(
+                    f"{emoji} [매도] {market} | {reason} | {qty:.6f}개",
+                    critical=True,
+                )
                 self.sold_today[market] = now_hms()
                 if _master_remove:
                     try:
