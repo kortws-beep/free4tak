@@ -140,8 +140,7 @@ EXCLUDE_KEYWORDS = ["UP", "DOWN", "BEAR", "BULL"]
 BUY_1ST_AMT       = 1_000_000   # 1차 매수 100만원 (단일, 추매 없음)
 BUY_2ND_AMT       = 0           # 추매 비활성화
 BUY_2ND_THRESHOLD = -9999       # 추매 비활성화 (절대 도달 안 하는 값)
-MAX_POSITIONS     = 3           # 최대 3코인 (종목당 100만원 × 3 = 300만원)
-MAX_ALT_POSITIONS = 3           # BTC/ETH 외 알트 동시 보유 최대 3개
+MAX_POSITIONS     = 3           # 최대 3코인 (종목당 100만원 × 3 = 300만원, 익절슬롯반환시 4번째 가능)
 MIN_ORDER_AMT     = 5_000       # 업비트 최소 주문 금액
 
 # ── 매도 전략 (v3 — ATR 추세추종) ─────────────────────────
@@ -1296,11 +1295,13 @@ class CBot:
             if rsi_1h >= 80:
                 return False, ind, f"1시간봉 RSI 과매수 ({rsi_1h:.1f})"
 
-        # 알트코인 동시 보유 한도 (FIXED_COINS는 한도 제외)
-        if market not in FIXED_COINS:
-            holding_alts = [m for m in self.positions if m not in FIXED_COINS]
-            if len(holding_alts) >= MAX_ALT_POSITIONS:
-                return False, ind, f"알트 동시보유 한도 ({MAX_ALT_POSITIONS}개)"
+        # ★ 2026-08-24: 알트코인 동시보유 한도 제거(사용자 요청 — "별 의미도
+        #   없었어"). MAX_ALT_POSITIONS(3)이 기존 MAX_POSITIONS(3)와 같은
+        #   값이라 원래도 전체 포지션 한도보다 먼저 걸릴 일이 없었는데,
+        #   08-22 익절슬롯반환 보너스 기준 완화(50만원)로 4번째 슬롯이
+        #   열리는 경우가 늘면서 이 알트 한도가 그 4번째 슬롯을(알트일 경우)
+        #   막아버리는 진짜 제약으로 작동해버림 — 애초에 의도한 효과가
+        #   없던 규칙이라 완전히 제거.
 
         return True, ind, (
             f"MA정배열|RSI:{rsi:.0f}|"
