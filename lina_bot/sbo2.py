@@ -1350,6 +1350,67 @@ class Sbo2:
                 curr=c["curr"], stop=c["stop"], tgt=c["tgt"], rr=c["rr"],
             )
 
+    def _refresh_momentum_candidates(self):
+        """★ 2026-08-21 신설 — 모멘텀 슬롯이 08-15 실거래 투입 이후 단 한
+        건도 후보로조차 안 잡힌 구조적 버그 발견(sbo2_candidates/sbo2_trades
+        둘 다 grade='momentum' 0건 확인, 사용자가 "모멘텀은 매일 쌓였을테니
+        들여다보자"고 요청해 발견). 원인: 후보 전체갱신(_refresh_candidates)
+        이 "하루 1회, 그날 첫 루프(보통 08:00 직후)"에만 도는데, AI 모멘텀
+        스캐너는 08:55/14:35에 그때그때 생성됨 — 즉 sbo2가 후보를 읽는
+        시점엔 그날 모멘텀픽이 아직 존재한 적이 없어 영원히 못 잡히는
+        구조였음. 모멘텀은 로컬 DB 조회만 하면 되고(API 호출 없음) 비용이
+        가벼우므로, 전체갱신과 별도로 매 루프 독립적으로 재조회해 모멘텀
+        슬롯만 갱신한다."""
+        if not self.candidates:
+            return  # 전체갱신이 아직 한 번도 안 됐으면(기동 직후) 건너뜀
+        held_codes = set(self.positions.keys())
+        held_names = {p.get("name") for p in self.positions.values()}
+        inter_names = {c["name"] for c in self.candidates if c["grade"] == SLOT_INTER}
+
+        try:
+            _mconn = sqlite3.connect(
+                os.path.join(os.path.dirname(BASE_DIR), "intelligence", "ai_momentum_picks.db"),
+                timeout=5)
+            _mrows = _mconn.execute("""
+                SELECT stock_name, buy_price, stop_price, tgt_price, theme
+                FROM momentum_picks WHERE date = ? ORDER BY id DESC
+            """, (today_str(),)).fetchall()
+            _mconn.close()
+        except Exception as e:
+            print(f"⚠️ [sbo2] 모멘텀픽 재조회 오류: {e}")
+            return
+
+        momentum_names = set()
+        momentum_list = []
+        for name, buy_price, stop_price, tgt_price, theme in _mrows:
+            if name in momentum_names or name in inter_names:
+                continue
+            if get_stock_code(name) in held_codes or name in held_names:
+                continue
+            momentum_names.add(name)
+            momentum_list.append({
+                "name": name, "grade": SLOT_MOMENTUM, "score": 75,
+                "vcp": False, "trend": False, "catalyst": False,
+                "curr": buy_price or 0, "stop": stop_price or 0, "tgt": tgt_price or 0,
+                "rr": round((tgt_price - buy_price) / (buy_price - stop_price), 1)
+                    if buy_price and stop_price and buy_price > stop_price else 0,
+                "themes": [theme] if theme else [],
+            })
+
+        momentum_list = momentum_list[:CANDIDATE_CAP_PER_SLOT]
+        old_names = {c["name"] for c in self.candidates if c["grade"] == SLOT_MOMENTUM}
+        new_names = {c["name"] for c in momentum_list}
+        if new_names == old_names:
+            return
+
+        self.candidates = [c for c in self.candidates if c["grade"] != SLOT_MOMENTUM] + momentum_list
+        print(f"   🔄 [sbo2] 모멘텀 후보 갱신: {len(new_names)}개 ({', '.join(new_names) or '없음'})")
+        for c in momentum_list:
+            save_candidate(
+                name=c["name"], grade=c["grade"], score=c["score"],
+                vcp=c["vcp"], trend=c["trend"], catalyst=c["catalyst"],
+                curr=c["curr"], stop=c["stop"], tgt=c["tgt"], rr=c["rr"],
+            )
 
     # ── 매수 체크 ─────────────────────────────────────────────
     def _check_buy(self):
@@ -2221,8 +2282,10 @@ class Sbo2:
                 # ★ 미체결 주문 취소 (1루프 이상 경과된 미체결)
                 self._cancel_stale_orders()
 
-                # 후보 갱신 (30분마다)
+                # 후보 갱신 (하루 1회)
                 self._refresh_candidates()
+                # ★ 모멘텀만 매 루프 별도 갱신 — 사유는 _refresh_momentum_candidates() 참고
+                self._refresh_momentum_candidates()
 
                 # 매도 체크 (항상)
                 if self.positions:
