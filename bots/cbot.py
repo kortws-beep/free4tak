@@ -1937,12 +1937,17 @@ class CBot:
                     _write_status(self._build_status(krw, total_profit))
                     time.sleep(LOOP_SLEEP); continue
 
-                # ── 매수 슬롯 (1차 익절 후 슬롯 반환, 주문가능금액 100만원 이상일 때만) ──
+                # ── 매수 슬롯 (1차 익절 후 슬롯 반환, 주문가능금액 50만원 이상일 때만) ──
+                # ★ 2026-08-22: 기준 100만원(BUY_1ST_AMT)→50만원으로 완화(사용자
+                #   요청) — 마지막 슬롯 매수는 이미 krw*0.98로 잔액만큼만 사는
+                #   로직이 있어서(_is_last_slot), 50만원만 있어도 그 금액 그대로
+                #   매수 시도할 수 있음. 100만원을 다 채울 때까지 기다리지 않고
+                #   더 적극적으로 슬롯을 활용.
                 익절중 = sum(
                     1 for m in self.positions
                     if self.peak_tracker.get(m, {}).get("stage", 0) >= 1
                 )
-                보너스 = 익절중 if krw >= BUY_1ST_AMT else 0
+                보너스 = 익절중 if krw >= 500_000 else 0
                 available_slots = MAX_POSITIONS - len(self.positions) + 보너스
                 if 보너스:
                     print(f"  ♻️ 익절진행중 {보너스}코인 슬롯 반환 → 가용:{available_slots}")
