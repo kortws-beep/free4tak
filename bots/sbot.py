@@ -211,7 +211,13 @@ POOL_SIZE        = 100
 
 REG_MARKET_START = "0900"
 REG_MARKET_END   = "1530"
-BUY_START_TIME   = "0910"         # ★ 09:10 이후 매수
+# ★ 2026-08-21: 09:10→09:20 — 시장 쏠림 안전check(intelligence/
+#   market_safety_stop.py)가 09:19에 시장폭(breadth_ratio) 판단해서
+#   위험하면 매수 시작 전에 봇을 정지시키는데, 그 판단 자체가 개장
+#   직후 5분 데이터로는 신뢰도가 낮아 09:19까지 데이터를 모아야 함
+#   (사용자 결정 — S7 대형주만 오르고 나머지는 다 빠지는 쏠림장을
+#   겪은 뒤 안전장치로 도입).
+BUY_START_TIME   = "0920"         # ★ 09:20 이후 매수
 SELL_CHECK_START = "0800"         # ★ 08:00부터 매도 체크
 SELL_CHECK_END   = "2000"         # ★ 20:00까지 매도 체크
 SLEEP_INTERVAL   = 60

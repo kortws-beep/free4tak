@@ -150,7 +150,10 @@ SLOT_LABEL = {
     "A":        "A급",
 }
 LOOP_SLEEP       = 30           # 루프 간격 (초)
-BUY_START_TIME   = "0910"       # 매수 시작
+# ★ 2026-08-21: 09:10→09:20 — sbot과 동일 사유(intelligence/
+#   market_safety_stop.py의 쏠림 안전check가 09:19까지 시장폭 데이터를
+#   모아 판단하므로, 그 전엔 매수를 시작하지 않도록 늦춤)
+BUY_START_TIME   = "0920"       # 매수 시작
 BUY_END_TIME     = "1520"       # 매수 마감
 SELL_START_TIME  = "0800"       # 프리장부터 매도 체크
 SELL_END_TIME    = "2000"       # 애프터장까지 매도 체크
