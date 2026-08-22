@@ -307,6 +307,10 @@ class CBot:
         self._ws_running           = False # WebSocket 실행 여부
         self._ws_markets           = set() # 현재 구독 중인 종목
         self._price_history        = {}   # ★ {market: deque[(ts, price)]} 최근 CRASH_WINDOW_SEC 롤링 — 급락감지용
+        # ★ 2026-08-22: _price_history는 WS 스레드(쓰기)와 메인루프
+        #   스레드(읽기)가 동시에 건드려서 "deque mutated during
+        #   iteration" 크래시가 실제로 발생함(사용자 신고) — 락으로 보호.
+        self._price_history_lock   = threading.Lock()
         self._candle_cache_1h      = {}   # ★ 1시간봉 캐시
         self.atr_cache             = {}   # {market: (atr_rate, ts)}
         self._tech_cache           = {}
@@ -433,22 +437,32 @@ class CBot:
     # 급락감지 (ATR × 최근 10분 실시간창)
     # ============================================================
     def _record_price_history(self, market: str, price: float):
-        """WS 틱마다 호출 — 최근 CRASH_WINDOW_SEC만 남기는 롤링 히스토리"""
+        """WS 틱마다 호출(WS 스레드에서 실행) — 최근 CRASH_WINDOW_SEC만
+        남기는 롤링 히스토리. 메인루프 스레드의 _check_recent_crash()가
+        동시에 같은 deque를 읽어서 락 필요."""
         now = time.time()
-        buf = self._price_history.setdefault(market, deque())
-        buf.append((now, price))
-        cutoff = now - CRASH_WINDOW_SEC
-        while buf and buf[0][0] < cutoff:
-            buf.popleft()
+        with self._price_history_lock:
+            buf = self._price_history.setdefault(market, deque())
+            buf.append((now, price))
+            cutoff = now - CRASH_WINDOW_SEC
+            while buf and buf[0][0] < cutoff:
+                buf.popleft()
 
     def _check_recent_crash(self, market: str, current: float, atr_val: float) -> tuple:
         """최근 CRASH_WINDOW_SEC(10분) 내 고점 대비 하락폭을 ATR 배수로
         판단. 4시간봉 대신 실시간가라서 지연이 없고, ATR 배수라서 코인별
-        변동성에 맞게 스케일됨(고정 %보다 정교)."""
-        buf = self._price_history.get(market)
-        if not buf or atr_val <= 0:
+        변동성에 맞게 스케일됨(고정 %보다 정교).
+        ★ 2026-08-22: 락 없이 deque를 순회하다가 WS 스레드가 동시에
+        append/popleft해서 "deque mutated during iteration" 크래시 발생
+        (사용자 신고) — 락 안에서 리스트로 복사한 뒤 락 밖에서 계산."""
+        with self._price_history_lock:
+            buf = self._price_history.get(market)
+            if not buf:
+                return False, 0.0
+            snapshot = list(buf)
+        if atr_val <= 0:
             return False, 0.0
-        window_high = max(p for _, p in buf)
+        window_high = max(p for _, p in snapshot)
         if window_high <= 0:
             return False, 0.0
         drop = window_high - current
