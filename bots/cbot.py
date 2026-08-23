@@ -304,8 +304,9 @@ class CBot:
         # ── 메모리 캐시 ─────────────────────────────────
         self._candle_cache         = {}
         self._ws_prices            = {}   # ★ WebSocket 실시간 현재가
-        self._ws_running           = False # WebSocket 실행 여부
+        self._ws_running           = False # WebSocket 실행 여부(일반 상태 표시용)
         self._ws_markets           = set() # 현재 구독 중인 종목
+        self._ws_stop_event        = None  # ★ 세대별 종료 신호(threading.Event) — 아래 참고
         self._price_history        = {}   # ★ {market: deque[(ts, price)]} 최근 CRASH_WINDOW_SEC 롤링 — 급락감지용
         # ★ 2026-08-22: _price_history는 WS 스레드(쓰기)와 메인루프
         #   스레드(읽기)가 동시에 건드려서 "deque mutated during
@@ -996,31 +997,44 @@ class CBot:
     # WebSocket 실시간 현재가
     # ============================================================
     def _ws_subscribe(self, markets: list):
-        """구독 종목 변경 시 WebSocket 재시작"""
+        """구독 종목 변경 시 WebSocket 재시작.
+        ★ 2026-08-23: 기존엔 종료신호를 self._ws_running(공유 bool) 하나로
+        관리해서, coin_pool이 바뀔 때마다(5분 캐시라 자주 발생) 새 스레드가
+        시작되면서 self._ws_running=True로 다시 켜버려 — 예전 스레드가
+        "나 종료해야 하나?" 체크할 때도 같은 값을 보고 "아직 켜져있네"라고
+        착각해 절대 안 끝나는 버그가 있었음. 그 결과 스레드/소켓/이벤트루프가
+        계속 쌓여 fd 고갈("Too many open files")로 이어짐(사용자 신고,
+        fd 1023/1024까지 참, 대부분 소켓+eventpoll). 세대마다 고유한
+        threading.Event를 만들어 "이 세대가 종료돼야 하는지"만 그 세대
+        전용으로 체크하도록 수정 — 새 스레드가 떠도 이전 세대엔 영향 없음."""
         new_set = set(markets)
         if new_set == self._ws_markets and self._ws_running:
             return  # 변경 없으면 유지
         self._ws_markets = new_set
-        self._ws_running = False  # 기존 스레드 종료 신호
+        if self._ws_stop_event is not None:
+            self._ws_stop_event.set()   # 이전 세대에게만 종료 신호
+        stop_event = threading.Event()
+        self._ws_stop_event = stop_event
         # 새 스레드 시작
-        t = threading.Thread(target=self._ws_run, args=(list(new_set),), daemon=True)
+        t = threading.Thread(target=self._ws_run, args=(list(new_set), stop_event), daemon=True)
         t.start()
         print(f"📡 WebSocket 구독: {len(new_set)}개 종목")
 
-    def _ws_run(self, markets: list):
+    def _ws_run(self, markets: list, stop_event: threading.Event):
         """WebSocket 백그라운드 스레드"""
         self._ws_running = True
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            loop.run_until_complete(self._ws_connect(markets))
+            loop.run_until_complete(self._ws_connect(markets, stop_event))
         except Exception as e:
             print(f"⚠️ WebSocket 스레드 오류: {e}")
         finally:
             loop.close()
-            self._ws_running = False
+            if self._ws_stop_event is stop_event:
+                self._ws_running = False
 
-    async def _ws_connect(self, markets: list):
+    async def _ws_connect(self, markets: list, stop_event: threading.Event):
         """업비트 WebSocket 연결 및 현재가 수신"""
         WS_URL = "wss://api.upbit.com/websocket/v1"
         subscribe_msg = json.dumps([
@@ -1034,7 +1048,7 @@ class CBot:
         #   디스코드로 알림을 보내 사람이 알아챌 수 있게 한다.
         consecutive_fail = 0
         alerted = False
-        while self._ws_running:
+        while not stop_event.is_set():
             try:
                 async with websockets.connect(
                     WS_URL,
@@ -1045,7 +1059,7 @@ class CBot:
                     print(f"✅ WebSocket 연결됨 ({len(markets)}개)")
                     consecutive_fail = 0
                     alerted = False
-                    while self._ws_running:
+                    while not stop_event.is_set():
                         try:
                             msg = await asyncio.wait_for(ws.recv(), timeout=60)
                             data = json.loads(msg)
