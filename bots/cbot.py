@@ -853,8 +853,17 @@ class CBot:
             print(f"   고정: {', '.join(FIXED_COINS)}")
             if new_coins:
                 print(f"   추가: {', '.join(new_coins[:25])}")
-            # ★ 종목 풀 변경 시 WebSocket 재구독
-            self._ws_subscribe(self.coin_pool[:25])  # 최대 25개 구독
+            # ★ 2026-08-25: 보유 중인 코인이 거래대금 순위에서 밀려 상위
+            #   25개 밖으로 빠지면, get_current_price()가 _ws_prices에
+            #   남은 마지막 값을 "가격 있음"으로 착각해 계속 그 값을 써서
+            #   실제 수익률이 표시값과 어긋나는 사고가 있었음(사용자 신고
+            #   — 업비트 +15%인데 cbot엔 +10%로 표시, 재시작해야만 갱신됨).
+            #   보유 종목은 순위와 무관하게 항상 실시간가를 받아야 하므로
+            #   구독 목록에 강제 포함.
+            ws_targets = list(dict.fromkeys(
+                self.coin_pool[:25] + list(self.positions.keys())
+            ))
+            self._ws_subscribe(ws_targets)
 
         except Exception as e:
             print(f"⚠️ 종목 풀 갱신 오류: {e} — 기존 풀 유지 ({len(self.coin_pool)}개)")
@@ -1811,8 +1820,8 @@ class CBot:
             critical=True,
         )
 
-        # ★ WebSocket 초기 구독 (고정 코인 + BTC)
-        initial_markets = list(set(FIXED_COINS + ["KRW-BTC"]))
+        # ★ WebSocket 초기 구독 (고정 코인 + BTC + 재시작 시 복구된 보유종목)
+        initial_markets = list(set(FIXED_COINS + ["KRW-BTC"] + list(self.positions.keys())))
         self._ws_subscribe(initial_markets)
         import time as _t; _t.sleep(2)  # 연결 대기
 
