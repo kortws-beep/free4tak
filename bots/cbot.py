@@ -1779,6 +1779,24 @@ class CBot:
         if not pending or pending.get("type") != "sell":
             return
         sell_market = pending.get("market", "")
+        # ★ 2026-08-25: KiKi "!c전체매도" 지원 — 사용자 요청("나중을 위해서
+        #   테스트")으로 전종목 일괄매도 명령 추가.
+        if sell_market == "ALL":
+            if not self.positions:
+                _write_cmd_result("⚠️ 보유 종목 없음")
+                return
+            sold, failed = [], []
+            for market, pos in list(self.positions.items()):
+                ok = self.sell(
+                    market, pos["qty"], "즉시매도(kiki명령-전체)",
+                    sell_price=pos.get("current", 0), force_all=True,
+                )
+                (sold if ok else failed).append(market)
+            msg = f"✅ 전체매도: {', '.join(sold) if sold else '없음'}"
+            if failed:
+                msg += f" | ❌ 실패: {', '.join(failed)}"
+            _write_cmd_result(msg)
+            return
         if sell_market in self.positions:
             pos = self.positions[sell_market]
             self.sell(

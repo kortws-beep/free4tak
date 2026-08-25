@@ -1280,7 +1280,7 @@ async def cmd_help(ctx):
 ━━━ ⌨️ 명령어 직접 입력 ━━━
 **📈 sbot**   `!상태`(=`!s상태`) `!정지`(=`!s정지`) `!시작`(=`!s시작`) `!재시작`(=`!s재시작`) `!s매도 코드` `!점수기준 숫자` `!s관심 [코드]`
 **📊 sbo2**   `!sbo2상태` `!sbo2매도 코드` `!sbo2정지` `!sbo2시작` `!sbo2재시작`
-**🪙 코인봇** `!c상태` `!c정지` `!c시작` `!c재시작` `!c매도 BTC` `!c성과`
+**🪙 코인봇** `!c상태` `!c정지` `!c시작` `!c재시작` `!c매도 BTC` `!c전체매도` `!c성과`
 **📡 텔레그램/섹터** `!t재시작`  `!섹터재시작`
 
 **📊 성과/분석**
@@ -1381,6 +1381,26 @@ async def cmd_cbot_sell(ctx, market: str):
 
     update_state("cbot", pending_cmd={"type": "sell", "market": market})
     await ctx.send(f"📤 코인 매도 명령: **{market}**\n(다음 루프 ~5분 내 실행)")
+
+    result = await wait_cmd_result("cbot", max_attempts=12, interval=5.0)
+    if result:
+        await ctx.send(f"✅ {result}")
+    else:
+        await ctx.send("⚠️ 응답 없음 — cbot.py 실행 중인지 확인하세요")
+
+
+async def cmd_cbot_sell_all(ctx):
+    """코인봇 보유 종목 전체 매도 (2026-08-25 신설)"""
+    cbot_state  = read_state("cbot")
+    cbot_status = cbot_state.get("last_status", {})
+    held = list(cbot_status.get("positions_detail", {}).keys())
+
+    if not held:
+        await ctx.send("❌ 코인봇 보유 종목 없음")
+        return
+
+    update_state("cbot", pending_cmd={"type": "sell", "market": "ALL"})
+    await ctx.send(f"📤 코인봇 전체매도 명령 ({len(held)}종목: {', '.join(held)})\n(다음 루프 ~5분 내 실행)")
 
     result = await wait_cmd_result("cbot", max_attempts=12, interval=5.0)
     if result:

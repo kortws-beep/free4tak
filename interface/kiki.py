@@ -25,7 +25,7 @@ AI 비서입니다. 명령어로 봇을 조종하고, 평일 자동 브리핑을
     !e상태 / !e성과
 
   🪙 코인봇:
-    !c상태 / !c매도 BTC / !c정지 / !c시작 / !c성과
+    !c상태 / !c매도 BTC / !c전체매도 / !c정지 / !c시작 / !c성과
 
   🌐 공통:
     !전체상태      모든 봇 현황
@@ -106,7 +106,7 @@ from kiki_cmd import (
     cmd_watchlist, cmd_watchlist_show,
     cmd_all_status,
     cmd_restart_all, cmd_restart,
-    cmd_cbot_status, cmd_cbot_sell, cmd_cbot_performance,
+    cmd_cbot_status, cmd_cbot_sell, cmd_cbot_sell_all, cmd_cbot_performance,
     cmd_theme_status, cmd_watchlist_hts, cmd_help,
     cmd_total_performance,
     cmd_news,
@@ -716,6 +716,7 @@ class AIAssistant:
 "BTC/비트/이더/코인 팔아" → CMD:!c매도 코인명
 예: "MINA 팔아줘" → CMD:!c매도 KRW-MINA
 예: "삼성전자 팔아" → CMD:!매도 005930
+"코인봇 전체매도/코인 다 팔아/코인봇 청산" → CMD:!c전체매도
 
 [시작/정지]
 "단타 멈춰/정지/세워" → CMD:!정지
@@ -935,6 +936,8 @@ async def execute_command(ctx, cmd: str):
     # ── 코인봇 ───────────────────────────────────────────────
     elif cmd == "!c상태":
         await cmd_cbot_status(ctx)
+    elif cmd == "!c전체매도":
+        await cmd_cbot_sell_all(ctx)
     elif cmd.startswith("!c매도"):
         parts = cmd.split()
         if len(parts) == 2:
@@ -1142,7 +1145,7 @@ async def on_message(message):
                     cmd = reply.split("\n")[0][4:].strip()
                     # ★ 2026-08-19: sbo2매도/sbo2정지가 빠져있어서 확인 없이
                     #   바로 실행되고 있었음 — 다른 봇들과 동일하게 추가.
-                    danger_cmds = ["!매도","!s매도","!sbo2매도","!c매도",
+                    danger_cmds = ["!매도","!s매도","!sbo2매도","!c매도","!c전체매도",
                                    "!정지","!s정지","!sbo2정지","!c정지","!e정지"]
                     is_danger   = any(cmd.startswith(d) for d in danger_cmds)
                     if is_danger:
