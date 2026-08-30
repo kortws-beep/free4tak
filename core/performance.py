@@ -44,8 +44,15 @@ def _ro_connect(db_path: str) -> sqlite3.Connection:
 # ============================================================
 class PerformanceAnalyzer:
 
-    def __init__(self, db_path: str = "trade_history.db"):
+    def __init__(self, db_path: str = "trade_history.db", table: str = "trades"):
+        # ★ 2026-08-30: 봇별 DB(sbot_trade_history.db/cbot_trade_history.db/
+        #   trade_history.db)는 테이블명이 "trades"인데 이 클래스는 그동안
+        #   "master_trades"(별도 통합 DB인 master_trades.db 전용 테이블명)를
+        #   하드코딩 조회하고 있었음 — 봇별 DB엔 그 테이블이 없어 매 호출마다
+        #   "no such table" 오류로 조용히 빈 결과만 반환("매매 없음")했음.
+        #   테이블명을 인자로 받아 DB마다 맞는 이름을 쓰도록 수정.
         self.db_path = db_path
+        self.table   = table
 
     def _fetch_trades(self, days: int = None,
                       exclude_bug: bool = True) -> list:
@@ -62,7 +69,7 @@ class PerformanceAnalyzer:
                 cutoff = (datetime.datetime.now()
                           - datetime.timedelta(days=days)).strftime("%Y-%m-%d")
                 where.append(f"sell_time >= '{cutoff}'")
-            cur   = conn.execute("PRAGMA table_info(master_trades)").fetchall()
+            cur   = conn.execute(f"PRAGMA table_info({self.table})").fetchall()
             cols  = [c[1] for c in cur]
             c_code  = "market as code" if "market" in cols and "code" not in cols else "code"
             c_score = "ai_score" if "ai_score" in cols else "0 as ai_score"
@@ -72,7 +79,7 @@ class PerformanceAnalyzer:
                        buy_time, sell_time,
                        {c_score},
                        '' as market_status
-                FROM master_trades
+                FROM {self.table}
                 WHERE {' AND '.join(where)}
                 ORDER BY sell_time ASC
             """
@@ -382,13 +389,17 @@ class PerformanceAnalyzer:
 
     def _fetch_trades_between(self, start: str, end: str) -> list:
         try:
-            conn = _ro_connect(self.db_path)
-            rows = conn.execute("""
-                SELECT code, buy_price, sell_price, qty,
+            conn  = _ro_connect(self.db_path)
+            cur   = conn.execute(f"PRAGMA table_info({self.table})").fetchall()
+            cols  = [c[1] for c in cur]
+            c_code  = "market as code" if "market" in cols and "code" not in cols else "code"
+            c_score = "ai_score" if "ai_score" in cols else "0 as ai_score"
+            rows = conn.execute(f"""
+                SELECT {c_code}, buy_price, sell_price, qty,
                        profit_rate, sell_reason, buy_time, sell_time,
-                       ai_score,
+                       {c_score},
                        '' as market_status
-                FROM master_trades
+                FROM {self.table}
                 WHERE sell_price IS NOT NULL AND sell_price > 0
                   AND profit_rate > -99
                   AND sell_time >= ? AND sell_time <= ?
@@ -572,12 +583,21 @@ class MultiPerformanceAnalyzer:
         "sbot": "sbot_trade_history.db",
         "ebot": "ebot_trade_history.db",
         "cbot": "cbot_trade_history.db",
+        # ★ 2026-08-30: sbo2가 통째로 빠져 있었음 — 현재 가장 활발히
+        #   거래하는 봇인데도 !성과상세에 집계가 안 되고 있었음.
+        "sbo2": "lina_bot/sbo2_trades.db",
+    }
+    # ★ 봇마다 실제 거래이력 테이블명이 다름(대부분 "trades", sbo2만
+    #   "sbo2_trades"). 기본값은 "trades".
+    TABLE_MAP = {
+        "sbo2": "sbo2_trades",
     }
     LABELS = {
         "nbot": "📈 단타봇",
         "sbot": "📊 스윙봇",
         "ebot": "🌆 종가봇",
         "cbot": "🪙 코인봇",
+        "sbo2": "📊 스윙봇2",
     }
 
     def summary(self, days: int = 30) -> str:
@@ -593,7 +613,7 @@ class MultiPerformanceAnalyzer:
             if not os.path.exists(db_path):
                 continue
             try:
-                pa     = PerformanceAnalyzer(db_path)
+                pa     = PerformanceAnalyzer(db_path, table=self.TABLE_MAP.get(bot_name, "trades"))
                 report = pa.full_report(days=days)
                 b      = report.get("basic", {})
                 r      = report.get("risk", {})

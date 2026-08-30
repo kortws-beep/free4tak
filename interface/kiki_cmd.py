@@ -22,6 +22,7 @@ import discord
 from common_utils import now_kst, today_str, now_hms, now_hhmm, fmt_won, safe_float, safe_int
 # ★ read_state/write_state/update_state — 봇 이름 기반 버전 사용
 from kiki_briefing import read_state, write_state, update_state
+from performance import PerformanceAnalyzer, MultiPerformanceAnalyzer
 
 # send_long, wait_cmd_result는 kiki.py에서 주입
 send_long = None
