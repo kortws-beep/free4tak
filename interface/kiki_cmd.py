@@ -368,14 +368,6 @@ async def cmd_performance_detail(ctx, days: int = 30):
         mpa    = MultiPerformanceAnalyzer()
         result = await loop.run_in_executor(None, mpa.summary, days)
         await send_long(ctx, result)
-
-        # 단타봇 상세 리포트 추가
-        import os
-        if os.path.exists(TRADE_HIST_DB):
-            pa     = PerformanceAnalyzer(TRADE_HIST_DB)
-            report = await loop.run_in_executor(None, pa.full_report, days)
-            detail = pa.format_discord(report)
-            await send_long(ctx, detail)
     except Exception as e:
         await ctx.send(f"❌ 성과 분석 오류: {e}")
 

@@ -576,12 +576,15 @@ class PerformanceAnalyzer:
 # 멀티봇 종합 성과
 # ============================================================
 class MultiPerformanceAnalyzer:
-    """단타/스윙/종가/코인 4봇 종합 성과"""
+    """스윙(sbot/sbo2)/코인 봇 종합 성과"""
 
+    # ★ 2026-08-30: nbot(단타봇)은 서비스 자체가 삭제된 지 오래(systemctl
+    #   조회 시 유닛이 "not-found")인데도 DB_MAP에 남아 있어서 매번
+    #   "매매 없음"만 찍고 있었음(사용자 지적 — "단타봇이 아직 남아 있네").
+    #   ebot(종가봇)은 DB 파일 자체가 없어(운영된 적 없음) 이미
+    #   os.path.exists 체크로 자동 스킵되고 있었지만 정리 차원에서 함께 제거.
     DB_MAP = {
-        "nbot": "trade_history.db",
         "sbot": "sbot_trade_history.db",
-        "ebot": "ebot_trade_history.db",
         "cbot": "cbot_trade_history.db",
         # ★ 2026-08-30: sbo2가 통째로 빠져 있었음 — 현재 가장 활발히
         #   거래하는 봇인데도 !성과상세에 집계가 안 되고 있었음.
@@ -593,9 +596,7 @@ class MultiPerformanceAnalyzer:
         "sbo2": "sbo2_trades",
     }
     LABELS = {
-        "nbot": "📈 단타봇",
         "sbot": "📊 스윙봇",
-        "ebot": "🌆 종가봇",
         "cbot": "🪙 코인봇",
         "sbo2": "📊 스윙봇2",
     }
