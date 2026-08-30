@@ -2264,9 +2264,18 @@ class Sbo2:
             try:
                 now_t = now_hhmm()
 
+                # ★ 2026-08-30: 주말/휴장일에도 KiKi 명령(홀드/매도/정지 등)은
+                #   처리해야 함 — sbot과 동일 사유(사용자 신고 — 주말 "!h 종목"
+                #   실행했더니 "응답 없음", 알고보니 이 아래 continue로 매 루프
+                #   건너뛰어 다음 개장일까지 pending_cmd가 무한 대기했던 것).
+                self._handle_pending_command()
+
                 if is_weekend():
                     print(f"💤 주말 — 대기 중")
-                    time.sleep(3600)
+                    # ★ 2026-08-30: 3600 → 60초로 단축 — KiKi 명령을 신속히
+                    #   집어야 해서(위 _handle_pending_command 참고), 1시간
+                    #   간격이면 명령 도착 시점에 따라 최대 1시간 지연됨.
+                    time.sleep(60)
                     continue
 
                 # ── 휴장일 (★ 2026-07-17 추가 — sbot과 동일 패턴) ──

@@ -813,6 +813,13 @@ class SBot:
             hold_val  = pending.get("value", True)
             if hold_code in self.positions:
                 self.peak_tracker.setdefault(hold_code, {})["hold"] = hold_val
+                # ★ 2026-08-30: peak_tracker 영속화는 원래 루프 후반부
+                #   _write_status() 호출 시점에만 이뤄지는데, 그 호출은
+                #   장외/주말/휴장일 분기의 continue보다 뒤에 있어서 그
+                #   시간대엔 아예 실행되지 않음 — 여기서 즉시 저장해야
+                #   설정 직후 재시작해도 살아남음(사용자 실사례로 확인:
+                #   주말에 설정한 hold가 재시작 후 사라져 있었음).
+                _update_state(peak_tracker=self.peak_tracker)
                 label = "설정" if hold_val else "해제"
                 _write_cmd_result(
                     f"✅ [SWING] {hold_code} 홀드 {label} "
@@ -1373,6 +1380,13 @@ class SBot:
                 today = today_str()
                 now_t = now_hhmm()
                 now   = now_hms()
+
+                # ★ 2026-08-30: 주말/휴장일에도 KiKi 명령(홀드/매도/정지 등)은
+                #   처리해야 함 — 기존엔 이 체크가 주말/휴장 早리턴 뒤에 있어서
+                #   pending_cmd가 다음 개장일까지 무한 대기했음(사용자 신고 —
+                #   주말에 "!h 종목" 실행했더니 "응답 없음", 알고보니 매 루프
+                #   시작하자마자 continue로 건너뛰어 처리 자체가 안 됐던 것).
+                self._handle_pending_command(_read_state())
 
                 # ── 주말 ─────────────────────────────────
                 if is_weekend():
