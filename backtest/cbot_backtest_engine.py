@@ -62,6 +62,19 @@ RSI_MAX  = 79
 VOL_MULT = 1.2
 STOP_LOSS_CRASH = -0.05   # 직전봉 급락 즉시손절 기준 (주간 기준 — 4시간봉 백테스트는 야간 -0.08 예외 미반영)
 
+# ★ 2026-08-30: "정체 로테이션" 실험(사용자 아이디어) — 손실 중인 포지션은
+#   기존 손절/25일기한 로직이 이미 커버하므로 건드리지 않고, 수익 중이지만
+#   목표1(stage 0)도 못 찍고 24시간 넘게 2% 미만에서 정체된 포지션만 대상.
+#   1차 실험(무조건 시간+수익폭으로 매도)은 백테스트 결과 승리 크기를
+#   갉아먹어 역효과였음 — 2차 개선: (1) 거래량까지 봐서 "매수/매도가
+#   치열하게 싸우는 중"(거래량 살아있음)인지 "관심밖이라 거래량도 마른
+#   것"인지 구분하고, (2) 무조건 매도가 아니라 "실제로 더 점수 높은
+#   대안이 대기 중일 때만" 교체(사용자 요청) — CBotBacktestConfig.
+#   enable_stagnant_rotation로 on/off.
+STAGNANT_HOURS         = 24
+STAGNANT_PROFIT_CAP    = 0.02   # 2% 미만(0~1.999999%)
+STAGNANT_VOL_RATIO_MAX = 1.0    # 최근 거래량이 20봉 평균 밑이면 "관심밖"으로 판단
+
 
 # ============================================================
 # 거래 기록
@@ -105,6 +118,8 @@ class CBotBacktestConfig:
 
     ai_score_mode:   str   = "rule_proxy"  # AI 호출 불가 → 룰점수 사용
     verbose:         bool  = False
+    enable_stagnant_rotation: bool = False  # ★ 2026-08-30: 정체 로테이션 실험 on/off
+    stagnant_hours: int = STAGNANT_HOURS    # ★ 실험용 — 24h이 큰 상승 초입까지 잘라내는 사례가 있어 조정 테스트
 
 
 # ============================================================
@@ -127,6 +142,7 @@ class CBotBacktestEngine:
         self.daily_loss_amt   = 0.0
 
         self._ohlcv_cache: dict = {}
+        self._stagnant_info: dict = {}   # ★ {market: {"score":, "current":}} — 이번 틱 회전후보
 
     # ----------------------------------------------------------
     # 데이터 로드 (4시간봉)
@@ -393,6 +409,31 @@ class CBotBacktestEngine:
                 except Exception:
                     pass
 
+        # ②-2 정체 판단 (실험, stage==0 한정) — ★ 2026-08-30
+        #   손실 중이면 건드리지 않음(위 손절/25일기한이 이미 커버).
+        #   0%~2% 미만 수익 + 24시간 초과 + "거래량까지 마름"(vol_ratio가
+        #   20봉평균 밑 — 매수/매도가 치열하게 싸우는 중이면 거래량이 살아
+        #   있을 테니 그런 건 제외)인 경우만 회전 후보로 표시. 실제 매도는
+        #   여기서 하지 않고, run()에서 "진짜 점수 높은 대안이 나타났을
+        #   때만" 교체한다(무조건 시간손절은 1차 실험에서 큰 승리를
+        #   갉아먹는 역효과 확인 — 대안 존재 조건 추가로 완화).
+        if (self.config.enable_stagnant_rotation and stage == 0
+                and 0 <= rate < STAGNANT_PROFIT_CAP
+                and ind.get("vol_ratio", 1.0) < STAGNANT_VOL_RATIO_MAX):
+            buy_dt_str = tracker.get("buy_date", "")
+            if buy_dt_str:
+                try:
+                    buy_dt     = datetime.datetime.fromisoformat(buy_dt_str)
+                    cur_dt     = datetime.datetime.fromisoformat(date_str)
+                    held_hours = (cur_dt - buy_dt).total_seconds() / 3600
+                    if held_hours >= self.config.stagnant_hours:
+                        self._stagnant_info[market] = {
+                            "score":   self._rule_score(ind),
+                            "current": current,
+                        }
+                except Exception:
+                    pass
+
         # ③ 트레일링 스탑 (목표1 달성 이후)
         if stage >= 1 and atr_val > 0:
             trail_stop = peak_price - atr_val * ATR_TRAIL_MULT
@@ -442,6 +483,7 @@ class CBotBacktestEngine:
             date_str = ts.strftime("%Y-%m-%d %H:%M:%S")
             self.daily_loss_count = 0
             self.daily_loss_amt = 0.0
+            self._stagnant_info = {}   # ★ 이번 틱 정체후보 초기화
 
             for market in list(self.positions.keys()):
                 df = self._load_ohlcv(market)
@@ -454,9 +496,9 @@ class CBotBacktestEngine:
 
             self._record_equity(ts)
 
-            if len(self.positions) >= self.config.max_positions:
-                continue
-
+            # ★ 2026-08-30: 슬롯이 꽉 찼어도(포지션 수 == max) 정체 후보가
+            #   있으면 대안 후보를 계속 스캔해야 하므로, 빈 슬롯 없다고
+            #   바로 continue하지 않고 후보 스캔은 항상 수행.
             candidates = []
             for market in self.config.codes:
                 if market in self.positions:
@@ -478,6 +520,34 @@ class CBotBacktestEngine:
                     candidates.append((score, market, ind))
 
             candidates.sort(reverse=True)
+
+            # ★ 2026-08-30: 정체교체 — 슬롯이 꽉 찼고, 정체 후보 중 가장
+            #   점수 낮은 것보다 실제로 더 점수 높은 대안이 대기 중일
+            #   때만 교체. 대안이 없으면 그냥 계속 들고 감(무조건 시간
+            #   손절은 1차 실험에서 역효과 확인됨).
+            if (self.config.enable_stagnant_rotation
+                    and len(self.positions) >= self.config.max_positions
+                    and self._stagnant_info and candidates):
+                worst_market = min(self._stagnant_info,
+                                    key=lambda m: self._stagnant_info[m]["score"])
+                worst_score  = self._stagnant_info[worst_market]["score"]
+                best_score, best_market, best_ind = candidates[0]
+                if best_score > worst_score:
+                    worst_pos = self.positions[worst_market]
+                    self._simulate_sell(
+                        worst_market, worst_pos["qty"],
+                        self._stagnant_info[worst_market]["current"],
+                        f"정체교체(→{best_market})", date_str,
+                    )
+                    candidates.pop(0)
+                    amount = min(self.config.base_buy_amt, self.cash * 0.95)
+                    if amount >= MIN_ORDER_AMT:
+                        self._simulate_buy(best_market, best_ind["current"], int(amount),
+                                           date_str, best_score, best_ind["atr_rate"])
+
+            if len(self.positions) >= self.config.max_positions:
+                continue
+
             for score, market, ind in candidates:
                 if len(self.positions) >= self.config.max_positions:
                     break

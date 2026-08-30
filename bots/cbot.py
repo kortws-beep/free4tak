@@ -159,6 +159,18 @@ FALLBACK_TRAIL   = 0.05    # 고점 대비 -5%
 STOP_LOSS_CRASH  = -0.05   # 직전봉 -5% 급락
 STOP_LOSS_WEAK   = -0.05   # 약세장 손절 (폴백용)
 
+# ── 정체 교체 (실험, 1주일 트라이얼 2026-08-30~09-06) ────────
+# ★ 사용자 문제제기: 코인이 관심 밖으로 밀려나면 하염없이 정체될 수
+#   있음(고정 4종목+거래량상위 풀 특성상). backtest/cbot_backtest_engine.py로
+#   검증한 결과 — 24h/48h/72h는 오히려 역효과(폭발 직전 종목까지 잘라냄,
+#   실사례: KRW-EUL 정체 후 6일뒤 +15.6%, KRW-SOL 정체 후 2일뒤 +8%),
+#   96h(4일)에서 처음 PF 개선(0.52→0.64) 확인돼 이 값으로 라이브 트라이얼.
+#   buy_date가 날짜(일) 단위로만 저장돼 있어 96시간 대신 held_days>=4로 판단.
+ENABLE_STAGNANT_ROTATION = True
+STAGNANT_DAYS            = 4      # 96시간 ≈ 4일
+STAGNANT_PROFIT_CAP      = 0.02   # 2% 미만 수익만 대상(손실은 기존 손절/25일기한이 커버)
+STAGNANT_VOL_RATIO_MAX   = 1.0    # 최근 거래량이 20봉 평균 밑 — "관심밖"(매수/매도 전투중이면 제외)
+
 # ── 매수 신호 기준 ──────────────────────────────────────────
 RSI_MIN  = 40    # 45→40, 눌림목 진입 허용
 RSI_MAX  = 79
@@ -1259,6 +1271,44 @@ class CBot:
             return 0.0
 
     # ============================================================
+    # 정체 교체 후보 탐색 (실험, 1주일 트라이얼 — ENABLE_STAGNANT_ROTATION 참고)
+    # ============================================================
+    def _find_stagnant_market(self) -> str:
+        """stage0(목표1 미달성) + 0~2%대 수익 + 거래량 마름(관심밖) +
+        4일 이상 보유 포지션 중 가장 오래 보유한 것 하나를 반환.
+        없으면 빈 문자열. 손실 중인 포지션은 대상에서 제외(기존 손절/
+        25일기한 로직이 이미 커버)."""
+        if not ENABLE_STAGNANT_ROTATION:
+            return ""
+        best_market, best_days = "", -1
+        for market, pos in self.positions.items():
+            tracker = self.peak_tracker.get(market, {})
+            if tracker.get("stage", 0) != 0:
+                continue
+            entry, current = pos.get("entry_price", 0), pos.get("current", 0)
+            if not (entry and current):
+                continue
+            rate = (current - entry) / entry
+            if not (0 <= rate < STAGNANT_PROFIT_CAP):
+                continue
+            buy_date_str = tracker.get("buy_date", "")
+            if not buy_date_str:
+                continue
+            try:
+                held_days = (datetime.date.today()
+                             - datetime.date.fromisoformat(buy_date_str)).days
+            except Exception:
+                continue
+            if held_days < STAGNANT_DAYS:
+                continue
+            ind = self.get_indicators(market)
+            if not ind or ind.get("vol_ratio", 1.0) >= STAGNANT_VOL_RATIO_MAX:
+                continue
+            if held_days > best_days:
+                best_days, best_market = held_days, market
+        return best_market
+
+    # ============================================================
     # 매수 신호 판단
     # ============================================================
     def check_buy_signal(self, market: str) -> tuple:
@@ -2007,6 +2057,43 @@ class CBot:
                 available_slots = MAX_POSITIONS - len(self.positions) + 보너스
                 if 보너스:
                     print(f"  ♻️ 익절진행중 {보너스}코인 슬롯 반환 → 가용:{available_slots}")
+
+                # ── 정체 교체 (실험, 1주일 트라이얼) ──────────────
+                # ★ 슬롯이 꽉 찼을 때만 검토 — 여유 슬롯이 있으면 굳이
+                #   기존 포지션을 정리할 필요 없이 그 슬롯으로 바로 신규
+                #   진입하면 됨. 진짜 지금 당장 사들일 만한 대안이 코인풀에
+                #   있을 때만 정체 포지션을 정리한다(무조건 시간손절은
+                #   백테스트에서 역효과 확인됨 — ENABLE_STAGNANT_ROTATION
+                #   주석 참고).
+                if available_slots <= 0:
+                    stagnant_market = self._find_stagnant_market()
+                    if stagnant_market:
+                        for _cand in self.coin_pool:
+                            if _cand in self.positions or _cand == stagnant_market:
+                                continue
+                            if self.sold_today.get(_cand):
+                                continue
+                            _signal, _ind, _reason = self.check_buy_signal(_cand)
+                            if not _signal:
+                                continue
+                            _ai_result = self.get_ai_score(_cand, _ind)
+                            if _ai_result["score"] < ai_threshold:
+                                continue
+                            # 진짜 대안 발견 — 정체 포지션 정리 후 슬롯 확보
+                            _pos  = self.positions[stagnant_market]
+                            _rate = (_pos["current"] - _pos["entry_price"]) / _pos["entry_price"]
+                            self.notify(
+                                f"♻️ 정체교체 {stagnant_market} → {_cand}\n"
+                                f"{stagnant_market} {_rate:+.2%} ({STAGNANT_DAYS}일+ 정체·거래량감소) "
+                                f"정리 후 신규진입",
+                                critical=False,
+                            )
+                            if self.sell(stagnant_market, _pos["qty"],
+                                         f"정체교체({_rate:+.2%})",
+                                         sell_price=_pos["current"], force_all=True):
+                                self.peak_tracker.pop(stagnant_market, None)
+                                available_slots += 1
+                            break
 
                 # ── 매수 로직 ─────────────────────────────────
                 if available_slots <= 0:
