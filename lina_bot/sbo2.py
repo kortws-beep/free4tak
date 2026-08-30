@@ -2335,7 +2335,8 @@ class Sbo2:
                     rate  = (curr - pos["entry_price"]) / pos["entry_price"] * 100
                     grade = pos.get('grade', '')
                     label = SLOT_LABEL.get(grade, grade)
-                    print(f"   💼 {pos.get('name', code)}({label}) "
+                    hold_mark = "⭐" if pos.get("hold", False) else "  "
+                    print(f"  {hold_mark}💼 {pos.get('name', code)}({label}) "
                           f"{rate:+.1f}% | 현재:{int(curr):,} | "
                           f"손절:{pos['stop_price']:,.0f} 목표:{pos['tgt_price']:,.0f}")
                     # ★ 2026-07-02: master_positions 현재가 갱신 (sbot과 동일 패턴).

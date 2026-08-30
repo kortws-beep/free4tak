@@ -33,8 +33,8 @@ AI 비서입니다. 명령어로 봇을 조종하고, 평일 자동 브리핑을
     !테마          당일 강세 업종/테마
     !뉴스          오늘 테마별 뉴스 감성 리포트
     !관심HTS       키움 HTS 관심그룹 즉시 동기화
-    !h 종목명/코드   손절체크만 제외(홀드), sbot/sbo2 자동판별 (트레일링/목표는 그대로 작동)
-    !h해제 종목명/코드 홀드 해제
+    !h 종목명/코드   손절체크만 제외(홀드), sbot/sbo2 자동판별 (트레일링/목표는 그대로 작동), 재시작해도 유지
+    !r 종목명/코드   홀드 해제 (정상 손절체크로 복귀)
     !브리핑        즉시 모닝 브리핑
     !저녁브리핑    즉시 저녁 브리핑
     !성과          오늘 손익 (단순)
@@ -721,10 +721,10 @@ class AIAssistant:
 예: "삼성전자 팔아" → CMD:!매도 005930
 "코인봇 전체매도/코인 다 팔아/코인봇 청산" → CMD:!c전체매도
 
-[홀드 — 손절체크만 제외]
+[홀드 — 손절체크만 제외, 재시작해도 유지]
 "XXX 홀드/홀드해줘/손절 걸지마/손절 빼줘" → CMD:!h 종목명
 예: "삼성전자 홀드해줘" → CMD:!h 삼성전자
-"XXX 홀드해제/손절 다시 걸어줘" → CMD:!h해제 종목명
+"XXX 홀드해제/손절 다시 걸어줘/XXX 풀어줘" → CMD:!r 종목명
 
 [시작/정지]
 "단타 멈춰/정지/세워" → CMD:!정지
@@ -984,13 +984,13 @@ async def execute_command(ctx, cmd: str):
         await cmd_watchlist_hts(ctx)
 
     # ── 공통 ─────────────────────────────────────────────────
-    elif cmd.startswith("!h해제"):
+    elif cmd.startswith("!r "):
         parts = cmd.split(maxsplit=1)
         if len(parts) == 2:
             await cmd_hold(ctx, parts[1].strip(), hold_val=False)
         else:
-            await ctx.send("❌ 사용법: !h해제 종목명 또는 !h해제 005930")
-    elif cmd.startswith("!h"):
+            await ctx.send("❌ 사용법: !r 종목명 또는 !r 005930 (홀드 해제)")
+    elif cmd.startswith("!h "):
         parts = cmd.split(maxsplit=1)
         if len(parts) == 2:
             await cmd_hold(ctx, parts[1].strip(), hold_val=True)
@@ -1169,7 +1169,7 @@ async def on_message(message):
                     #   확인절차에 걸리지 않게 구분.
                     danger_cmds = ["!매도","!s매도","!sbo2매도","!c매도","!c전체매도",
                                    "!정지","!s정지","!sbo2정지","!c정지","!e정지",
-                                   "!h ","!h해제"]
+                                   "!h ","!r "]
                     is_danger   = any(cmd.startswith(d) for d in danger_cmds)
                     if is_danger:
                         _pending_confirm[user_id] = (cmd, time.time())
