@@ -299,9 +299,11 @@ class SwingStrategy:
         #   (필요시 git 히스토리에서 복원 가능)
 
         # ----------------------------------------------------------
-        # ③ 손절가 이탈
+        # ③ 손절가 이탈 — ★ 2026-08-30: "홀드" 설정된 종목은 이 체크만
+        #   건너뜀(트레일링/목표달성 로직은 그대로 적용). KiKi "!h 종목"
+        #   명령으로 설정, bots/sbot.py의 pending_cmd "hold" 처리 참고.
         # ----------------------------------------------------------
-        if current <= stop_price:
+        if current <= stop_price and not tracker.get("hold", False):
             label = "손절" if stage == 0 else f"손절(stage{stage})"
             print(f"🛑 {label} {code} | 현재:{current:,.0f} ≤ 손절:{stop_price:,.0f} ({rate:+.2%})")
             on_sell(code, qty, f"{label}({rate:+.2%})", current)

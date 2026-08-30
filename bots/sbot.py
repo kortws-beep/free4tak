@@ -804,6 +804,23 @@ class SBot:
             )
             _write_cmd_result(f"✅ [SWING] {buy_code} {buy_qty}주 매수 완료")
 
+        elif cmd_type == "hold":
+            # ★ 2026-08-30 신설 — 사용자 요청: 특정 종목 손절체크만 제외
+            #   ("!h 종목명이나코드" → 홀드 설정, 트레일링/목표달성 로직은
+            #   그대로 작동, 손절가 이탈만 무시). peak_tracker에 저장해야
+            #   실계좌 동기화(positions.clear()+update)에도 안 날아감.
+            hold_code = pending.get("code", "")
+            hold_val  = pending.get("value", True)
+            if hold_code in self.positions:
+                self.peak_tracker.setdefault(hold_code, {})["hold"] = hold_val
+                label = "설정" if hold_val else "해제"
+                _write_cmd_result(
+                    f"✅ [SWING] {hold_code} 홀드 {label} "
+                    f"(손절체크 {'제외' if hold_val else '포함'}, 트레일링/목표는 그대로)"
+                )
+            else:
+                _write_cmd_result(f"⚠️ {hold_code} 보유 중이 아님")
+
     # ============================================================
     # 한 종목 분석
     # ============================================================

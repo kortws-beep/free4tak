@@ -1299,6 +1299,29 @@ class Sbo2:
         elif cmd_type == "resume":
             _update_state(paused=False, cmd_result="▶️ [sbo2] 재개", pending_cmd=None)
 
+        elif cmd_type == "hold":
+            # ★ 2026-08-30 신설 — 사용자 요청: 특정 종목 손절체크만 제외
+            #   ("!h 종목명이나코드"). sbo2는 positions 딕셔너리 자체가
+            #   실계좌 동기화 시에도 보존되는 구조라 여기에 직접 저장.
+            hold_code = pending.get("code", "")
+            hold_val  = pending.get("value", True)
+            if hold_code in self.positions:
+                self.positions[hold_code]["hold"] = hold_val
+                label = "설정" if hold_val else "해제"
+                _update_state(
+                    cmd_result=(
+                        f"✅ [sbo2] {hold_code} 홀드 {label} "
+                        f"(손절체크 {'제외' if hold_val else '포함'}, 트레일링/목표는 그대로)"
+                    ),
+                    pending_cmd=None,
+                )
+                self._save_state()
+            else:
+                _update_state(
+                    cmd_result=f"⚠️ [sbo2] {hold_code} 보유 중이 아님",
+                    pending_cmd=None,
+                )
+
     def _name(self, code: str) -> str:
         for pos in self.positions.values():
             if pos.get("code") == code:
@@ -1847,8 +1870,10 @@ class Sbo2:
             #   ATR 손절/트레일링/목표가만으로 관리 (사용자 결정, 최근 장세에서
             #   기간매도가 손실 구간 포지션을 강제로 털어버리는 부작용 반복됨).
 
-            # ② 손절가 이탈
-            if not reason and stop > 0 and curr <= stop:
+            # ② 손절가 이탈 — ★ 2026-08-30: "홀드" 설정된 종목은 이 체크만
+            #   건너뜀(트레일링/목표달성은 그대로 적용). KiKi "!h 종목"
+            #   명령으로 설정.
+            if not reason and stop > 0 and curr <= stop and not pos.get("hold", False):
                 reason = f"손절({rate:+.1f}%)"
 
             # ③ 트레일링 스탑 (목표가1 달성 이후)
