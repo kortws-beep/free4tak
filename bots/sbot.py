@@ -1373,6 +1373,38 @@ class SBot:
             print(f"📦 peak_tracker 복원: 기존유지 {restored}건 / "
                   f"신규생성 {created}건 / 불완전복구 {repaired}건")
 
+        # ★ 2026-08-31: code_name_map 복원 — 이 맵은 저장은 되는데(_write_status
+        #   호출 시 last_status 하위에 저장됨) 재시작 시 복원 로직이 아예 없어서
+        #   매 재시작마다 비어버렸음. 이름은 매수 후보 분석 파이프라인
+        #   (_analyze_one_code)을 거친 종목만 채워지는데, 이미 보유 중인 종목은
+        #   재시작 후 다시 분석 대상이 될 일이 없어 콘솔/KiKi 상태에 종목명 대신
+        #   코드만 계속 표시되는 버그로 이어졌음(사용자 지적 — "SBOT의 종목명
+        #   표시해 줄 수 있니?"). 시세조회 API(get_market_data)의 hts_kor_isnm
+        #   필드로 보충하려 했으나, 08~09시 NXT 시간대엔 이 필드 자체가 응답에
+        #   빠져 있어(실측 확인) 신뢰 불가 — sbo2와 동일하게 로컬 DB
+        #   (kr_theme_finance.db, 장 시간과 무관)로 조회하도록 변경.
+        self.code_name_map.update(_read_state().get("last_status", {}).get("code_name_map", {}) or {})
+        _name_backfilled = 0
+        for _code in self.positions:
+            if _code not in self.code_name_map:
+                try:
+                    import re as _re
+                    _db   = os.path.join(_BASE, "lina_bot", "kr_theme_finance.db")
+                    _conn = _sqlite3.connect(_db, timeout=5)
+                    _row  = _conn.execute(
+                        "SELECT stock_name FROM kr_theme_stocks WHERE stock_name LIKE ? LIMIT 1",
+                        (f"%{_code}%",),
+                    ).fetchone()
+                    _conn.close()
+                    if _row:
+                        _clean = _re.sub(r'(KOSPI|KOSDAQ).*|\d{6}', '', _row[0]).strip()
+                        if _clean:
+                            self.code_name_map[_code] = _clean
+                            _name_backfilled += 1
+                except Exception:
+                    pass
+        if _name_backfilled:
+            print(f"🏷️ 종목명 보충 조회: {_name_backfilled}건")
 
         while True:
             try:
