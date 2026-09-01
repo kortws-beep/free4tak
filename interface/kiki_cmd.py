@@ -236,7 +236,11 @@ async def cmd_hold(ctx, target: str, hold_val: bool = True):
                      cmd_result=None)
         label = "설정" if hold_val else "해제"
         await ctx.send(f"📤 [{bot_name}] {code} 홀드 {label} 명령 전달\n(다음 루프에서 실행)")
-        result = await wait_cmd_result(bot_name)
+        # ★ 2026-09-02: 기본 대기(12×5s=60초)가 sbo2 루프 주기(60초+α)와
+        #   너무 빠듯해서, 명령은 정상 처리됐는데도 "응답 없음"으로 보이는
+        #   허위 타임아웃이 발생함(사용자 실사례 — 108490 홀드, cmd_result는
+        #   성공인데 키키는 타임아웃 표시). 여유 있게 20×5s=100초로 연장.
+        result = await wait_cmd_result(bot_name, max_attempts=20, interval=5.0)
         if result:
             await ctx.send(f"✅ 결과: {result}")
         else:
