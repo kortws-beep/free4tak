@@ -176,6 +176,11 @@ RSI_MIN  = 40    # 45→40, 눌림목 진입 허용
 RSI_MAX  = 79
 VOL_MULT = 1.2
 AI_SCORE_MIN_BASE = 55          # AI 점수 기본 임계치 (동적 조정됨)
+# ★ 2026-09-03: get_ai_score() 프롬프트가 "0~44점: 회피"라고 명시하는데,
+#   백테스트 보너스(최대+20점)가 무조건 합산돼 회피 신호(예:35점)도 55점으로
+#   둔갑해 동적임계치를 통과하는 구멍이 있었음(재점검 리포트로 발견/확인).
+#   raw 점수가 이 값 이하면 보너스와 무관하게 즉시 제외.
+AI_SCORE_AVOID_MAX = 44
 
 # ── 시장 / 리스크 ───────────────────────────────────────────
 BTC_WEAK_THRESH  = -2.0
@@ -843,8 +848,8 @@ class CBot:
                 except Exception as e:
                     print(f"⚠️ 시세 조회 오류 (chunk {i}): {e}")
 
-            # 4) 필터
-            filtered = []
+            # 4) 필터 (가격/거래대금/등락률 — 저렴한 조건 먼저)
+            candidates = []
             for item in ticker_data:
                 market      = item.get("market", "")
                 trade_price = safe_float(item.get("trade_price", 0))
@@ -855,22 +860,42 @@ class CBot:
                 if change_rate < MIN_CHANGE_RATE: continue
                 if change_rate > MAX_CHANGE_RATE: continue
                 if trade_price < 1: continue
+                candidates.append((market, trade_price, acc_trade, change_rate))
 
-                # ★ 4시간봉 21개 미만 코인 제외 (신규 상장 / 데이터 부족)
-                # 고정 코인은 항상 통과 (아래 6단계에서 강제 포함)
-                if market not in FIXED_COINS:
-                    try:
-                        res_c = self.session.get(
-                            f"{BASE_URL}/candles/minutes/{CANDLE_UNIT}",
-                            params={"market": market, "count": 21}, timeout=3,
-                        ).json()
-                        if not isinstance(res_c, list) or len(res_c) < 21:
-                            print(f"  ⏭️ {market} 4시간봉 부족({len(res_c) if isinstance(res_c, list) else 0}개) — 제외")
-                            continue
-                        time.sleep(0.05)  # rate limit
-                    except Exception:
-                        continue  # 조회 실패도 제외
+            # ★ 2026-09-03: 4시간봉 데이터 유무 확인(신규상장 제외)을 코인마다
+            #   순차 HTTP 요청으로 처리하고 있어서, 5분마다 후보 수십~백여
+            #   개를 훑느라 메인루프가 10~15초씩 블로킹되던 문제(재점검
+            #   리포트로 발견) — ThreadPoolExecutor로 병렬화. 고정코인은
+            #   조회 자체를 안 해도 되므로 제외.
+            need_check = [c for c in candidates if c[0] not in FIXED_COINS]
+            has_enough_candles: dict = {}
 
+            def _check_candles(market: str) -> bool:
+                try:
+                    res_c = self.session.get(
+                        f"{BASE_URL}/candles/minutes/{CANDLE_UNIT}",
+                        params={"market": market, "count": 21}, timeout=3,
+                    ).json()
+                    return isinstance(res_c, list) and len(res_c) >= 21
+                except Exception:
+                    return False
+
+            if need_check:
+                from concurrent.futures import ThreadPoolExecutor
+                with ThreadPoolExecutor(max_workers=10) as ex:
+                    futures = {ex.submit(_check_candles, c[0]): c[0] for c in need_check}
+                    for fut in futures:
+                        market = futures[fut]
+                        try:
+                            has_enough_candles[market] = fut.result()
+                        except Exception:
+                            has_enough_candles[market] = False
+
+            filtered = []
+            for market, trade_price, acc_trade, change_rate in candidates:
+                if market not in FIXED_COINS and not has_enough_candles.get(market, False):
+                    print(f"  ⏭️ {market} 4시간봉 부족 — 제외")
+                    continue
                 filtered.append({
                     "market":    market,
                     "trade_amt": acc_trade,
@@ -990,12 +1015,15 @@ class CBot:
                 return "weak"
 
         except Exception as e:
+            # ★ 2026-09-03: 여기 바로 아래에 중복 except(데드코드)와
+            #   _update_market_status()에서 복사해온 것으로 보이는 무관한
+            #   finally(self._last_market_check 갱신)가 붙어 있었음
+            #   (재점검 리포트로 발견). 이 함수가 BTC 약세 구간마다(매수
+            #   후보 스캔 시 종목별로 반복 호출) 그 타임스탬프를 계속
+            #   갱신해버려서, _update_market_status()의 10분 캐시 갱신
+            #   주기가 사실상 무력화되는 부작용까지 있었음 — 둘 다 제거.
             print(f"⚠️ alt_status 오류 {market}: {e}")
             return self.market_status
-        except Exception as e:
-            print(f"⚠️ BTC 시세 오류: {e}")
-        finally:
-            self._last_market_check = time.time()
 
     # ============================================================
     # 공포탐욕지수 (1시간 캐시)
@@ -1113,7 +1141,11 @@ class CBot:
                     alerted = False
                     while not stop_event.is_set():
                         try:
-                            msg = await asyncio.wait_for(ws.recv(), timeout=60)
+                            # ★ 2026-09-03: timeout=60이면 stop_event가 켜져도
+                            #   최대 60초까지 recv()에 블로킹돼 이전 세대
+                            #   스레드 정리가 지연됨(재점검 리포트로 발견).
+                            #   5초로 줄여 stop_event 재확인 주기를 단축.
+                            msg = await asyncio.wait_for(ws.recv(), timeout=5)
                             data = json.loads(msg)
                             market = data.get("code", "")
                             price  = float(data.get("trade_price", 0))
@@ -1872,7 +1904,17 @@ class CBot:
                     market, pos["qty"], "즉시매도(kiki명령-전체)",
                     sell_price=pos.get("current", 0), force_all=True,
                 )
-                (sold if ok else failed).append(market)
+                if ok:
+                    # ★ 2026-09-03: sell()이 self.positions/peak_tracker를
+                    #   갱신하지 않아, 같은 루프 후속 로직(_check_sell 재호출,
+                    #   슬롯 계산)이 이미 판 종목을 여전히 보유 중으로 착각해
+                    #   중복 매도 시도/슬롯 오계산이 나던 문제(재점검 리포트로
+                    #   발견) — 매도 성공 즉시 메모리에서도 제거.
+                    self.positions.pop(market, None)
+                    self.peak_tracker.pop(market, None)
+                    sold.append(market)
+                else:
+                    failed.append(market)
             msg = f"✅ 전체매도: {', '.join(sold) if sold else '없음'}"
             if failed:
                 msg += f" | ❌ 실패: {', '.join(failed)}"
@@ -1880,13 +1922,20 @@ class CBot:
             return
         if sell_market in self.positions:
             pos = self.positions[sell_market]
-            self.sell(
+            ok = self.sell(
                 sell_market, pos["qty"],
                 "즉시매도(kiki명령)",
                 sell_price=pos.get("current", 0),
                 force_all=True,
             )
-            _write_cmd_result(f"✅ {sell_market} 즉시매도 완료")
+            if ok:
+                self.positions.pop(sell_market, None)
+                self.peak_tracker.pop(sell_market, None)
+                _write_cmd_result(f"✅ {sell_market} 즉시매도 완료")
+            else:
+                # ★ 2026-09-03: 기존엔 sell() 성공 여부와 무관하게 항상
+                #   "완료" 메시지를 보내고 있었음 — 실패 시 그대로 반영.
+                _write_cmd_result(f"❌ {sell_market} 즉시매도 실패")
         else:
             _write_cmd_result(f"⚠️ {sell_market} 미보유")
 
@@ -2153,6 +2202,12 @@ class CBot:
                         ai_result = self.get_ai_score(market, ind)
                         ai_score  = ai_result["score"]
                         ai_reason = ai_result["reason"]
+
+                        # ★ 2026-09-03: AI 회피 신호(raw 점수 기준)는 백테스트
+                        #   보너스로 구제되지 않도록 여기서 먼저 차단.
+                        if ai_score <= AI_SCORE_AVOID_MAX:
+                            print(f"  ❌ {market} — AI 회피 신호({ai_score}점, 원본기준) | {ai_reason}")
+                            continue
 
                         # 💡 [백테스터 연동 보너스] -------------------------------------
                         bt_bonus = 0
