@@ -2119,13 +2119,16 @@ async def on_message(message):
     if message.content.startswith("!상태"):
         async with message.channel.typing():
             try:
-                import json
+                # ★ 2026-09-03: 일반 open()+json.load()는 sbo2가 마침 그
+                #   순간에 파일을 쓰고 있으면 JSONDecodeError로 튕길 수
+                #   있어(재점검 리포트로 발견) — common_utils.py의 원자적
+                #   read_state()로 교체(다른 곳도 오늘 다 이걸로 통일함).
+                from common_utils import read_state as _cu_read_state
                 state_file = os.path.join(base_dir, 'sbo2_state.json')
                 if not os.path.exists(state_file):
                     await send_safe_message(message.channel, "⚠️ sbo2 상태파일 없어.")
                     return
-                with open(state_file, 'r', encoding='utf-8') as f:
-                    state = json.load(f)
+                state = _cu_read_state(state_file, default={})
                 positions = state.get("positions", {})
 
                 from kis_api import KisAPI
