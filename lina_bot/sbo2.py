@@ -1141,6 +1141,9 @@ def get_stock_name(code: str) -> str:
 def get_stock_code(name: str) -> str:
     """kr_theme_finance.db 에서 종목명으로 코드 조회"""
     import re
+    # ★ 2026-09-03: conn.close()가 정상경로에만 있어서 쿼리 도중 예외가 나면
+    #   커넥션이 안 닫히던 누수를 finally로 수정(재점검 리포트로 발견).
+    conn = None
     try:
         db = os.path.join(BASE_DIR, "kr_theme_finance.db")
         conn = sqlite3.connect(db, timeout=5)
@@ -1161,7 +1164,6 @@ def get_stock_code(name: str) -> str:
         if row:
             m = re.search(r'(\d{6})', row[0])
             if m:
-                conn.close()
                 return m.group(1)
 
         # 2. kr_stock_daily_data 에서 폴백 (코드 미포함 포맷 — 종목명 정확일치만)
@@ -1170,7 +1172,6 @@ def get_stock_code(name: str) -> str:
             WHERE stock_name = ?
             LIMIT 1
         """, (name,)).fetchone()
-        conn.close()
 
         if row:
             m = re.search(r'(\d{6})', row[0])
@@ -1179,6 +1180,9 @@ def get_stock_code(name: str) -> str:
 
     except Exception as e:
         print(f"⚠️ 코드 조회 오류 {name}: {e}")
+    finally:
+        if conn is not None:
+            conn.close()
     return ""
 
 
@@ -1893,6 +1897,7 @@ class Sbo2:
                 if stage == 0:
                     # ★ 목표가1 달성 → 50% 매도(수익실현)
                     half_qty = qty if qty <= 1 else qty // 2
+                    ok_half = False
                     if half_qty > 0:
                         ok_half = self.api.sell(code, half_qty, price=int(curr))
                         if ok_half:
@@ -1911,20 +1916,28 @@ class Sbo2:
                                 )
                             pos["qty"] = qty - half_qty
                             print(f"💰 목표1 50%매도 {code} | {half_qty}주 @ {curr:,.0f}원")
-                    new_stop   = round(entry + atr_val * 1.0, 0) if atr_val > 0 else round(entry * 1.02, 0)
-                    new_target = round(curr + atr_val * 3.0, 0) if atr_val > 0 else round(curr * 1.10, 0)
-                    pos["stop_price"]  = new_stop
-                    pos["tgt_price"]   = new_target
-                    pos["target_next"] = new_target
-                    pos["stage"]       = 1
-                    self._save_state()
-                    print(f"🎯 목표가1 달성 {code} ({rate:+.1f}%) | "
-                          f"손절↑:{new_stop:,.0f} | 새목표:{new_target:,.0f}")
-                    _notify(
-                        f"🎯 [sbo2] 목표가1 달성 {name}({code}) — 50%매도\n"
-                        f"   {rate:+.1f}% | 손절↑:{new_stop:,.0f} | 새목표:{new_target:,.0f}",
-                        critical=False
-                    )
+                    # ★ 2026-09-03: 매도 실패(API 오류/호가 부족 등) 시 stage를
+                    #   올리지 않도록 이 블록 전체를 if ok_half: 안으로 이동
+                    #   (재점검 리포트로 발견 — 원래는 이 밖에 있어서 1주도
+                    #   안 팔렸는데 전량이 손절가 상향된 2단계로 넘어가는
+                    #   위험이 있었음).
+                    if ok_half:
+                        new_stop   = round(entry + atr_val * 1.0, 0) if atr_val > 0 else round(entry * 1.02, 0)
+                        new_target = round(curr + atr_val * 3.0, 0) if atr_val > 0 else round(curr * 1.10, 0)
+                        pos["stop_price"]  = new_stop
+                        pos["tgt_price"]   = new_target
+                        pos["target_next"] = new_target
+                        pos["stage"]       = 1
+                        self._save_state()
+                        print(f"🎯 목표가1 달성 {code} ({rate:+.1f}%) | "
+                              f"손절↑:{new_stop:,.0f} | 새목표:{new_target:,.0f}")
+                        _notify(
+                            f"🎯 [sbo2] 목표가1 달성 {name}({code}) — 50%매도\n"
+                            f"   {rate:+.1f}% | 손절↑:{new_stop:,.0f} | 새목표:{new_target:,.0f}",
+                            critical=False
+                        )
+                    else:
+                        print(f"⚠️ 목표1 매도 실패 {code} — stage 유지, 손절가 그대로")
                 else:
                     new_stop   = target_next
                     new_target = round(curr + atr_val * 3.0, 0) if atr_val > 0 else round(curr * 1.10, 0)
@@ -2026,11 +2039,13 @@ class Sbo2:
 
     def _cancel_stale_orders(self):
         """1루프 이상 미체결 주문 취소 (sbot 방식)"""
-        # 1. 체결 완료된 종목 pending에서 제거
-        for code in list(self.positions.keys()):
-            self._pending_orders.pop(code, None)
-
-        # 2. 남은 pending = 미체결 → 취소
+        # ★ 2026-09-03: 기존 "1. 체결 완료된 종목 pending에서 제거" 단계가
+        #   _check_buy()가 체결 확인 전에 이미 self.positions를 채워놓는
+        #   것과 겹쳐서, 아래 실제 취소 로직이 실행될 기회가 전혀 없었음
+        #   (재점검 리포트로 발견 — sbot과 완전히 동일한 버그). 그 단계를
+        #   삭제 — 아래 cancel_order() 성공/실패 분기가 이미 정확한
+        #   판단을 하고 있으므로 그대로 살려두면 됨.
+        # 미체결 → 취소 시도
         # ★ 2026-07-23 버그 수정: 취소 성공/실패와 무관하게 무조건
         #   sold_today에 등록하고 있었음. cancel_order()가 실패하는 이유가
         #   "정정취소 가능수량이 없습니다"(=주문이 이미 전량 체결됨)인
@@ -2046,6 +2061,11 @@ class Sbo2:
                 _notify(f"🚫 [sbo2] 미체결 취소 {name}({code}) → 자금 반환 / 재매수 방지 등록")
                 # 재매수 방지 — 취소가 실제로 성공(=진짜 미체결)했을 때만
                 self.sold_today[code] = now_hms()
+                # ★ 2026-09-03: 진짜 미체결로 확인됐으니 매수시점에 미리
+                #   채워둔 낙관적 포지션도 같이 정리(안 그러면 실제로는
+                #   0주인데 계속 보유중으로 착각).
+                self.positions.pop(code, None)
+                self._buy_sync_guard.pop(code, None)
             else:
                 print(f"   ℹ️ {name}({code}) 취소 실패 — 이미 체결된 것으로 보여 "
                       f"sold_today 등록 안 함 (다음 동기화에서 정상 포지션으로 반영됨)")
