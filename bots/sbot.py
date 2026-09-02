@@ -262,15 +262,19 @@ def _write_cmd_result(result: str):
     _update_state(cmd_result=result, pending_cmd=None)
 
 def _write_status(status: dict, peak_tracker: dict = None):
-    state = _read_state()
-    state["last_status"] = status
-    state["last_update"] = now_hms()
+    # ★ 2026-09-03: 기존엔 "읽기 → 수정 → 전체 덮어쓰기"를 락 없이 수동으로
+    #   해서, 이 사이에 키키가 pending_cmd를 쓰면 그 변경사항이 사라지는
+    #   레이스컨디션이 있었음(재점검 리포트로 발견 — common_utils.py 자체
+    #   주석에 이미 "!일시중단 명령 유실" 실사례가 남아있는 버그 클래스).
+    #   _update_state()(파일락 보호)로 교체 — 여기서 안 건드리는 키(예:
+    #   pending_cmd/cmd_result/paused)는 자동으로 안전하게 보존됨.
+    kwargs = {"last_status": status, "last_update": now_hms()}
     # ★ peak_tracker 영속화 (2026-06-28 추가) — 재시작 시 손절가/목표가/
     #   stage/buy_date가 전부 초기화되던 문제 방지. None이 아닐 때만 갱신
     #   (호출하지 않는 다른 경로에서 값이 날아가지 않도록 보호).
     if peak_tracker is not None:
-        state["peak_tracker"] = peak_tracker
-    write_state(BOT_STATE_FILE, state)
+        kwargs["peak_tracker"] = peak_tracker
+    _update_state(**kwargs)
 
 
 # ============================================================
@@ -659,10 +663,8 @@ class SBot:
             print(f"🚫 [SWING] {code} 손절/본절 → 당일 재매수 금지")
 
         # 상태 파일에도 sold_today 저장
-        st = _read_state()
-        st["sold_today"]      = self.sold_today
-        st["sold_today_date"] = today_str()
-        write_state(BOT_STATE_FILE, st)
+        # ★ 2026-09-03: 락 없는 수동 read+write → 안전한 _update_state로 교체
+        _update_state(sold_today=self.sold_today, sold_today_date=today_str())
 
     def _do_loss(self):
         """손절 카운터 +1"""

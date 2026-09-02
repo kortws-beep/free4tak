@@ -251,10 +251,10 @@ def _update_state(**kwargs):
     update_state(BOT_STATE_FILE, **kwargs)
 
 def _write_status(status: dict):
-    state = _read_state()
-    state["last_status"] = status
-    state["last_update"] = now_hms()
-    write_state(BOT_STATE_FILE, state)
+    # ★ 2026-09-03: 락 없는 수동 read+write → 안전한 _update_state로 교체
+    #   (재점검 리포트로 발견 — sbot과 동일한 레이스컨디션, common_utils.py
+    #   자체 주석에 이미 "!일시중단 명령 유실" 실사례가 남아있는 버그 클래스).
+    _update_state(last_status=status, last_update=now_hms())
 
 def _write_cmd_result(result: str):
     _update_state(cmd_result=result, pending_cmd=None)
@@ -667,18 +667,24 @@ class CBot:
 
     def _save_positions(self):
         """포지션·피크트래커·당일매도이력을 cbot_state.json에 영속화"""
+        # ★ 2026-09-03: 기존엔 read_state()로 통째로 읽은 뒤 그 스냅샷의
+        #   pending_cmd/cmd_result/paused까지 그대로 다시 _update_state(**state)
+        #   에 넘겨 강제로 되써버렸음 — 그 사이(읽기~쓰기)에 키키가 새
+        #   pending_cmd를 쓰면 여기서 옛 값으로 덮어써 사라지는 레이스컨디션이
+        #   있었음(재점검 리포트로 발견). positions/peak_tracker/sold_today만
+        #   넘기면 _update_state()의 락 안 병합이 나머지 키를 안전하게 보존함.
         try:
-            state = _read_state()
-            state["positions"]       = self.positions
-            state["peak_tracker"]    = self.peak_tracker
             # ★ 2026-08-18: sold_today는 메모리에만 있고 저장 안 돼서,
             #   재시작하면 당일 재매수 금지가 통째로 풀리는 사고가 있었음
             #   (KRW-LA를 21:26 급락손절 직후, 하필 그 직후에 재시작이
             #   일어나 21:36에 더 비싼 가격으로 바로 재매수됨 — 사용자
             #   신고로 발견). positions/peak_tracker와 같이 저장.
-            state["sold_today"]      = self.sold_today
-            state["sold_today_date"] = self._sold_today_date
-            _update_state(**state)
+            _update_state(
+                positions=self.positions,
+                peak_tracker=self.peak_tracker,
+                sold_today=self.sold_today,
+                sold_today_date=self._sold_today_date,
+            )
         except Exception as e:
             print(f"⚠️ 포지션 저장 오류: {e}")
 

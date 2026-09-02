@@ -40,9 +40,16 @@ RESTART_SERVICES = {
     "sector":   "yeongam9-sector",
 }
 
-async def wait_cmd_result(bot_name: str, max_attempts: int = 12,
+async def wait_cmd_result(bot_name: str, max_attempts: int = 20,
                            interval: float = 5.0) -> str:
-    """pending_cmd 처리 결과 폴링 — 자체 구현"""
+    """pending_cmd 처리 결과 폴링 — 자체 구현.
+    ★ 2026-09-03: 기본 60초(12×5s)가 sbot/sbo2 루프 주기(60초+처리시간)와
+    너무 빠듯해서, 명령은 실제로 정상 처리됐는데도 "응답 없음"으로 잘못
+    보고되는 허위 타임아웃이 발생함(재점검 리포트로 발견 — 이전엔 !h/!r
+    호출부만 개별적으로 100초로 늘려놨었는데, 매도/정지/재시작 등 다른
+    명령들은 여전히 기본값이라 같은 문제가 남아있었음). 기본값 자체를
+    100초(20×5s)로 상향해 전체 명령에 일괄 적용.
+    """
     import asyncio as _asyncio
     for _ in range(max_attempts):
         await _asyncio.sleep(interval)
@@ -827,16 +834,23 @@ def _sync_watchlist_to_state(codes: list) -> dict:
             wl_source.pop(code, None)
             summary["removed"] += 1
 
-        # 종목명 매핑 갱신
-        code_name_map = state.get("last_status", {}).get("code_name_map", {})
-        code_name_map.update(all_codes)
-
-        state["watchlist"]        = watchlist
-        state["watchlist_expire"] = wl_expire
-        state["watchlist_source"] = wl_source
-        state["hts_watchlist"]    = all_codes
-        state["hts_updated_at"]   = now_kst().strftime("%Y-%m-%d %H:%M")
-        write_state(bot_name, state)
+        # ★ 2026-09-03: 기존엔 여기서 읽은 state 전체를 나중에 통째로
+        #   write_state(bot_name, state)로 되써서, 그 사이에 봇 자신의
+        #   _write_status()가 last_status를 갱신하면 그 변경사항이
+        #   사라지는 레이스컨디션이 있었음(재점검 리포트로 발견). 이
+        #   함수가 실제로 바꾸는 top-level 키만 update_state()(파일락
+        #   보호)로 넘겨 나머지(last_status 등)는 안전하게 보존.
+        #   (last_status.code_name_map에 직접 병합해 넣던 것도 제거 —
+        #   봇 자신이 이미 로컬DB/분석파이프라인으로 이름을 채우므로
+        #   중복이었고, 이 레이어에서 손대는 게 오히려 레이스 유발 지점.)
+        update_state(
+            bot_name,
+            watchlist=watchlist,
+            watchlist_expire=wl_expire,
+            watchlist_source=wl_source,
+            hts_watchlist=all_codes,
+            hts_updated_at=now_kst().strftime("%Y-%m-%d %H:%M"),
+        )
 
     print(f"✅ HTS 동기화: +{summary['added']} -{summary['removed']} 총{summary['total']}개")
     return summary

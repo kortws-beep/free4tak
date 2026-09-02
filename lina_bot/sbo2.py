@@ -499,32 +499,33 @@ def get_trade_review(days: int = 30) -> str:
 # ============================================================
 # 상태 파일 헬퍼
 # ============================================================
+# ★ 2026-09-03: 기존엔 이 파일이 core/common_utils.py를 전혀 안 쓰고
+#   락 없는 수동 read+write를 직접 구현하고 있었음 — 원자적 쓰기(임시
+#   파일+교체)도 없고, 키키가 같은 파일에 pending_cmd를 쓰는 순간과
+#   겹치면 서로의 변경사항이 사라지는 레이스컨디션에 완전히 노출돼
+#   있었음(재점검 리포트로 발견 — common_utils.py 자체 주석에 이미
+#   "!일시중단 명령 유실" 실사례가 남아있는 바로 그 버그 클래스).
+#   sbot/cbot처럼 common_utils.py의 파일락(filelock) 보호 버전으로 통일.
+from common_utils import (
+    read_state  as _cu_read_state,
+    write_state as _cu_write_state,
+    update_state as _cu_update_state,
+)
+
+_SBO2_STATE_DEFAULT = {"paused": False, "positions": {}, "sold_today": {}, "sold_today_date": ""}
+
 def _read_state() -> dict:
-    try:
-        if os.path.exists(BOT_STATE_FILE):
-            with open(BOT_STATE_FILE, 'r', encoding='utf-8') as f:
-                return json.load(f)
-    except Exception:
-        pass
-    return {"paused": False, "positions": {}, "sold_today": {}, "sold_today_date": ""}
+    return _cu_read_state(BOT_STATE_FILE, default=_SBO2_STATE_DEFAULT)
 
 def _write_state(state: dict):
-    try:
-        with open(BOT_STATE_FILE, 'w', encoding='utf-8') as f:
-            json.dump(state, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        print(f"⚠️ 상태 저장 오류: {e}")
+    _cu_write_state(BOT_STATE_FILE, state)
 
 def _update_state(**kwargs):
-    st = _read_state()
-    st.update(kwargs)
-    _write_state(st)
+    _cu_update_state(BOT_STATE_FILE, **kwargs)
 
 def _save_cand_date(date: str):
     """후보 갱신 날짜 상태파일에 저장"""
-    st = _read_state()
-    st["cand_date"] = date
-    _write_state(st)
+    _cu_update_state(BOT_STATE_FILE, cand_date=date)
 
 
 # ============================================================
@@ -1233,18 +1234,20 @@ class Sbo2:
         print(f"   보유 포지션: {list(self.positions.keys())}")
 
     def _save_state(self):
-        # 기존 pending_cmd/cmd_result는 보존 (덮어쓰기 방지)
-        _existing = _read_state()
-        _write_state({
-            "positions":       self.positions,
-            "sold_today":      self.sold_today,
-            "sold_today_date": today_str(),
-            "candidates":      self.candidates,
-            "cand_date":       getattr(self, "_cand_date", ""),
-            "pending_cmd":     _existing.get("pending_cmd"),
-            "cmd_result":      _existing.get("cmd_result"),
-            "paused":          _existing.get("paused", False),
-        })
+        # ★ 2026-09-03: 기존엔 "현재 상태 읽기 → 그 스냅샷의 pending_cmd/
+        #   cmd_result/paused를 그대로 옮겨담아 전체 덮어쓰기"였는데, 그
+        #   읽기와 쓰기 사이에 키키가 새 pending_cmd를 쓰면 그게 사라지는
+        #   레이스컨디션이 있었음(재점검 리포트로 발견). _cu_update_state()는
+        #   락 안에서 읽기+병합+쓰기를 원자적으로 하므로, pending_cmd/
+        #   cmd_result/paused를 여기서 안 건드리면 자동으로 안전하게 보존됨.
+        _cu_update_state(
+            BOT_STATE_FILE,
+            positions=self.positions,
+            sold_today=self.sold_today,
+            sold_today_date=today_str(),
+            candidates=self.candidates,
+            cand_date=getattr(self, "_cand_date", ""),
+        )
 
     def _handle_pending_command(self):
         """디스코드(키키/리나)에서 들어온 매도/정지 명령 처리"""

@@ -55,9 +55,17 @@ def write_state(bot: str = "sbot", state: dict = None):
     _ws(fpath, state or {})
 
 def update_state(bot: str = "sbot", **kwargs):
-    state = read_state(bot)
-    state.update(kwargs)
-    write_state(bot, state)
+    # ★ 2026-09-03: 기존엔 락 없는 수동 read+write라서, 이 read~write
+    #   사이에 해당 봇의 메인루프가 자기 상태(_write_status 등)를 쓰면
+    #   서로의 변경사항이 사라지는 레이스컨디션이 있었음(재점검 리포트로
+    #   발견 — 키키가 pending_cmd를 쓰는 바로 이 함수가 정작 안전하지
+    #   않았음). core/common_utils.py의 파일락(filelock) 보호 버전으로 교체.
+    from common_utils import update_state as _us
+    fname = _BOT_STATE_FILES.get(bot)
+    if not fname:
+        return
+    fpath = _os2.path.join(_base, fname)
+    _us(fpath, **kwargs)
 
 # 봇 상태 파일 경로
 _base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
