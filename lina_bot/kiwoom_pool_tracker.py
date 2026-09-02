@@ -159,7 +159,11 @@ async def scan_and_log() -> bool:
 
 
 def checkin_pool_log():
-    """5영업일 이상 경과한 미체크 항목 체크인 — 10% 이하 상승분 promoted 플래그"""
+    """5영업일 이상 경과한 미체크 항목 체크인 — 10% 이하 상승분 promoted 플래그.
+    반환: (checked_cnt, promoted_list[(name, scan_date, change_pct), ...])
+    ★ 2026-09-03: 07/25 신설 이후 스케줄러에 실제로 물려 있지 않아 한 달 넘게
+    데이터만 쌓이고 체크인이 한 번도 안 돌고 있었음(사용자 지적). 반환값을
+    lina_bot.py의 07:20 마스터 리포트에 포함하도록 연결."""
     init_db()
     conn = sqlite3.connect(POOL_DB, timeout=10)
     fin_conn = sqlite3.connect(FIN_DB, timeout=10)
@@ -193,7 +197,13 @@ def checkin_pool_log():
             continue
         curr_price = row[0]
         change_pct = round((curr_price - base_price) / base_price * 100, 2) if base_price else 0
-        promoted = int(change_pct <= CHECKIN_MAX_GAIN_PCT)
+        # ★ 2026-09-03: 하한선 없이 "10% 이하 상승"만 봐서 -78%처럼 완전히
+        #   폭락한 종목까지 "아직 안 늦은 후보"로 잘못 분류되던 버그 발견
+        #   (실측: 2124건 체크인 중 1793건이 후보로 잡혔는데 그중 1014건이
+        #   실제론 하락 종목 — 진짜 의도(플랫~소폭상승, 아직 안 늦음)에
+        #   맞는 건 779건뿐). 하락은 이미 실패한 픽이지 "안 늦은 후보"가
+        #   아니므로 0% 이상으로 하한선 추가.
+        promoted = int(0 <= change_pct <= CHECKIN_MAX_GAIN_PCT)
 
         conn.execute("""
             UPDATE kiwoom_pool_log
@@ -208,9 +218,11 @@ def checkin_pool_log():
     conn.close()
     fin_conn.close()
 
+    promoted_list.sort(key=lambda x: x[2])
     print(f"✅ 체크인 완료: {checked_cnt}건 평가 ({len(promoted_list)}건 재검토 후보)")
-    for name, scan_date, chg in sorted(promoted_list, key=lambda x: x[2]):
+    for name, scan_date, chg in promoted_list:
         print(f"   🔍 {name} ({scan_date} 스캔, {chg:+.1f}%) — 재검토 후보")
+    return checked_cnt, promoted_list
 
 
 if __name__ == "__main__":

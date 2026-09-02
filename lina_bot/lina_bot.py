@@ -1632,6 +1632,24 @@ async def daily_master_report():
 
     try:
         master_report = await asyncio.to_thread(get_master_report, 3)
+
+        # ★ 2026-09-03: 키움풀 체크인(5영업일 경과분 검증) — 07/25 신설 이후
+        #   스케줄러에 안 물려 있어 한 달 넘게 데이터만 쌓이고 검증이 한 번도
+        #   안 되고 있었음(사용자 지적). 매일 07:20 마스터 리포트에 같이
+        #   포함해서 매일 자동 검증되도록 연결. sbo2 실거래 자동연결은 며칠
+        #   더 관찰 + 주말 백테스터 재검증 후 별도 결정(사용자 지시).
+        try:
+            from kiwoom_pool_tracker import checkin_pool_log
+            checked_cnt, promoted_list = await asyncio.to_thread(checkin_pool_log)
+            if checked_cnt > 0:
+                pool_lines = [f"\n\n🔍 **키움풀 체크인 (5영업일 경과분)**",
+                              f"평가: {checked_cnt}건 | 재검토 후보: {len(promoted_list)}건"]
+                for name, scan_date, chg in promoted_list[:10]:
+                    pool_lines.append(f"  · {name} ({scan_date} 스캔, {chg:+.1f}%)")
+                master_report += "\n".join(pool_lines)
+        except Exception as e:
+            print(f"⚠️ 키움풀 체크인 오류: {e}")
+
         await send_safe_message(channel,
             f"🎯 **[대장! 07:20 스윙 마스터 리포트야]** 🎯\n\n{master_report}")
         print(f"✅ 07:20 마스터 리포트 전송 완료!")
