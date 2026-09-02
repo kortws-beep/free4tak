@@ -48,6 +48,13 @@ ATR_TARGET_MULT = 3.0
 ATR_RAISE_MULT  = 1.0
 ATR_TRAIL_MULT  = 1.5
 
+# ★ 2026-09-03: "%하드 트레일링 앙상블" 실험(사용자 제안) — 급등 시 ATR도
+#   같이 커져서 트레일링이 너무 느슨해지는(고점 대비 수익 반납이 큰) 문제
+#   완화. 누적 최고수익(peak_rate)이 일정 % 이상 찍힌 뒤부터는 ATR
+#   트레일링과 %기반 트레일링 중 더 타이트한(먼저 도달하는) 쪽을 적용.
+PCT_TRAIL_PROFIT_THRESHOLD = 0.15   # 이 이상 찍어야 % 트레일링 활성화
+PCT_TRAIL_PCT               = 0.045  # 고점 대비 -4.5%
+
 FALLBACK_STOP   = -0.07
 # ★ 2026-08-17: 0.12 → 0.15 (cbot.py FALLBACK_TARGET과 불일치했음 — 정비 중 발견)
 FALLBACK_TARGET = 0.15
@@ -120,6 +127,9 @@ class CBotBacktestConfig:
     verbose:         bool  = False
     enable_stagnant_rotation: bool = False  # ★ 2026-08-30: 정체 로테이션 실험 on/off
     stagnant_hours: int = STAGNANT_HOURS    # ★ 실험용 — 24h이 큰 상승 초입까지 잘라내는 사례가 있어 조정 테스트
+    enable_pct_trail_ensemble: bool = False  # ★ 2026-09-03: %하드 트레일링 앙상블 실험 on/off
+    pct_trail_threshold: float = PCT_TRAIL_PROFIT_THRESHOLD
+    pct_trail_pct: float       = PCT_TRAIL_PCT
 
 
 # ============================================================
@@ -434,11 +444,18 @@ class CBotBacktestEngine:
                 except Exception:
                     pass
 
-        # ③ 트레일링 스탑 (목표1 달성 이후)
+        # ③ 트레일링 스탑 (목표1 달성 이후) — ATR 트레일링 + (실험) %하드 앙상블
         if stage >= 1 and atr_val > 0:
             trail_stop = peak_price - atr_val * ATR_TRAIL_MULT
+            label = "트레일링"
+            if (self.config.enable_pct_trail_ensemble
+                    and tracker["peak_rate"] >= self.config.pct_trail_threshold):
+                pct_trail_stop = peak_price * (1 - self.config.pct_trail_pct)
+                if pct_trail_stop > trail_stop:
+                    trail_stop = pct_trail_stop
+                    label = "%트레일링"
             if current <= trail_stop:
-                self._simulate_sell(market, qty, current, f"트레일링({rate:+.2%})", date_str)
+                self._simulate_sell(market, qty, current, f"{label}({rate:+.2%})", date_str)
                 return
 
         # ④ 목표가 달성 → 손절/목표가 상향 (목표1은 50%매도)
