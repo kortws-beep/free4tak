@@ -602,6 +602,37 @@ class CBot:
         except Exception as e:
             print(f"⚠️ 수동거래 저장 오류 {market}: {e}")
 
+    def _get_monthly_performance(self):
+        """이번 달(1일~오늘) 성과만 집계 — ★ 2026-09-02: 콘솔 "📊 성과" 출력이
+        _get_recent_performance()(최근 20건, 월 구분 없음)를 그대로 써서
+        영구 누적치처럼 보였음(사용자 요청 — "월이 변경되면 초기화해서
+        월 단위로"). AI 동적임계치용 _get_recent_performance()는 최근
+        거래건수 기반 로직이라 그대로 두고, 이 표시 전용 함수만 신설."""
+        try:
+            this_month = datetime.date.today().strftime("%Y-%m")
+            conn = _db_connect(TRADE_HIST_DB)
+            rows = conn.execute("""
+                SELECT profit_rate, profit_krw FROM trades
+                WHERE sell_price IS NOT NULL AND (ai_score IS NULL OR ai_score >= 0)
+                  AND substr(sell_time, 1, 7) = ?
+            """, (this_month,)).fetchall()
+            conn.close()
+            if not rows:
+                return None
+            profits = [r[0] for r in rows if r[0] is not None]
+            krws    = [r[1] for r in rows if r[1] is not None]
+            if not profits:
+                return None
+            wins = [p for p in profits if p >= 0]
+            return {
+                "total":      len(profits),
+                "win_rate":   round(len(wins) / len(profits) * 100, 1),
+                "avg_profit": round(sum(profits) / len(profits), 2),
+                "total_krw":  round(sum(krws), 0),
+            }
+        except Exception:
+            return None
+
     def _get_recent_performance(self, limit: int = 20):
         try:
             conn = _db_connect(TRADE_HIST_DB)
@@ -2180,13 +2211,13 @@ class CBot:
                 # ── 상태 저장 ─────────────────────────────────
                 _write_status(self._build_status(krw, total_profit))
 
-                # ── 성과 출력 ────────────────────────────────
-                perf = self._get_recent_performance()
+                # ── 성과 출력 (이번 달 기준, 월 바뀌면 자동 초기화) ──
+                perf = self._get_monthly_performance()
                 if perf:
                     print(
-                        f"📊 성과 | 승률:{perf['win_rate']}% | "
+                        f"📊 이번달 성과 | 승률:{perf['win_rate']}% | "
                         f"평균:{perf['avg_profit']:+.2f}% | "
-                        f"누적:{perf['total_krw']:+,.0f}원"
+                        f"누적:{perf['total_krw']:+,.0f}원 ({perf['total']}건)"
                     )
 
                 self._save_positions()  # ★ 루프마다 포지션 영속화
