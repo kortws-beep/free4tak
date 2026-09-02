@@ -513,8 +513,11 @@ def _call_llm(prompt: str, max_tokens: int = 1200, force_claude: bool = False) -
     try:
         import anthropic as _ant
         client = _ant.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+        # ★ 2026-09-03: 리나는 봇들의 컨트롤타워라 하이쿠→소넷5로 격상
+        #   (사용자 요청 — "경직된 느낌", sbot/cbot 고빈도 스코어링은
+        #   비용 대비 하이쿠가 적정이라 그대로 둠).
         res = client.messages.create(
-            model=os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001"),
+            model=os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5"),
             max_tokens=max_tokens,
             messages=[{"role": "user", "content": prompt}],
         )

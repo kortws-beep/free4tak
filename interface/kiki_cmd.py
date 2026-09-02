@@ -63,6 +63,11 @@ ai  = None
 bot = None
 BOT_STATE_FILES = {}
 CHANNEL_ID = 0
+# ★ 2026-09-03: cmd_analyze_today/cmd_analyze_period가 DEFAULT_MODEL을
+#   참조하는데 정의/주입이 아예 없어 NameError로 죽고 있었음(!분석오늘/
+#   !분석이번주 실행 시 "❌ 분석 오류: name 'DEFAULT_MODEL' is not defined").
+#   kiki.py가 아래서 실제 값을 주입(kiki.py DEFAULT_MODEL과 동일하게 유지).
+DEFAULT_MODEL = "claude-sonnet-5"
 
 # DB 경로 상수
 _base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

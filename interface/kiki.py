@@ -163,7 +163,12 @@ BOT_STATE_FILES = {
 }
 
 # AI 모델
-DEFAULT_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
+# ★ 2026-09-03: 키키/리나는 봇들의 "컨트롤타워"라 자연어 해석/브리핑
+#   품질이 중요하다고 판단, 하이쿠(고빈도 단순 스코어링용, sbot/cbot은
+#   그대로 유지)에서 소넷5로 격상(사용자 요청 — "얘네가 컨트롤타워인데
+#   조금 경직된 느낌"). sbot/cbot의 AI 점수 채점은 호출 빈도가 높고
+#   단순 패턴판단이라 하이쿠가 비용 대비 적정이라 건드리지 않음.
+DEFAULT_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5")
 
 
 # ============================================================
@@ -1077,6 +1082,7 @@ async def on_ready():
     _kc.send_long      = send_long
     _kc.wait_cmd_result = wait_cmd_result
     _kc.execute_command = execute_command
+    _kc.DEFAULT_MODEL  = DEFAULT_MODEL
     asyncio.ensure_future(status_listener())
     asyncio.ensure_future(auto_briefing())
     asyncio.ensure_future(hts_sync_task())
