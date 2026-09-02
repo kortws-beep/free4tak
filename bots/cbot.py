@@ -1373,6 +1373,14 @@ class CBot:
             ind = self.get_indicators(market)
             if not ind or ind.get("vol_ratio", 1.0) >= STAGNANT_VOL_RATIO_MAX:
                 continue
+            # ★ 2026-09-03: 코인 순환매(대장주→메이저→알트)는 눌림목에서
+            #   숨고르기 하다 차례가 오면 급등하는 패턴이 흔한데, 거래량만
+            #   보고 정체판정하면 MA20 위에서 정상적으로 숨고르는 중인
+            #   종목까지 잘라내 순환매 급등을 놓칠 수 있음(사용자 제안으로
+            #   발견). MA20 아래로 구조가 무너진 것만 정체로 판정.
+            ma20 = ind.get("ma20", 0)
+            if ma20 > 0 and ind.get("current", 0) >= ma20:
+                continue
             if held_days > best_days:
                 best_days, best_market = held_days, market
         return best_market
@@ -2216,14 +2224,23 @@ class CBot:
                             continue
 
                         # 💡 [백테스터 연동 보너스] -------------------------------------
+                        # ★ 2026-09-03: get_rule_score()는 실제로는 "과거 승률"이
+                        #   아니라 최근 30봉 MA5/MA20/거래량으로 즉석 계산하는
+                        #   추세추종 룰점수라, AI 프롬프트가 이미 보는 것과 같은
+                        #   종류의 신호를 중복 반영함 — 상승장/불장에서는 거의
+                        #   전종목이 이 보너스를 다 받아 "매수 허들이 인위적으로
+                        #   낮아지는" 착시가 생길 수 있음(사용자 제안으로 발견).
+                        #   시장이 normal이 아닐 때(weak/stop)는 그 착시가 더
+                        #   위험하므로 보너스 비중을 절반으로 낮춤.
                         bt_bonus = 0
                         try:
                             # 우리가 만든 엔진에 물어봅니다.
                             bt_res = CoinStrategy(db_path="backtestc/coin_backtest.db").get_rule_score(market)
-                            # 백테스트 점수의 20%를 보너스로 부여 (최대 +20점)
-                            bt_bonus = bt_res.get('total', 0) * 0.2  
+                            bt_weight = 0.2 if self.market_status == "normal" else 0.1
+                            bt_bonus = bt_res.get('total', 0) * bt_weight
                             if bt_bonus > 0:
-                                print(f"  └ 📊 백테스트 보너스: +{bt_bonus}점 (과거 승률 반영)")
+                                print(f"  └ 📊 백테스트 보너스: +{bt_bonus}점 "
+                                      f"(가중치{bt_weight:.0%}, 시장:{self.market_status})")
                         except Exception:
                             bt_bonus = 0
 
