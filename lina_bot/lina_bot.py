@@ -1886,8 +1886,17 @@ async def on_ready():
     print(f"🦊 [v13 맵핑 DB & 수급 완전융합 3합 브리핑 가동]")
     print(f"==========================================")
     
+    # ★ 2026-09-04: discord.py는 게이트웨이 세션이 무효화(invalidated)돼
+    #   재-IDENTIFY하면 on_ready가 프로세스 중에 다시 호출될 수 있음.
+    #   기존엔 매번 무조건 .start()를 걸어서, 이미 돌고 있던(정상 동작
+    #   중인) 스케줄러마다 "Task is already launched" 에러가 우르르
+    #   찍혀 실제 장애처럼 보였음(사용자가 로그 보고 놀라서 발견) —
+    #   실제로는 최초 기동 때의 루프가 끊김 없이 계속 돌고 있어 기능
+    #   장애는 아니었지만, 매번 이 노이즈가 재발하는 걸 막기 위해
+    #   is_running() 가드 추가.
     try:
-        daily_morning_report.start() 
+        if not daily_morning_report.is_running():
+            daily_morning_report.start()
         print("✅ [시스템] 7시 30분 융합 브리핑 스케줄러 가동 성공!")
     except Exception as e: print(f"⚠️ [에러] 7시 30분 스케줄러: {e}")
 
@@ -1903,49 +1912,60 @@ async def on_ready():
     # except Exception as e: print(f"⚠️ [에러] 텔레그램 스케줄러: {e}")
 
     try:
-        daily_news_report.start()
+        if not daily_news_report.is_running():
+            daily_news_report.start()
         print("✅ [시스템] 07시 뉴스 스케줄러 가동 성공!")
     except Exception as e: print(f"⚠️ [에러] 뉴스 스케줄러: {e}")
 
     try:
-        daily_strategy_report.start()
+        if not daily_strategy_report.is_running():
+            daily_strategy_report.start()
         print("✅ [시스템] 08:50 MBN 투자전략 요약 스케줄러 가동 성공!")
     except Exception as e: print(f"⚠️ [에러] 투자전략 스케줄러: {e}")
 
     try:
-        daily_market_context_report.start()
+        if not daily_market_context_report.is_running():
+            daily_market_context_report.start()
         print("✅ [시스템] 09:35 시장 쏠림 종합 브리핑 스케줄러 가동 성공! (관찰 전용)")
     except Exception as e: print(f"⚠️ [에러] 쏠림 브리핑 스케줄러: {e}")
 
     try:
-        daily_momentum_am_report.start()
-        daily_momentum_pm_report.start()
-        daily_momentum_checkin.start()
+        if not daily_momentum_am_report.is_running():
+            daily_momentum_am_report.start()
+        if not daily_momentum_pm_report.is_running():
+            daily_momentum_pm_report.start()
+        if not daily_momentum_checkin.is_running():
+            daily_momentum_checkin.start()
         print("✅ [시스템] AI 모멘텀 스캐너(08:55/14:35) + 체크인(16:00) 스케줄러 가동 성공! (관찰 전용)")
     except Exception as e: print(f"⚠️ [에러] AI 모멘텀 스케줄러: {e}")
 
     try:
-        kiwoom_pool_scan_loop.start()
+        if not kiwoom_pool_scan_loop.is_running():
+            kiwoom_pool_scan_loop.start()
         print("✅ [시스템] 키움풀 스캔 스케줄러(09:30/12:30/15:00) 가동 성공! (관찰 전용)")
     except Exception as e: print(f"⚠️ [에러] 키움풀 스캔 스케줄러: {e}")
 
     try:
-        daily_master_report.start()
+        if not daily_master_report.is_running():
+            daily_master_report.start()
         print("✅ [시스템] 07:20 마스터 리포트 스케줄러 가동 성공!")
     except Exception as e: print(f"⚠️ [에러] 마스터 스케줄러: {e}")
 
     try:
-        daily_tele_swing_report.start()
+        if not daily_tele_swing_report.is_running():
+            daily_tele_swing_report.start()
         print("✅ [시스템] 07:50 텔레스윙 스케줄러 가동 성공!")
     except Exception as e: print(f"⚠️ [에러] 텔레스윙 스케줄러: {e}")
 
     try:
-        daily_tele_swing_afternoon.start()
+        if not daily_tele_swing_afternoon.is_running():
+            daily_tele_swing_afternoon.start()
         print("✅ [시스템] 14:40 텔레스윙 오후 스케줄러 가동 성공!")
     except Exception as e: print(f"⚠️ [에러] 텔레스윙 오후 스케줄러: {e}")
 
     try:
-        api_error_watchdog.start()
+        if not api_error_watchdog.is_running():
+            api_error_watchdog.start()
         print("✅ [시스템] API 에러 watchdog (1분 주기, sbot/sbo2/sector) 가동 성공!")
     except Exception as e: print(f"⚠️ [에러] API watchdog 스케줄러: {e}")
 
