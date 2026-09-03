@@ -214,6 +214,15 @@ TICK_DB        = "coin_price_ticks.db"   # ★ 2026-08-17: 실시간 시세틱 �
                                           #   달리 외국인/기관 데이터가 없어
                                           #   market/ts/price만 저장하면 됨)
 
+# ★ 2026-09-03: 코인텔레그램(coinnesskr) 뉴스 기반 시장심리 요약 —
+#   get_ai_score()가 기술지표만 보고 "규제 단속/ETF 승인/거래소 해킹" 같은
+#   당일 이벤트를 놓치는 걸 보완(cbot 고도화 #4, 코인뉴스 수집기가 준비된
+#   09-03에 착수).
+COIN_NEWS_DB        = "intelligence/coin_telegram_events.db"
+NEWS_REGIME_TTL     = 1800   # 30분 캐시
+NEWS_LOOKBACK_HOURS = 3      # 최근 3시간 뉴스만 반영
+NEWS_MAX_ITEMS      = 25     # LLM에 넘길 최대 헤드라인 수
+
 # ★ 2026-08-17: 급락감지 재설계 — 기존엔 4시간봉 직전 완결봉 등락률(최대
 #   4시간+5분 캐시만큼 지연된 정보)로 판단해서, 이미 다 지나간 급락에
 #   뒤늦게 물려 -5% 기준인데 실제론 -7~-11%에 손절되는 경우가 잦았음
@@ -314,6 +323,7 @@ class CBot:
         self.market_status = "normal"
         self.btc_rate      = 0.0
         self.fear_greed    = 50
+        self.news_regime   = ""   # ★ 코인뉴스 시장심리 요약 (30분 캐시)
 
         # ── 종목 풀 (5분 캐시) ─────────────────────────────
         self.coin_pool      = list(FIXED_COINS)
@@ -335,6 +345,7 @@ class CBot:
         self._tech_cache           = {}
         self._last_market_check    = 0
         self._last_feargreed_check = 0
+        self._last_news_check      = 0
 
         # ── DB 초기화 ────────────────────────────────────
         self._init_trade_db()
@@ -1059,6 +1070,53 @@ class CBot:
             print(f"⚠️ 공포탐욕 조회 오류: {e} — 기존값 유지({self.fear_greed})")
 
     # ============================================================
+    # 코인뉴스 시장심리 (30분 캐시)
+    # ============================================================
+    def _update_news_regime(self):
+        """
+        ★ 2026-09-03: intelligence/coin_telegram_events.db(coinnesskr
+        수집분)의 최근 헤드라인을 LLM으로 한 줄 요약해 get_ai_score()
+        프롬프트에 얹는다. DB가 없거나(수집기 미가동) 최근 뉴스가
+        없으면 조용히 스킵 — 기존 기술지표 판단 흐름에 영향 없음.
+        """
+        if time.time() - self._last_news_check < NEWS_REGIME_TTL:
+            return
+        self._last_news_check = time.time()
+        try:
+            conn   = sqlite3.connect(COIN_NEWS_DB)
+            cutoff = (datetime.datetime.now()
+                      - datetime.timedelta(hours=NEWS_LOOKBACK_HOURS)
+                      ).isoformat(timespec="seconds")
+            rows = conn.execute(
+                "SELECT message FROM coin_telegram_events "
+                "WHERE recv_at >= ? ORDER BY recv_at DESC LIMIT ?",
+                (cutoff, NEWS_MAX_ITEMS),
+            ).fetchall()
+            conn.close()
+
+            if not rows:
+                self.news_regime = ""
+                return
+
+            headlines = "\n".join(f"- {r[0].split(chr(10))[0][:80]}" for r in rows)
+            prompt = (
+                "다음은 최근 코인 관련 뉴스 헤드라인입니다.\n"
+                f"{headlines}\n\n"
+                "전체적인 시장 심리를 한 줄로 요약하세요(규제/ETF/해킹/거래소"
+                " 이슈 등 눈에 띄는 이벤트가 있으면 반영, 없으면 '특이사항"
+                " 없음'). 30자 이내, 요약문만 출력하세요."
+            )
+            res  = self.llm.messages.create(
+                model=self.model, max_tokens=64,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            text = extract_claude_text(res).strip()
+            self.news_regime = (text.split("\n")[0][:60] if text else "")
+            print(f"📰 코인뉴스 동향: {self.news_regime or '(없음)'}")
+        except Exception as e:
+            print(f"⚠️ 뉴스동향 갱신 오류: {e} — 기존값 유지({self.news_regime!r})")
+
+    # ============================================================
     # 야간 / 손절선
     # ============================================================
     def _is_night(self) -> bool:
@@ -1525,7 +1583,8 @@ class CBot:
                 f"[거래량비] {ind.get('vol_ratio', 0):.2f}x\n"
                 f"[직전봉] {ind.get('candle_rate', 0):+.2%}\n"
                 f"[BTC시장] {self.market_status} ({self.btc_rate:+.2f}%)\n"
-                f"[공포탐욕] {self.fear_greed}\n\n"
+                f"[공포탐욕] {self.fear_greed}\n"
+                f"[코인뉴스 동향] {self.news_regime or '특이사항 없음'}\n\n"
                 f"[판단 기준]\n"
                 f"- {caution}\n\n"
                 "[★ 점수 분포 — 반드시 아래대로]\n"
@@ -2049,6 +2108,7 @@ class CBot:
                 self._update_coin_pool()
                 self._update_market_status()
                 self._update_fear_greed()
+                self._update_news_regime()
 
                 # ★ 2026-08-17: 시세틱 스냅샷 저장 (30초 주기, coin_pool
                 #   전체 — WS가 이미 실시간으로 채워둔 _ws_prices 그대로 씀,
