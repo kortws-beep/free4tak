@@ -97,6 +97,11 @@ try:
     from master_db import record_trade as _master_record
 except Exception:
     _master_record = None
+try:
+    import yfinance as _yf
+except ImportError:
+    _yf = None
+    print("⚠️ yfinance 없음 → 매크로 신호(美국채/금) 비활성")
 from backtestc.strategy_coin import CoinStrategy
 
 from common_utils import (
@@ -223,6 +228,11 @@ NEWS_REGIME_TTL     = 1800   # 30분 캐시
 NEWS_LOOKBACK_HOURS = 3      # 최근 3시간 뉴스만 반영
 NEWS_MAX_ITEMS      = 25     # LLM에 넘길 최대 헤드라인 수
 
+# ★ 2026-09-03: 미국채 10년물 금리 / 20년물 대용(TLT) / 금값 — 사용자
+#   아이디어("뉴스의 진의를 보정")로 착수한 매크로 지표. 위험자산(코인)
+#   선호 심리를 코인뉴스만으로 못 잡을 때 보조 참고용으로 프롬프트에 추가.
+MACRO_TTL = 3600   # 1시간 캐시(국채/금은 일봉 기준이라 자주 안 바뀜)
+
 # ★ 2026-08-17: 급락감지 재설계 — 기존엔 4시간봉 직전 완결봉 등락률(최대
 #   4시간+5분 캐시만큼 지연된 정보)로 판단해서, 이미 다 지나간 급락에
 #   뒤늦게 물려 -5% 기준인데 실제론 -7~-11%에 손절되는 경우가 잦았음
@@ -324,6 +334,11 @@ class CBot:
         self.btc_rate      = 0.0
         self.fear_greed    = 50
         self.news_regime   = ""   # ★ 코인뉴스 시장심리 요약 (30분 캐시)
+        self.us10y         = 0.0  # ★ 美국채10년 금리(%)
+        self.us10y_chg     = 0.0  # 전일대비 %p 변화
+        self.tlt_chg       = 0.0  # 美국채20년대용 TLT 전일대비 %
+        self.gold_price    = 0.0  # 금 선물가($)
+        self.gold_chg      = 0.0  # 전일대비 %
 
         # ── 종목 풀 (5분 캐시) ─────────────────────────────
         self.coin_pool      = list(FIXED_COINS)
@@ -346,6 +361,7 @@ class CBot:
         self._last_market_check    = 0
         self._last_feargreed_check = 0
         self._last_news_check      = 0
+        self._last_macro_check     = 0
 
         # ── DB 초기화 ────────────────────────────────────
         self._init_trade_db()
@@ -1117,6 +1133,53 @@ class CBot:
             print(f"⚠️ 뉴스동향 갱신 오류: {e} — 기존값 유지({self.news_regime!r})")
 
     # ============================================================
+    # 매크로 신호 — 美국채10년/20년대용(TLT)/금값 (1시간 캐시)
+    # ============================================================
+    def _update_macro_signals(self):
+        """
+        ★ 2026-09-03: yfinance로 ^TNX(美10년물 금리), TLT(20년+ 국채
+        ETF, 20년물 대용), GC=F(금 선물) 일봉 종가 기준 전일대비 변화를
+        가져와 get_ai_score() 프롬프트에 raw 수치로 얹는다. 해석은
+        AI에게 맡기고(위험자산 선호/회피 심리 참고용), 여기서는 수치만
+        공급 — yfinance 미설치/네트워크 실패 시 조용히 스킵.
+        """
+        if _yf is None:
+            return
+        if time.time() - self._last_macro_check < MACRO_TTL:
+            return
+        self._last_macro_check = time.time()
+        try:
+            data = _yf.download(
+                ["^TNX", "TLT", "GC=F"], period="5d", interval="1d",
+                progress=False, group_by="ticker",
+            )
+
+            def _last_two(ticker):
+                closes = data[ticker]["Close"].dropna()
+                if len(closes) < 2:
+                    return None, None
+                return float(closes.iloc[-1]), float(closes.iloc[-2])
+
+            us10y, us10y_prev = _last_two("^TNX")
+            if us10y is not None:
+                self.us10y     = us10y
+                self.us10y_chg = us10y - us10y_prev
+
+            tlt, tlt_prev = _last_two("TLT")
+            if tlt is not None and tlt_prev:
+                self.tlt_chg = (tlt - tlt_prev) / tlt_prev * 100
+
+            gold, gold_prev = _last_two("GC=F")
+            if gold is not None and gold_prev:
+                self.gold_price = gold
+                self.gold_chg   = (gold - gold_prev) / gold_prev * 100
+
+            print(f"🌐 매크로 | 美10Y:{self.us10y:.2f}%({self.us10y_chg:+.2f}%p) "
+                  f"TLT:{self.tlt_chg:+.2f}% 금:${self.gold_price:,.0f}({self.gold_chg:+.2f}%)")
+        except Exception as e:
+            print(f"⚠️ 매크로 신호 갱신 오류: {e} — 기존값 유지")
+
+    # ============================================================
     # 야간 / 손절선
     # ============================================================
     def _is_night(self) -> bool:
@@ -1584,9 +1647,13 @@ class CBot:
                 f"[직전봉] {ind.get('candle_rate', 0):+.2%}\n"
                 f"[BTC시장] {self.market_status} ({self.btc_rate:+.2f}%)\n"
                 f"[공포탐욕] {self.fear_greed}\n"
-                f"[코인뉴스 동향] {self.news_regime or '특이사항 없음'}\n\n"
+                f"[코인뉴스 동향] {self.news_regime or '특이사항 없음'}\n"
+                f"[美국채10년] {self.us10y:.2f}%({self.us10y_chg:+.2f}%p)\n"
+                f"[美국채20년대용TLT] {self.tlt_chg:+.2f}%\n"
+                f"[금가] ${self.gold_price:,.0f}({self.gold_chg:+.2f}%)\n\n"
                 f"[판단 기준]\n"
-                f"- {caution}\n\n"
+                f"- {caution}\n"
+                f"- 美금리 급등/금값 급등(안전자산 선호)이면 위험자산(코인) 심리 위축 가능성 참고\n\n"
                 "[★ 점수 분포 — 반드시 아래대로]\n"
                 "- 90~100: 강력 추천 (모든 신호 우수)\n"
                 "- 75~89:  매수 추천 (2가지 강한 신호)\n"
@@ -2109,6 +2176,7 @@ class CBot:
                 self._update_market_status()
                 self._update_fear_greed()
                 self._update_news_regime()
+                self._update_macro_signals()
 
                 # ★ 2026-08-17: 시세틱 스냅샷 저장 (30초 주기, coin_pool
                 #   전체 — WS가 이미 실시간으로 채워둔 _ws_prices 그대로 씀,
