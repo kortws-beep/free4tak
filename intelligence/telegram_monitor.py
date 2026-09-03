@@ -57,6 +57,13 @@ CHANNELS = [
     "AllStockNews",   # 전체 주식 뉴스 (상한가/이슈) — 여의도 주식 속보
     "FastStockNews",  # 주식급등일보
     "darthacking",    # 실시간 주식 공시
+    "coinnesskr",     # ★ 2026-09-03: 코인 뉴스 — 아래 handler에서 완전히
+                       #   별도 경로(coin_telegram_events.db)로만 저장,
+                       #   이 파일의 주식 키워드/공시 분석은 절대 안 탐.
+                       #   (원래 별도 세션/프로세스로 분리했으나, 텔레그램
+                       #   계정당 API 앱이 1개만 허용돼 두 세션이 서로를
+                       #   계속 무효화시키는 문제가 있어 프로세스는 합치되
+                       #   데이터 경로만 분리하는 방식으로 변경 — 사용자 결정)
 ]
 
 # ── 공시 타입별 가산점 ────────────────────────────────
@@ -416,11 +423,34 @@ async def main():
     print("✅ 텔레그램 연결 완료")
     print(f"📡 모니터링 채널: {CHANNELS}")
 
+    # ★ 2026-09-03: 코인 채널 전용 저장 헬퍼(별도 DB) — import만, 세션/
+    #   클라이언트는 이 파일의 것 하나만 씀.
+    try:
+        from telegram_coin_monitor import init_db as _coin_init_db, save_event as _coin_save_event
+        _coin_init_db()
+        _coin_ready = True
+    except Exception as e:
+        print(f"⚠️ 코인 이벤트 저장 모듈 로드 실패: {e}")
+        _coin_ready = False
+
     @client.on(events.NewMessage(chats=CHANNELS))
     async def handler(event):
         text    = event.message.message or ""
         channel = event.chat.username or str(event.chat_id)
         now     = datetime.datetime.now().strftime("%H:%M:%S")
+
+        # ★ 2026-09-03: 코인 채널은 완전히 별도 경로 — 주식 키워드분석/
+        #   공시매핑/nbot state 갱신 등 이 파일의 로직을 전혀 안 타고
+        #   원문만 coin_telegram_events.db에 저장. 사용자 요구("코인은
+        #   주식과 따로 가야 해") — 프로세스는 공유하되 데이터는 분리.
+        if channel == "coinnesskr":
+            if _coin_ready and text.strip():
+                try:
+                    _coin_save_event(channel, text)
+                    print(f"[{now}] 🪙 coinnesskr 저장: {text[:60]}")
+                except Exception as e:
+                    print(f"⚠️ 코인 이벤트 저장 오류: {e}")
+            return
 
         # ★ KIND 채널 → 종목코드 직접 매핑
         if channel == "kind_krx" or "공시" in text:
