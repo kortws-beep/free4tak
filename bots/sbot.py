@@ -63,6 +63,7 @@ from common_utils  import (
     is_weekend, safe_int, safe_float,
     read_state, write_state, update_state,
     fmt_won, fmt_pct,
+    extract_claude_text,
 )
 from kis_api       import KisAPI
 from kiwoom_api    import KiwoomAPI
@@ -947,7 +948,7 @@ class SBot:
                 messages=[{"role": "user", "content": prompt}],
             )
             import json as _json
-            result = _json.loads(msg.content[0].text)
+            result = _json.loads(extract_claude_text(msg))
             code = result.get("code", "").strip()
             reason = result.get("reason", "")
             if code and len(code) == 6 and code.isdigit():

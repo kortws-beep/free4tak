@@ -41,7 +41,7 @@ import asyncio
 import sqlite3
 import time
 
-from common_utils import now_kst, today_str
+from common_utils import now_kst, today_str, extract_claude_text
 
 # ============================================================
 # 모듈 전역 — on_ready()에서 init_monitor()로 주입
@@ -208,7 +208,7 @@ async def _ai_proactive_message(
                 messages=[{"role": "user", "content": prompt}],
             ),
         )
-        return res.content[0].text.strip()
+        return extract_claude_text(res)
     except Exception as e:
         print(f"⚠️ AI 능동 알림 오류: {e}")
         return "OK"

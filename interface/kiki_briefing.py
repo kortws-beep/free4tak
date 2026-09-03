@@ -24,7 +24,7 @@ for _ep in [os.path.join(_here, ".env"), os.path.join(_base, ".env")]:
         break
 
 from anthropic import Anthropic
-from common_utils import now_kst
+from common_utils import now_kst, extract_claude_text
 try:
     from kiki_data import get_today_realized_all
 except Exception:
@@ -358,7 +358,7 @@ def _get_us_events(today_date: str) -> str:
                 f"검색 결과:\n{combined}"
             )}],
         )
-        return res.content[0].text.strip()[:800]
+        return extract_claude_text(res)[:800]
     except Exception as e:
         print(f"us_events 오류: {e}")
         return ""''
@@ -499,7 +499,7 @@ def _build_briefing_msg() -> str:
                     "(없는 정보는 '정보없음' 표시)"
                 )}],
             )
-            for line in _res.content[0].text.strip().split("\n"):
+            for line in extract_claude_text(_res).split("\n"):
                 if ":" in line:
                     k, v = line.split(":", 1)
                     extracted_map[k.strip()] = v.strip()
@@ -527,7 +527,7 @@ def _build_briefing_msg() -> str:
                             f"검색결과:\n{raw_val[:500]}"
                         )}],
                     )
-                    first = _r.content[0].text.strip()[:100]
+                    first = extract_claude_text(_r)[:100]
                 except Exception:
                     first = raw_val.split("[요약]")[-1].split("\n")[0].strip()[:80]
         msg += f"{label}: {first}\n"
@@ -590,7 +590,7 @@ def _build_briefing_msg() -> str:
                 "주의: NVDA 쇼크 시 즉시 손절 대응 필요"
             )}],
         )
-        ai_text = adj_res.content[0].text.strip()
+        ai_text = extract_claude_text(adj_res)
 
         # 파싱
         am_thresh = 70
@@ -730,7 +730,7 @@ def _build_evening_briefing_msg() -> str:
                             f"검색결과:\n{raw_val[:500]}"
                         )}],
                     )
-                    first = _r.content[0].text.strip()[:100]
+                    first = extract_claude_text(_r)[:100]
                 except Exception:
                     first = raw_val.split("[요약]")[-1].split("\n")[0].strip()[:80]
         msg += f"{label}: {first}\n"

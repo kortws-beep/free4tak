@@ -521,7 +521,11 @@ def _call_llm(prompt: str, max_tokens: int = 1200, force_claude: bool = False) -
             max_tokens=max_tokens,
             messages=[{"role": "user", "content": prompt}],
         )
-        return res.content[0].text.strip()
+        # ★ 2026-09-03: 소넷5 응답의 content[0]이 ThinkingBlock일 수 있어
+        #   .content[0].text 직접 접근 대신 공용 헬퍼 사용(자세한 배경은
+        #   common_utils.extract_claude_text 참고).
+        from common_utils import extract_claude_text
+        return extract_claude_text(res)
     except Exception as e:
         print(f"⚠️ Claude 호출도 실패({e})")
         return ""

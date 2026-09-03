@@ -106,7 +106,8 @@ class AIAnalyzer:
                     max_tokens=300,
                     messages=[{"role": "user", "content": prompt}],
                 )
-                text = res.content[0].text.strip()
+                from common_utils import extract_claude_text
+                text = extract_claude_text(res)
             text  = re.sub(r"```(?:json)?", "", text).strip()
             match = re.search(r'\{.*\}', text, re.DOTALL)
 

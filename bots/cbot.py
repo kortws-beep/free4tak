@@ -104,6 +104,7 @@ from common_utils import (
     safe_int, safe_float,
     read_state, write_state, update_state,
     fmt_won, fmt_pct,
+    extract_claude_text,
 )
 from notifier import Notifier
 
@@ -1543,7 +1544,7 @@ class CBot:
                 model=self.model, max_tokens=128,
                 messages=[{"role": "user", "content": prompt}],
             )
-            text  = res.content[0].text.strip()
+            text  = extract_claude_text(res)
             text  = _re.sub(r"```(?:json)?", "", text).strip()
             match = _re.search(r'\{.*\}', text, _re.DOTALL)
             if not match:

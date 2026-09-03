@@ -67,7 +67,11 @@ def ask_claude_for_sectors(date_str, top_stocks_df):
                 temperature=0.1,
                 messages=[{"role": "user", "content": prompt}]
             )
-            return response.content[0].text.strip()
+            # ★ 2026-09-03: content[0]이 항상 텍스트 블록이라고 가정하면
+            #   최신 모델의 ThinkingBlock 응답에서 AttributeError 위험 —
+            #   실제 텍스트 블록만 골라 반환(core/common_utils.extract_claude_text와 동일 로직).
+            _parts = [b.text for b in response.content if getattr(b, "type", None) == "text"]
+            return "".join(_parts).strip()
         except Exception as e:
             err_msg = str(e)
             if '429' in err_msg or 'rate_limit' in err_msg:

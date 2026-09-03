@@ -232,3 +232,24 @@ def round_to_hoga(price: float, direction: str = "up") -> int:
         return int(price // hoga) * hoga
     else:  # near
         return int((price + hoga / 2) // hoga) * hoga
+
+
+# ============================================================
+# Claude API 응답 파싱
+# ============================================================
+def extract_claude_text(response) -> str:
+    """
+    Claude API 응답(client.messages.create() 반환값)에서 텍스트만 안전하게
+    추출한다.
+    ★ 2026-09-03: 여러 파일이 관행적으로 response.content[0].text로 첫
+    블록을 텍스트라고 가정하고 있었는데, 소넷5로 모델을 올린 뒤 응답
+    content[0]에 ThinkingBlock(추론 블록)이 먼저 오는 경우가 있어
+    .text 접근이 AttributeError로 죽는 문제가 발견됨(리나 09:35 쏠림
+    브리핑 등이 조용히 실패하고 있었음 — 사용자 지적으로 발견).
+    content 리스트에서 실제 text 타입 블록만 골라 이어붙이도록 통일.
+    """
+    try:
+        parts = [b.text for b in response.content if getattr(b, "type", None) == "text"]
+        return "".join(parts).strip()
+    except Exception:
+        return ""

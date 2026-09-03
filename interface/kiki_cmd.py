@@ -19,7 +19,10 @@ for _ep in [os.path.join(_here, ".env"), os.path.join(_base, ".env")]:
         break
 
 import discord
-from common_utils import now_kst, today_str, now_hms, now_hhmm, fmt_won, safe_float, safe_int
+from common_utils import (
+    now_kst, today_str, now_hms, now_hhmm, fmt_won, safe_float, safe_int,
+    extract_claude_text,
+)
 # ★ read_state/write_state/update_state — 봇 이름 기반 버전 사용
 from kiki_briefing import read_state, write_state, update_state
 from performance import PerformanceAnalyzer, MultiPerformanceAnalyzer
@@ -433,7 +436,7 @@ async def cmd_analyze_today(ctx):
                 model=DEFAULT_MODEL, max_tokens=300,
                 messages=[{"role": "user", "content": prompt}]
             )
-            return res.content[0].text.strip()
+            return extract_claude_text(res)
 
         analysis = await loop.run_in_executor(None, _call)
         summary  = (f"📊 **오늘 매매 분석** [{today}]\n"
@@ -485,7 +488,7 @@ MDD:-{r.get('mdd',0):.1f}% | 샤프:{r.get('sharpe',0):.2f}{hour_insight}
                 model=DEFAULT_MODEL, max_tokens=300,
                 messages=[{"role": "user", "content": prompt}]
             )
-            return res.content[0].text.strip()
+            return extract_claude_text(res)
 
         analysis = await loop.run_in_executor(None, _call)
         result   = pa.format_discord(report)
@@ -935,7 +938,7 @@ def _translate_to_korean(text: str) -> str:
                 ),
             }],
         )
-        return res.content[0].text.strip()
+        return extract_claude_text(res)
     except Exception:
         return clean[:80]
 
