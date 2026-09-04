@@ -64,6 +64,7 @@ from common_utils  import (
     read_state, write_state, update_state,
     fmt_won, fmt_pct,
     extract_claude_text,
+    check_api_health,
 )
 from kis_api       import KisAPI
 from kiwoom_api    import KiwoomAPI
@@ -732,16 +733,13 @@ class SBot:
     # API 헬스체크 (연속 실패 시 재시작)
     # ============================================================
     def _check_api_health(self, success: bool):
-        """API 호출 성공/실패 추적 — 연속 실패 시 재시작"""
-        if success:
-            self.api_fail_count = 0
-        else:
-            self.api_fail_count += 1
-            print(f"⚠️ [SWING] API 실패 {self.api_fail_count}/{API_FAIL_MAX}회")
-            if self.api_fail_count >= API_FAIL_MAX:
-                print(f"🚨 [SWING] API 연속 {API_FAIL_MAX}회 실패 → 재시작")
-                self._notify("🚨 [SWING] API 연속 실패 → 자동 재시작", critical=True)
-                import sys; sys.exit(1)  # systemd Restart=on-failure 트리거
+        """API 호출 성공/실패 추적 — 연속 실패 시 재시작.
+        ★ 2026-09-04: sbo2와 완전히 동일하던 로직을 common_utils 공유
+        헬퍼로 통합."""
+        self.api_fail_count = check_api_health(
+            self.api_fail_count, success, self._notify, "[SWING]",
+            max_fail=API_FAIL_MAX,
+        )
 
     # ============================================================
     # 일일 초기화

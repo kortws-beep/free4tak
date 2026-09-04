@@ -497,6 +497,7 @@ from common_utils import (
     read_state  as _cu_read_state,
     write_state as _cu_write_state,
     update_state as _cu_update_state,
+    check_api_health as _cu_check_api_health,
 )
 
 _SBO2_STATE_DEFAULT = {"paused": False, "positions": {}, "sold_today": {}, "sold_today_date": ""}
@@ -2042,16 +2043,13 @@ class Sbo2:
             self._save_state()
 
     def _check_api_health(self, success: bool):
-        """API 호출 성공/실패 추적 — 연속 실패 시 재시작"""
-        if success:
-            self.api_fail_count = 0
-        else:
-            self.api_fail_count += 1
-            print(f"⚠️ [sbo2] API 실패 {self.api_fail_count}/{API_FAIL_MAX}회")
-            if self.api_fail_count >= API_FAIL_MAX:
-                print(f"🚨 [sbo2] API 연속 {API_FAIL_MAX}회 실패 → 재시작")
-                _notify("🚨 [sbo2] API 연속 실패 → 자동 재시작", critical=True)
-                import sys; sys.exit(1)  # systemd Restart=on-failure 트리거
+        """API 호출 성공/실패 추적 — 연속 실패 시 재시작.
+        ★ 2026-09-04: sbot과 완전히 동일하던 로직을 common_utils 공유
+        헬퍼로 통합."""
+        self.api_fail_count = _cu_check_api_health(
+            self.api_fail_count, success, _notify, "[sbo2]",
+            max_fail=API_FAIL_MAX,
+        )
 
     def _sync_real_positions(self):
         """

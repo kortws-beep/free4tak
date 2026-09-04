@@ -64,6 +64,31 @@ def is_weekend() -> bool:
     return now_kst().weekday() >= 5
 
 
+# ============================================================
+# API 헬스체크 (★ 2026-09-04 신설 — sbot/sbo2 공유)
+# ============================================================
+def check_api_health(fail_count: int, success: bool, notify_fn, label: str,
+                      max_fail: int = 3) -> int:
+    """API 호출 성공/실패 추적 — 연속 max_fail회 실패 시 알림 후 프로세스
+    종료(systemd Restart=on-failure가 재시작). sbot/sbo2가 완전히 동일한
+    로직을 각자 구현하고 있던 걸(봇 이름 라벨만 다름) 공유 헬퍼로 통합.
+
+    호출자는 반환값을 자신의 실패카운터에 재대입해서 쓴다:
+        self.api_fail_count = check_api_health(
+            self.api_fail_count, success, self._notify, "[SWING]")
+    """
+    if success:
+        return 0
+    fail_count += 1
+    print(f"⚠️ {label} API 실패 {fail_count}/{max_fail}회")
+    if fail_count >= max_fail:
+        print(f"🚨 {label} API 연속 {max_fail}회 실패 → 재시작")
+        notify_fn(f"🚨 {label} API 연속 실패 → 자동 재시작", critical=True)
+        import sys
+        sys.exit(1)
+    return fail_count
+
+
 def is_market_hours() -> bool:
     """정규장 시간(09:00~15:30)이면 True"""
     t = now_hhmm()
