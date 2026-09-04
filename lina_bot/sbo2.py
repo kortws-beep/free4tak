@@ -2071,6 +2071,20 @@ class Sbo2:
                 print("⚠️ 실계좌 잔고 조회 실패 — 동기화 스킵 (캐시 유지)")
                 self._check_api_health(False)   # ★ API 실패 카운트
                 return
+            # ★ 2026-09-04: sbot에서 이식 — new_pos가 {}(빈 딕셔너리)인데
+            #   기존에 보유종목이 있으면 API 일시오류로 의심하고 스킵.
+            #   기존엔 진짜 0종목과 구분 없이 그대로 진행해서, {}가 잘못
+            #   오면 보호기간(BUY_SYNC_GUARD_SEC) 지난 보유종목 전부가
+            #   "수동매도"로 오판(가짜 매도기록 DB저장)되고, 다음 루프에서
+            #   재조회가 정상화되면 완전히 새 포지션으로 재등록되어 기존
+            #   진입가/단계/점수 이력이 통째로 사라지는 사고 위험이 있었음
+            #   (sbot이 035420 실사례로 이미 겪고 고친 것과 같은 버그 클래스,
+            #   sbo2는 재구성 방식이 더 공격적이라 피해 범위가 더 컸을 것).
+            if new_pos == {} and len(self.positions) > 0:
+                print(f"⚠️ 잔고조회 결과 빈값({{}}), 기존 {len(self.positions)}종목 보유 중 "
+                      f"→ API 오류로 간주, 동기화 스킵 (캐시 유지)")
+                self._check_api_health(False)
+                return
             self._check_api_health(True)        # ★ API 정상
             # new_pos가 {} (빈 딕셔너리)인 경우 → 진짜로 보유종목 0개. 정상 진행.
 
