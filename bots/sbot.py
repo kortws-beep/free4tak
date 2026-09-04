@@ -575,17 +575,22 @@ class SBot:
         if not is_second:
             self.sold_today[code] = now_hms()
 
-    def _do_sell(self, code: str, qty: int, reason: str, sell_price: float):
+    def _do_sell(self, code: str, qty: int, reason: str, sell_price: float) -> bool:
         """
         매도 주문 실행.
         ★ 개선: 부분 매도 시 buy_context를 절대 삭제하지 않음 (전량일 때만).
+        ★ 2026-09-04: 반환값이 없어(항상 암묵적 None) sbot_strategy.py의
+        check_sell()이 목표1 매도 성공/실패를 구분 못 하고 무조건 stage를
+        올리던 버그(sbo2에서 09-03에 먼저 발견/수정됐던 것과 동일 클래스,
+        당시 외부 리포트가 sbot에서는 이 항목을 안 짚어 놓쳤었음)를
+        고치기 위해 bool 반환 추가.
         """
         if qty <= 0:
-            return
+            return False
 
         ok = self.api.sell(code, qty, price=int(sell_price))
         if not ok:
-            return
+            return False
 
         # 전량/부분 매도 판단
         current_pos  = self.positions.get(code, {})
@@ -666,6 +671,7 @@ class SBot:
         # 상태 파일에도 sold_today 저장
         # ★ 2026-09-03: 락 없는 수동 read+write → 안전한 _update_state로 교체
         _update_state(sold_today=self.sold_today, sold_today_date=today_str())
+        return True
 
     def _do_loss(self):
         """손절 카운터 +1"""

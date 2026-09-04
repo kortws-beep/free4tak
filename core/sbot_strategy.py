@@ -342,17 +342,26 @@ class SwingStrategy:
         if current >= target_next:
             if stage == 0:
                 # ★ 목표가1 달성 → 50% 매도(수익실현) + 손절을 매수가+ATR×1로 올림
+                # ★ 2026-09-04: 매도 성공 여부를 확인하지 않고 무조건 stage를
+                #   올리던 버그 수정(sbo2에서 09-03에 먼저 발견/수정된 것과
+                #   동일 클래스 — 1주도 안 팔렸는데 손절가가 상향된 2단계로
+                #   넘어가는 실거래 위험). on_sell()이 성공(True)했을 때만
+                #   stage/손절/목표 갱신.
                 sell_qty = qty if qty <= 1 else qty // 2
+                ok_half = False
                 if sell_qty > 0:
-                    on_sell(code, sell_qty, f"목표1익절50%({rate:+.2%})", current)
-                new_stop   = round(entry + atr_val * ATR_RAISE_MULT, 0)
-                new_target = round(current + atr_val * ATR_TARGET_MULT, 0)
-                tracker["stop_price"]  = new_stop
-                tracker["target_next"] = new_target
-                tracker["stage"]       = 1
-                tracker["half_sold"]   = True
-                print(f"🎯 목표가1 달성 {code} ({rate:+.2%}) | 50%매도:{sell_qty}주 | "
-                      f"손절 상향:{new_stop:,.0f} | 새목표:{new_target:,.0f}")
+                    ok_half = on_sell(code, sell_qty, f"목표1익절50%({rate:+.2%})", current)
+                if ok_half:
+                    new_stop   = round(entry + atr_val * ATR_RAISE_MULT, 0)
+                    new_target = round(current + atr_val * ATR_TARGET_MULT, 0)
+                    tracker["stop_price"]  = new_stop
+                    tracker["target_next"] = new_target
+                    tracker["stage"]       = 1
+                    tracker["half_sold"]   = True
+                    print(f"🎯 목표가1 달성 {code} ({rate:+.2%}) | 50%매도:{sell_qty}주 | "
+                          f"손절 상향:{new_stop:,.0f} | 새목표:{new_target:,.0f}")
+                else:
+                    print(f"⚠️ 목표1 매도 실패 {code} — stage 유지, 손절가 그대로")
             else:
                 # 목표가2+ 달성 → 손절을 직전 목표가로 올림
                 new_stop   = target_next   # 직전 목표가가 새 손절
