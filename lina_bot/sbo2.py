@@ -59,6 +59,7 @@ for _d in ["core", "interface", "bots", ""]:
 
 # ── 의존 모듈 ─────────────────────────────────────────────────
 from kis_api       import KisAPI
+from risk_manager  import RiskManager
 from swing_master        import get_master_report, _get_catalyst_stocks, _extract_names_from_report
 from swing_analyzer import get_swing_picks
 from trend_analyzer import get_trend_picks
@@ -169,30 +170,16 @@ SBO2_DB_PATH     = os.path.join(BASE_DIR, "sbo2_trades.db")
 
 
 # ============================================================
-# KST 시간 헬퍼
+# KST 시간 헬퍼 — ★ 2026-09-04: sbot과 동일하게 common_utils 공유본으로
+#   전환(기존엔 sbo2가 자체 재구현해서 로직이 갈라져 있었음). now_kst()의
+#   반환값이 naive datetime으로 바뀌지만(기존엔 tzinfo 부착 aware),
+#   sbo2 안에서 now_kst()는 이 파일의 다른 wrapper(now_hhmm 등)를 통해
+#   strftime/weekday()로만 쓰이므로 tzinfo 유무는 결과에 영향 없음 —
+#   직접 datetime 연산/비교에 쓰는 곳이 없음을 확인 후 교체.
 # ============================================================
-KST = datetime.timezone(datetime.timedelta(hours=9))
-
-def now_kst() -> datetime.datetime:
-    return datetime.datetime.now(KST)
-
-def now_hhmm() -> str:
-    return now_kst().strftime("%H%M")
-
-def now_hms() -> str:
-    return now_kst().strftime("%H:%M:%S")
-
-def today_str() -> str:
-    return now_kst().strftime("%Y-%m-%d")
-
-def now_full_ts() -> str:
-    """★ 완전한 타임스탬프 (날짜+시각) — buy_time/sell_time 통일용
-    (기존에는 buy_time이 시각만(now_hms) 또는 날짜만(today_str)으로
-    저장처가 갈려서 hold_days 계산이 틀어지는 버그가 있었음, 2026-06-27 수정)"""
-    return now_kst().strftime("%Y-%m-%d %H:%M:%S")
-
-def is_weekend() -> bool:
-    return now_kst().weekday() >= 5
+from common_utils import (
+    now_kst, now_hhmm, now_hms, today_str, now_full_ts, is_weekend,
+)
 
 
 # ============================================================
@@ -1194,6 +1181,13 @@ class Sbo2:
 
     def __init__(self):
         self.api        = KisAPI()
+        # ★ 2026-09-04: sbot과 공유하는 ATR 계산(risk_manager.RiskManager)
+        #   도입 — 기존엔 sbo2가 자체 재구현했는데, get_daily_ohlc()가
+        #   반환하는 필드명(high/low/close)이 아니라 KIS 원본 필드명
+        #   (stck_hgpr 등)을 찾고 있어 ATR이 항상 0으로 계산되던 버그가
+        #   있었음(실계좌 포지션 전부 ATR 대신 고정 -10%/+15% 폴백으로만
+        #   운영되고 있었음 — 사용자와 함께 발견/확인).
+        self.risk       = RiskManager(base_buy_amt=BASE_BUY_AMT)
         self.positions  = {}       # {code: {entry, qty, stop, tgt, name, grade, buy_time}}
         self.sold_today = {}       # {code: time}
         self.candidates  = []       # 현재 후보 리스트
@@ -1803,42 +1797,14 @@ class Sbo2:
 
     # ── 매도 체크 ─────────────────────────────────────────────
     def _get_atr_rate(self, code: str) -> float:
-        """ATR/현재가 비율 (성공 시 30분 캐시, 실패 시 60초만 — 2026-08-10 수정:
-        기존엔 API 조회 실패도 30분씩 캐싱해서, 장시작 직후처럼 일시적으로
-        조회가 막히면 그 30분 내내 ATR=0으로 취급돼 손절/목표가 폴백
-        경로로 계속 새는 문제가 있었음(화일약품/프로티아 실사례)."""
-        import time as _time
-        now_ts = _time.time()
-        FAIL_CACHE_SEC = 60
-        if code in self.atr_cache:
-            cached_rate, ts = self.atr_cache[code]
-            ttl = 1800 if cached_rate > 0 else FAIL_CACHE_SEC
-            if now_ts - ts < ttl:
-                return cached_rate
-        try:
-            ohlc = self.api.get_daily_ohlc(code, days=20) if hasattr(self.api, 'get_daily_ohlc') else []
-            if not ohlc:
-                self.atr_cache[code] = (0.0, now_ts)
-                return 0.0
-            # ATR 계산 (14일)
-            highs  = [float(o.get("stck_hgpr", 0)) for o in ohlc]
-            lows   = [float(o.get("stck_lwpr", 0)) for o in ohlc]
-            closes = [float(o.get("stck_clpr", 0)) for o in ohlc]
-            trs = []
-            for i in range(1, min(15, len(ohlc))):
-                tr = max(highs[i] - lows[i],
-                         abs(highs[i] - closes[i-1]),
-                         abs(lows[i]  - closes[i-1]))
-                trs.append(tr)
-            atr     = sum(trs) / len(trs) if trs else 0
-            cur_p   = closes[0] if closes else 1
-            atr_rate = atr / cur_p if cur_p > 0 else 0
-            self.atr_cache[code] = (atr_rate, now_ts)
-            return atr_rate
-        except Exception as e:
-            print(f"⚠️ ATR 조회 오류 {code}: {e}")
-            self.atr_cache[code] = (0.0, now_ts)
-            return 0.0
+        """ATR/현재가 비율. ★ 2026-09-04: sbot과 공유되는
+        risk_manager.RiskManager.get_atr_rate_cached()로 위임 —
+        기존 자체구현은 get_daily_ohlc()가 반환하는 필드명(high/low/close)
+        대신 KIS 원본 필드명(stck_hgpr 등)을 찾고 있어 ATR이 항상
+        0으로 계산되던 치명적 버그가 있었음(실계좌 포지션 전부 ATR 대신
+        고정 -10%/+15% 폴백으로만 운영되고 있었음). 성공/실패 캐시
+        기간 분리(30분/60초, 2026-08-10 수정분)는 공유 헬퍼에 이식됨."""
+        return self.risk.get_atr_rate_cached(self.api, self.atr_cache, code)
 
     def _check_sell(self):
         now_t = now_hhmm()

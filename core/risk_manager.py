@@ -19,6 +19,7 @@ risk_manager.py — 리스크 관리 모듈 (★ 신규)
 ================================================================
 """
 import datetime
+import time
 from typing import Optional
 
 
@@ -74,6 +75,42 @@ class RiskManager:
             return atr / current if current > 0 else 0
         except (KeyError, ZeroDivisionError):
             return 0
+
+    # ============================================================
+    # 1-1. ATR 캐시 조회 (★ 2026-09-04 신설 — sbot/sbo2 공유)
+    # ============================================================
+    def get_atr_rate_cached(self, api, atr_cache: dict, code: str,
+                             period: int = 14) -> float:
+        """
+        api.get_daily_ohlc()로 일봉을 받아 calc_atr_rate()로 계산, 결과를
+        호출자가 넘긴 atr_cache 딕셔너리에 저장한다.
+
+        ★ 2026-08-10 sbo2에서 발견/적용됐던 수정을 여기로 이식(sbot에는
+        없었음): 실패/0 결과를 성공 결과와 똑같이 30분씩 캐싱하면, 장시작
+        직후처럼 일시적으로 조회가 막히는 경우 그 30분 내내 ATR=0으로
+        취급돼 손절/목표가 폴백 경로로 계속 새는 문제가 있었음(화일약품/
+        프로티아 실사례). 성공(>0)은 30분, 실패/0은 60초만 캐싱해 금방
+        재시도되게 한다.
+        """
+        now_ts = time.time()
+        FAIL_CACHE_SEC    = 60
+        SUCCESS_CACHE_SEC = 1800
+        if code in atr_cache:
+            cached_rate, ts = atr_cache[code]
+            ttl = SUCCESS_CACHE_SEC if cached_rate > 0 else FAIL_CACHE_SEC
+            if now_ts - ts < ttl:
+                return cached_rate
+        try:
+            ohlc = api.get_daily_ohlc(code, days=20) if hasattr(api, "get_daily_ohlc") else []
+            if not ohlc:
+                atr_cache[code] = (0.0, now_ts)
+                return 0.0
+            atr_rate = self.calc_atr_rate(ohlc, period=period)
+            atr_cache[code] = (atr_rate, now_ts)
+            return atr_rate
+        except Exception:
+            atr_cache[code] = (0.0, now_ts)
+            return 0.0
 
     # ============================================================
     # 2. 포지션 사이징 (점수에 비례한 베팅)

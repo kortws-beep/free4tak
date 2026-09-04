@@ -53,6 +53,12 @@ def today_str() -> str:
     return now_kst().strftime("%Y-%m-%d")
 
 
+def now_full_ts() -> str:
+    """완전한 타임스탬프('YYYY-MM-DD HH:MM:SS') 반환 — buy_time/sell_time
+    처럼 날짜+시각이 모두 필요한 기록용(sbo2.py에서 이식, 09-04)."""
+    return now_kst().strftime("%Y-%m-%d %H:%M:%S")
+
+
 def is_weekend() -> bool:
     """주말(토/일)이면 True"""
     return now_kst().weekday() >= 5

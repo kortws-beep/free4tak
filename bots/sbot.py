@@ -677,21 +677,13 @@ class SBot:
     # ATR 계산 (스윙은 일봉 변동성)
     # ============================================================
     def _get_atr_rate(self, code: str) -> float:
-        """ATR/현재가 비율 (30분 캐시)"""
-        if code in self.atr_cache:
-            cached_rate, ts = self.atr_cache[code]
-            if time.time() - ts < 1800:
-                return cached_rate
-        try:
-            ohlc = self.api.get_daily_ohlc(code, days=20) if hasattr(self.api, 'get_daily_ohlc') else []
-            if not ohlc:
-                self.atr_cache[code] = (0, time.time())
-                return 0
-            atr_rate = self.risk.calc_atr_rate(ohlc, period=14)
-            self.atr_cache[code] = (atr_rate, time.time())
-            return atr_rate
-        except Exception:
-            return 0
+        """ATR/현재가 비율. ★ 2026-09-04: sbo2와 공유되는
+        risk_manager.RiskManager.get_atr_rate_cached()로 위임 —
+        기존엔 실패/0도 성공과 똑같이 30분씩 캐싱해 일시적 조회실패가
+        30분 내내 ATR=0으로 오인되는 버그가 있었음(sbo2는 08-10에
+        이미 고쳤었는데 sbot엔 이식이 안 돼 있었음). 공유 헬퍼로
+        이전하며 같이 해결."""
+        return self.risk.get_atr_rate_cached(self.api, self.atr_cache, code)
 
     # ============================================================
     # peak_tracker 항목 생성 (★ 공통 헬퍼 — 2026-06-28 신규)
