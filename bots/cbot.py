@@ -153,6 +153,11 @@ BUY_2ND_THRESHOLD = -9999       # 추매 비활성화 (절대 도달 안 하는 
 MAX_POSITIONS     = 3           # 최대 3코인 (종목당 100만원 × 3 = 300만원, 익절슬롯반환시 4번째 가능)
 MIN_ORDER_AMT     = 5_000       # 업비트 최소 주문 금액
 
+# ★ 2026-09-05: 매수직후 동기화 보호 — sbot/sbo2가 실제 사고(sbo2는 3번)로
+#   겪고 도입한 것과 동일한 클래스의 보호를 cbot에도 이식. 업비트는 KIS보다
+#   체결반영이 빨라 위험도는 낮지만 방어장치 자체가 아예 없었음.
+BUY_SYNC_GUARD_SEC = 90
+
 # ── 매도 전략 (v3 — ATR 추세추종) ─────────────────────────
 # 분할 익절 제거 — 전량 보유하며 목표가/손절가 상향
 ATR_STOP_MULT    = 2.0    # 손절: 매수가 - ATR × 2
@@ -329,6 +334,7 @@ class CBot:
         self.peak_tracker     = {}
         self.sold_today       = {}
         self._sold_today_date = today_str()
+        self._buy_sync_guard  = {}   # {market: 매수시각(epoch)} — 매수직후 동기화 보호
         self.daily_loss_count = 0
         self.daily_pnl        = 0
         self._is_paused       = False
@@ -1736,6 +1742,8 @@ class CBot:
                     f"BTC:{self.btc_rate:+.2f}%",
                     critical=True,
                 )
+                # ★ 2026-09-05: 매수직후 동기화 보호 시작
+                self._buy_sync_guard[market] = time.time()
                 # ★ 매수 직후 self.positions 즉시 반영
                 # 정확한 수량은 다음 루프에서 갱신되지만, 즉시 매도 체크 누락 방지
                 if not is_second:
@@ -2058,6 +2066,7 @@ class CBot:
                     #   발견) — 매도 성공 즉시 메모리에서도 제거.
                     self.positions.pop(market, None)
                     self.peak_tracker.pop(market, None)
+                    self._buy_sync_guard.pop(market, None)
                     sold.append(market)
                 else:
                     failed.append(market)
@@ -2077,6 +2086,7 @@ class CBot:
             if ok:
                 self.positions.pop(sell_market, None)
                 self.peak_tracker.pop(sell_market, None)
+                self._buy_sync_guard.pop(sell_market, None)
                 _write_cmd_result(f"✅ {sell_market} 즉시매도 완료")
             else:
                 # ★ 2026-09-03: 기존엔 sell() 성공 여부와 무관하게 항상
@@ -2201,8 +2211,15 @@ class CBot:
                 #   의미있는 통계가 만들어질거야"). 업비트는 아직 KIS처럼
                 #   정확한 실현손익 조회 API가 없어, 감지 시점의 최신 시세로
                 #   추정 기록한다(엄밀한 체결가는 아니지만 없는 것보단 낫다).
+                _now_ts = time.time()
+                _guarded_codes = []
                 for _code in list(self.positions.keys()):
                     if _code not in new_pos and _code not in self.sold_today:
+                        _guard_until = self._buy_sync_guard.get(_code, 0) + BUY_SYNC_GUARD_SEC
+                        if _now_ts < _guard_until:
+                            print(f"   🛡️ {_code} 매수직후 동기화 보호 중 — 수동매도 감지 스킵")
+                            _guarded_codes.append(_code)
+                            continue
                         self.sold_today[_code] = now_hms()
                         print(f"🔍 수동매도 감지: {_code} → sold_today 추가")
                         _old_pos = self.positions.get(_code, {})
@@ -2211,13 +2228,20 @@ class CBot:
                         self._save_manual_trade(
                             _code, _old_pos.get("entry_price", 0), _sell_price,
                             _old_pos.get("qty", 0))
+                        self._buy_sync_guard.pop(_code, None)
                         # ★ 2026-07-02: master_positions 정리 누락 수정 —
                         #   기존엔 감지만 하고 지우질 않아 수동매도된 코인이
                         #   master_positions에 유령으로 계속 남아있었음.
                         if _master_remove:
                             _master_remove('cbot', _code)
+                # ★ 2026-09-05: 보호 중인 종목은 new_pos에 없어도(체결반영 지연)
+                #   메모리 포지션을 그대로 유지 — 위 가드 스킵과 짝을 이룸.
+                _guarded_positions = {c: self.positions[c] for c in _guarded_codes
+                                      if c in self.positions}
                 self.positions.clear()
                 self.positions.update(new_pos)
+                for _code, _pos in _guarded_positions.items():
+                    self.positions.setdefault(_code, _pos)
                 krw            = self.get_krw_balance()
                 total_profit   = sum(
                     (p["current"] - p["entry_price"]) * p["qty"]
