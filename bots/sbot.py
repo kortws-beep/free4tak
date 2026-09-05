@@ -1604,6 +1604,33 @@ class SBot:
                         #   (sbo2는 이미 정리하고 있었음, sbot만 누락).
                         if _master_remove:
                             _master_remove("sbot", _code)
+
+                    # ★ 2026-09-05: 수동 일부매도(부분매도) 감지 — 기존엔
+                    #   전량매도(코드가 new_pos에서 완전히 사라짐)만
+                    #   감지/기록하고, 수량만 줄어드는 부분매도는 조용히
+                    #   qty만 갱신될 뿐 거래이력DB에 전혀 안 남았음(사용자
+                    #   지적). self.db.save_sell()은 이미 목표1 50%익절
+                    #   때부터 "판 수량 < 원본 수량"이면 DB 행을 분할하는
+                    #   로직이 있어 그대로 재사용, sell_price는 정확한
+                    #   체결가를 알 방법이 없어 감지 시점 최신 시세로 추정.
+                    for _code in list(self.positions.keys()):
+                        if _code not in new_pos:
+                            continue
+                        _guard_until = self._buy_sync_guard.get(_code, 0) + BUY_SYNC_GUARD_SEC
+                        if _now_ts < _guard_until:
+                            continue
+                        _old_qty = self.positions[_code].get("qty", 0)
+                        _new_qty = new_pos[_code].get("qty", 0)
+                        if 0 < _new_qty < _old_qty:
+                            _sold_qty = _old_qty - _new_qty
+                            _mdata = self.api.get_market_data(_code)
+                            _sell_price = (safe_float(_mdata.get("stck_prpr", 0))
+                                           if _mdata else self.positions[_code].get("entry_price", 0))
+                            self.db.save_sell(_code, _sell_price, "수동일부매도",
+                                               sold_qty=_sold_qty)
+                            print(f"   🔍 수동 일부매도 감지: {self._name(_code)}"
+                                  f"({_code}) {_sold_qty}주 @ {_sell_price:,.0f}원")
+
                     # ★ 2026-09-05: sbo2가 08-11에 겪은 "한화엔진 실사례"와
                     #   동일한 위험 방지 — 오늘 이미 매도(주로 손절/본절,
                     #   sold_today 등록분)한 종목이 KIS 잔고API 정산지연으로

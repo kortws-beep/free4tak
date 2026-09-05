@@ -2164,6 +2164,42 @@ class Sbo2:
                               f"(실계좌:{rdata['qty']}, 메모리:{existing['qty']})")
                     else:
                         old_entry = existing["entry_price"]
+                        old_qty   = existing["qty"]
+                        # ★ 2026-09-05: 수동 일부매도(부분매도) 감지 — 기존엔
+                        #   전량매도(코드가 new_pos에서 완전히 사라짐)만
+                        #   감지/기록하고, 수량만 줄어드는 부분매도는 조용히
+                        #   qty만 갱신될 뿐 거래이력DB에 전혀 안 남았음(사용자
+                        #   지적 — 통계/백테스트 데이터에서 그 매도 자체가
+                        #   빠지는 문제). save_sell_trade()는 이미 목표1
+                        #   50%익절 때부터 "판 수량 < 원본 수량"이면 DB 행을
+                        #   분할(매도완료분/잔여보유분)하는 로직이 있어 —
+                        #   그대로 재사용, sell_price는 정확한 체결가를 알
+                        #   방법이 없어 감지 시점 최신 시세로 추정.
+                        if 0 < rdata["qty"] < old_qty:
+                            _sold_qty = old_qty - rdata["qty"]
+                            _mdata = self.api.get_market_data(code)
+                            _sell_price = (float(_mdata.get("stck_prpr", 0))
+                                           if _mdata else old_entry)
+                            save_sell_trade(
+                                code=code, sell_price=_sell_price,
+                                reason="수동일부매도",
+                                entry_price=old_entry, qty=_sold_qty,
+                                buy_time=existing.get("buy_time", ""),
+                                stock_name=existing.get("name", code),
+                                grade=existing.get("grade", ""),
+                                stage=existing.get("stage", 0),
+                            )
+                            if _master_record:
+                                _master_record(
+                                    bot_type="sbo2", code=code,
+                                    stock_name=existing.get("name", code),
+                                    buy_price=old_entry, sell_price=_sell_price,
+                                    qty=_sold_qty, sell_reason="수동일부매도",
+                                    buy_tag=existing.get("grade", ""),
+                                    ai_score=existing.get("score", 0),
+                                )
+                            print(f"   🔍 수동 일부매도 감지: {existing.get('name', code)}"
+                                  f"({code}) {_sold_qty}주 @ {_sell_price:,.0f}원")
                         existing["qty"]         = rdata["qty"]
                         existing["entry_price"] = rdata["entry_price"]
                         # ★ 2026-08-07: 평단가가 바뀌면(추가매수) 손절/목표도
