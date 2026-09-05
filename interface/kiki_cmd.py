@@ -1453,7 +1453,12 @@ async def cmd_cbot_sell(ctx, market: str):
             )
         return
 
-    update_state("cbot", pending_cmd={"type": "sell", "market": market})
+    # ★ 2026-09-05: cmd_result=None을 안 넘겨서, 예전 명령의 남은 결과값이
+    #   그대로 남아있으면 이번 명령 결과인 것처럼 잘못 튀어나오는 버그
+    #   발견(사용자 실사례 — TRUMP 단일매도 요청에 예전 "전체매도" 결과가
+    #   섞여나옴). sbot/sbo2 매도(211행)/홀드(260행)는 이미 초기화하고
+    #   있었는데 cbot 매도 두 곳만 누락돼 있었음.
+    update_state("cbot", pending_cmd={"type": "sell", "market": market}, cmd_result=None)
     await ctx.send(f"📤 코인 매도 명령: **{market}**\n(다음 루프 ~5분 내 실행)")
 
     result = await wait_cmd_result("cbot", max_attempts=12, interval=5.0)
@@ -1473,7 +1478,7 @@ async def cmd_cbot_sell_all(ctx):
         await ctx.send("❌ 코인봇 보유 종목 없음")
         return
 
-    update_state("cbot", pending_cmd={"type": "sell", "market": "ALL"})
+    update_state("cbot", pending_cmd={"type": "sell", "market": "ALL"}, cmd_result=None)
     await ctx.send(f"📤 코인봇 전체매도 명령 ({len(held)}종목: {', '.join(held)})\n(다음 루프 ~5분 내 실행)")
 
     result = await wait_cmd_result("cbot", max_attempts=12, interval=5.0)
