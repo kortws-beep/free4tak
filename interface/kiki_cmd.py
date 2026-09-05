@@ -219,8 +219,9 @@ async def cmd_sell(ctx, code: str, bot_name: str = "sbot"):
 
 
 def _find_held_code(bot_name: str, target: str) -> str:
-    """target(종목명 또는 코드)이 bot_name 봇의 보유종목이면 코드를 반환,
-    아니면 빈 문자열. sbot/sbo2는 상태파일 스키마가 달라서 각자 처리."""
+    """target(종목명/코드/코인티커)이 bot_name 봇의 보유종목이면 코드를
+    반환, 아니면 빈 문자열. sbot/sbo2/cbot은 상태파일 스키마가 달라서
+    각자 처리."""
     state = read_state(bot_name)
     if bot_name == "sbot":
         pos_detail    = state.get("last_status", {}).get("positions_detail", {})
@@ -230,6 +231,12 @@ def _find_held_code(bot_name: str, target: str) -> str:
         found = next((c for c, name in code_name_map.items()
                       if c in pos_detail and (target in name or name in target)), None)
         return found or ""
+    elif bot_name == "cbot":  # 코인 — positions 키가 "KRW-XXX" 마켓코드
+        positions = state.get("positions", {})
+        market = target if target.startswith("KRW-") else f"KRW-{target.upper()}"
+        if market in positions:
+            return market
+        return ""
     else:  # sbo2 — positions가 최상위, 각 값에 name 필드 포함
         positions = state.get("positions", {})
         if target in positions:
@@ -240,14 +247,17 @@ def _find_held_code(bot_name: str, target: str) -> str:
 
 
 async def cmd_hold(ctx, target: str, hold_val: bool = True):
-    """종목 홀드 설정/해제 (2026-08-25 신설) — 손절체크만 제외, 트레일링/
-    목표달성 로직은 그대로 적용. 봇 지정 없이 종목명/코드만 주면 sbot→sbo2
-    순서로 보유 중인 쪽을 찾아 적용."""
-    for bot_name in ("sbot", "sbo2"):
+    """종목 홀드 설정/해제 (2026-08-25 신설, 09-05 cbot 추가) — 손절체크
+    (cbot은 급락감지 포함)만 제외, 트레일링/목표달성 로직은 그대로 적용.
+    봇 지정 없이 종목명/코드/코인티커만 주면 sbot→sbo2→cbot 순서로
+    보유 중인 쪽을 찾아 적용."""
+    for bot_name in ("sbot", "sbo2", "cbot"):
         code = _find_held_code(bot_name, target)
         if not code:
             continue
-        update_state(bot_name, pending_cmd={"type": "hold", "code": code, "value": hold_val},
+        # ★ cbot은 기존 sell 명령과 동일하게 필드명이 "code"가 아니라 "market"
+        _key = "market" if bot_name == "cbot" else "code"
+        update_state(bot_name, pending_cmd={"type": "hold", _key: code, "value": hold_val},
                      cmd_result=None)
         label = "설정" if hold_val else "해제"
         await ctx.send(f"📤 [{bot_name}] {code} 홀드 {label} 명령 전달\n(다음 루프에서 실행)")
@@ -1358,7 +1368,7 @@ async def cmd_help(ctx):
   `!테마`  `!뉴스`  `!이벤트`
   `!관심 [코드]`  `!관심HTS`
   `!리스크`  `!리스크중단`  `!리스크재개`
-  `!h 종목명/코드` — 홀드(손절체크만 제외, sbot/sbo2 자동판별, 재시작해도 유지)
+  `!h 종목명/코드` — 홀드(손절체크만 제외, sbot/sbo2/cbot 자동판별, 재시작해도 유지)
   `!r 종목명/코드` — 홀드 해제
 
 ━━━ 🌟 Tip ━━━

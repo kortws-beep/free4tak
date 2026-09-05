@@ -1866,6 +1866,7 @@ class CBot:
                 "target_next": existing.get("target_next", target1),
                 "atr_val":     atr_val,
                 "buy_date":    existing.get("buy_date", _dt.date.today().isoformat()),  # ★ 25일 기한
+                "hold":        existing.get("hold", False),  # ★ 홀드(손절체크 제외) 보존
             }
             print(f"   📐 ATR 타점 {market} | 손절:{stop:,.0f} | "
                   f"목표:{target1:,.0f} | ATR:{atr_rate:.2%}")
@@ -1890,7 +1891,11 @@ class CBot:
         #   감지가 자주 발동하는데 정작 -5% 기준인데 실제 -7~11%로 손절되는
         #   경우가 잦았음, 지연된 신호 탓). 자세한 배경은 CRASH_WINDOW_SEC
         #   상단 주석 참고.
-        is_crash, crash_rate = self._check_recent_crash(market, current, atr_val)
+        # ★ 2026-09-05: sbot/sbo2의 홀드(!h/!r) 기능 이식 — 정세 급변으로
+        #   전량 손절되는 걸 막기 위해 특정 코인만 손절체크(급락감지 포함)를
+        #   제외. 트레일링/목표달성 로직은 그대로 작동.
+        is_held = tracker.get("hold", False)
+        is_crash, crash_rate = (False, 0.0) if is_held else self._check_recent_crash(market, current, atr_val)
         if is_crash:
             self.notify(
                 f"💥 급락감지 즉시손절 {market}\n"
@@ -1905,7 +1910,7 @@ class CBot:
             return
 
         # ② 손절가 이탈 — ATR 기반 손절가로 통일 ──────────
-        if current <= stop_price:
+        if current <= stop_price and not is_held:
             label = "손절" if stage == 0 else f"손절(stage{stage})"
             self.notify(
                 f"🛑 {label} {market} | {rate:+.2%}\n"
@@ -2043,7 +2048,28 @@ class CBot:
     # ============================================================
     def _handle_pending_command(self, bot_state: dict):
         pending = bot_state.get("pending_cmd")
-        if not pending or pending.get("type") != "sell":
+        if not pending:
+            return
+
+        if pending.get("type") == "hold":
+            # ★ 2026-09-05 신설 — sbot/sbo2와 동일한 홀드(!h/!r) 기능.
+            #   peak_tracker에 저장해야 실계좌 동기화(positions.clear()+
+            #   update)에도 안 날아감(sbot과 동일 사유).
+            hold_market = pending.get("market", "")
+            hold_val    = pending.get("value", True)
+            if hold_market in self.positions:
+                self.peak_tracker.setdefault(hold_market, {})["hold"] = hold_val
+                _update_state(peak_tracker=self.peak_tracker)
+                label = "설정" if hold_val else "해제"
+                _write_cmd_result(
+                    f"✅ [COIN] {hold_market} 홀드 {label} "
+                    f"(손절/급락감지 {'제외' if hold_val else '포함'}, 트레일링/목표는 그대로)"
+                )
+            else:
+                _write_cmd_result(f"⚠️ {hold_market} 보유 중이 아님")
+            return
+
+        if pending.get("type") != "sell":
             return
         sell_market = pending.get("market", "")
         # ★ 2026-08-25: KiKi "!c전체매도" 지원 — 사용자 요청("나중을 위해서
@@ -2262,8 +2288,9 @@ class CBot:
                     stop_p    = tracker.get("stop_price", 0)
                     target_p  = tracker.get("target_next", 0)
                     stage_tag = f"(stage{stage})" if stage > 0 else ""
+                    hold_mark = "⭐" if tracker.get("hold", False) else "  "
                     print(
-                        f"  {emoji} {market}{stage_tag} {rate:+.2f}% | "
+                        f"{hold_mark}{emoji} {market}{stage_tag} {rate:+.2f}% | "
                         f"현재:{pos['current']:,} | 손절:{int(stop_p):,} 목표:{int(target_p):,}"
                     )
                 print(f"📈 평가손익: {total_profit:+,.0f}원")
