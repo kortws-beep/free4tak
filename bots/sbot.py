@@ -1604,10 +1604,30 @@ class SBot:
                         #   (sbo2는 이미 정리하고 있었음, sbot만 누락).
                         if _master_remove:
                             _master_remove("sbot", _code)
+                    # ★ 2026-09-05: sbo2가 08-11에 겪은 "한화엔진 실사례"와
+                    #   동일한 위험 방지 — 오늘 이미 매도(주로 손절/본절,
+                    #   sold_today 등록분)한 종목이 KIS 잔고API 정산지연으로
+                    #   new_pos에 잠깐 남아있으면, 기존엔 무조건
+                    #   self.positions.update(new_pos)로 그대로 되살아나
+                    #   방금 자른 손실 포지션을 재보유중으로 오인할 위험이
+                    #   있었음(sbot은 blunt clear+update라 sbo2보다 이 위험에
+                    #   더 그대로 노출돼 있었음). 아직 self.positions에 없던
+                    #   (=진짜 신규가 아니라 정산지연 잔재로 보이는) 코드만
+                    #   골라서 제외.
+                    _resurrect_risk = {
+                        c for c in new_pos
+                        if c not in self.positions and c in self.sold_today
+                    }
+                    for _c in _resurrect_risk:
+                        print(f"   ⏭️ {self._name(_c)}({_c}) 오늘 이미 매도 — "
+                              f"정산 지연으로 보이는 잔고, 재입양 스킵")
+                    _filtered_new_pos = {
+                        c: p for c, p in new_pos.items() if c not in _resurrect_risk
+                    }
                     _guarded_positions = {c: self.positions[c] for c in _guarded_codes
                                           if c in self.positions}
                     self.positions.clear()
-                    self.positions.update(new_pos)
+                    self.positions.update(_filtered_new_pos)
                     # ★ 2026-09-03: 보호 중인 종목은 new_pos에 없어도(정산지연)
                     #   메모리 포지션을 그대로 유지 — 위 가드 스킵과 짝을 이룸.
                     for _code, _pos in _guarded_positions.items():
