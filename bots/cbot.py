@@ -141,6 +141,10 @@ MIN_CHANGE_RATE   = -20.0           # 폭락 (-20% 이하) 제외
 # 레버리지/ETF 제외 키워드
 EXCLUDE_KEYWORDS = ["UP", "DOWN", "BEAR", "BULL"]
 
+# ★ 2026-09-05: 사용자가 개인적으로 싫어하는 코인 영구 제외 (거래대금/
+#   등락률 조건과 무관하게 종목풀 후보에서 아예 제외).
+EXCLUDE_MARKETS = ["KRW-TRUMP"]
+
 # 매수/매도 금액 (100만원 단일 매수 — 추매 없음)
 # ★ 2026-08-07: 300만원 시드 재투입 예정에 맞춰 40만원→100만원, 4→3종목으로 조정
 BUY_1ST_AMT       = 1_000_000   # 1차 매수 100만원 (단일, 추매 없음)
@@ -862,10 +866,11 @@ class CBot:
                 if m["market"].startswith("KRW-")
             ]
 
-            # 2) 레버리지/ETF 제외
+            # 2) 레버리지/ETF 제외 + 영구 제외 코인
             krw_markets = [
                 m for m in krw_markets
                 if not any(kw in m.replace("KRW-", "") for kw in EXCLUDE_KEYWORDS)
+                and m not in EXCLUDE_MARKETS
             ]
 
             # 3) 전체 시세 (100개씩 청크)
