@@ -2,7 +2,6 @@ import asyncio
 import os
 import subprocess
 import discord
-import aiohttp
 import datetime
 import sqlite3
 import re
@@ -43,8 +42,6 @@ if _CORE_DIR not in _sys.path:
 
 # 환경 변수 및 모델 세팅
 DISCORD_TOKEN = os.getenv("DISCORD_BOT_TOKEN_N")
-OLLAMA_API_URL = os.getenv("OLLAMA_API_URL", "http://127.0.0.1:11434/api/chat")
-MODEL_NAME = os.getenv("MODEL_NAME", "gemma4:e4b")
 
 # 🚨 대한민국 표준시(KST) 타임존
 KST = datetime.timezone(datetime.timedelta(hours=9))
@@ -477,49 +474,27 @@ def _fetch_and_summarize_bodies(sess, headers, items: list) -> list:
     return results
 
 
-def _call_llm(prompt: str, max_tokens: int = 1200, force_claude: bool = False) -> str:
-    """로컬 ollama 우선 시도 → 실패 시 Claude API로 폴백 (2026-07-02).
-    ★ 2026-07-02: _summarize_report_body 전용이던 이 호출부를 공용 헬퍼로
-    추출 — 시장 종합 브리핑(_build_market_context_summary) 등 다른 곳에서도
-    같은 폴백 로직을 재사용하기 위함.
-    ★ 2026-07-07: force_claude 추가 — 로컬 ollama(qwen2.5:14b)가 프롬프트에
-    "보조 참고자료"로만 쓰라고 명시해도, 텔레그램 뉴스 블록이 구조화된
-    쏠림 데이터보다 훨씬 크면 그쪽으로 관심이 쏠려 지시를 무시하는 문제가
-    있었음(시장 쏠림 브리핑이 그냥 뉴스 나열로 나온 사고). 지시 준수가
-    중요한 저빈도 호출은 로컬을 건너뛰고 바로 Claude로 보낸다."""
-    ollama_model = os.getenv("OLLAMA_MODEL", "qwen2.5:14b")
-    ollama_url   = os.getenv("OLLAMA_URL", "http://localhost:11434")
-    if not force_claude:
-        try:
-            import openai as _openai
-            client = _openai.OpenAI(base_url=f"{ollama_url}/v1", api_key="ollama", timeout=120)
-            res = client.chat.completions.create(
-                model=ollama_model, max_tokens=max_tokens,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            result = res.choices[0].message.content.strip()
-            # ★ 2026-08-04: 로컬 LLM이 가끔 요약 도중 문단 단위로 중국어로
-            #   새는 현상 발견(사용자 지적 — MBN 08:50 리포트 일부 문단이
-            #   중국어로 나옴). 한국어 본문엔 한자가 거의 안 나오므로,
-            #   한자(CJK 통합 한자) 개수가 일정 수준 넘으면 오염된 출력으로
-            #   보고 Claude로 재시도한다.
-            han_count = sum(1 for ch in result if '一' <= ch <= '鿿')
-            if han_count <= 20:
-                return result
-            print(f"⚠️ 로컬 LLM 출력에 한자/중국어 혼입 감지({han_count}자) → Claude로 재시도")
-        except Exception as e:
-            print(f"⚠️ 로컬 LLM 호출 실패({e}) → Claude로 폴백")
-
+def _call_llm(prompt: str, max_tokens: int = 1200, system: str = None) -> str:
+    """Claude API 직접 호출.
+    ★ 2026-09-07: 로컬 ollama 경로를 완전히 제거함 — 이 서버는 실계좌
+    봇(sbot/sbo2/cbot)과 원격데스크톱이 같은 GPU(RTX 3070Ti, 8GB)를
+    나눠 쓰는데, 로컬 LLM(gemma4:e4b 등 8GB 이상 모델)이 VRAM을 넘어서면
+    일부 레이어가 CPU로 넘어가면서 CPU/GPU를 동시에 크게 잡아먹어 원격
+    데스크톱이 느려지는 문제가 반복 발생함(대장 신고). 이 헬퍼가 하루
+    몇 번밖에 안 불리는 저빈도 호출이라 로컬로 비용을 아낄 실익도 작아,
+    아예 Claude로 통일. 모델은 09-03에 이미 "리나는 컨트롤타워라 소넷5"로
+    격상 결정된 것을 그대로 유지(대장 확인)."""
     try:
         import anthropic as _ant
         client = _ant.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-        # ★ 2026-09-03: 리나는 봇들의 컨트롤타워라 하이쿠→소넷5로 격상
-        #   (사용자 요청 — "경직된 느낌", sbot/cbot 고빈도 스코어링은
-        #   비용 대비 하이쿠가 적정이라 그대로 둠).
+        kwargs = {}
+        if system:
+            kwargs["system"] = system
         res = client.messages.create(
             model=os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5"),
             max_tokens=max_tokens,
             messages=[{"role": "user", "content": prompt}],
+            **kwargs,
         )
         # ★ 2026-09-03: 소넷5 응답의 content[0]이 ThinkingBlock일 수 있어
         #   .content[0].text 직접 접근 대신 공용 헬퍼 사용(자세한 배경은
@@ -527,7 +502,7 @@ def _call_llm(prompt: str, max_tokens: int = 1200, force_claude: bool = False) -
         from common_utils import extract_claude_text
         return extract_claude_text(res)
     except Exception as e:
-        print(f"⚠️ Claude 호출도 실패({e})")
+        print(f"⚠️ Claude 호출 실패({e})")
         return ""
 
 
@@ -665,15 +640,12 @@ def _build_market_context_summary() -> str:
         f"[최근 텔레그램 속보 — 보조 참고자료]\n{tele_context or '없음'}\n\n"
         f"[최근 3일 종합 코멘트 추세 — 참고용]\n{trend_text}"
     )
-    # ★ 2026-07-07: 로컬 ollama가 지시(숫자 우선/뉴스는 보조)를 무시하고
-    #   텔레그램 뉴스 나열로 흘러가는 문제가 반복돼, 하루 1회뿐인 이 호출은
-    #   비용 부담이 적으니 바로 Claude로 보낸다 (지시 준수 우선).
     # ★ 2026-09-04: 소넷5가 이 프롬프트류에서 내부적으로 thinking 블록을
     #   쓰면서 max_tokens 예산을 상당량(실측 231/600) 먼저 소모해버려,
     #   정작 답변 텍스트가 문장 중간에 잘려 디스코드로 그대로 전송되는
     #   사고 발생(09-04 09:35 브리핑이 "…대형"에서 끊김, 사용자가 발견).
     #   thinking+본문(3~5문장)이 모두 들어갈 여유를 두기 위해 상향.
-    return _call_llm(prompt, max_tokens=1500, force_claude=True)
+    return _call_llm(prompt, max_tokens=1500)
 
 
 # ══════════════════════════════════════════════════════════════
@@ -682,10 +654,12 @@ def _build_market_context_summary() -> str:
 # ★ VCP/추세/촉매는 전부 "이미 벌어진 기술적 패턴"만 본다. 미국-이란
 #   재격돌/하이퍼스케일러 CAPEX 우려/중국 반도체 부각 같은 거시 모멘텀
 #   내러티브를 종합해 "그래서 오늘 뭐가 뜰까"를 판단하는 축은 없었음.
-#   사용자 제안: 하루 2회(아침/오후) 로컬 ollama에게 종목 2개씩 물어보고,
-#   생쇼처럼 사후검증(체크인)만 하고 sbot/sbo2 스코어링엔 바로 연결하지
-#   않는다. 로컬 AI를 쓰는 이유는 비용뿐 아니라 "로컬 AI가 이런 판단을
-#   얼마나 잘하는지" 자체를 관찰하고 싶다는 의도 — force_claude 안 씀.
+#   사용자 제안: 하루 2회(아침/오후) 종목 2개씩 물어보고, 생쇼처럼
+#   사후검증(체크인)만 하고 sbot/sbo2 스코어링엔 바로 연결하지 않는다.
+#   ★ 2026-09-07: 원래는 "로컬 AI가 이런 판단을 얼마나 잘하는지"를 관찰할
+#   목적으로 로컬 ollama를 일부러 썼는데, 관찰 결과 "20B 미만 로컬모델은
+#   품질이 대화용 수준이지 이런 판단엔 부적합"으로 결론 남(대장 확인) —
+#   관찰 종료, 이 호출도 다른 곳과 동일하게 Claude로 통일.
 
 _THEME_LINE_RE = re.compile(r'테마\s*\d*\s*[:：]\s*(.+)')
 MOMENTUM_MIN_PRICE = 5000  # ★ 2026-07-14: 동전주 배제 최소가 (사용자 지적)
@@ -1461,15 +1435,11 @@ async def daily_morning_report():
         f"3. **원픽 테마**: 오늘 수급이 가장 강하게 붙을 원픽 테마와 핵심 종목을 단도직입적으로 요약해줘."
     )
 
-    payload = {"model": MODEL_NAME, "messages": [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": prompt}], "stream": False, "options": {"temperature": 0.2}}
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(OLLAMA_API_URL, json=payload) as response:
-                if response.status == 200:
-                    res_json = await response.json()
-                    reply_text = res_json.get("message", {}).get("content", "").strip()
-                    await send_safe_message(channel, f"☀️ **[대장! 07시 30분 융합 마스터 전략 브리핑이야]** ☀️\n\n{reply_text}")
-                    print(f"✅ [디버그] 07시 30분 4합 통합 융합 마스터 브리핑 전송 완료!")
+        reply_text = await asyncio.to_thread(_call_llm, prompt, max_tokens=1500, system=SYSTEM_PROMPT)
+        if reply_text:
+            await send_safe_message(channel, f"☀️ **[대장! 07시 30분 융합 마스터 전략 브리핑이야]** ☀️\n\n{reply_text}")
+            print(f"✅ [디버그] 07시 30분 4합 통합 융합 마스터 브리핑 전송 완료!")
     except Exception as e: print(f"❌ 통합 브리핑 전송 에러: {e}")
 
 @daily_morning_report.before_loop
@@ -1514,15 +1484,11 @@ async def hourly_telegram_event_report():
         f"  - 두 번째 관련 핵심 종목/섹터 압축\n\n"
         f"[최신 속보 데이터]:\n{raw_context}"
     )
-    payload = {"model": MODEL_NAME, "messages": [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": prompt}], "stream": False, "options": {"temperature": 0.0}}
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(OLLAMA_API_URL, json=payload) as response:
-                if response.status == 200:
-                    res_json = await response.json()
-                    reply_text = res_json.get("message", {}).get("content", "").strip()
-                    await send_safe_message(channel, f"🚨 **[대장! 지난 텔레그램 주도 테마 요약이야]** 🚨\n\n{reply_text}")
-                    print(f"🎉 [디버그] 텔레그램 리포트 전송 완벽 성공!")
+        reply_text = await asyncio.to_thread(_call_llm, prompt, max_tokens=1500, system=SYSTEM_PROMPT)
+        if reply_text:
+            await send_safe_message(channel, f"🚨 **[대장! 지난 텔레그램 주도 테마 요약이야]** 🚨\n\n{reply_text}")
+            print(f"🎉 [디버그] 텔레그램 리포트 전송 완벽 성공!")
     except Exception as e: print(f"❌ 텔레그램 리포트 전송 에러: {e}")
 
 @hourly_telegram_event_report.before_loop
@@ -1569,19 +1535,12 @@ async def daily_news_report():
         f"수집된 실제 데이터만 바탕으로 핵심만 요약해줘. 절대 지어내지 마.\n\n"
         f"[오늘 아침 뉴스]\n{raw_news}"
     )
-    payload = {"model": MODEL_NAME,
-               "messages": [{"role": "system", "content": SYSTEM_PROMPT},
-                             {"role": "user", "content": prompt}],
-               "stream": False, "options": {"temperature": 0.0}}
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(OLLAMA_API_URL, json=payload) as response:
-                if response.status == 200:
-                    res_json = await response.json()
-                    reply_text = res_json.get("message", {}).get("content", "").strip()
-                    await send_safe_message(channel,
-                        f"📰 **[대장! 07시 아침 뉴스야]** 📰\n\n{reply_text}")
-                    print(f"✅ 07시 뉴스 브리핑 전송 완료!")
+        reply_text = await asyncio.to_thread(_call_llm, prompt, max_tokens=1500, system=SYSTEM_PROMPT)
+        if reply_text:
+            await send_safe_message(channel,
+                f"📰 **[대장! 07시 아침 뉴스야]** 📰\n\n{reply_text}")
+            print(f"✅ 07시 뉴스 브리핑 전송 완료!")
     except Exception as e:
         print(f"❌ 뉴스 브리핑 오류: {e}")
 
@@ -2297,12 +2256,9 @@ async def on_message(message):
                 chat_memory[message.channel.id].append({"role": "user", "content": user_input})
                 prompt = user_input 
 
-        payload = {"model": MODEL_NAME, "messages": [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": prompt}], "stream": False, "options": {"temperature": 0.0}}
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(OLLAMA_API_URL, json=payload) as response:
-                    res_json = await response.json()
-                    await send_safe_message(message.channel, res_json.get("message", {}).get("content", "에러 발생!").strip(), reply_to=message)
+            reply_text = await asyncio.to_thread(_call_llm, prompt, max_tokens=1500, system=SYSTEM_PROMPT)
+            await send_safe_message(message.channel, reply_text or "에러 발생!", reply_to=message)
         except Exception as e:
             await message.reply(f"❌ 엔진 에러: {str(e)}")
 
