@@ -57,6 +57,7 @@ class KisAPI:
         self.acnt     = acnt     or os.getenv("KIS_ACNT_PRDT_CD")
         self.base_url = "https://openapi.koreainvestment.com:9443"
 
+        self.token_expires_at = None
         self.token           = self._issue_token()
         self.token_issued_at = time.time()
         self._mkt_cache      = {}
@@ -86,6 +87,16 @@ class KisAPI:
                 )
                 if _ok and _d.get("access_token"):
                     print(f"✅ 토큰 캐시 사용 [{self.cano}] (만료:{_d['access_token_token_expired']})")
+                    # ★ 2026-09-07: 캐시 재사용 시에도 "진짜" 만료시각을
+                    #   기억해둬야 함 — 안 그러면 refresh_token_if_needed()가
+                    #   프로세스 시작시각 기준으로 23시간을 다시 세서, 이미
+                    #   반나절 넘게 산 캐시토큰을 "아직 23시간 남음"으로
+                    #   착각함(자정 무렵 재부팅 후 실제로 발생 — sbot/sbo2가
+                    #   00시부터 chk-holiday 등 모든 API가 조용히 실패했는데
+                    #   refresh 타이머는 프로세스 시작 기준이라 정오 넘어서야
+                    #   돌았던 사고).
+                    self.token_expires_at = datetime.datetime.strptime(
+                        _d["access_token_token_expired"], "%Y-%m-%d %H:%M:%S")
                     return _d["access_token"]
                 else:
                     os.remove(_tdat)
@@ -104,6 +115,12 @@ class KisAPI:
                 return ""
             token = res.get("access_token", "")
             exp   = res.get("access_token_token_expired", "")
+            if token and exp:
+                try:
+                    self.token_expires_at = datetime.datetime.strptime(
+                        exp, "%Y-%m-%d %H:%M:%S")
+                except Exception:
+                    pass
             if token:
                 try:
                     import pickle as _pk2
@@ -120,7 +137,20 @@ class KisAPI:
             print(f"❌ 토큰 발급 실패: {e}"); return ""
 
     def refresh_token_if_needed(self):
-        if time.time() - self.token_issued_at > TOKEN_TTL - 3600:
+        """
+        ★ 2026-09-07: 판단 기준을 "프로세스 시작 후 경과시간"에서
+          "토큰의 실제 만료시각(token_expires_at)"으로 교체.
+          기존엔 __init__ 시점(=프로세스 시작시각)부터 23시간을 셌는데,
+          캐시된(이미 몇시간 써버린) 토큰을 재사용한 경우 실제 만료가
+          훨씬 먼저 옴 — 재부팅 후 이 프로세스가 그런 토큰을 물려받으면
+          진짜 만료 이후에도 한참(최대 11시간) 갱신을 안 해서, 그동안
+          모든 API 호출이 조용히 실패함(2026-09-07 새벽 실사례).
+        """
+        _need_refresh = (
+            self.token_expires_at is None
+            or datetime.datetime.now() >= self.token_expires_at - datetime.timedelta(hours=1)
+        )
+        if _need_refresh:
             print("🔄 토큰 갱신 중...")
             try:
                 _tdat = self._token_dat_path()
