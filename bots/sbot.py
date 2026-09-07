@@ -179,13 +179,21 @@ def get_swing_theme_bonus(code: str, theme_group_map: dict) -> tuple:
 # ============================================================
 MAX_POSITIONS    = 5              # 최대 보유 종목 (3→5)
 
-# ★ 5대장주 전용 슬롯 (2026-06-23 추가) — 기존 MAX_POSITIONS와 별개로 운영
+# ★ 대형주 급락매수 전용 슬롯 (2026-06-23 추가) — 기존 MAX_POSITIONS와 별개로 운영
 #   최근 10일 최고가 대비 -15% 하락 시 매수, ATR 추세추종 로직에 편입
+# ★ 2026-09-07: 기존 "5대장주"(임의 선정 5종목)에서 "S7"(intelligence/
+#   market_concentration.py의 MEGA_CAP_CODES와 동일 — 한국증시 쏠림 기준
+#   대형주 7종목, 2026-07-02 사용자 지정) + 현대차로 교체. 시장쏠림
+#   관찰용 워치리스트와 같은 기준을 쓰도록 통일(대장 요청). 두 파일이
+#   물리적으론 분리돼있으니 S7 구성을 바꾸면 이쪽도 같이 맞출 것.
 MEGA_CAP_CODES = {
     "005930": "삼성전자",
     "000660": "SK하이닉스",
-    "009150": "삼성전기",
     "402340": "SK스퀘어",
+    "005935": "삼성전자우",
+    "009150": "삼성전기",
+    "032830": "삼성생명",
+    "028260": "삼성물산",
     "005380": "현대차",
 }
 MEGA_CAP_DROP_THRESHOLD = -0.15   # 10일 최고가 대비 -15%
@@ -447,7 +455,11 @@ class SBot:
     # 종목 풀 조회
     # ============================================================
     def _get_pool(self) -> list:
-        """키움 조건검색식 (단타 키워드 제외) + new 그룹 종목 합성"""
+        """키움 '주도주' 조건검색식 + new 그룹 종목 합성.
+        ★ 2026-09-07: 종목선정 단순화(대장 요청) — 기존엔 단타 키워드만
+          제외하고 나머지 조건검색식(수익/수익성/성장주/저평가/실적호전 등)을
+          전부 합쳤는데, "주도주검색식3" 하나 + new 관심그룹 이렇게 2개
+          소스로 좁힘. 수동 관심종목(watchlist 상태파일) 반영도 같이 제거."""
         if not self.kiwoom.enabled:
             print("⚠️ 키움 없음 — 빈 풀")
             return []
@@ -455,7 +467,7 @@ class SBot:
             loop  = asyncio.new_event_loop()
             codes = loop.run_until_complete(
                 self.kiwoom.get_condition_codes(
-                    use_keywords=None,           # 모든 조건검색식 가져옴
+                    use_keywords=["주도주"],     # ★ 주도주검색식3만 사용
                     skip_keywords=SKIP_COND_KEYWORDS,  # 단타 제외
                     code_name_map=self.code_name_map,
                     code_tag_map=self.code_tag_map,   # ★ 검색식명 태그 저장
@@ -464,12 +476,6 @@ class SBot:
             loop.close()
 
             if codes:
-                st = _read_state()
-                # 관심종목 추가
-                for wc in st.get("watchlist", []):
-                    if wc not in codes and wc.isdigit():
-                        codes.append(wc)
-
                 # new 그룹 추가
                 try:
                     self._load_new_codes()
@@ -1838,13 +1844,13 @@ class SBot:
                 else:
                     self._run_analysis(codes, now_t, score_enter, psbl_cash)
 
-                # ── 5대장주 급락 매수 (30분마다, 정규장 중) ──
+                # ── S7 급락 매수 (30분마다, 정규장 중) ──
                 if (is_buy_ok and
                         time.time() - self._last_megacap_check > MEGA_CAP_CHECK_INTERVAL):
                     try:
                         self._check_megacap_dip_buy(psbl_cash)
                     except Exception as e:
-                        print(f"⚠️ 5대장주 체크 오류: {e}")
+                        print(f"⚠️ S7 체크 오류: {e}")
                     self._last_megacap_check = time.time()
 
                 # ── 매도 체크 ─────────────────────────────
@@ -1868,17 +1874,18 @@ class SBot:
                 time.sleep(5)
 
     # ============================================================
-    # ★ 5대장주 급락 매수 (전용 슬롯, 2026-06-23 추가)
+    # ★ S7 급락 매수 (전용 슬롯, 2026-06-23 추가, 2026-09-07 5대장주→S7 교체)
     # ============================================================
     def _check_megacap_dip_buy(self, psbl_cash: int):
         """
-        삼성전자/SK하이닉스/삼성전기/SK스퀘어/현대차 — 5대장주 중
-        최근 10일 최고가 대비 -15% 이상 하락한 종목이 있으면 1개 매수.
+        삼성전자/SK하이닉스/SK스퀘어/삼성전자우/삼성전기/삼성생명/삼성물산
+        + 현대차 — S7(MEGA_CAP_CODES) 중 최근 10일 최고가 대비 -15% 이상
+        하락한 종목이 있으면 1개 매수.
         기존 MAX_POSITIONS 슬롯과는 완전히 별개(전용 1슬롯).
         매수 후에는 일반 positions/peak_tracker에 합류시켜
         기존 ATR 추세추종(_check_all_sells)이 그대로 관리하게 함.
         """
-        # 이미 5대장주 중 보유중인 종목이 있으면 스킵 (전용슬롯 1개)
+        # 이미 S7 중 보유중인 종목이 있으면 스킵 (전용슬롯 1개)
         held_megacaps = [c for c in MEGA_CAP_CODES if c in self.positions]
         if held_megacaps:
             return
@@ -1903,7 +1910,7 @@ class SBot:
                 if drop_rate <= MEGA_CAP_DROP_THRESHOLD:
                     candidates.append((drop_rate, code, name, current, mdata))
             except Exception as e:
-                print(f"⚠️ 5대장주 {name} 조회 오류: {e}")
+                print(f"⚠️ S7 {name} 조회 오류: {e}")
                 continue
 
         if not candidates:
@@ -1915,18 +1922,18 @@ class SBot:
 
         amount = min(MEGA_CAP_BUY_AMT, psbl_cash)
         if amount < current:
-            print(f"⏭️ 5대장주 {name} 패스 — 예산({amount:,}) < 주가({current:,.0f})")
+            print(f"⏭️ S7 {name} 패스 — 예산({amount:,}) < 주가({current:,.0f})")
             return
 
         ok, orgno, odno, qty = self.api.buy(code, current, amount, {code: name})
         if not ok or qty <= 0:
-            print(f"❌ 5대장주 매수 실패: {name}")
+            print(f"❌ S7 매수 실패: {name}")
             return
 
-        print(f"🛒 [5대장주 급락매수] {name}({code}) | 10일최고대비:{drop_rate:+.1%} | "
+        print(f"🛒 [S7 급락매수] {name}({code}) | 10일최고대비:{drop_rate:+.1%} | "
               f"{qty}주 @ {current:,.0f}")
         self._notify(
-            f"🛒 [5대장주 급락매수] {name}\n"
+            f"🛒 [S7 급락매수] {name}\n"
             f"10일 최고가 대비: {drop_rate:+.1%}\n"
             f"{qty}주 @ {current:,.0f}원",
             critical=True,
@@ -1951,21 +1958,21 @@ class SBot:
         #   이 경로는 DB 저장/master_positions 등록/buy_context 생성을
         #   전부 빼먹고 있었음. 나중에 이 종목이 팔릴 때 AI점수/매수사유
         #   없이 기록되고 대시보드에도 매수시점이 안 잡히는 문제 → 추가.
-        _ai_reason = f"5대장주급락매수(10일최고대비{drop_rate:+.1%})"
+        _ai_reason = f"S7급락매수(10일최고대비{drop_rate:+.1%})"
         self.buy_context[code] = {
             "ai_score": 0, "ai_reason": _ai_reason, "stock_name": name,
         }
         self.db.save_buy(
             code=code, buy_price=current, qty=qty,
             ai_score=0, ai_reason=_ai_reason,
-            stock_name=name, buy_tag="5대장주",
+            stock_name=name, buy_tag="S7",
         )
         if _master_upsert:
             try:
                 _master_upsert(
                     bot_type='sbot', code=code, stock_name=name,
                     entry_price=current, current_price=current, qty=qty,
-                    buy_time=now_hms(), buy_tag="5대장주", ai_score=0,
+                    buy_time=now_hms(), buy_tag="S7", ai_score=0,
                 )
             except Exception as _e:
                 print(f'⚠️ master_positions upsert 오류: {_e}')
