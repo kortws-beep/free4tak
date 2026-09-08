@@ -382,7 +382,7 @@ class SBot:
     # 알림
     # ============================================================
     def _notify(self, msg: str, critical: bool = False):
-        self.notifier.send(f"[SWING] {msg}", critical=critical)
+        self.notifier.send(f"[SBOT] {msg}", critical=critical)
 
     def _name(self, code: str) -> str:
         return self.code_name_map.get(code, code)
@@ -1312,12 +1312,11 @@ class SBot:
     # ============================================================
     def run(self):
         self._notify(
-            f"🚀 [영암9 SWING] 스윙봇 가동\n"
+            f"🚀 [영암9 SWING1] 스윙봇 가동\n"
             f"⏰ {now_kst().strftime('%Y-%m-%d %H:%M:%S')}\n"
             f"💰 1차:{fmt_won(BUY_1ST_AMT_BASE)} / 최대 {MAX_POSITIONS}종목\n"
             f"🎯 ATR×3 목표가 상향추종 | 손절:ATR×2 | 1차달성시 50%매도+상향\n"
-            f"⏳ 매수: {BUY_START_TIME} 이후\n"
-            f"⛔ 단타 제외: {SKIP_COND_KEYWORDS}",
+            f"⏳ 매수: {BUY_START_TIME} 이후",
             critical=True,
         )
         self._is_paused = False

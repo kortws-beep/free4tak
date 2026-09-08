@@ -384,7 +384,7 @@ class CBot:
     # ============================================================
     def notify(self, msg: str, critical: bool = False):
         """디스코드 알림 (critical=True면 5회 재시도)"""
-        self.notifier.send(f"[COIN] {msg}", critical=critical)
+        self.notifier.send(f"[CBOT] {msg}", critical=critical)
 
     # ============================================================
     # JWT 인증 (검증된 방식 그대로)

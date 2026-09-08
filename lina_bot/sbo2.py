@@ -76,18 +76,16 @@ except ImportError:
     _master_record = _master_upsert = _master_remove = None
     print("⚠️ master_db 없음 → 통합 이력 비활성")
 
+# ★ 2026-09-09: 기존엔 DISCORD_WEBHOOK_URL로 직접 웹훅 전송 — "Spidey Bot"
+#   이라는 이름으로 sbot/cbot(키키 봇토큰, DM으로 감)과 전혀 다른 채널
+#   (free4tak서버 "일반")에 알림이 갔음. 대장이 sbot/cbot 알림은 DM으로
+#   받고 있는데 sbo2만 서버 채널로 가서 놓치고 있었던 것으로 확인돼,
+#   sbot/cbot과 동일한 Notifier(키키 봇토큰 → DM)로 통일.
 try:
-    import requests as _req
-    DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK_URL", "")
+    from notifier import Notifier
+    _notifier = Notifier(name="sbo2")
     def _notify(msg: str, critical: bool = False):
-        if not DISCORD_WEBHOOK:
-            print(f"[알림] {msg}")
-            return
-        prefix = "🚨 " if critical else "📢 "
-        try:
-            _req.post(DISCORD_WEBHOOK, json={"content": f"{prefix}{msg}"}, timeout=5)
-        except Exception as e:
-            print(f"⚠️ 디스코드 알림 오류: {e}")
+        _notifier.send(f"[SBO2] {msg}", critical=critical)
 except Exception:
     def _notify(msg, critical=False): print(f"[알림] {msg}")
 
@@ -2297,7 +2295,17 @@ class Sbo2:
             print(f"⚠️ 실계좌 동기화 오류: {e}")
 
     def run(self):
-        _notify("🤖 [sbo2] 리나 스윙봇 시작!", critical=True)
+        # ★ 2026-09-09: sbot과 동일한 형식으로 통일(대장 요청) — 숫자는
+        #   sbo2 실제 설정값 그대로(최대 4종목, 목표1 ATR×2.0 — 08-17
+        #   튜닝 결과, sbot의 ATR×3와 다름).
+        _notify(
+            f"🚀 [영암9 SWING2] 스윙봇 가동\n"
+            f"⏰ {now_kst().strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"💰 1차:{BASE_BUY_AMT:,}원 / 최대 {MAX_POSITIONS}종목\n"
+            f"🎯 ATR×2 목표가 상향추종 | 손절:ATR×2 | 1차달성시 50%매도+상향\n"
+            f"⏳ 매수: {BUY_START_TIME} 이후",
+            critical=True,
+        )
         print("\n" + "=" * 50)
         print("🤖 [sbo2] 리나 스윙봇 시작")
         print(f"   시드: {SEED_MONEY:,}원 | 1종목: {BASE_BUY_AMT:,}원 | 최대: {MAX_POSITIONS}종목")
