@@ -75,6 +75,12 @@ from sector_monitor import detect_baton_touch, DB_PATH as SECTOR_DB_PATH
 
 CONDITION_KEYWORDS = ["단타000", "장개장직후", "5본봉", "주도주"]
 MAX_CANDIDATES_TO_LLM = 25   # 프롬프트 비대화 방지 — 조회순 상위 N개만 넘김
+# ★ 2026-09-09: 대장 지적 — 실전 참고용이라 이미 15% 넘게 오른 종목은
+#   추격매수 리스크가 커서 제외해야 함. AI 지시만으로는 놓칠 수 있어
+#   코드에서 확정적으로 필터링(프롬프트 지시가 아니라 후보 자체를 제거).
+MAX_CHANGE_RATE_PCT = 15.0
+TELEGRAM_DB_PATH = os.path.join(_here, "telegram_events.db")
+TELEGRAM_LOOKBACK_HOURS = 6
 STATE_FILE = os.path.join(_here, "day_trade_scout_state.json")
 BATON_ACCEL_THRESHOLD = 30.0  # detect_baton_touch의 "급가속" 기준과 동일(재확인용)
 
@@ -149,15 +155,54 @@ def _gather_candidates() -> list:
     return [(c, code_name_map.get(c, c), code_tag_map.get(c, "")) for c in codes]
 
 
+def _search_telegram_mentions(stock_name: str) -> str:
+    """
+    ★ 2026-09-09: get_stock_event_bonus()는 telegram_monitor.py가 이미
+    가공해둔 stock_event_bonus 테이블만 보는데, 이 테이블은 sbot/nbot용
+    테마 매칭 기준이라 여기 후보(단타 검색식)와는 안 걸리는 경우가
+    많음(대장 지적 — "텔레그램/공시 근거 없음"이 계속 뜸). 원본
+    telegram_events에서 종목명으로 직접 LIKE 검색해서 보강.
+    """
+    try:
+        conn = sqlite3.connect(TELEGRAM_DB_PATH, timeout=5)
+        conn.execute("PRAGMA query_only=ON")
+        cutoff = (datetime.datetime.now() -
+                  datetime.timedelta(hours=TELEGRAM_LOOKBACK_HOURS)).strftime("%Y-%m-%d %H:%M:%S")
+        rows = conn.execute("""
+            SELECT message FROM telegram_events
+            WHERE message LIKE ? AND created_at >= ?
+            ORDER BY created_at DESC LIMIT 2
+        """, (f"%{stock_name}%", cutoff)).fetchall()
+        conn.close()
+        if not rows:
+            return ""
+        snippets = [r[0][:60].replace("\n", " ") for r in rows]
+        return " / ".join(snippets)
+    except Exception as e:
+        print(f"⚠️ 텔레그램 검색 오류({stock_name}): {e}")
+        return ""
+
+
 def _enrich(candidates: list, kis: KisAPI) -> list:
-    """각 후보에 현재가/등락률/거래량 + 텔레그램·공시 가산점 붙이기."""
+    """각 후보에 현재가/등락률/거래량 + 텔레그램·공시 가산점 붙이기.
+    ★ 2026-09-09: 등락률 MAX_CHANGE_RATE_PCT(15%) 초과 종목은 추격매수
+    리스크가 커서(대장 지적) 여기서 확정적으로 제외 — AI 프롬프트
+    지시만으로는 놓칠 수 있어 코드 필터로 강제."""
     enriched = []
     for code, name, cond_name in candidates:
         mdata = kis.get_market_data(code) or {}
         price  = mdata.get("stck_prpr", "0")
         chg    = mdata.get("prdy_ctrt", "0")
         vol    = mdata.get("acml_vol", "0")
+        try:
+            if float(chg) > MAX_CHANGE_RATE_PCT:
+                print(f"   ⏭️ {name}({code}) 등락률 {chg}% > {MAX_CHANGE_RATE_PCT}% — 제외")
+                continue
+        except (TypeError, ValueError):
+            pass
         bonus, reason = get_stock_event_bonus(code, bot_type="sbot")
+        if not reason:
+            reason = _search_telegram_mentions(name)
         enriched.append({
             "code": code, "name": name, "cond": cond_name,
             "price": price, "chg": chg, "vol": vol,
@@ -191,12 +236,16 @@ def _build_prompt(enriched: list) -> str:
 
 
 def _call_claude(prompt: str) -> str:
+    # ★ 2026-09-09: 소넷5가 thinking에 토큰을 먼저 소모해 본문(종목 5개
+    #   상세분석)이 중간에 잘리는 사고 발생(대장 발견 — "짤렸다") —
+    #   lina_bot의 동일 사고([[project_sonnet5_thinkingblock_bug]])와
+    #   같은 패턴. max_tokens 1200→2000으로 상향.
     import anthropic
     from common_utils import extract_claude_text
     client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
     res = client.messages.create(
         model=os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5"),
-        max_tokens=1200,
+        max_tokens=2000,
         messages=[{"role": "user", "content": prompt}],
     )
     return extract_claude_text(res)
