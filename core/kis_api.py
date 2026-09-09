@@ -263,7 +263,15 @@ class KisAPI:
                         print(f'⚠️ 포지션 제외 (ETF/기타): {code} {name}')
                         continue
                     avg  = float(item.get("pchs_avg_pric", 0))
-                    pos[code] = {"entry_price": avg, "qty": qty}
+                    # ★ 2026-09-09: prdt_name(한투가 실시간으로 주는 정확한
+                    #   종목명)을 ETF필터링에만 쓰고 버리고 있었음 — sbo2가
+                    #   신규/수동매수 포지션 입양 시 이 이름을 못 받아서
+                    #   로컬 DB(kr_theme_finance.db) 폴백만 타는데, 거기
+                    #   없는 종목(448900 실사례)은 코드 그대로 표시되는
+                    #   문제로 발견(대장 지적 — 상태로그에 이름 대신 코드만
+                    #   찍힘). 한투 API가 이미 정확한 이름을 주고 있으니
+                    #   그대로 반환값에 포함.
+                    pos[code] = {"entry_price": avg, "qty": qty, "name": name}
 
                 # ★ rt_cd=="0"(API 정상응답) → pos가 비어도 "진짜 0종목"으로 확정, 캐시 갱신
                 self._pos_cache = pos

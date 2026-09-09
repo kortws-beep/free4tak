@@ -2223,10 +2223,13 @@ class Sbo2:
                                   f"({old_entry:,.0f}→{new_entry:,.0f}) — 손절/목표 재계산 "
                                   f"(손절:{existing['stop_price']:,.0f} "
                                   f"목표:{existing['tgt_price']:,.0f})")
-                    # 종목명이 코드 그대로면 DB에서 다시 조회
+                    # 종목명이 코드 그대로면 재조회 — 한투 실계좌 잔고(rdata,
+                    # 방금 kis_api.py 수정으로 이제 name을 줌)를 먼저 쓰고,
+                    # 그래도 없으면 로컬 DB로 폴백(2026-09-09, 448900 실사례로
+                    # "코드가 그대로 이름 자리에 뜸" 문제 발견 후 수정)
                     cur_name = existing.get("name", code)
                     if cur_name == code:
-                        cur_name = get_stock_name(code)
+                        cur_name = rdata.get("name", "") or get_stock_name(code)
                     existing["name"] = cur_name
                     updated[code] = existing
                 else:

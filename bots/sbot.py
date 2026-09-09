@@ -1673,6 +1673,18 @@ class SBot:
                     #   메모리 포지션을 그대로 유지 — 위 가드 스킵과 짝을 이룸.
                     for _code, _pos in _guarded_positions.items():
                         self.positions.setdefault(_code, _pos)
+                    # ★ 2026-09-09: sbot의 self._name()은 code_name_map만 보는데
+                    #   (키움 조건검색으로만 채워짐), 이건 조건검색에 안 걸린
+                    #   수동매수/장기보유 종목은 화면에 코드 그대로 표시되는
+                    #   원인이었음(sbo2의 448900 실사례로 발견 — kis_api.py
+                    #   get_current_positions()가 한투 실시간 이름(prdt_name)을
+                    #   버리고 있던 게 근본원인, 그건 core에서 수정). 여기서도
+                    #   실계좌 데이터의 이름을 code_name_map에 반영해 화면에
+                    #   반영되게 함.
+                    for _code, _pos in self.positions.items():
+                        _real_name = _pos.get("name", "")
+                        if _real_name and _real_name != _code:
+                            self.code_name_map[_code] = _real_name
                 psbl_cash      = self.api.get_psbl_order_cash("005930")
                 if psbl_cash <= 0:
                     psbl_cash = cash
