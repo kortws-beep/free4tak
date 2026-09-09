@@ -2318,6 +2318,16 @@ class Sbo2:
             try:
                 now_t = now_hhmm()
 
+                # ★ 2026-09-09: heartbeat 갱신도 주말/휴장/장외 continue보다
+                #   먼저 실행해야 함 — 예전엔 "장외 시간" continue 뒤에만
+                #   있어서, 20시 넘으면 이 줄까지 아예 도달을 못 해
+                #   heartbeat가 밤새 하나도 안 찍혔음. heartbeat watchdog
+                #   (300초 무갱신시 강제재시작)이 이걸 "죽었다"고 오판해서
+                #   매일 밤 20:05 전후로 sbo2가 자동 재시작당하고 있었음
+                #   (실제 장애 아님, 대장이 로그 보고 발견). sbot과 완전히
+                #   동일한 버그, 토큰갱신 때와도 같은 패턴.
+                pathlib.Path(HB_FILE).touch()
+
                 # ★ 2026-09-07: sbo2는 이 토큰갱신 호출 자체가 아예 없었음
                 #   (sbot엔 있었는데 이식이 안 됐던 항목) — 장기간 무재시작
                 #   실행 시 KIS 토큰이 24시간 지나면 자연만료되는데 갱신
@@ -2369,9 +2379,6 @@ class Sbo2:
                     continue
 
                 print(f"\n⏰ [{now_hms()}] 루프 실행")
-
-                # ── Heartbeat 기록 ────────────────────────
-                pathlib.Path(HB_FILE).touch()
 
                 # ★ 실계좌 동기화 (매 루프) — sbot 방식과 동일
                 self._sync_real_positions()

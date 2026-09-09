@@ -1429,6 +1429,17 @@ class SBot:
                 now_t = now_hhmm()
                 now   = now_hms()
 
+                # ★ 2026-09-09: heartbeat 갱신도 주말/휴장/장외 continue보다
+                #   먼저 실행해야 함 — 예전엔 "장외 대기" continue 뒤(정규장
+                #   진입 후)에만 있어서, 20시 넘으면 이 줄까지 아예 도달을
+                #   못 해 heartbeat가 밤새 하나도 안 찍혔음. heartbeat
+                #   watchdog(30초 주기, 300초 무갱신시 강제재시작)이 이걸
+                #   "죽었다"고 오판해서 매일 밤 20:05 전후로 sbot이 자동
+                #   재시작당하고 있었음(실제 장애 아님, 대장이 로그 보고
+                #   발견 — "20:05분에 재기동 루틴 있니?"). 토큰갱신 때와
+                #   똑같은 구조의 버그.
+                pathlib.Path(HB_FILE).touch()
+
                 # ★ 2026-09-07: 토큰 갱신도 주말/휴장/장외 continue보다
                 #   먼저 실행해야 함 — 예전엔 아래쪽(계좌 조회 직전)에
                 #   있어서, 심야에 "장외 대기" continue에 매 루프 걸리면
@@ -1479,9 +1490,6 @@ class SBot:
                     time.sleep(300); continue
 
                 print(f"\n📈 [SWING] {'정규장' if is_reg else '장전/후 매도체크'} [{now}]")
-
-                # ── Heartbeat 기록 ────────────────────────
-                pathlib.Path(HB_FILE).touch()
 
                 st              = _read_state()
                 self._is_paused = st.get("paused", False)
