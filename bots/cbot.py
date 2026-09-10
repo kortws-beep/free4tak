@@ -1678,7 +1678,10 @@ class CBot:
                 '{"score": 70, "reason": "이유 한 줄"}'
             )
             res = self.llm.messages.create(
-                model=self.model, max_tokens=128,
+                # ★ 2026-09-10: 128은 reason이 조금만 길어져도 JSON이 중간에
+                #   잘려서 파싱실패→"AI 회피 신호"로 오판되는 버그가 있었음
+                #   (로그에서 22회 확인). 여유있게 올려서 재발 방지.
+                model=self.model, max_tokens=256,
                 messages=[{"role": "user", "content": prompt}],
             )
             text  = extract_claude_text(res)
