@@ -1841,13 +1841,17 @@ class SBot:
                     self._save_status(cash, total_profit, score_enter, now, pos_mkt_cache)
                     time.sleep(LOOP_SLEEP); continue
 
-                codes = self._get_pool()
-                if not codes:
-                    print("⚠️ 종목 풀 없음")
-                    time.sleep(LOOP_SLEEP); continue
-
                 # ── 분석 + 매수 ───────────────────────────
-                # ★ 슬롯 없으면 신규 분석 스킵 (캐시는 유지)
+                # ★ 2026-09-10: 슬롯/자금 부족 판단을 키움 조건검색(_get_pool)
+                #   호출보다 먼저 하도록 순서 변경 — 기존엔 포지션이 풀(5/5)
+                #   이라 신규 분석을 어차피 스킵할 상황에서도 매 루프
+                #   _get_pool()을 그대로 호출하고 있었음. 이 호출이 키움
+                #   조건검색 4개를 순서대로 조회하는데, 타임아웃 나면
+                #   재시도(최대 65초×3회)까지 겹쳐서 루프 하나가 몇 분씩
+                #   걸릴 수 있음 — 대장이 "포지션 풀인데 계속 검색하네,
+                #   멈춘 것처럼 보인다"고 신고해서 발견. 슬롯/자금 없으면
+                #   애초에 조회할 필요가 없으므로 그 경우엔 호출 자체를
+                #   건너뜀.
                 익절중 = sum(
                     1 for c in self.positions
                     if self.peak_tracker.get(c, {}).get("stage", 0) >= 1
@@ -1856,12 +1860,16 @@ class SBot:
                 보너스 = 익절중 if psbl_cash >= 1_000_000 else 0
                 avail_slots = MAX_POSITIONS - len(self.positions) + 보너스
                 if avail_slots <= 0:
-                    print(f"⛔ 슬롯 없음 ({len(self.positions)}/{MAX_POSITIONS}) — 신규 분석 스킵")
+                    print(f"⛔ 슬롯 없음 ({len(self.positions)}/{MAX_POSITIONS}) — 종목검색/신규분석 스킵")
                 elif psbl_cash < MIN_ANALYSIS_CASH:
                     print(f"💰 주문가능({psbl_cash:,}원) < 최소기준({MIN_ANALYSIS_CASH:,}원) "
-                          f"— 신규 분석 스킵")
+                          f"— 종목검색/신규분석 스킵")
                 else:
-                    self._run_analysis(codes, now_t, score_enter, psbl_cash)
+                    codes = self._get_pool()
+                    if not codes:
+                        print("⚠️ 종목 풀 없음")
+                    else:
+                        self._run_analysis(codes, now_t, score_enter, psbl_cash)
 
                 # ── S7 급락 매수 (30분마다, 정규장 중) ──
                 if (is_buy_ok and
