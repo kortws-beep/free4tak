@@ -165,6 +165,18 @@ ATR_TARGET_MULT  = 3.0    # 목표: 매수가 + ATR × 3
 ATR_RAISE_MULT   = 1.0    # 목표1 달성 후 손절: 매수가 + ATR × 1
 ATR_TRAIL_MULT   = 1.5    # 트레일링: 고점 - ATR × 1.5
 
+# ★ 2026-09-12: stage0 조기 부분익절 — 목표1 "가격"(보통 ATR×3, +15~20%대)
+#   도달 전이라도 수익률이 STAGE0_PARTIAL_THRESHOLD를 넘으면 목표1때와
+#   동일하게 50% 매도 + stage1 승격(손절↑/목표재설정). 백테스트(4/6~9/12,
+#   159일)로 검증: 전량 트레일링은 큰 승자를 잘라먹어 명확히 역효과
+#   (+71.41%→+10.76%)였지만, 절반만 챙기는 부분익절은 손해가 작음
+#   (+71.41%→+69.14%, -2.3%p) — 대장이 "작은 손해는 감수하고 적용"으로
+#   결정. 부수효과로 stage>=1(익절중) 코인이 늘어나 08-22에 만든
+#   "익절슬롯반환"(50만원 이상일 때만 4번째 슬롯 허용) 보너스가 더 자주
+#   발동하게 됨 — 별도로 MAX_POSITIONS을 늘리지 않아도 요청한 "여유자금
+#   생기면 슬롯 하나 더" 동작이 기존 로직으로 그대로 충족됨.
+STAGE0_PARTIAL_THRESHOLD = 0.10
+
 # 폴백 (ATR 없을 때)
 FALLBACK_STOP    = -0.07   # -7%
 FALLBACK_TARGET  = 0.15    # +15%
@@ -1971,6 +1983,29 @@ class CBot:
                              sell_price=current, force_all=True):
                     self.peak_tracker.pop(market, None)
                 return
+
+        # ③-1 stage0 조기 부분익절 — 목표1 가격 도달 전이라도 수익률
+        #     기준(STAGE0_PARTIAL_THRESHOLD)을 채우면 목표1때와 동일하게
+        #     50%매도+stage1 승격 (백테스트 검증, 상단 주석 참고)
+        if stage == 0 and rate >= STAGE0_PARTIAL_THRESHOLD:
+            half_qty = qty if qty * current <= MIN_ORDER_AMT * 2 else qty / 2
+            if half_qty > 0 and (qty - half_qty) * current >= MIN_ORDER_AMT:
+                if self.sell(market, half_qty, f"stage0조기익절50%({rate:+.2%})",
+                             sell_price=current, force_all=False):
+                    print(f"💰 stage0 조기 50%매도 {market} | {half_qty:.6f}개 @ {current:,.0f}")
+            new_stop   = round(entry + atr_val * ATR_RAISE_MULT, 0)
+            new_target = round(current + atr_val * ATR_TARGET_MULT, 0)
+            tracker["stop_price"]  = new_stop
+            tracker["target_next"] = new_target
+            tracker["stage"]       = 1
+            print(f"🎯 stage0 조기익절 {market} ({rate:+.2%}) | "
+                  f"손절↑:{new_stop:,.0f} | 새목표:{new_target:,.0f}")
+            self.notify(
+                f"🎯 조기익절(목표1 전) {market} ({rate:+.2%}) — 50%매도\n"
+                f"손절↑:{new_stop:,.0f} | 새목표:{new_target:,.0f}",
+                critical=False,
+            )
+            return
 
         # ④ 목표가 달성 → 손절/목표가 상향 (매도 안 함) ────
         if target_next > 0 and current >= target_next:
