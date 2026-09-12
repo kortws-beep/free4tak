@@ -197,7 +197,7 @@ MEGA_CAP_CODES = {
     "028260": "삼성물산",
     "005380": "현대차",
 }
-MEGA_CAP_DROP_THRESHOLD = -0.15   # 10일 최고가 대비 -15%
+MEGA_CAP_DROP_THRESHOLD = -0.10   # 10일 최고가 대비 -10% (★2026-09-12: -15%→-10%, 대장 결정 — 너무 과도해서 거의 발동 안 함)
 MEGA_CAP_LOOKBACK_DAYS  = 10
 MEGA_CAP_BUY_AMT        = 1_000_000
 MEGA_CAP_CHECK_INTERVAL = 1800    # 30분마다 체크
