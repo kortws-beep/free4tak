@@ -148,6 +148,14 @@ class CBotBacktestConfig:
     stage0_trail_threshold: float = STAGE0_TRAIL_THRESHOLD
     stage0_trail_pct: float       = STAGE0_TRAIL_PCT
 
+    # ★ 2026-09-12: stage0 조기 부분익절 실험(사용자 제안) — 트레일링(전량
+    #   기준)은 부정적으로 나왔지만, 목표1 가격 도달 전이라도 %수익 기준
+    #   충족시 목표1때와 동일한 메커니즘(50%매도+stage1 승격)을 조기발동.
+    #   승자를 전량 잘라내는 트레일링과 달리 절반만 챙기고 나머지는 계속
+    #   태울 수 있어 다른 결과가 나올 수 있음.
+    enable_stage0_partial: bool = False
+    stage0_partial_threshold: float = 0.10
+
 
 # ============================================================
 # 백테스트 엔진
@@ -414,22 +422,24 @@ class CBotBacktestEngine:
                                f"급락감지({ind['candle_rate']:+.2%})", date_str)
             return
 
-        # ② 손절가 이탈 (stage0 수익보호 트레일링 실험 반영)
+        # ② 손절가 이탈 — stage 0 전용 (stage0 수익보호 트레일링 실험 반영)
+        # ★ 2026-09-12: stage>=1은 목표 달성마다 stop_price가 그 목표가로
+        #   바로 승격돼 트레일링(peak-ATR×1.5)보다 타이트해지는 문제 발견
+        #   (실전 bots/cbot.py와 동일 수정) — stage>=1부터는 ③ 트레일링만
+        #   매도판단에 쓰고, stop_price는 계속 올리되 기록용으로만 남김.
         effective_stop = stop_price
         used_stage0_trail = False
-        if (self.config.enable_stage0_trail and stage == 0
-                and tracker["peak_rate"] >= self.config.stage0_trail_threshold):
-            trail_stop = peak_price * (1 - self.config.stage0_trail_pct)
-            if trail_stop > effective_stop:
-                effective_stop = trail_stop
-                used_stage0_trail = True
-        if current <= effective_stop:
-            if used_stage0_trail:
-                label = "stage0트레일링"
-            else:
-                label = "손절" if stage == 0 else f"손절(stage{stage})"
-            self._simulate_sell(market, qty, current, f"{label}({rate:+.2%})", date_str)
-            return
+        if stage == 0:
+            if (self.config.enable_stage0_trail
+                    and tracker["peak_rate"] >= self.config.stage0_trail_threshold):
+                trail_stop = peak_price * (1 - self.config.stage0_trail_pct)
+                if trail_stop > effective_stop:
+                    effective_stop = trail_stop
+                    used_stage0_trail = True
+            if current <= effective_stop:
+                label = "stage0트레일링" if used_stage0_trail else "손절"
+                self._simulate_sell(market, qty, current, f"{label}({rate:+.2%})", date_str)
+                return
 
         # ②-1 보유기한 초과 (stage==0, 25일)
         if stage == 0:
@@ -485,6 +495,21 @@ class CBotBacktestEngine:
             if current <= trail_stop:
                 self._simulate_sell(market, qty, current, f"{label}({rate:+.2%})", date_str)
                 return
+
+        # ③-1 stage0 조기 부분익절 (실험) — 목표1 "가격" 도달 전이라도 %수익
+        #     기준을 채우면 목표1때와 동일하게 50%매도+stage1 승격
+        if (self.config.enable_stage0_partial and stage == 0
+                and rate >= self.config.stage0_partial_threshold):
+            half_qty = qty if qty * current <= MIN_ORDER_AMT * 2 else qty / 2
+            if half_qty > 0 and (qty - half_qty) * current >= MIN_ORDER_AMT:
+                self._simulate_sell(market, half_qty, current,
+                                   f"stage0조기익절50%({rate:+.2%})", date_str)
+            new_stop   = entry + atr_val * ATR_RAISE_MULT
+            new_target = current + atr_val * ATR_TARGET_MULT
+            tracker["stop_price"]  = new_stop
+            tracker["target_next"] = new_target
+            tracker["stage"]       = 1
+            return
 
         # ④ 목표가 달성 → 손절/목표가 상향 (목표1은 50%매도)
         if target_next > 0 and current >= target_next:

@@ -1924,15 +1924,20 @@ class CBot:
                 self._check_daily_loss_limit()
             return
 
-        # ② 손절가 이탈 — ATR 기반 손절가로 통일 ──────────
-        if current <= stop_price and not is_held:
-            label = "손절" if stage == 0 else f"손절(stage{stage})"
+        # ② 손절가 이탈 — ATR 기반 손절가 (stage 0 전용) ──────
+        # ★ 2026-09-12: stage>=1은 목표 달성마다 stop_price가 그 목표가로
+        #   바로 승격돼(거의 현재가에 붙음) 트레일링(peak-ATR×1.5)보다
+        #   훨씬 타이트해지는 문제 발견(대장 지적) — 목표 찍자마자 살짝만
+        #   눌려도 트레일링이 작동할 틈 없이 여기서 먼저 잘림. stage>=1부터는
+        #   stop_price는 계속 올려서 기록/최종 안전판으로만 남기고, 실제
+        #   매도판단은 ③ 트레일링에만 맡긴다(stage==0일 때만 이 체크 사용).
+        if stage == 0 and current <= stop_price and not is_held:
             self.notify(
-                f"🛑 {label} {market} | {rate:+.2%}\n"
+                f"🛑 손절 {market} | {rate:+.2%}\n"
                 f"현재:{current:,.0f} ≤ 손절:{stop_price:,.0f} | 시장:{self.market_status}",
                 critical=True,
             )
-            if self.sell(market, qty, f"{label}({rate:+.2%})",
+            if self.sell(market, qty, f"손절({rate:+.2%})",
                          sell_price=current, force_all=True):
                 self.daily_loss_count += 1
                 self.peak_tracker.pop(market, None)
