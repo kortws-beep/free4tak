@@ -82,6 +82,15 @@ STAGNANT_HOURS         = 24
 STAGNANT_PROFIT_CAP    = 0.02   # 2% 미만(0~1.999999%)
 STAGNANT_VOL_RATIO_MAX = 1.0    # 최근 거래량이 20봉 평균 밑이면 "관심밖"으로 판단
 
+# ★ 2026-09-12: "stage0 수익보호 트레일링" 실험(사용자 관찰) — 트레일링
+#   스탑이 stage>=1(목표1 달성 후)부터만 작동해서, 목표1 도달 전에 이미
+#   +10%대 찍었다가 급락감지(10분 롤링창)엔 안 걸릴 만큼 서서히 흘러내려
+#   원래(진입가 근처) 손절가까지 그대로 반납하는 사례 발견(KRW-ETHFI
+#   +12.1%로 관찰). stage 0이라도 peak_rate가 임계치를 넘으면 고점 대비
+#   트레일링을 원래 손절가와 비교해 더 타이트한(높은) 쪽을 적용.
+STAGE0_TRAIL_THRESHOLD = 0.10   # 이 수익률 이상 찍어야 활성화
+STAGE0_TRAIL_PCT       = 0.05   # 고점 대비 -5%
+
 
 # ============================================================
 # 거래 기록
@@ -134,6 +143,10 @@ class CBotBacktestConfig:
     enable_pct_trail_ensemble: bool = False  # ★ 2026-09-03: %하드 트레일링 앙상블 실험 on/off
     pct_trail_threshold: float = PCT_TRAIL_PROFIT_THRESHOLD
     pct_trail_pct: float       = PCT_TRAIL_PCT
+
+    enable_stage0_trail: bool = False  # ★ 2026-09-12: stage0 수익보호 트레일링 실험 on/off
+    stage0_trail_threshold: float = STAGE0_TRAIL_THRESHOLD
+    stage0_trail_pct: float       = STAGE0_TRAIL_PCT
 
 
 # ============================================================
@@ -401,9 +414,20 @@ class CBotBacktestEngine:
                                f"급락감지({ind['candle_rate']:+.2%})", date_str)
             return
 
-        # ② 손절가 이탈
-        if current <= stop_price:
-            label = "손절" if stage == 0 else f"손절(stage{stage})"
+        # ② 손절가 이탈 (stage0 수익보호 트레일링 실험 반영)
+        effective_stop = stop_price
+        used_stage0_trail = False
+        if (self.config.enable_stage0_trail and stage == 0
+                and tracker["peak_rate"] >= self.config.stage0_trail_threshold):
+            trail_stop = peak_price * (1 - self.config.stage0_trail_pct)
+            if trail_stop > effective_stop:
+                effective_stop = trail_stop
+                used_stage0_trail = True
+        if current <= effective_stop:
+            if used_stage0_trail:
+                label = "stage0트레일링"
+            else:
+                label = "손절" if stage == 0 else f"손절(stage{stage})"
             self._simulate_sell(market, qty, current, f"{label}({rate:+.2%})", date_str)
             return
 

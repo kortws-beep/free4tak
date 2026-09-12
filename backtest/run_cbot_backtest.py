@@ -28,6 +28,12 @@ def get_cbot_scenarios(base: CBotBacktestConfig) -> list:
         {"name": "보수적(임계치65)", "config": {**base.__dict__, "buy_score_min": 65}},
         {"name": "엄격(임계치75)",   "config": {**base.__dict__, "buy_score_min": 75}},
         {"name": "포지션확대(max=5)", "config": {**base.__dict__, "max_positions": 5}},
+        # ★ 2026-09-12: stage0 수익보호 트레일링 실험 — 임계치(몇% 찍어야
+        #   활성화)와 트레일폭(고점 대비 몇% 하락시 매도)을 조합 스윕
+        {"name": "stage0트레일(8%/4%)",  "config": {**base.__dict__, "enable_stage0_trail": True, "stage0_trail_threshold": 0.08, "stage0_trail_pct": 0.04}},
+        {"name": "stage0트레일(10%/5%)", "config": {**base.__dict__, "enable_stage0_trail": True, "stage0_trail_threshold": 0.10, "stage0_trail_pct": 0.05}},
+        {"name": "stage0트레일(10%/3%)", "config": {**base.__dict__, "enable_stage0_trail": True, "stage0_trail_threshold": 0.10, "stage0_trail_pct": 0.03}},
+        {"name": "stage0트레일(12%/6%)", "config": {**base.__dict__, "enable_stage0_trail": True, "stage0_trail_threshold": 0.12, "stage0_trail_pct": 0.06}},
     ]
 
 
