@@ -125,8 +125,12 @@ class CBotBacktestConfig:
 
     ai_score_mode:   str   = "rule_proxy"  # AI 호출 불가 → 룰점수 사용
     verbose:         bool  = False
-    enable_stagnant_rotation: bool = False  # ★ 2026-08-30: 정체 로테이션 실험 on/off
-    stagnant_hours: int = STAGNANT_HOURS    # ★ 실험용 — 24h이 큰 상승 초입까지 잘라내는 사례가 있어 조정 테스트
+    # ★ 2026-09-12: 실전 cbot.py는 08-30 트라이얼 이후 계속
+    #   ENABLE_STAGNANT_ROTATION=True/STAGNANT_DAYS=4(96h)로 운영 중인데
+    #   백테스터 기본값은 꺼짐+24h로 실전과 어긋나 있었음(발견/수정) —
+    #   "기본" 시나리오가 실전을 정확히 재현하도록 실전값으로 동기화.
+    enable_stagnant_rotation: bool = True
+    stagnant_hours: int = 96
     enable_pct_trail_ensemble: bool = False  # ★ 2026-09-03: %하드 트레일링 앙상블 실험 on/off
     pct_trail_threshold: float = PCT_TRAIL_PROFIT_THRESHOLD
     pct_trail_pct: float       = PCT_TRAIL_PCT

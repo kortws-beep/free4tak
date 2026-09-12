@@ -6,9 +6,11 @@ run_cbot_backtest.py — 코인봇 백테스트 실행 진입점
   python3 run_cbot_backtest.py --start 2026-04-06 --end 2026-05-09
 
 [주의]
-  coin_backtest.db 데이터가 약 33일치(4시간봉 200개)뿐이라
-  25일 보유기한 로직 검증은 샘플이 매우 적을 수 있음.
-  결과는 참고용으로만 활용.
+  coin_backtest.db는 backtestc/fetch_coin_data.py를 수동으로 돌려야
+  갱신됨(자동 스케줄 없음, 2026-09-12 기준 12일 정체 발견해 수동 갱신함).
+  한 번 호출당 4시간봉 200개(약 33일치)만 가져오지만, 여러 번 누적
+  실행하면 DB 전체 기간은 그보다 길어짐 — 실제 사용 가능 기간은
+  daily_ohlcv 테이블의 MIN/MAX date로 직접 확인할 것.
 """
 import os
 import sys
@@ -53,7 +55,7 @@ def run_one(name: str, config: CBotBacktestConfig, db_path: str) -> dict:
     }
 
 
-def print_cbot_summary(results: list):
+def print_cbot_summary(results: list, start_date: str = "", end_date: str = ""):
     print(f"\n\n{'=' * 70}")
     print("📊 [CBOT] 시나리오 비교")
     print('=' * 70)
@@ -86,7 +88,14 @@ def print_cbot_summary(results: list):
           f"승률: {bm.get('win_rate',0):.1f}% | "
           f"MDD: {bm.get('mdd',0):.2f}% | PF: {bm.get('profit_factor',0) or 0:.2f}")
 
-    print("\n  ⚠️ 데이터 기간이 짧아(약 33일) 참고용 결과입니다.")
+    if start_date and end_date:
+        days = (datetime.date.fromisoformat(end_date) - datetime.date.fromisoformat(start_date)).days
+        note = f"\n  ℹ️ 백테스트 기간: {start_date} ~ {end_date} ({days}일)"
+        if days < 60:
+            note += " — 기간이 짧아 참고용 결과입니다."
+        print(note)
+    else:
+        print("\n  ⚠️ 백테스트 기간 정보 없음 — 참고용 결과입니다.")
 
 
 def main():
@@ -143,7 +152,7 @@ def main():
         for sc in scenarios:
             cfg = CBotBacktestConfig(**sc["config"])
             results.append(run_one(sc["name"], cfg, args.db))
-        print_cbot_summary(results)
+        print_cbot_summary(results, args.start, end_date)
     else:
         result = run_one("단일(CBOT)", base_config, args.db)
         print()
