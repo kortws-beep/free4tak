@@ -1907,6 +1907,10 @@ class Sbo2:
                         pos["tgt_price"]   = new_target
                         pos["target_next"] = new_target
                         pos["stage"]       = 1
+                        # ★ 2026-09-12: 목표1 달성하면 홀드 자동 해제(대장 요청) —
+                        #   홀드는 "1차목표 전 손절 안 당하게" 걸어두는 용도였는데,
+                        #   목표를 이미 달성했으니 더 이상 걸어둘 이유가 없음.
+                        pos["hold"]        = False
                         self._save_state()
                         print(f"🎯 목표가1 달성 {code} ({rate:+.1f}%) | "
                               f"손절↑:{new_stop:,.0f} | 새목표:{new_target:,.0f}")

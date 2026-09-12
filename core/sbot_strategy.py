@@ -362,6 +362,10 @@ class SwingStrategy:
                     tracker["target_next"] = new_target
                     tracker["stage"]       = 1
                     tracker["half_sold"]   = True
+                    # ★ 2026-09-12: 목표1 달성하면 홀드 자동 해제(대장 요청) —
+                    #   홀드는 "1차목표 전 손절 안 당하게" 걸어두는 용도였는데,
+                    #   목표를 이미 달성했으니 더 이상 걸어둘 이유가 없음.
+                    tracker["hold"]        = False
                     print(f"🎯 목표가1 달성 {code} ({rate:+.2%}) | 50%매도:{sell_qty}주 | "
                           f"손절 상향:{new_stop:,.0f} | 새목표:{new_target:,.0f}")
                 else:
