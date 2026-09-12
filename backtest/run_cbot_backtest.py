@@ -34,6 +34,12 @@ def get_cbot_scenarios(base: CBotBacktestConfig) -> list:
         {"name": "stage0트레일(10%/5%)", "config": {**base.__dict__, "enable_stage0_trail": True, "stage0_trail_threshold": 0.10, "stage0_trail_pct": 0.05}},
         {"name": "stage0트레일(10%/3%)", "config": {**base.__dict__, "enable_stage0_trail": True, "stage0_trail_threshold": 0.10, "stage0_trail_pct": 0.03}},
         {"name": "stage0트레일(12%/6%)", "config": {**base.__dict__, "enable_stage0_trail": True, "stage0_trail_threshold": 0.12, "stage0_trail_pct": 0.06}},
+        # ★ 2026-09-12: stage0 조기 부분익절(50%매도) 실험 — 트레일링과 달리
+        #   절반만 챙기고 나머지는 계속 태우는 방식, 임계치 스윕
+        {"name": "stage0조기익절(8%)",  "config": {**base.__dict__, "enable_stage0_partial": True, "stage0_partial_threshold": 0.08}},
+        {"name": "stage0조기익절(10%)", "config": {**base.__dict__, "enable_stage0_partial": True, "stage0_partial_threshold": 0.10}},
+        {"name": "stage0조기익절(12%)", "config": {**base.__dict__, "enable_stage0_partial": True, "stage0_partial_threshold": 0.12}},
+        {"name": "stage0조기익절(15%)", "config": {**base.__dict__, "enable_stage0_partial": True, "stage0_partial_threshold": 0.15}},
     ]
 
 

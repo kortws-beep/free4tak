@@ -1848,10 +1848,15 @@ class Sbo2:
             #   ATR 손절/트레일링/목표가만으로 관리 (사용자 결정, 최근 장세에서
             #   기간매도가 손실 구간 포지션을 강제로 털어버리는 부작용 반복됨).
 
-            # ② 손절가 이탈 — ★ 2026-08-30: "홀드" 설정된 종목은 이 체크만
-            #   건너뜀(트레일링/목표달성은 그대로 적용). KiKi "!h 종목"
-            #   명령으로 설정.
-            if not reason and stop > 0 and curr <= stop and not pos.get("hold", False):
+            # ② 손절가 이탈 — stage 0 전용 (★ 2026-09-12: cbot/sbot과 동일
+            #   문제 발견 — 목표 달성마다 stop_price가 그 목표가로 바로
+            #   승격돼 트레일링(peak-ATR×1.5)보다 타이트해져서 목표 찍자마자
+            #   살짝만 눌려도 여기서 먼저 잘리는 구조였음. stage>=1부터는
+            #   stop_price는 계속 올려서 기록/최종 안전판으로만 남기고,
+            #   실제 매도판단은 ③ 트레일링에만 맡긴다.
+            #   ★ 2026-08-30: "홀드" 설정된 종목은 이 체크만 건너뜀(트레일링/
+            #   목표달성은 그대로 적용). KiKi "!h 종목" 명령으로 설정.
+            if not reason and stage == 0 and stop > 0 and curr <= stop and not pos.get("hold", False):
                 reason = f"손절({rate:+.1f}%)"
 
             # ③ 트레일링 스탑 (목표가1 달성 이후)

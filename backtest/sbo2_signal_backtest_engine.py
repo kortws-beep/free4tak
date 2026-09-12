@@ -320,7 +320,10 @@ class Sbo2SignalBacktest:
             atr_val = pos["atr_val"]
 
             reason = None
-            if pos["stop_price"] > 0 and curr <= pos["stop_price"]:
+            # ★ 2026-09-12: stage>=1은 손절가 대신 트레일링으로만 판단
+            #   (실전 lina_bot/sbo2.py와 동일 수정 — 목표달성마다 stop_price가
+            #   그 목표가로 승격돼 트레일링보다 타이트해지는 문제)
+            if stage == 0 and pos["stop_price"] > 0 and curr <= pos["stop_price"]:
                 reason = f"손절({rate:+.1f}%)"
             if not reason and stage >= 1 and atr_val > 0:
                 trail = pos["peak_price"] - atr_val * 1.5

@@ -299,18 +299,22 @@ class SwingStrategy:
         #   (필요시 git 히스토리에서 복원 가능)
 
         # ----------------------------------------------------------
-        # ③ 손절가 이탈 — ★ 2026-08-30: "홀드" 설정된 종목은 이 체크만
-        #   건너뜀(트레일링/목표달성 로직은 그대로 적용). KiKi "!h 종목"
-        #   명령으로 설정, bots/sbot.py의 pending_cmd "hold" 처리 참고.
+        # ③ 손절가 이탈 — stage 0 전용 (★ 2026-09-12: cbot과 동일 문제
+        #   발견 — 목표 달성마다 stop_price가 그 목표가로 바로 승격돼
+        #   트레일링(peak-ATR×1.5)보다 타이트해져서 목표 찍자마자 살짝만
+        #   눌려도 여기서 먼저 잘리는 구조였음. stage>=1부터는 stop_price는
+        #   계속 올려서 기록/최종 안전판으로만 남기고, 실제 매도판단은
+        #   ④ 트레일링에만 맡긴다.)
+        #   ★ 2026-08-30: "홀드" 설정된 종목은 이 체크만 건너뜀(트레일링/
+        #   목표달성 로직은 그대로 적용). KiKi "!h 종목" 명령으로 설정,
+        #   bots/sbot.py의 pending_cmd "hold" 처리 참고.
         # ----------------------------------------------------------
-        if current <= stop_price and not tracker.get("hold", False):
-            label = "손절" if stage == 0 else f"손절(stage{stage})"
-            print(f"🛑 {label} {code} | 현재:{current:,.0f} ≤ 손절:{stop_price:,.0f} ({rate:+.2%})")
-            on_sell(code, qty, f"{label}({rate:+.2%})", current)
-            if stage == 0:
-                on_loss()
+        if stage == 0 and current <= stop_price and not tracker.get("hold", False):
+            print(f"🛑 손절 {code} | 현재:{current:,.0f} ≤ 손절:{stop_price:,.0f} ({rate:+.2%})")
+            on_sell(code, qty, f"손절({rate:+.2%})", current)
+            on_loss()
             peak_tracker.pop(code, None)
-            return label
+            return "손절"
 
         # ★ 2026-07-06: 보유기한(25일) 강제청산 로직 제거 — ATR 손절/트레일링/
         #   목표가만으로 관리 (사용자 결정, 최근 장세에서 기간매도가 손실
