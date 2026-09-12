@@ -12,7 +12,6 @@ import yfinance as yf
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv, find_dotenv
 from discord.ext import tasks
-from swing_analyzer import get_swing_picks
 from trend_analyzer import get_trend_picks
 from swing_master import get_master_report
 import warnings
@@ -2007,25 +2006,16 @@ async def on_message(message):
         return
 
     # ---------------------------------------------------------
-    # 💡 [신규] 대장의 수동 스윙 엔진 호출 명령어 (!스윙)
-    # --------------------------------------------------------
-    if message.content.startswith("!스윙"):
-        async with message.channel.typing():
-            report = await asyncio.to_thread(get_swing_picks, 5)
-            await send_safe_message(message.channel, report)
-        return    
-
-    # ---------------------------------------------------------
     # 💡 [신규] 대장의 수동 상승추세 엔진 호출 명령어 (!추세)
     # --------------------------------------------------------
     if message.content.startswith("!추세"):
         async with message.channel.typing():
             report = await asyncio.to_thread(get_trend_picks, 5)
             await send_safe_message(message.channel, report)
-        return    
+        return
 
     # --------------------------------------------------------
-    # 💡 [신규] 대장의 수동 3개 교집합 엔진 호출 명령어 (!마스터)
+    # 💡 [신규] 대장의 수동 2개 교집합 엔진 호출 명령어 (!마스터)
     # --------------------------------------------------------
     if message.content.startswith("!마스터"):
         async with message.channel.typing():

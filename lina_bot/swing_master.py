@@ -1,16 +1,19 @@
 """
 swing_master.py
 ─────────────────────────────────────────────────────────────
-대장 전용 S/A/B 등급 통합 마스터 리포트
+대장 전용 S/B 등급 통합 마스터 리포트
 
-3개 엔진 교집합:
+2개 엔진 교집합:
  1번 — 촉매 확인  (미장 급등 섹터 OR 텔레그램 핫 키워드)
- 2번 — VCP 스윙  (횡보 수렴 + 거래량 마름 + 스마트머니)
- 3번 — 상승추세  (HH/HL 파동 + RSI 눌림 + 60일선 우상향)
+ 2번 — 상승추세  (HH/HL 파동 + RSI 눌림 + 60일선 우상향)
+
+★ 2026-09-12: VCP 스윙 엔진 완전 제거 — sbo2 실거래(08-15)/백테스터에
+   이어 이 리포트에서도 삭제. swing_analyzer.py 자체는 lina_bot.py의
+   AI모멘텀 스캐너(_map_themes_to_candidates)가 여전히 get_swing_data를
+   OR게이트로 쓰고 있어 파일은 남겨둠 — 이 리포트에서만 뺌.
 
 등급:
- 🥇 S급 — 3개 교집합  → 풀베팅 감
- 🥈 A급 — 2개 교집합  → 절반 베팅 감
+ 🥇 S급 — 2개 교집합  → 풀베팅 감
  🥉 B급 — 1개만       → 관망 / 소량
 
 호출:
@@ -43,7 +46,6 @@ TOP_N_DEFAULT    = 5
 
 
 # ── 임포트 (같은 폴더) ────────────────────────────────────────
-from swing_analyzer import get_swing_picks
 from trend_analyzer import get_trend_picks
 
 
@@ -277,76 +279,42 @@ def _extract_names_from_report(report: str) -> set:
 
 def get_master_report(top_n: int = TOP_N_DEFAULT) -> str:
 
-    # ── 3개 엔진 실행 ─────────────────────────────────────────
+    # ── 2개 엔진 실행 ─────────────────────────────────────────
     print("⚙️  [마스터] 1번 촉매 스캔 중...")
     catalyst_set = _get_catalyst_stocks()
 
-    print("⚙️  [마스터] 2번 VCP 스윙 엔진 실행 중...")
-    from swing_analyzer import get_swing_data
-    swing_list  = get_swing_data(top_n=20)
-    swing_names = {d["name"] for d in swing_list}
-
-    print("⚙️  [마스터] 3번 상승추세 엔진 실행 중...")
+    print("⚙️  [마스터] 2번 상승추세 엔진 실행 중...")
     from trend_analyzer import get_trend_data
     trend_list  = get_trend_data(top_n=20)
     trend_names = {d["name"] for d in trend_list}
 
     print(f"   촉매 종목: {len(catalyst_set)}개")
-    print(f"   VCP 통과: {len(swing_names)}개")
     print(f"   추세 통과: {len(trend_names)}개")
 
     # ── 교집합 계산 & 등급 부여 ───────────────────────────────
-    s_grade = swing_names & trend_names & catalyst_set        # 3개
-    a_grade = (
-        ((swing_names & trend_names)  - catalyst_set) |   # 추세+VCP
-        ((swing_names & catalyst_set) - trend_names)  |   # VCP+촉매
-        ((trend_names & catalyst_set) - swing_names)       # 추세+촉매
-    )
-    b_grade = (
-        (swing_names | trend_names | catalyst_set)
-        - s_grade - a_grade
-    )
+    s_grade = trend_names & catalyst_set
+    b_grade = (trend_names | catalyst_set) - s_grade
 
     # ── 결과 없으면 안내 ──────────────────────────────────────
-    total_hits = len(s_grade) + len(a_grade)
-    if total_hits == 0:
+    if not s_grade:
         return (
-            "💡 **[마스터 리포트]** 오늘은 A급 이상 교집합 종목이 없어.\n\n"
-            f"   VCP 통과    : {len(swing_names)}개\n"
+            "💡 **[마스터 리포트]** 오늘은 S급 교집합 종목이 없어.\n\n"
             f"   추세 통과   : {len(trend_names)}개\n"
             f"   촉매 감지   : {len(catalyst_set)}개\n\n"
-            "   → B급 단독 종목은 `!스윙` / `!추세` 로 따로 확인해봐."
+            "   → B급 단독 종목은 `!추세` 로 따로 확인해봐."
         )
 
     # ── 리포트 빌드 ──────────────────────────────────────────
-    report  = "🏆 **[마스터 리포트 — S/A/B 등급 교집합 분석]** 🏆\n"
-    report += f"   VCP {len(swing_names)}개 × 추세 {len(trend_names)}개 × 촉매 {len(catalyst_set)}개 교집합\n"
+    report  = "🏆 **[마스터 리포트 — S/B 등급 교집합 분석]** 🏆\n"
+    report += f"   추세 {len(trend_names)}개 × 촉매 {len(catalyst_set)}개 교집합\n"
     report += "=" * 60 + "\n"
 
     # S급
-    if s_grade:
-        report += f"\n🥇 **S급 — 3개 교집합 [{len(s_grade)}종목] → 풀베팅 감!**\n"
-        report += "   촉매 ✅  VCP타점 ✅  상승추세 ✅\n"
-        report += "-" * 40 + "\n"
-        for name in sorted(s_grade)[:top_n]:
-            report += f"   🔥 **{name}**\n"
-
-    # A급
-    if a_grade:
-        report += f"\n🥈 **A급 — 2개 교집합 [{len(a_grade)}종목] → 절반 베팅 감**\n"
-        report += "-" * 40 + "\n"
-
-        # 어떤 2개 조합인지 태그
-        for name in sorted(a_grade)[:top_n]:
-            tags = []
-            if name in catalyst_set: tags.append("촉매✅")
-            if name in swing_names:  tags.append("VCP✅")
-            if name in trend_names:  tags.append("추세✅")
-            missing = []
-            if name not in catalyst_set: missing.append("촉매❌")
-            if name not in swing_names:  missing.append("VCP❌")
-            if name not in trend_names:  missing.append("추세❌")
-            report += f"   ⚡ **{name}**  {' '.join(tags)}  {' '.join(missing)}\n"
+    report += f"\n🥇 **S급 — 2개 교집합 [{len(s_grade)}종목] → 풀베팅 감!**\n"
+    report += "   촉매 ✅  상승추세 ✅\n"
+    report += "-" * 40 + "\n"
+    for name in sorted(s_grade)[:top_n]:
+        report += f"   🔥 **{name}**\n"
 
     # B급 (상위 5개만)
     b_show = sorted(b_grade)[:5]
@@ -354,33 +322,23 @@ def get_master_report(top_n: int = TOP_N_DEFAULT) -> str:
         report += f"\n🥉 **B급 — 1개만 [{len(b_grade)}종목] → 관망 권장**\n"
         report += "-" * 40 + "\n"
         for name in b_show:
-            tag = "촉매" if name in catalyst_set else ("VCP" if name in swing_names else "추세")
+            tag = "촉매" if name in catalyst_set else "추세"
             report += f"   🔸 {name}  ({tag}만 해당)\n"
         if len(b_grade) > 5:
             report += f"   ... 외 {len(b_grade)-5}개\n"
 
     report += "\n" + "=" * 60 + "\n"
-    report += "   💡 S급부터 공략 → A급은 조합 보고 판단 → B급은 관망\n\n"
+    report += "   💡 S급부터 공략 → B급은 관망\n\n"
 
-    # ── 각 엔진 Top2 ─────────────────────────────────────────
-    # ★ 2026-06-29 수정: swing_names/trend_names는 점수 정보가 없는 set이라
-    #   sorted()를 해도 가나다순일 뿐 점수 상위가 아니었음 (실제로는
-    #   "탑픽"이라는 라벨과 다르게 동작하던 버그). swing_list/trend_list는
-    #   get_swing_data()/get_trend_data() 단계에서 이미 점수 내림차순으로
-    #   정렬되어 있으므로, 그 순서 그대로 앞 2개를 뽑으면 진짜 점수 상위가 됨.
-    swing_top2 = [d["name"] for d in swing_list[:2]]
-    if swing_top2:
-        report += f"   🔻 VCP 탑픽   : {' / '.join(swing_top2)}\n"
-
+    # ── 추세엔진 Top2 ────────────────────────────────────────
+    # ★ 2026-06-29: trend_names는 점수 정보가 없는 set이라 sorted()를 해도
+    #   가나다순일 뿐 점수 상위가 아님 — trend_list는 get_trend_data()에서
+    #   이미 점수 내림차순 정렬돼있으므로 그 순서 그대로 앞 2개를 뽑는다.
     trend_top2 = [d["name"] for d in trend_list[:2]]
     if trend_top2:
         report += f"   📈 추세 탑픽   : {' / '.join(trend_top2)}\n"
 
-    hot_overlap = (swing_names | trend_names) & catalyst_set - s_grade - a_grade
-    if hot_overlap:
-        report += f"   🔥 촉매 관심주 : {' / '.join(sorted(hot_overlap)[:3])}\n"
-
-    report += "   📌 `!스윙` / `!추세` 로 상세 데이터 확인 가능\n"
+    report += "   📌 `!추세` 로 상세 데이터 확인 가능\n"
 
     return report
 

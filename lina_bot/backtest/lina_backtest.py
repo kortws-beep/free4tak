@@ -3,7 +3,9 @@ lina_backtest.py — lina_bot 스윙 전략 백테스터
 ================================================================
 [설계 원칙]
 - 데이터: kr_theme_finance.db (200일치 OHLCV + 수급)
-- 전략: swing_analyzer (VCP) + trend_analyzer (추세) 조건
+- 전략: 추세(trend) + TrackB(200일선 돌파 기준봉) 조건
+  ★ 2026-09-12: VCP(swing_analyzer) 시뮬레이션 완전 제거 — sbo2 실거래
+    (08-15)/sbo2_signal_backtest_engine.py에 이어 이 백테스터에서도 삭제.
 - 진입: 신호 발생 다음날 시가 (T+1 시가 근사 = 당일 종가 × 1.005)
 - 매도: ATR 손절 / 목표가 / 최대 보유일 초과
 - 시뮬: 날짜별 롤링 윈도우로 과거 조건 재현
@@ -41,10 +43,6 @@ class BacktestConfig:
     atr_target_mult: float = 3.0          # 목표 ATR 배수
     max_hold_days:   int   = 20           # 최대 보유일
     min_rr:          float = 1.5          # 최소 R:R
-    # VCP 파라미터
-    ma20_band:       float = 0.10         # 20일선 ±10%
-    vcp_ratio:       float = 0.70         # VCP 수렴 비율
-    vol_dry_ratio:   float = 0.50         # 거래량 마름 비율
     # 추세 파라미터
     pullback_band:   float = 0.12         # 눌림목 ±12%
     rsi_low:         float = 35.0
@@ -132,98 +130,6 @@ def _get_theme(conn, stock_name: str) -> str:
         return ""
 
 
-def check_vcp_signal(data: list, cfg: BacktestConfig) -> dict:
-    """
-    VCP 스윙 신호 체크
-    data: 특정 날짜 기준 과거 데이터 (최신→과거, 최소 30개)
-    반환: {"signal": bool, "stop": float, "tgt": float, "rr": float, "score": int}
-    """
-    if len(data) < 30:
-        return {"signal": False}
-
-    closes  = [d["close"] for d in data if d["close"] > 0]
-    volumes = [d["volume"] for d in data if d["volume"] > 0]
-
-    if len(closes) < 30:
-        return {"signal": False}
-
-    curr = closes[0]
-
-    # ETF/우선주 제외
-    # (호출 전에 처리)
-
-    # ① 200일선 위
-    ma200 = _ma(closes, 200)
-    if ma200 > 0 and curr < ma200:
-        return {"signal": False}
-
-    # ② 20일선 밀집
-    ma20 = _ma(closes, 20)
-    if ma20 == 0: return {"signal": False}
-    dist_ma20 = abs(curr - ma20) / ma20
-    if dist_ma20 > cfg.ma20_band:
-        return {"signal": False}
-
-    # ③ VCP 수렴
-    if len(closes) < 30: return {"signal": False}
-    recent_amp = (max(closes[0:15]) - min(closes[0:15])) / min(closes[0:15]) if min(closes[0:15]) > 0 else 0
-    prev_amp   = (max(closes[15:30]) - min(closes[15:30])) / min(closes[15:30]) if min(closes[15:30]) > 0 else 0
-    if prev_amp == 0 or recent_amp >= prev_amp * cfg.vcp_ratio:
-        return {"signal": False}
-
-    # ④ 거래량 마름
-    if len(volumes) < 10: return {"signal": False}
-    vol_avg = sum(volumes) / len(volumes)
-    vol_rec = sum(volumes[:5]) / 5
-    if vol_avg == 0 or vol_rec >= vol_avg * cfg.vol_dry_ratio:
-        return {"signal": False}
-
-    # ⑤ 스마트머니 (실제 엔진과 동일 로직)
-    f_nets_raw = [d["f_net"] for d in data]
-    i_nets_raw = [d["i_net"] for d in data]
-    supply_len = max(
-        sum(1 for v in f_nets_raw if v != 0),
-        sum(1 for v in i_nets_raw if v != 0)
-    )
-    if supply_len == 0:
-        smart_ok = True   # 수급 데이터 없으면 통과
-    else:
-        sw         = min(10, supply_len)
-        f_pos      = sum(1 for v in f_nets_raw[:sw] if v > 0)
-        i_pos      = sum(1 for v in i_nets_raw[:sw] if v > 0)
-        f_cum      = sum(f_nets_raw[:sw])
-        i_cum      = sum(i_nets_raw[:sw])
-        adj_min    = max(2, int(2 * supply_len / 10))
-        smart_ok   = (
-            f_pos >= adj_min or i_pos >= adj_min or
-            (f_cum > 0 and i_cum > 0) or f_cum > 0 or i_cum > 0
-        )
-    if not smart_ok:
-        return {"signal": False}
-
-    # ATR 계산
-    atr  = _atr(closes)
-    stop = round(curr - atr * cfg.atr_stop_mult, 0)
-    tgt  = round(curr + atr * cfg.atr_target_mult, 0)
-    if stop <= 0: return {"signal": False}
-    stop_pct = (curr - stop) / curr * 100
-    tgt_pct  = (tgt - curr) / curr * 100
-    if stop_pct > 20 or tgt_pct < 8: return {"signal": False}
-    rr = round(tgt_pct / stop_pct, 1) if stop_pct > 0 else 0
-    if rr < cfg.min_rr: return {"signal": False}
-
-    return {
-        "signal": True,
-        "type":   "VCP",
-        "curr":   curr,
-        "stop":   stop,
-        "tgt":    tgt,
-        "rr":     rr,
-        "score":  70,
-    }
-
-
-
 def check_track_b(data: list, cfg: BacktestConfig, vol_mult: float = 3.0, dry_ratio: float = 0.25) -> dict:
     """Track B: 200일선 돌파 기준봉 + 마른 눌림목"""
     if len(data) < 30: return {"signal": False}
@@ -277,7 +183,7 @@ def check_track_b(data: list, cfg: BacktestConfig, vol_mult: float = 3.0, dry_ra
     rr = round(tgt_pct / stop_pct, 1) if stop_pct > 0 else 0
     if rr < cfg.min_rr: return {"signal": False}
 
-    return {"signal": True, "type": "TRACK_B", "vcp_type": "200MA_Breakout",
+    return {"signal": True, "type": "TRACK_B", "breakout_type": "200MA_Breakout",
             "curr": curr, "stop": stop, "tgt": tgt, "rr": rr, "score": 85}
 
 def check_trend_signal(data: list, cfg: BacktestConfig) -> dict:
@@ -488,14 +394,9 @@ class LinaBacktest:
             cfg_name = getattr(self.cfg, "_name", "")
             if "TrackBTrigger" in cfg_name:
                 vol_mult = 2.0 if "200%" in cfg_name else 2.5 if "250%" in cfg_name else 3.0
-                vcp_sig   = check_vcp_signal(data, self.cfg)
                 trend_sig = check_trend_signal(data, self.cfg)
                 tb_sig    = check_track_b(data, self.cfg, vol_mult=vol_mult)
-                if vcp_sig["signal"] and trend_sig["signal"]:
-                    sig = vcp_sig; sig["score"] = 90; sig["type"] = "S급(VCP+추세)"
-                elif vcp_sig["signal"]:   sig = vcp_sig
-                elif trend_sig["signal"]: sig = trend_sig
-                else:                     sig = {"signal": False}
+                sig = trend_sig if trend_sig["signal"] else {"signal": False}
                 if sig.get("signal") and tb_sig.get("signal"):
                     sig["score"] = sig.get("score", 70) + 20
                     sig["type"]  = "S급(TrackB승격)"
@@ -503,13 +404,8 @@ class LinaBacktest:
                 vol_mult = 2.0 if "200%" in cfg_name else 2.5 if "250%" in cfg_name else 3.0
                 sig = check_track_b(data, self.cfg, vol_mult=vol_mult)
             else:
-                vcp_sig   = check_vcp_signal(data, self.cfg)
                 trend_sig = check_trend_signal(data, self.cfg)
-                if vcp_sig["signal"] and trend_sig["signal"]:
-                    sig = vcp_sig; sig["score"] = 90; sig["type"] = "S급(VCP+추세)"
-                elif vcp_sig["signal"]:   sig = vcp_sig
-                elif trend_sig["signal"]: sig = trend_sig
-                else:                     sig = {"signal": False}
+                sig = trend_sig if trend_sig["signal"] else {"signal": False}
 
             if sig["signal"]:
                 theme = _get_theme(self.conn, stock_name)
@@ -520,8 +416,8 @@ class LinaBacktest:
                     **sig,
                 })
 
-        # 스코어 순 정렬 (같으면 VCP 우선)
-        candidates.sort(key=lambda x: (x["score"], x["type"] == "VCP"), reverse=True)
+        # 스코어 순 정렬
+        candidates.sort(key=lambda x: x["score"], reverse=True)
 
         for cand in candidates[:slots]:
             curr       = cand["curr"]
@@ -655,7 +551,6 @@ class LinaBacktest:
         total_return = (final_equity - self.cfg.initial_cash) / self.cfg.initial_cash * 100
 
         # 전략별 분류
-        vcp_trades   = [t for t in trades if t["type"] == "VCP"]
         trend_trades = [t for t in trades if t["type"] == "TREND"]
 
         return {
@@ -669,9 +564,7 @@ class LinaBacktest:
             "profit_factor": round(pf, 2),
             "mdd":           round(mdd, 2),
             "final_equity":  round(final_equity, 0),
-            "vcp_trades":    len(vcp_trades),
             "trend_trades":  len(trend_trades),
-            "vcp_winrate":   round(sum(1 for t in vcp_trades if t["profit_pct"] > 0) / len(vcp_trades) * 100, 1) if vcp_trades else 0,
             "trend_winrate": round(sum(1 for t in trend_trades if t["profit_pct"] > 0) / len(trend_trades) * 100, 1) if trend_trades else 0,
         }
 
@@ -717,7 +610,6 @@ def print_report(results: list):
         m = r["metrics"]
         if "error" in m: continue
         print(f"\n  [{r['name']}]")
-        print(f"    VCP   : {m['vcp_trades']}건 / 승률 {m['vcp_winrate']}%")
         print(f"    추세  : {m['trend_trades']}건 / 승률 {m['trend_winrate']}%")
         print(f"    손익  : 평균수익 {m['avg_win_pct']:+.1f}% / 평균손실 {m['avg_loss_pct']:+.1f}%")
         print(f"    최종  : {int(m['final_equity']):,}원 (시드대비 {m['total_return']:+.1f}%)")
@@ -759,7 +651,6 @@ def main():
             ("기본(ATR×1.5/3.0)",   make_cfg("기본",    start_date=args.start, end_date=args.end, atr_stop_mult=1.5, atr_target_mult=3.0)),
             ("공격적(ATR×1.0/3.0)", make_cfg("공격적",  start_date=args.start, end_date=args.end, atr_stop_mult=1.0, atr_target_mult=3.0)),
             ("보수적(ATR×2.0/4.0)", make_cfg("보수적",  start_date=args.start, end_date=args.end, atr_stop_mult=2.0, atr_target_mult=4.0)),
-            ("VCP전용(MA20±5%)",    make_cfg("VCP전용", start_date=args.start, end_date=args.end, ma20_band=0.05)),
             ("최대보유10일",         make_cfg("최대보유10일", start_date=args.start, end_date=args.end, max_hold_days=10)),
             ("TrackB(200%)",        make_cfg("TrackB200%",       start_date=args.start, end_date=args.end, atr_stop_mult=1.5, atr_target_mult=3.0)),
             ("TrackB(250%)",        make_cfg("TrackB250%",       start_date=args.start, end_date=args.end, atr_stop_mult=1.5, atr_target_mult=3.0)),
