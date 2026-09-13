@@ -131,28 +131,46 @@ def _notify(msg: str, critical: bool = False):
         print(f"⚠️ 알림 전송 오류: {e}")
 
 
+def _short_tag(full_cond_name: str) -> str:
+    """조건검색식 풀네임에서 CONDITION_KEYWORDS 중 매칭되는 짧은 키워드로 축약.
+    예: "5본봉거래대금단타(시총50조이하)" → "5본봉" """
+    for kw in CONDITION_KEYWORDS:
+        if kw in full_cond_name:
+            return kw
+    return full_cond_name
+
+
 def _gather_candidates() -> list:
-    """4개 조건검색식에서 후보 종목 수집."""
+    """4개 조건검색식에서 후보 종목 수집.
+    ★ 2026-09-13: 종목별로 어느 검색식(들)에서 나왔는지 출처 표시 요청
+    (대장) — code_tag_map(첫 매칭 1개만)이 아니라 code_multi_tag_map
+    (매칭된 검색식 전부, 07-25 키움풀 히스토리용으로 이미 만들어져 있던
+    파라미터)을 사용해 한 종목이 여러 검색식에 걸리면 전부 표시."""
     kiwoom = KiwoomAPI()
     if not kiwoom.enabled:
         print("⚠️ 키움 비활성 — 스캔 불가")
         return []
 
     code_name_map = {}
-    code_tag_map  = {}
+    code_multi_tag_map = {}
     loop = asyncio.new_event_loop()
     try:
         codes = loop.run_until_complete(
             kiwoom.get_condition_codes(
                 use_keywords=CONDITION_KEYWORDS,
                 code_name_map=code_name_map,
-                code_tag_map=code_tag_map,
+                code_multi_tag_map=code_multi_tag_map,
             )
         )
     finally:
         loop.close()
 
-    return [(c, code_name_map.get(c, c), code_tag_map.get(c, "")) for c in codes]
+    result = []
+    for c in codes:
+        tags = [_short_tag(n) for n in code_multi_tag_map.get(c, [])]
+        tags = list(dict.fromkeys(tags))  # 중복 제거(순서 유지)
+        result.append((c, code_name_map.get(c, c), tags))
+    return result
 
 
 def _search_telegram_mentions(stock_name: str) -> str:
@@ -189,7 +207,7 @@ def _enrich(candidates: list, kis: KisAPI) -> list:
     리스크가 커서(대장 지적) 여기서 확정적으로 제외 — AI 프롬프트
     지시만으로는 놓칠 수 있어 코드 필터로 강제."""
     enriched = []
-    for code, name, cond_name in candidates:
+    for code, name, tags in candidates:
         mdata = kis.get_market_data(code) or {}
         price  = mdata.get("stck_prpr", "0")
         chg    = mdata.get("prdy_ctrt", "0")
@@ -204,7 +222,7 @@ def _enrich(candidates: list, kis: KisAPI) -> list:
         if not reason:
             reason = _search_telegram_mentions(name)
         enriched.append({
-            "code": code, "name": name, "cond": cond_name,
+            "code": code, "name": name, "tags": tags,
             "price": price, "chg": chg, "vol": vol,
             "bonus": bonus, "reason": reason,
         })
@@ -214,9 +232,10 @@ def _enrich(candidates: list, kis: KisAPI) -> list:
 def _build_prompt(enriched: list) -> str:
     lines = []
     for e in enriched[:MAX_CANDIDATES_TO_LLM]:
+        tag_str = ",".join(e["tags"]) if e["tags"] else "?"
         tag = f" | 텔레그램/공시: {e['reason']}" if e["reason"] else ""
         lines.append(
-            f"- {e['name']}({e['code']}) [{e['cond']}] "
+            f"- {e['name']}({e['code']}) [출처:{tag_str}] "
             f"현재가:{e['price']}원 등락률:{e['chg']}% 거래량:{e['vol']}{tag}"
         )
     candidate_text = "\n".join(lines) if lines else "(조건검색 후보 없음)"
@@ -229,9 +248,11 @@ def _build_prompt(enriched: list) -> str:
         "🚨 [작성 지침]\n"
         "1. 이 중 오늘 단타(수일 내 매도 목표)로 매수할 만한 종목을 최대 5개까지 골라줘.\n"
         "2. 텔레그램/공시 근거가 있는 종목을 우선하되, 없어도 등락률·거래량이 뚜렷하면 포함해.\n"
-        "3. 각 종목마다 '왜 오늘인지' 한 줄 이유를 붙여.\n"
-        "4. 데이터에 없는 내용은 절대 지어내지 마.\n"
-        "5. 후보가 마땅치 않으면 '오늘은 마땅한 후보 없음'이라고 솔직히 말해."
+        "3. 각 종목명 뒤에 괄호로 출처를 표시해줘 — 위 후보 목록의 [출처:...] 값을 "
+        "그대로 옮겨적어. 예: 삼성전자(단타000,주도주)\n"
+        "4. 각 종목마다 '왜 오늘인지' 한 줄 이유를 붙여.\n"
+        "5. 데이터에 없는 내용은 절대 지어내지 마.\n"
+        "6. 후보가 마땅치 않으면 '오늘은 마땅한 후보 없음'이라고 솔직히 말해."
     )
 
 
