@@ -110,8 +110,8 @@ def _save_state(st: dict):
         print(f"⚠️ 상태파일 저장 오류: {e}")
 
 
-def _check_new_sector_signal(state: dict) -> str:
-    """오늘 아직 알림 안 보낸 급가속 테마가 있으면 테마명 반환, 없으면 빈 문자열."""
+def _check_new_sector_signal(state: dict) -> dict:
+    """오늘 아직 알림 안 보낸 급가속 테마가 있으면 신호 dict(theme_cd/theme_nm 포함) 반환, 없으면 빈 dict."""
     try:
         conn = sqlite3.connect(SECTOR_DB_PATH, timeout=5)
         conn.execute("PRAGMA query_only=ON")
@@ -119,13 +119,54 @@ def _check_new_sector_signal(state: dict) -> str:
         conn.close()
     except Exception as e:
         print(f"⚠️ 섹터 신호 조회 오류: {e}")
-        return ""
+        return {}
 
     notified = set(state.get("notified_themes", []))
     for s in signals:
         if s["status"] == "급가속🔥" and s["theme_nm"] not in notified:
-            return s["theme_nm"]
-    return ""
+            return s
+    return {}
+
+
+def _get_theme_leader(theme_cd: str, kiwoom: KiwoomAPI, top_n: int = 2) -> list:
+    """★ 2026-09-13: 섹터 교체(바톤터치) 감지시 그 테마의 '대장주'를 찾아
+    후보에 강제 포함(대장 요청). sector_monitor.py가 30초 주기로 쌓아온
+    stock_momentum(테마별 개별종목 거래대금/등락률/체결강도)에서 최근
+    10분간 거래대금(trde_amt) 1~2위 종목을 대장주로 판단 — 실제 그 순간
+    돈이 가장 많이 몰린 종목이 대장주라는 통상적 정의를 그대로 씀."""
+    try:
+        conn = sqlite3.connect(SECTOR_DB_PATH, timeout=5)
+        conn.execute("PRAGMA query_only=ON")
+        cutoff = (datetime.datetime.now() -
+                  datetime.timedelta(minutes=10)).strftime("%Y-%m-%d %H:%M:%S")
+        rows = conn.execute("""
+            SELECT code, MAX(trde_amt) as max_amt, AVG(change_rate) as avg_chg
+            FROM stock_momentum
+            WHERE theme_cd = ? AND ts >= ?
+            GROUP BY code
+            ORDER BY max_amt DESC
+            LIMIT ?
+        """, (theme_cd, cutoff, top_n)).fetchall()
+        conn.close()
+    except Exception as e:
+        print(f"⚠️ 대장주 조회 오류: {e}")
+        return []
+
+    if not rows:
+        return []
+
+    code_name_map = {}
+    try:
+        kiwoom.get_theme_stocks(theme_cd, code_name_map)
+    except Exception as e:
+        print(f"⚠️ 테마종목 이름조회 오류: {e}")
+
+    leaders = []
+    for code, amt, chg in rows:
+        name = code_name_map.get(code, code)
+        leaders.append((code, name, ["대장주"]))
+        print(f"   🚩 대장주 후보: {name}({code}) | 거래대금:{amt:,.0f}억 | 등락률:{chg:+.1f}%")
+    return leaders
 
 
 def _notify(msg: str, critical: bool = False):
@@ -253,11 +294,13 @@ def _build_prompt(enriched: list) -> str:
         "🚨 [작성 지침]\n"
         "1. 이 중 오늘 단타(수일 내 매도 목표)로 매수할 만한 종목을 최대 5개까지 골라줘.\n"
         "2. 텔레그램/공시 근거가 있는 종목을 우선하되, 없어도 등락률·거래량이 뚜렷하면 포함해.\n"
-        "3. 각 종목명 뒤에 괄호로 출처를 표시해줘 — 위 후보 목록의 [출처:...] 값을 "
-        "그대로 옮겨적어. 예: 삼성전자(단타000,주도주)\n"
-        "4. 각 종목마다 '왜 오늘인지' 한 줄 이유를 붙여.\n"
-        "5. 데이터에 없는 내용은 절대 지어내지 마.\n"
-        "6. 후보가 마땅치 않으면 '오늘은 마땅한 후보 없음'이라고 솔직히 말해."
+        "3. 출처에 '대장주'가 포함된 종목은 방금 급가속이 감지된 테마의 거래대금 "
+        "1위 종목이야 — 다른 조건 없이도 우선적으로 포함시켜서 검토해줘.\n"
+        "4. 각 종목명 뒤에 괄호로 출처를 표시해줘 — 위 후보 목록의 [출처:...] 값을 "
+        "그대로 옮겨적어. 예: 삼성전자(단타000,주도주) / 현대차(대장주)\n"
+        "5. 각 종목마다 '왜 오늘인지' 한 줄 이유를 붙여.\n"
+        "6. 데이터에 없는 내용은 절대 지어내지 마.\n"
+        "7. 후보가 마땅치 않으면 '오늘은 마땅한 후보 없음'이라고 솔직히 말해."
     )
 
 
@@ -277,9 +320,26 @@ def _call_claude(prompt: str) -> str:
     return extract_claude_text(res)
 
 
-def _run_scan(trigger_label: str, notify_on_empty: bool = False, keywords: list = None):
+def _run_scan(trigger_label: str, notify_on_empty: bool = False,
+              keywords: list = None, extra_candidates: list = None):
     print(f"🔎 [스카우트] 단타 후보 스캔 시작 ({trigger_label})")
     candidates = _gather_candidates(keywords)
+
+    # ★ 2026-09-13: 섹터 대장주 등 조건검색 결과 밖에서 강제 포함시킬
+    #   후보 병합 — 이미 있는 종목이면 태그만 합침(중복 방지)
+    if extra_candidates:
+        by_code = {c: (n, list(t)) for c, n, t in candidates}
+        for code, name, tags in extra_candidates:
+            if code in by_code:
+                existing_name, existing_tags = by_code[code]
+                for t in tags:
+                    if t not in existing_tags:
+                        existing_tags.append(t)
+                by_code[code] = (existing_name, existing_tags)
+            else:
+                by_code[code] = (name, list(tags))
+        candidates = [(c, n, t) for c, (n, t) in by_code.items()]
+
     if not candidates:
         print("   후보 없음")
         if notify_on_empty:
@@ -317,15 +377,19 @@ def main():
     if not state.get("baseline_done"):
         print("⏭️ [스카우트] 09:35 정기 스캔 전이라 섹터체크 스킵")
         return
-    theme = _check_new_sector_signal(state)
-    if not theme:
+    signal = _check_new_sector_signal(state)
+    if not signal:
         print("😴 [스카우트] 새로운 섹터 교체 신호 없음")
         return
+    theme = signal["theme_nm"]
 
     # ★ 2026-09-13: 섹터 교체 재스캔은 "단타000"/"주도주" 2개만 — 나머지
     #   ("장개장직후"/"5본봉")는 아침 시간대에만 유효한 조건이라 장중
     #   재스캔에는 의미 없음(대장 설명).
-    _run_scan(f"섹터 교체 감지: {theme}", keywords=CONDITION_KEYWORDS_SECTOR_RECHECK)
+    # + 그 테마의 대장주(거래대금 상위)를 조건검색 결과와 무관하게 강제 포함.
+    leaders = _get_theme_leader(signal["theme_cd"], KiwoomAPI())
+    _run_scan(f"섹터 교체 감지: {theme}",
+              keywords=CONDITION_KEYWORDS_SECTOR_RECHECK, extra_candidates=leaders)
     state.setdefault("notified_themes", []).append(theme)
     _save_state(state)
 
