@@ -1919,7 +1919,13 @@ class CBot:
             )
             if self.sell(market, qty, f"급락감지({crash_rate:+.2%})",
                          sell_price=current, force_all=True):
-                self.daily_loss_count += 1
+                # ★ 2026-09-14: 급락감지는 stage>=1(트레일링 구간)에서도
+                #   발동할 수 있는데, 그땐 큰 수익 확정 매도일 수 있음(실측:
+                #   KRW-CVC +19.43%). 실제 손익 부호와 무관하게 무조건
+                #   손실카운트하던 버그 수정 — 진짜 손실일 때만 카운트.
+                if rate < 0:
+                    self.daily_loss_count += 1
+                    _update_state(daily_loss=self.daily_loss_count)
                 self.peak_tracker.pop(market, None)
                 self._check_daily_loss_limit()
             return
@@ -1939,7 +1945,9 @@ class CBot:
             )
             if self.sell(market, qty, f"손절({rate:+.2%})",
                          sell_price=current, force_all=True):
-                self.daily_loss_count += 1
+                if rate < 0:
+                    self.daily_loss_count += 1
+                    _update_state(daily_loss=self.daily_loss_count)
                 self.peak_tracker.pop(market, None)
                 self._check_daily_loss_limit()
             return
@@ -1962,6 +1970,7 @@ class CBot:
                                      sell_price=current, force_all=True):
                             if rate < 0:
                                 self.daily_loss_count += 1
+                                _update_state(daily_loss=self.daily_loss_count)
                             self.peak_tracker.pop(market, None)
                             self._check_daily_loss_limit()
                         return
