@@ -74,6 +74,11 @@ from telegram_monitor import get_stock_event_bonus
 from sector_monitor import detect_baton_touch, DB_PATH as SECTOR_DB_PATH
 
 CONDITION_KEYWORDS = ["단타000", "장개장직후", "5본봉", "주도주"]
+# ★ 2026-09-13: 섹터 교체 감지 재스캔은 09:35 정기스캔과 달리 4개 전부가
+#   아니라 "단타000"/"주도주" 2개만 사용(대장 요청) — "장개장직후"/
+#   "5본봉"은 아침 시간대에만 유효한 조건이라 장중 재스캔 시점엔 의미가
+#   없음(대장 설명).
+CONDITION_KEYWORDS_SECTOR_RECHECK = ["단타000", "주도주"]
 MAX_CANDIDATES_TO_LLM = 25   # 프롬프트 비대화 방지 — 조회순 상위 N개만 넘김
 # ★ 2026-09-09: 대장 지적 — 실전 참고용이라 이미 15% 넘게 오른 종목은
 #   추격매수 리스크가 커서 제외해야 함. AI 지시만으로는 놓칠 수 있어
@@ -140,8 +145,8 @@ def _short_tag(full_cond_name: str) -> str:
     return full_cond_name
 
 
-def _gather_candidates() -> list:
-    """4개 조건검색식에서 후보 종목 수집.
+def _gather_candidates(keywords: list = None) -> list:
+    """조건검색식에서 후보 종목 수집 (keywords 미지정시 CONDITION_KEYWORDS 전체).
     ★ 2026-09-13: 종목별로 어느 검색식(들)에서 나왔는지 출처 표시 요청
     (대장) — code_tag_map(첫 매칭 1개만)이 아니라 code_multi_tag_map
     (매칭된 검색식 전부, 07-25 키움풀 히스토리용으로 이미 만들어져 있던
@@ -157,7 +162,7 @@ def _gather_candidates() -> list:
     try:
         codes = loop.run_until_complete(
             kiwoom.get_condition_codes(
-                use_keywords=CONDITION_KEYWORDS,
+                use_keywords=keywords or CONDITION_KEYWORDS,
                 code_name_map=code_name_map,
                 code_multi_tag_map=code_multi_tag_map,
             )
@@ -272,9 +277,9 @@ def _call_claude(prompt: str) -> str:
     return extract_claude_text(res)
 
 
-def _run_scan(trigger_label: str, notify_on_empty: bool = False):
+def _run_scan(trigger_label: str, notify_on_empty: bool = False, keywords: list = None):
     print(f"🔎 [스카우트] 단타 후보 스캔 시작 ({trigger_label})")
-    candidates = _gather_candidates()
+    candidates = _gather_candidates(keywords)
     if not candidates:
         print("   후보 없음")
         if notify_on_empty:
@@ -317,7 +322,10 @@ def main():
         print("😴 [스카우트] 새로운 섹터 교체 신호 없음")
         return
 
-    _run_scan(f"섹터 교체 감지: {theme}")
+    # ★ 2026-09-13: 섹터 교체 재스캔은 "단타000"/"주도주" 2개만 — 나머지
+    #   ("장개장직후"/"5본봉")는 아침 시간대에만 유효한 조건이라 장중
+    #   재스캔에는 의미 없음(대장 설명).
+    _run_scan(f"섹터 교체 감지: {theme}", keywords=CONDITION_KEYWORDS_SECTOR_RECHECK)
     state.setdefault("notified_themes", []).append(theme)
     _save_state(state)
 
