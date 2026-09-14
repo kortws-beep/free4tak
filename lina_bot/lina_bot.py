@@ -1722,8 +1722,9 @@ RESTART_COOLDOWN_SECONDS = 300         # 재시작 후 5분간 재감지 무시
 #   watchdog이 절대 감지를 못 하므로(실제로 이 버그로 sbot 미감지 발생),
 #   파일 직접 출처인 봇은 로그 파일을 직접 읽는다.
 _BOT_LOG_FILE = {
-    "sbot":   "/home/free4tak/k-bot/stock_bot/logs/sbot.log",
-    "sector": "/home/free4tak/k-bot/stock_bot/logs/sector_monitor.log",
+    "sbot":     "/home/free4tak/k-bot/stock_bot/logs/sbot.log",
+    "sector":   "/home/free4tak/k-bot/stock_bot/logs/sector_monitor.log",
+    "telegram": "/home/free4tak/k-bot/stock_bot/logs/telegram.log",
 }
 # ★ 2026-07-02: 고정 바이트 tail(_LOG_TAIL_BYTES) 방식은 로그가 적게 쌓이는
 #   구간(장외 대기 등)에서 8000바이트가 10~20분치까지 덮어버려, 이미 지나간
@@ -1837,6 +1838,69 @@ async def api_error_watchdog():
 async def before_api_error_watchdog():
     await client.wait_until_ready()
 
+
+# ==========================================
+# [텔레그램 모니터 세션만료 watchdog]
+# ★ 2026-09-14: 대장 요청 — "갸도 로그체크해서 키키나 리나에서 경고
+#   해야겠어" (mbngold 채널 추가 작업 중, 모니터가 9/12부터 세션만료로
+#   죽어있었는데 아무도 몰랐던 것 발견). 위 api_error_watchdog과 달리
+#   자동재시작(sudo systemctl restart)을 시도하지 않는다 — 이 크래시는
+#   대화형 전화번호/인증코드 입력이 필요한데 systemd 서비스라 터미널이
+#   없어서 즉시 EOFError로 다시 죽음(이미 30초 간격으로 무한 재시작
+#   중이라 재시작 자체는 의미 없음). 대신 감지되면 대장에게 터미널에서
+#   직접 재인증하라는 안내만 보낸다.
+# ==========================================
+TELEGRAM_CRASH_PATTERNS = [
+    "EOFError: EOF when reading a line",
+    "Please enter your phone",
+]
+TELEGRAM_CRASH_STREAK_THRESHOLD = 2      # 연속 2분 감지되면 알림
+TELEGRAM_ALERT_COOLDOWN_SECONDS = 3600   # 재인증 전까지 1시간에 한 번만 알림(스팸 방지)
+
+_telegram_crash_streak = 0
+_telegram_last_alert_at = None
+
+
+@tasks.loop(minutes=1)
+async def telegram_watchdog():
+    global _telegram_crash_streak, _telegram_last_alert_at
+    now = datetime.datetime.now(KST)
+
+    try:
+        channel = await client.fetch_channel(REPORT_CHANNEL_ID)
+    except Exception as e:
+        print(f"❌ [watchdog] 채널 접속 실패: {e}")
+        return
+
+    log_text = await asyncio.to_thread(_fetch_recent_log, "telegram")
+    has_crash = any(p in log_text for p in TELEGRAM_CRASH_PATTERNS)
+
+    if has_crash:
+        _telegram_crash_streak += 1
+        print(f"⚠️ [watchdog] 텔레그램 모니터 세션만료 감지 "
+              f"({_telegram_crash_streak}/{TELEGRAM_CRASH_STREAK_THRESHOLD})")
+    else:
+        _telegram_crash_streak = 0
+
+    if _telegram_crash_streak >= TELEGRAM_CRASH_STREAK_THRESHOLD:
+        if (_telegram_last_alert_at is None or
+                (now - _telegram_last_alert_at).total_seconds() >= TELEGRAM_ALERT_COOLDOWN_SECONDS):
+            await send_safe_message(
+                channel,
+                "🚨 **[watchdog] 텔레그램 모니터 세션 만료**\n"
+                "자동재시작으론 안 풀려(대화형 인증 필요) — 터미널에서 직접 재인증해줘:\n"
+                "```\ncd /home/free4tak/k-bot/stock_bot\n"
+                "./venv/bin/python3 intelligence/telegram_monitor.py\n```\n"
+                "전화번호/인증코드 입력하고 '메시지 대기 중' 뜨면 Ctrl+C로 멈춘 뒤 "
+                "`sudo systemctl restart yeongam9-telegram`으로 서비스 재시작해줘."
+            )
+            _telegram_last_alert_at = now
+
+
+@telegram_watchdog.before_loop
+async def before_telegram_watchdog():
+    await client.wait_until_ready()
+
 # ==========================================
 # [메인 디스코드 코어 핸들러]
 # ==========================================
@@ -1931,6 +1995,12 @@ async def on_ready():
             api_error_watchdog.start()
         print("✅ [시스템] API 에러 watchdog (1분 주기, sbot/sbo2/sector) 가동 성공!")
     except Exception as e: print(f"⚠️ [에러] API watchdog 스케줄러: {e}")
+
+    try:
+        if not telegram_watchdog.is_running():
+            telegram_watchdog.start()
+        print("✅ [시스템] 텔레그램 모니터 watchdog (1분 주기, 세션만료 감지) 가동 성공!")
+    except Exception as e: print(f"⚠️ [에러] 텔레그램 watchdog 스케줄러: {e}")
 
 @client.event
 async def on_message(message):

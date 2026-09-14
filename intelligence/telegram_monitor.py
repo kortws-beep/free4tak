@@ -51,7 +51,10 @@ API_HASH = os.getenv("TELEGRAM_API_HASH", "d7c4e05b6ac021c5bfe2e89db29938fc")
 SESSION  = os.path.join(_BASE, "intelligence", "telegram_session")
 
 CHANNELS = [
-    "hankyung_fin",   # 한국경제 금융
+    # ★ 2026-09-14: hankyung_fin 제외 — 대장 확인, 내용이 안 나옴(채널
+    #   비활성/변경 추정). mbngoldkty/mbngoldckj 2개 신규 추가.
+    "mbngoldkty",
+    "mbngoldckj",
     "stocknewskorea", # 주식뉴스
     "kind_krx",       # 공시(KIND)
     "AllStockNews",   # 전체 주식 뉴스 (상한가/이슈) — 여의도 주식 속보
