@@ -816,7 +816,8 @@ def _get_kiwoom_condition_pool() -> set:
 # ============================================================
 # 한투 관심그룹 'new' (★ 2026-07-17 추가)
 # ============================================================
-_KIS_WATCHLIST_CACHE = {"date": "", "names": set()}
+_KIS_WATCHLIST_CACHE = {"ts": 0.0, "names": set()}
+WATCHLIST_REFRESH_SEC = 600  # ★ 2026-09-15: 하루1회→10분 캐시로 변경(아래 사유)
 
 def _get_kis_new_watchlist_names(api) -> set:
     """
@@ -824,9 +825,16 @@ def _get_kis_new_watchlist_names(api) -> set:
     받아온다. 사용자가 직접 계속 갱신하는(유망종목 추가/제거) 목록이라
     sbo2 전체 후보가 적거나 없을 때 보조 소스로 사용 — 전체 시장 스캔
     실패 시의 안전망.
+
+    ★ 2026-09-15: 기존엔 하루 1회(날짜기준) 캐시라, 대장이 장중에 계속
+    추가/제외하는 변경사항이 다음날까지 반영이 안 됐음(대장 지적 —
+    "장중엔 모멘텀+new 관심종목만 자주 갱신하면 시간이 줄지 않을까").
+    API 호출이 2개뿐인 가벼운 조회라 시간기반(10분) 캐시로 바꿔 매 루프
+    호출해도 부담 없게 하고, _refresh_watchlist_candidates()가 momentum과
+    동일하게 이 슬롯만 독립적으로 자주 재계산하도록 함.
     """
-    today = today_str()
-    if _KIS_WATCHLIST_CACHE["date"] == today:
+    now = time.time()
+    if now - _KIS_WATCHLIST_CACHE["ts"] < WATCHLIST_REFRESH_SEC:
         return _KIS_WATCHLIST_CACHE["names"]
 
     names = set()
@@ -854,7 +862,7 @@ def _get_kis_new_watchlist_names(api) -> set:
         print(f"⚠️ [sbo2] 한투 관심그룹 조회 오류: {e}")
 
     _KIS_WATCHLIST_CACHE["names"] = names
-    _KIS_WATCHLIST_CACHE["date"]  = today
+    _KIS_WATCHLIST_CACHE["ts"]    = now
     return names
 
 
@@ -1438,6 +1446,66 @@ class Sbo2:
         self.candidates = [c for c in self.candidates if c["grade"] != SLOT_MOMENTUM] + momentum_list
         print(f"   🔄 [sbo2] 모멘텀 후보 갱신: {len(new_names)}개 ({', '.join(new_names) or '없음'})")
         for c in momentum_list:
+            save_candidate(
+                name=c["name"], grade=c["grade"], score=c["score"],
+                vcp=c["vcp"], trend=c["trend"], catalyst=c["catalyst"],
+                curr=c["curr"], stop=c["stop"], tgt=c["tgt"], rr=c["rr"],
+            )
+
+    def _refresh_watchlist_candidates(self):
+        """★ 2026-09-15 신설 — 대장 제안: "장중엔 모멘텀+new 관심종목만
+        자주 갱신하면 시간이 줄지 않을까". 전체갱신(_refresh_candidates)은
+        키움조건검색+미장45종목스캔+전체시장 추세분석이 다 들어있어
+        무거워서 하루 1회로 유지하되, 관심종목(SLOT_WATCHLIST)은 API
+        호출 2개뿐인 가벼운 조회(_get_kis_new_watchlist_names, 이번에
+        10분 캐시로 전환)라 momentum과 동일하게 매 루프 독립 갱신한다
+        — 대장이 하루 중 계속 추가/제외하는 게 반영되게.
+        get_candidates() 원본 로직과 동일하게 "다른 슬롯 합쳐서
+        MAX_POSITIONS 미만일 때만" 보조 소스로 사용."""
+        if not self.candidates:
+            return
+        held_codes = set(self.positions.keys())
+        held_names = {p.get("name") for p in self.positions.values()}
+        non_watchlist = [c for c in self.candidates if c["grade"] != SLOT_WATCHLIST]
+
+        if len(non_watchlist) >= MAX_POSITIONS:
+            if len(non_watchlist) != len(self.candidates):
+                self.candidates = non_watchlist  # 다른 슬롯으로 충분 — 관심종목 비움
+            return
+
+        already_covered = {c["name"] for c in non_watchlist
+                            if c["grade"] in (SLOT_INTER, SLOT_TREND, SLOT_MOMENTUM, SLOT_LIGHT)}
+        watchlist_names = _get_kis_new_watchlist_names(self.api) - already_covered
+        watchlist_names = {n for n in watchlist_names
+                            if get_stock_code(n) not in held_codes and n not in held_names}
+
+        watchlist_list = []
+        if watchlist_names:
+            conn = sqlite3.connect(os.path.join(BASE_DIR, "kr_theme_finance.db"), timeout=5)
+            for name in watchlist_names:
+                wl = _check_light_chart_health(name, conn, self.api)
+                if wl:
+                    watchlist_list.append({
+                        "name": name, "grade": SLOT_WATCHLIST, "score": 50,
+                        "vcp": False, "trend": False, "catalyst": False,
+                        "curr": wl["curr_price"], "stop": wl["stop_price"], "tgt": wl["tgt_price"],
+                        "rr": round((wl["tgt_price"] - wl["curr_price"]) /
+                                    (wl["curr_price"] - wl["stop_price"]), 1)
+                            if wl["curr_price"] > wl["stop_price"] else 0,
+                        "themes": [f"관심종목:{wl['pattern']}"],
+                    })
+            conn.close()
+        watchlist_list.sort(key=lambda x: x["score"], reverse=True)
+        watchlist_list = watchlist_list[:CANDIDATE_CAP_PER_SLOT]
+
+        old_names = {c["name"] for c in self.candidates if c["grade"] == SLOT_WATCHLIST}
+        new_names = {c["name"] for c in watchlist_list}
+        if new_names == old_names:
+            return
+
+        self.candidates = non_watchlist + watchlist_list
+        print(f"   🔄 [sbo2] 관심종목(new) 후보 갱신: {len(new_names)}개 ({', '.join(new_names) or '없음'})")
+        for c in watchlist_list:
             save_candidate(
                 name=c["name"], grade=c["grade"], score=c["score"],
                 vcp=c["vcp"], trend=c["trend"], catalyst=c["catalyst"],
@@ -2400,8 +2468,10 @@ class Sbo2:
 
                 # 후보 갱신 (하루 1회)
                 self._refresh_candidates()
-                # ★ 모멘텀만 매 루프 별도 갱신 — 사유는 _refresh_momentum_candidates() 참고
+                # ★ 모멘텀/관심종목(new)만 매 루프 별도 갱신(가벼움) — 무거운 전체갱신은
+                #   하루 1회 유지. 사유는 각 함수 docstring 참고.
                 self._refresh_momentum_candidates()
+                self._refresh_watchlist_candidates()
 
                 # 매도 체크 (항상)
                 if self.positions:
