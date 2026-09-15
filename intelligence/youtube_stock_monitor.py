@@ -432,11 +432,18 @@ def main():
         state.setdefault(handle, {})["last_video_id"] = new_last_id
         _save_state(state)
 
-    # ★ 2026-09-15: 개별 신규 저장 건 나열 대신, 14일 기준(그 이전 언급은
-    #   카운트에서 자동 제외) 2번 이상 언급된 종목만 "종목명(최초일자,
-    #   N회)" 형태로 간단히 리포팅 (대장 요청 — 날짜 나열은 헷갈려서
-    #   최초언급일+횟수로 축약) — 이번 실행에서 새로 저장된 종목 중
-    #   임계치를 넘긴 것만 골라 알림.
+    report_count = notify_report(total_saved)
+    print(f"\n✅ [유튜브] 완료 — 신규 저장 {len(total_saved)}건, 리포팅 {report_count}건")
+
+
+def notify_report(total_saved: list) -> int:
+    """★ 2026-09-15: 개별 신규 저장 건 나열 대신, 14일 기준(그 이전 언급은
+    카운트에서 자동 제외) 2번 이상 언급된 종목만 "종목명(최초일자, N회)"
+    형태로 간단히 리포팅 (대장 요청 — 날짜 나열은 헷갈려서 최초언급일+
+    횟수로 축약). VOD 스캔(youtube_stock_monitor)과 라이브 모니터
+    (youtube_live_monitor)가 이 함수를 공유해서 알림 포맷을 통일한다.
+    total_saved: [(pick_date, stock_name, channel_label), ...]
+    반환: 리포팅된 종목 수."""
     report_lines = []
     for name in sorted({n for _, n, _ in total_saved}):
         dates = get_mention_dates(name, days=14)
@@ -453,7 +460,7 @@ def main():
         except Exception as e:
             print(f"⚠️ 알림 전송 오류: {e}")
 
-    print(f"\n✅ [유튜브] 완료 — 신규 저장 {len(total_saved)}건, 리포팅 {len(report_lines)}건")
+    return len(report_lines)
 
 
 if __name__ == "__main__":
