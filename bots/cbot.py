@@ -221,6 +221,12 @@ FEAR_GREED_MIN   = 20
 DAILY_LOSS_LIMIT = -150_000     # 일일 손실 한도 (한도 내에서만 거래)
 MAX_DAILY_LOSS   = 5            # 당일 손절 최대 5회
 
+# ★ 2026-09-15: 재매수 금지를 "당일(자정까지)"에서 "매도 후 5시간 롤링"으로
+#   변경(대장 결정) — 종목풀이 작아서 당일 재매수 금지가 걸리면 오히려
+#   더 안 좋은 대안 종목을 사게 되는 경우가 많고, 한 번 오른 뒤 조정받고
+#   다시 오르는 코인도 있어 자정 기준보다 롤링 쿨다운이 더 합리적.
+REBUY_COOLDOWN_SEC = 5 * 3600
+
 NIGHT_START = 23   # 밤 11시 ~ 오전 6시
 NIGHT_END   = 6
 
@@ -744,12 +750,15 @@ class CBot:
             state = _read_state()
             saved_pos = state.get("positions", {})
             saved_peak = state.get("peak_tracker", {})
-            # ★ 2026-08-18: 같은 날짜 저장분만 복구 — 날짜가 다르면(자정
-            #   경과) 새로 시작하는 게 맞음(_daily_reset과 동일 의미).
-            if state.get("sold_today_date") == today_str():
-                self.sold_today = state.get("sold_today", {})
-                if self.sold_today:
-                    print(f"♻️ 당일매도이력 복구: {list(self.sold_today.keys())}")
+            # ★ 2026-08-18 도입, 2026-09-15 날짜조건 제거: 원래는 "같은
+            #   날짜 저장분만 복구"였는데, 재매수금지가 5시간 롤링
+            #   쿨다운으로 바뀌면서 날짜가 바뀌어도 여전히 유효한 쿨다운이
+            #   있을 수 있음(예: 23시 매도 후 자정 넘겨 재시작). 날짜와
+            #   무관하게 항상 복구하고, 만료 여부는 _is_rebuy_blocked()가
+            #   타임스탬프로 알아서 판단(오래된 항목은 자동으로 무해).
+            self.sold_today = state.get("sold_today", {})
+            if self.sold_today:
+                print(f"♻️ 매도이력 복구: {list(self.sold_today.keys())}")
             if saved_pos:
                 # 실제 잔고와 교차 검증
                 balances = self.get_balances()
@@ -1832,7 +1841,7 @@ class CBot:
                     f"{emoji} [매도] {market} | {reason} | {qty:.6f}개",
                     critical=True,
                 )
-                self.sold_today[market] = now_hms()
+                self.sold_today[market] = time.time()  # ★ 09-15: 5시간 롤링 쿨다운용 실제 타임스탬프
                 if _master_remove:
                     try:
                         _master_remove('cbot', market)
@@ -2173,11 +2182,24 @@ class CBot:
         else:
             _write_cmd_result(f"⚠️ {sell_market} 미보유")
 
+    def _is_rebuy_blocked(self, market: str) -> bool:
+        """★ 2026-09-15: 매도 후 REBUY_COOLDOWN_SEC(5시간) 이내면 재매수 금지
+        (기존 "당일 자정까지 금지"에서 롤링 쿨다운으로 변경, 대장 결정).
+        구버전(now_hms 문자열)이 상태파일에 잔존해 있어도 숫자가 아니면
+        안전하게 만료 취급(재시작 직후 크래시 방지)."""
+        sold_at = self.sold_today.get(market)
+        if not isinstance(sold_at, (int, float)):
+            return False
+        return (time.time() - sold_at) < REBUY_COOLDOWN_SEC
+
     # ============================================================
     # 일일 초기화
     # ============================================================
     def _daily_reset(self, today: str):
-        self.sold_today       = {}
+        # ★ 2026-09-15: sold_today는 더 이상 자정 기준으로 비우지 않음 —
+        #   5시간 롤링 쿨다운이라 자정에 통째로 지우면 늦은 밤 매도건의
+        #   쿨다운이 부당하게 짧아짐(예: 23시 매도가 00시에 바로 풀림).
+        #   개별 항목은 _is_rebuy_blocked()가 시간으로 알아서 만료시킴.
         self._sold_today_date = today
         self.daily_loss_count = 0
         self.daily_pnl        = 0
@@ -2298,7 +2320,7 @@ class CBot:
                             print(f"   🛡️ {_code} 매수직후 동기화 보호 중 — 수동매도 감지 스킵")
                             _guarded_codes.append(_code)
                             continue
-                        self.sold_today[_code] = now_hms()
+                        self.sold_today[_code] = _now_ts  # ★ 09-15: 5시간 롤링 쿨다운용
                         print(f"🔍 수동매도 감지: {_code} → sold_today 추가")
                         _old_pos = self.positions.get(_code, {})
                         _prices = self.get_current_price([_code])
@@ -2402,7 +2424,7 @@ class CBot:
                         for _cand in self.coin_pool:
                             if _cand in self.positions or _cand == stagnant_market:
                                 continue
-                            if self.sold_today.get(_cand):
+                            if self._is_rebuy_blocked(_cand):
                                 continue
                             _signal, _ind, _reason = self.check_buy_signal(_cand)
                             if not _signal:
@@ -2441,7 +2463,7 @@ class CBot:
                             break
                         if market in self.positions:
                             continue
-                        if self.sold_today.get(market):
+                        if self._is_rebuy_blocked(market):
                             print(f"🚫 재매수 금지 {market}")
                             continue
 
