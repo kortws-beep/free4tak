@@ -1460,17 +1460,27 @@ class Sbo2:
         호출 2개뿐인 가벼운 조회(_get_kis_new_watchlist_names, 이번에
         10분 캐시로 전환)라 momentum과 동일하게 매 루프 독립 갱신한다
         — 대장이 하루 중 계속 추가/제외하는 게 반영되게.
-        get_candidates() 원본 로직과 동일하게 "다른 슬롯 합쳐서
-        MAX_POSITIONS 미만일 때만" 보조 소스로 사용."""
+
+        ★ 게이트 기준: 처음엔 get_candidates() 원본과 동일하게 "후보
+        풀 개수(non_watchlist) >= MAX_POSITIONS면 스킵"으로 짰는데,
+        대장이 지적 — "슬롯이 비었을 때는 모멘텀+추세+완화 8개에서
+        후보를 못 구하면 new에서 구해야 해". 후보 풀이 많아도(예:8개)
+        실제 매수단계에서 MA40/시총/거래량/이미보유 등으로 다 걸러질
+        수 있어 "풀 개수"는 "실제로 살 수 있는지"의 근사치로 부적절.
+        **실제 보유 슬롯이 비었는지**(len(self.positions))로 게이트를
+        바꿈 — 슬롯이 하나라도 열려있으면 항상 new도 후보 풀에 포함시켜
+        놓고, 어차피 실제 매수 우선순위(교집합>모멘텀>추세>완화>
+        관심종목>키움풀)는 _check_buy()의 슬롯 순회에서 이미 보장되므로
+        "다른 슬롯이 다 채우고 남으면 그때 관심종목 차례"가 자연히 지켜짐."""
         if not self.candidates:
             return
         held_codes = set(self.positions.keys())
         held_names = {p.get("name") for p in self.positions.values()}
         non_watchlist = [c for c in self.candidates if c["grade"] != SLOT_WATCHLIST]
 
-        if len(non_watchlist) >= MAX_POSITIONS:
+        if len(self.positions) >= MAX_POSITIONS:
             if len(non_watchlist) != len(self.candidates):
-                self.candidates = non_watchlist  # 다른 슬롯으로 충분 — 관심종목 비움
+                self.candidates = non_watchlist  # 실제 슬롯이 꽉 참 — 관심종목 비움
             return
 
         already_covered = {c["name"] for c in non_watchlist
