@@ -76,6 +76,11 @@ MAX_BACKLOG_PER_CHANNEL = 20
 OLLAMA_URL   = os.getenv("OLLAMA_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("YT_OLLAMA_MODEL", "llama3.1:8b")
 
+# 한 세그먼트에서 진짜 추천은 보통 1~3개 — 이보다 많이 나오면 테마나열로
+# 간주해 통째로 버림 (대장 요청: "추천종목/탑픽만 캐치해야지 안그럼 종목수
+# 엄청 많아짐")
+MAX_PICKS_PER_SEGMENT = 3
+
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                   "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -300,28 +305,49 @@ def extract_stock_picks(title: str, transcript: str, llm) -> list:
 자막:
 {transcript}
 
-위 내용에서 출연자가 명확하게 "추천" 또는 "주목/관심 있게 볼 종목"으로
-언급한 개별 상장 종목명만 뽑아줘. 규칙:
-- 지수(코스피/코스닥), 업종/섹터 이름, 해외지수는 제외하고 개별 종목명만.
+"오늘의 추천종목", "탑픽", "일발장전" 같은 공식 추천/픽 코너에서
+출연자가 명시적으로 지목한 종목명만 뽑아줘. 아주 엄격하게 판단할 것:
+- 그냥 테마/섹터를 설명하다가 예시로 여러 종목을 나열한 경우(예: "이
+  테마 관련 종목들은 A, B, C, D..." 식의 단순 소개)는 절대 포함하지
+  마 — 이런 나열은 추천이 아니라 정보전달일 뿐임.
+- "추천합니다", "탑픽입니다", "오늘의 픽" 처럼 명시적으로 추천/픽으로
+  못박은 경우만 포함.
+- 한 세그먼트에서 진짜 추천되는 종목은 보통 1~3개 이내임. 4개 넘게
+  나온다면 그건 십중팔구 테마 나열이지 진짜 추천이 아니니 의심하고
+  더 엄격히 재검토.
+- 지수(코스피/코스닥), 업종/섹터 이름, 해외지수는 제외.
 - 확실하지 않으면 포함하지 마.
-- 결과는 다른 설명 없이 JSON 배열로만 응답. 예: ["삼성전자", "SK하이닉스"]
+- 결과는 다른 설명 없이 JSON 배열로만 응답. 예: ["삼성전자"]
 - 추천 종목이 없으면 빈 배열 []."""
 
-    try:
-        res = llm.chat.completions.create(
-            model=OLLAMA_MODEL,
-            max_tokens=500,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        text = res.choices[0].message.content.strip()
-        m = re.search(r"\[.*\]", text, re.S)
-        if not m:
-            return []
-        names = json.loads(m.group(0))
-        return [n.strip() for n in names if isinstance(n, str) and n.strip()]
-    except Exception as e:
-        print(f"   ⚠️ 로컬AI 추출 오류: {e}")
-        return []
+    # ★ 2026-09-16: 소형 로컬모델이 가끔 JSON을 깨뜨려서 파싱 실패 —
+    #   진짜 추천을 놓치는 게 더 아까워서 실패시 1회 재시도.
+    for attempt in range(2):
+        try:
+            res = llm.chat.completions.create(
+                model=OLLAMA_MODEL,
+                max_tokens=500,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            text = res.choices[0].message.content.strip()
+            m = re.search(r"\[.*\]", text, re.S)
+            if not m:
+                continue
+            names = json.loads(m.group(0))
+            names = [n.strip() for n in names if isinstance(n, str) and n.strip()]
+            # ★ 2026-09-16: 대장 지적 — "추천종목/탑픽만 캐치해야지 안그럼
+            #   종목수 엄청 많아짐". 프롬프트로 "4개 넘으면 테마나열"이라고
+            #   힌트만 줘서는 로컬(소형)모델이 가끔 안 지킴 — 코드로 강제.
+            #   진짜 추천 코너는 보통 1~3개, 그 이상이면 테마 나열로 간주해
+            #   통째로 버림(일부만 골라 keep하는 건 자의적이라 전부 버리는
+            #   쪽이 안전).
+            if len(names) > MAX_PICKS_PER_SEGMENT:
+                print(f"   🚫 {len(names)}개 추출됨(>{MAX_PICKS_PER_SEGMENT}) — 테마나열로 판단, 전체 버림: {names}")
+                return []
+            return names
+        except Exception as e:
+            print(f"   ⚠️ 로컬AI 추출 오류(시도 {attempt+1}/2): {e}")
+    return []
 
 
 def generate_comment(stock_name: str, transcript: str, llm) -> str:
