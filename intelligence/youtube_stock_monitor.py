@@ -327,6 +327,7 @@ def extract_stock_picks(title: str, transcript: str, llm) -> list:
             res = llm.chat.completions.create(
                 model=OLLAMA_MODEL,
                 max_tokens=500,
+                extra_body={"options": {"num_ctx": 8192}},
                 messages=[{"role": "user", "content": prompt}],
             )
             text = res.choices[0].message.content.strip()
@@ -367,6 +368,7 @@ def generate_comment(stock_name: str, transcript: str, llm) -> str:
         res = llm.chat.completions.create(
             model=OLLAMA_MODEL,
             max_tokens=100,
+            extra_body={"options": {"num_ctx": 8192}},
             messages=[{"role": "user", "content": prompt}],
         )
         comment = res.choices[0].message.content.strip().strip('"').strip()

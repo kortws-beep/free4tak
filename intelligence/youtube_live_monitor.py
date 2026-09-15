@@ -71,6 +71,7 @@ POLL_INTERVAL_SEC  = 300   # 라이브 아닐 때 재확인 주기 (5분)
 WHISPER_MODEL_SIZE = os.getenv("YT_WHISPER_MODEL", "small")        # 대장 확인 — 안전우선
 AUDIO_FORMAT       = "233"  # yt-dlp 포맷ID: 오디오 전용 저비트레이트 (음성인식엔 충분)
 YTDLP_BIN          = os.path.join(os.path.dirname(sys.executable), "yt-dlp")  # venv 안 실행파일 절대경로 사용(PATH 의존 X)
+TRANSCRIPT_SUB_CHUNK = 4000  # 60분 전사(~2만자)를 이 크기로 쪼개서 전체를 다 훑음(num_ctx=8192 여유 감안)
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -164,18 +165,26 @@ def process_chunk(handle: str, channel_label: str, llm, model):
         return True
 
     print(f"   📝 [{channel_label}] 전사 {len(text)}자")
-    names = extract_stock_picks(f"{channel_label} 라이브", text[:6000], llm)
+    # ★ 2026-09-16: 60분 구간 전사가 보통 2만자 안팎이라 한 번에
+    #   text[:6000]으로 잘라 넣으면 앞쪽 16분 정도만 분석되고 나머지
+    #   84%가 통째로 무시되던 버그를 실측(첫 라이브 사이클)으로 발견.
+    #   TRANSCRIPT_SUB_CHUNK 단위로 쪼개서 전체를 다 훑도록 수정 —
+    #   MAX_PICKS_PER_SEGMENT 필터도 조각마다 독립 적용되니 테마나열
+    #   차단 효과는 그대로 유지됨.
     saved = []
-    for raw_name in names:
-        valid_name = validate_stock_name(raw_name)
-        if not valid_name:
-            print(f"   ⏭️ 검증 실패(할루시네이션 추정): {raw_name}")
-            continue
-        comment = generate_comment(valid_name, text[:6000], llm)
-        if save_pick(today, valid_name, channel_label, video_id, f"{channel_label} 라이브", comment):
-            saved.append((today, valid_name, channel_label))
-            suffix = f" — {comment}" if comment else ""
-            print(f"   💾 {today} | {valid_name} ({channel_label}){suffix}")
+    for i in range(0, len(text), TRANSCRIPT_SUB_CHUNK):
+        sub = text[i:i + TRANSCRIPT_SUB_CHUNK]
+        names = extract_stock_picks(f"{channel_label} 라이브", sub, llm)
+        for raw_name in names:
+            valid_name = validate_stock_name(raw_name)
+            if not valid_name:
+                print(f"   ⏭️ 검증 실패(할루시네이션 추정): {raw_name}")
+                continue
+            comment = generate_comment(valid_name, sub, llm)
+            if save_pick(today, valid_name, channel_label, video_id, f"{channel_label} 라이브", comment):
+                saved.append((today, valid_name, channel_label))
+                suffix = f" — {comment}" if comment else ""
+                print(f"   💾 {today} | {valid_name} ({channel_label}){suffix}")
 
     if saved:
         notify_report(saved)
