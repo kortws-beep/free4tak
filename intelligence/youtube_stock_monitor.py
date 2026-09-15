@@ -135,7 +135,7 @@ def get_recent_picks(days: int = 1) -> list:
     return [{"date": r[0], "name": r[1], "channel": r[2], "title": r[3]} for r in rows]
 
 
-def get_mention_dates(stock_name: str, days: int = 2) -> list:
+def get_mention_dates(stock_name: str, days: int = 14) -> list:
     """최근 N일(오늘 포함) 동안 해당 종목이 언급된 날짜 목록(중복 포함, 발생순)."""
     conn = sqlite3.connect(DB_PATH, timeout=5)
     conn.execute("PRAGMA query_only = ON")
@@ -392,23 +392,23 @@ def main():
         state.setdefault(handle, {})["last_video_id"] = new_last_id
         _save_state(state)
 
-    # ★ 2026-09-15: 개별 신규 저장 건 나열 대신, 2일 기준 2번 이상 언급된
-    #   종목만 "종목명(일자1,일자2)" 형태로 간단히 리포팅 (대장 요청) —
-    #   하루 3회(06/10/14시) 체크로 바뀌면서 매번 raw 리스트를 다 쏘면
-    #   중복/스팸이 심해져서, 이번 실행에서 새로 저장된 종목 중 임계치를
-    #   넘긴 것만 골라 알림.
+    # ★ 2026-09-15: 개별 신규 저장 건 나열 대신, 14일 기준(그 이전 언급은
+    #   카운트에서 자동 제외) 2번 이상 언급된 종목만 "종목명(최초일자,
+    #   N회)" 형태로 간단히 리포팅 (대장 요청 — 날짜 나열은 헷갈려서
+    #   최초언급일+횟수로 축약) — 이번 실행에서 새로 저장된 종목 중
+    #   임계치를 넘긴 것만 골라 알림.
     report_lines = []
     for name in sorted({n for _, n, _ in total_saved}):
-        dates = get_mention_dates(name, days=2)
+        dates = get_mention_dates(name, days=14)
         if len(dates) >= 2:
-            short_dates = [d[5:].replace("-", "/") for d in dates]  # 09/15
-            report_lines.append(f"{name}({','.join(short_dates)})")
+            first_date = dates[0][5:].replace("-", "/")  # 09/15
+            report_lines.append(f"{name}({first_date}, {len(dates)}회)")
 
     if report_lines:
         try:
             from notifier import Notifier
             Notifier(name="유튜브스카우트").send(
-                "[유튜브] 2일내 2회+ 언급 종목\n" + ", ".join(report_lines)
+                "[유튜브] 14일내 2회+ 언급 종목\n" + ", ".join(report_lines)
             )
         except Exception as e:
             print(f"⚠️ 알림 전송 오류: {e}")
