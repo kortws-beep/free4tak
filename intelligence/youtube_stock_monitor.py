@@ -98,24 +98,29 @@ def init_db():
             channel     TEXT DEFAULT '',
             video_id    TEXT DEFAULT '',
             video_title TEXT DEFAULT '',
+            evaluation  TEXT DEFAULT '',
             created_at  TEXT DEFAULT (datetime('now','localtime')),
             UNIQUE(video_id, stock_name)
         )
     """)
+    # ★ 2026-09-15: 기존 DB에는 evaluation 컬럼이 없어서 마이그레이션 필요
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(youtube_picks)").fetchall()]
+    if "evaluation" not in cols:
+        conn.execute("ALTER TABLE youtube_picks ADD COLUMN evaluation TEXT DEFAULT ''")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_yp_date ON youtube_picks(pick_date)")
     conn.commit()
     conn.close()
 
 
 def save_pick(pick_date: str, stock_name: str, channel: str,
-              video_id: str, video_title: str) -> bool:
+              video_id: str, video_title: str, evaluation: str = "") -> bool:
     conn = sqlite3.connect(DB_PATH, timeout=10)
     conn.execute("PRAGMA journal_mode=WAL")
     cur = conn.execute("""
         INSERT OR IGNORE INTO youtube_picks
-            (pick_date, stock_name, channel, video_id, video_title)
-        VALUES (?, ?, ?, ?, ?)
-    """, (pick_date, stock_name, channel, video_id, video_title))
+            (pick_date, stock_name, channel, video_id, video_title, evaluation)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, (pick_date, stock_name, channel, video_id, video_title, evaluation))
     conn.commit()
     saved = cur.rowcount > 0
     conn.close()
@@ -126,13 +131,13 @@ def get_recent_picks(days: int = 1) -> list:
     conn = sqlite3.connect(DB_PATH, timeout=5)
     conn.execute("PRAGMA query_only = ON")
     rows = conn.execute("""
-        SELECT pick_date, stock_name, channel, video_title
+        SELECT pick_date, stock_name, channel, video_title, evaluation
         FROM youtube_picks
         WHERE pick_date >= date('now', 'localtime', ? || ' days')
         ORDER BY pick_date DESC
     """, (f"-{days-1}",)).fetchall()
     conn.close()
-    return [{"date": r[0], "name": r[1], "channel": r[2], "title": r[3]} for r in rows]
+    return [{"date": r[0], "name": r[1], "channel": r[2], "title": r[3], "evaluation": r[4]} for r in rows]
 
 
 def get_mention_dates(stock_name: str, days: int = 14) -> list:
@@ -281,6 +286,11 @@ def _get_llm_client():
 
 
 def extract_stock_picks(title: str, transcript: str, llm) -> list:
+    """추천 종목명만 뽑는다 (JSON 문자열 배열). 근거요약(comment)은 별도
+    함수(generate_comment)로 분리 — name+comment를 한 번에 JSON 객체로
+    요청하면 llama3.1:8b가 형식을 자주 못 지켜서(JSON 자체를 안 씀)
+    실제 저장돼야 할 종목명까지 통째로 날아가는 걸 실측으로 확인.
+    종목명만 뽑는 단순한 형태가 검증된 형태라 그대로 유지."""
     if not transcript or llm is None:
         return []
 
@@ -312,6 +322,34 @@ def extract_stock_picks(title: str, transcript: str, llm) -> list:
     except Exception as e:
         print(f"   ⚠️ 로컬AI 추출 오류: {e}")
         return []
+
+
+def generate_comment(stock_name: str, transcript: str, llm) -> str:
+    """검증 통과한 종목에 한해서만 호출 — 자막에 실제로 나온 추천 근거를
+    한 줄로 요약. 독자적 투자판단이 아니라 "말한 내용 요약"으로 한정해
+    로컬 소형모델의 할루시네이션 리스크를 낮춤. JSON이 아니라 평문
+    응답이라 파싱 실패 위험이 거의 없음(그냥 텍스트 그대로 씀)."""
+    if llm is None:
+        return ""
+    prompt = f"""아래 자막에서 "{stock_name}"에 대해 언급된 추천 근거를
+20~30자 내외 한 줄로 요약해줘. 다른 설명 없이 요약 문장만 답해.
+자막에 명확한 근거가 없으면 그냥 "근거 불명확"이라고만 답해.
+
+자막:
+{transcript}"""
+    try:
+        res = llm.chat.completions.create(
+            model=OLLAMA_MODEL,
+            max_tokens=100,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        comment = res.choices[0].message.content.strip().strip('"').strip()
+        if "근거 불명확" in comment or len(comment) > 60:
+            return ""
+        return comment
+    except Exception as e:
+        print(f"   ⚠️ 코멘트 생성 오류 ({stock_name}): {e}")
+        return ""
 
 
 def validate_stock_name(name: str) -> str:
@@ -381,9 +419,11 @@ def main():
                 if not valid_name:
                     print(f"   ⏭️ 검증 실패(할루시네이션 추정): {raw_name}")
                     continue
-                if save_pick(pick_date, valid_name, channel_label, vid, title):
+                comment = generate_comment(valid_name, transcript, llm)
+                if save_pick(pick_date, valid_name, channel_label, vid, title, comment):
                     total_saved.append((pick_date, valid_name, channel_label))
-                    print(f"   💾 {pick_date} | {valid_name} ({channel_label})")
+                    suffix = f" — {comment}" if comment else ""
+                    print(f"   💾 {pick_date} | {valid_name} ({channel_label}){suffix}")
 
             # 영상 단위로 상태 저장 — 중간에 죽어도 재처리 안 되게
             state.setdefault(handle, {})["last_video_id"] = vid
