@@ -88,6 +88,9 @@ TELEGRAM_DB_PATH = os.path.join(_here, "telegram_events.db")
 TELEGRAM_LOOKBACK_HOURS = 6
 STATE_FILE = os.path.join(_here, "day_trade_scout_state.json")
 BATON_ACCEL_THRESHOLD = 30.0  # detect_baton_touch의 "급가속" 기준과 동일(재확인용)
+# ★ 2026-09-15: 섹터(테마)명 표시 요청(대장) — swing_master.py/swing_analyzer.py와
+#   동일하게 lina_bot/kr_theme_finance.db 사용(다른 두 사본은 0바이트 빈 파일).
+THEME_DB_PATH = os.path.join(_base, "lina_bot", "kr_theme_finance.db")
 
 
 def _load_state() -> dict:
@@ -219,6 +222,25 @@ def _gather_candidates(keywords: list = None) -> list:
     return result
 
 
+def _get_sector_name(stock_name: str, limit: int = 2) -> str:
+    """★ 2026-09-15: 섹터(테마)명 표시 요청(대장). kr_theme_finance.db의
+    stock_name은 "삼성전자KOSPI 005930"처럼 시장구분+코드가 붙어있어
+    LIKE prefix 매칭 사용. 한 종목이 여러 테마에 속할 수 있어 최대
+    limit개만(너무 길어지지 않게)."""
+    try:
+        conn = sqlite3.connect(THEME_DB_PATH, timeout=5)
+        conn.execute("PRAGMA query_only=ON")
+        rows = conn.execute(
+            "SELECT DISTINCT theme_name FROM kr_theme_stocks WHERE stock_name LIKE ? LIMIT ?",
+            (f"{stock_name}%", limit),
+        ).fetchall()
+        conn.close()
+        return ", ".join(r[0] for r in rows) if rows else ""
+    except Exception as e:
+        print(f"⚠️ 섹터 조회 오류({stock_name}): {e}")
+        return ""
+
+
 def _search_telegram_mentions(stock_name: str) -> str:
     """
     ★ 2026-09-09: get_stock_event_bonus()는 telegram_monitor.py가 이미
@@ -267,8 +289,9 @@ def _enrich(candidates: list, kis: KisAPI) -> list:
         bonus, reason = get_stock_event_bonus(code, bot_type="sbot")
         if not reason:
             reason = _search_telegram_mentions(name)
+        sector = _get_sector_name(name)
         enriched.append({
-            "code": code, "name": name, "tags": tags,
+            "code": code, "name": name, "tags": tags, "sector": sector,
             "price": price, "chg": chg, "vol": vol,
             "bonus": bonus, "reason": reason,
         })
@@ -279,9 +302,10 @@ def _build_prompt(enriched: list) -> str:
     lines = []
     for e in enriched[:MAX_CANDIDATES_TO_LLM]:
         tag_str = ",".join(e["tags"]) if e["tags"] else "?"
+        sector_str = f" [섹터:{e['sector']}]" if e["sector"] else ""
         tag = f" | 텔레그램/공시: {e['reason']}" if e["reason"] else ""
         lines.append(
-            f"- {e['name']}({e['code']}) [출처:{tag_str}] "
+            f"- {e['name']}({e['code']}) [출처:{tag_str}]{sector_str} "
             f"현재가:{e['price']}원 등락률:{e['chg']}% 거래량:{e['vol']}{tag}"
         )
     candidate_text = "\n".join(lines) if lines else "(조건검색 후보 없음)"
@@ -289,7 +313,8 @@ def _build_prompt(enriched: list) -> str:
     return (
         "너는 대한민국 주식 단타 트레이더를 보좌하는 리서치 참모야.\n"
         "아래는 오늘 장 시작 35분 후, 4개 단타 계열 조건검색식에 걸린 종목 목록과 "
-        "각 종목의 현재가/등락률/거래량, 그리고 최근 텔레그램/공시 동향(있는 경우)이야.\n\n"
+        "각 종목의 현재가/등락률/거래량, 소속 섹터(테마), 그리고 최근 텔레그램/공시 "
+        "동향(있는 경우)이야.\n\n"
         f"[오늘의 조건검색 후보]\n{candidate_text}\n\n"
         "🚨 [작성 지침]\n"
         "1. 이 중 오늘 단타(수일 내 매도 목표)로 매수할 만한 종목을 최대 5개까지 골라줘.\n"
@@ -298,9 +323,11 @@ def _build_prompt(enriched: list) -> str:
         "1위 종목이야 — 다른 조건 없이도 우선적으로 포함시켜서 검토해줘.\n"
         "4. 각 종목명 뒤에 괄호로 출처를 표시해줘 — 위 후보 목록의 [출처:...] 값을 "
         "그대로 옮겨적어. 예: 삼성전자(단타000,주도주) / 현대차(대장주)\n"
-        "5. 각 종목마다 '왜 오늘인지' 한 줄 이유를 붙여.\n"
-        "6. 데이터에 없는 내용은 절대 지어내지 마.\n"
-        "7. 후보가 마땅치 않으면 '오늘은 마땅한 후보 없음'이라고 솔직히 말해."
+        "5. 섹터 정보가 있는 종목은 종목명 뒤에 [섹터명]도 같이 표시해줘. "
+        "예: 삼성전자(단타000,주도주)[반도체]\n"
+        "6. 각 종목마다 '왜 오늘인지' 한 줄 이유를 붙여.\n"
+        "7. 데이터에 없는 내용은 절대 지어내지 마.\n"
+        "8. 후보가 마땅치 않으면 '오늘은 마땅한 후보 없음'이라고 솔직히 말해."
     )
 
 
