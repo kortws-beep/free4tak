@@ -2363,6 +2363,16 @@ class CBot:
                     target_p  = tracker.get("target_next", 0)
                     stage_tag = f"(stage{stage})" if stage > 0 else ""
                     hold_mark = "⭐" if tracker.get("hold", False) else "  "
+                    # ★ 2026-09-16: stage>=1은 stop_price 필드를 더 이상 갱신
+                    #   안 하고(트레일링 전용 전환, project_stage_trailing_
+                    #   stop_fix_all_bots) 실제 매도판단은 peak-ATR×1.5로
+                    #   매 루프 새로 계산하는데, 이 로그는 옛 stop_price를
+                    #   그대로 찍어서 실제 트레일선과 안 맞던 표시버그 수정.
+                    if stage >= 1:
+                        atr_val = tracker.get("atr_val", 0)
+                        peak_p  = tracker.get("peak_price", pos["current"])
+                        if atr_val > 0:
+                            stop_p = peak_p - atr_val * ATR_TRAIL_MULT
                     print(
                         f"{hold_mark}{emoji} {market}{stage_tag} {rate:+.2f}% | "
                         f"현재:{pos['current']:,} | 손절:{int(stop_p):,} 목표:{int(target_p):,}"
