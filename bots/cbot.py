@@ -759,6 +759,21 @@ class CBot:
             self.sold_today = state.get("sold_today", {})
             if self.sold_today:
                 print(f"♻️ 매도이력 복구: {list(self.sold_today.keys())}")
+
+            # ★ 2026-09-16: daily_pnl/daily_loss_count가 __init__에서 0으로만
+            #   시작하고 재시작시 상태파일에서 복구하는 코드가 없어서, 재시작
+            #   때마다(사유 무관) 당일 손익 집계와 일손실한도 카운터가
+            #   조용히 리셋되던 문제 발견(대장 지적 — "당일pnl이 초기화
+            #   되렸네"). DAILY_LOSS_LIMIT 서킷브레이커가 실질적으로
+            #   무력화될 수 있는 안전 관련 이슈라 같은 날짜(loss_date)
+            #   저장분에 한해 복구.
+            if state.get("loss_date") == today_str():
+                self.daily_loss_count = state.get("daily_loss", 0)
+                saved_pnl = state.get("last_status", {}).get("daily_pnl", 0)
+                if saved_pnl:
+                    self.daily_pnl = saved_pnl
+                if self.daily_loss_count or self.daily_pnl:
+                    print(f"♻️ 당일손익 복구: PNL {self.daily_pnl:+,}원 | 손절카운트 {self.daily_loss_count}")
             if saved_pos:
                 # 실제 잔고와 교차 검증
                 balances = self.get_balances()
