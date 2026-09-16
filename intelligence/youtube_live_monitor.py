@@ -180,11 +180,17 @@ def process_chunk(handle: str, channel_label: str, llm, model):
             if not valid_name:
                 print(f"   ⏭️ 검증 실패(할루시네이션 추정): {raw_name}")
                 continue
+            # ★ 2026-09-16: 대장 요청 — "언급내용중 목표가/손절가만 있는
+            #   종목으로 한정하자". comment(generate_comment)가 이제
+            #   목표가/손절가 전용이라, 비어있으면(=가격 언급 없음)
+            #   저장 자체를 스킵 — 일반 "추천합니다" 수준은 더 이상 저장 안 함.
             comment = generate_comment(valid_name, sub, llm)
+            if not comment:
+                print(f"   ⏭️ 목표가/손절가 없음 — 저장 스킵: {valid_name}")
+                continue
             if save_pick(today, valid_name, channel_label, video_id, f"{channel_label} 라이브", comment):
                 saved.append((today, valid_name, channel_label))
-                suffix = f" — {comment}" if comment else ""
-                print(f"   💾 {today} | {valid_name} ({channel_label}){suffix}")
+                print(f"   💾 {today} | {valid_name} ({channel_label}) — {comment}")
 
     if saved:
         notify_report(saved)

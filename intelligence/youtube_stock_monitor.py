@@ -352,15 +352,24 @@ def extract_stock_picks(title: str, transcript: str, llm) -> list:
 
 
 def generate_comment(stock_name: str, transcript: str, llm) -> str:
-    """검증 통과한 종목에 한해서만 호출 — 자막에 실제로 나온 추천 근거를
-    한 줄로 요약. 독자적 투자판단이 아니라 "말한 내용 요약"으로 한정해
-    로컬 소형모델의 할루시네이션 리스크를 낮춤. JSON이 아니라 평문
-    응답이라 파싱 실패 위험이 거의 없음(그냥 텍스트 그대로 씀)."""
+    """검증 통과한 종목에 한해서만 호출 — 자막에서 이 종목의 목표가/손절가가
+    구체적 숫자로 언급됐는지만 찾는다. ★ 2026-09-16: 대장 요청 —
+    "언급내용중 목표가/손절가만 있는 종목으로 한정하자". 일반적인
+    "추천합니다" 수준 언급은 더 이상 충분하지 않고, 구체적 가격이 나온
+    경우만 진짜 픽으로 취급. 호출부(process_chunk/main)에서 이 반환값이
+    비어있으면 아예 저장하지 않는 게이트로 씀 — 독자적 투자판단이 아니라
+    "말한 내용에 숫자가 있었는지"만 보는 거라 할루시네이션 리스크도 낮음."""
     if llm is None:
         return ""
-    prompt = f"""아래 자막에서 "{stock_name}"에 대해 언급된 추천 근거를
-20~30자 내외 한 줄로 요약해줘. 다른 설명 없이 요약 문장만 답해.
-자막에 명확한 근거가 없으면 그냥 "근거 불명확"이라고만 답해.
+    prompt = f"""아래 자막에서 "{stock_name}"에 대해 언급된 목표가(target
+price) 또는 손절가(stop-loss price)를 찾아줘. 규칙:
+- 목표가나 손절가가 구체적인 숫자(원/만원 단위)로 명확히 언급된 경우만
+  "목표가:X원" 또는 "손절가:X원" 형식으로 답해(둘 다 있으면 둘 다).
+- 그냥 "추천합니다", "주목할 만합니다" 같은 가격 없는 일반 발언은
+  해당 안 됨.
+- 목표가/손절가 둘 다 숫자로 안 나왔으면 다른 말 없이 정확히
+  "가격정보없음"이라고만 답해.
+- 다른 설명 없이 위 형식만 답해.
 
 자막:
 {transcript}"""
@@ -372,7 +381,11 @@ def generate_comment(stock_name: str, transcript: str, llm) -> str:
             messages=[{"role": "user", "content": prompt}],
         )
         comment = res.choices[0].message.content.strip().strip('"').strip()
-        if "근거 불명확" in comment or len(comment) > 60:
+        # ★ "가격정보없음" in comment로 부정매칭했더니, 목표가만 있고
+        #   손절가는 없는 경우("목표가:150,000원 / 손절가:가격정보없음")
+        #   처럼 일부만 없어도 전체가 무효 처리되던 버그 발견 — 목표가/
+        #   손절가 뒤에 실제 숫자가 있는지 긍정매칭으로 변경.
+        if len(comment) > 100 or not re.search(r"(목표가|손절가)\s*[:：]?\s*[\d,]+", comment):
             return ""
         return comment
     except Exception as e:
@@ -447,11 +460,15 @@ def main():
                 if not valid_name:
                     print(f"   ⏭️ 검증 실패(할루시네이션 추정): {raw_name}")
                     continue
+                # ★ 2026-09-16: 목표가/손절가 없으면 저장 스킵(generate_comment
+                #   변경사항 참고 — youtube_live_monitor.py와 동일 게이트)
                 comment = generate_comment(valid_name, transcript, llm)
+                if not comment:
+                    print(f"   ⏭️ 목표가/손절가 없음 — 저장 스킵: {valid_name}")
+                    continue
                 if save_pick(pick_date, valid_name, channel_label, vid, title, comment):
                     total_saved.append((pick_date, valid_name, channel_label))
-                    suffix = f" — {comment}" if comment else ""
-                    print(f"   💾 {pick_date} | {valid_name} ({channel_label}){suffix}")
+                    print(f"   💾 {pick_date} | {valid_name} ({channel_label}) — {comment}")
 
             # 영상 단위로 상태 저장 — 중간에 죽어도 재처리 안 되게
             state.setdefault(handle, {})["last_video_id"] = vid
