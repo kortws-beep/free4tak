@@ -168,9 +168,7 @@ def process_chunk(handle: str, channel_label: str, llm, model):
     # ★ 2026-09-16: 60분 구간 전사가 보통 2만자 안팎이라 한 번에
     #   text[:6000]으로 잘라 넣으면 앞쪽 16분 정도만 분석되고 나머지
     #   84%가 통째로 무시되던 버그를 실측(첫 라이브 사이클)으로 발견.
-    #   TRANSCRIPT_SUB_CHUNK 단위로 쪼개서 전체를 다 훑도록 수정 —
-    #   MAX_PICKS_PER_SEGMENT 필터도 조각마다 독립 적용되니 테마나열
-    #   차단 효과는 그대로 유지됨.
+    #   TRANSCRIPT_SUB_CHUNK 단위로 쪼개서 전체를 다 훑도록 수정.
     saved = []
     for i in range(0, len(text), TRANSCRIPT_SUB_CHUNK):
         sub = text[i:i + TRANSCRIPT_SUB_CHUNK]

@@ -76,11 +76,6 @@ MAX_BACKLOG_PER_CHANNEL = 20
 OLLAMA_URL   = os.getenv("OLLAMA_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("YT_OLLAMA_MODEL", "llama3.1:8b")
 
-# 한 세그먼트에서 진짜 추천은 보통 1~3개 — 이보다 많이 나오면 테마나열로
-# 간주해 통째로 버림 (대장 요청: "추천종목/탑픽만 캐치해야지 안그럼 종목수
-# 엄청 많아짐")
-MAX_PICKS_PER_SEGMENT = 3
-
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                   "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -336,15 +331,16 @@ def extract_stock_picks(title: str, transcript: str, llm) -> list:
                 continue
             names = json.loads(m.group(0))
             names = [n.strip() for n in names if isinstance(n, str) and n.strip()]
-            # ★ 2026-09-16: 대장 지적 — "추천종목/탑픽만 캐치해야지 안그럼
-            #   종목수 엄청 많아짐". 프롬프트로 "4개 넘으면 테마나열"이라고
-            #   힌트만 줘서는 로컬(소형)모델이 가끔 안 지킴 — 코드로 강제.
-            #   진짜 추천 코너는 보통 1~3개, 그 이상이면 테마 나열로 간주해
-            #   통째로 버림(일부만 골라 keep하는 건 자의적이라 전부 버리는
-            #   쪽이 안전).
-            if len(names) > MAX_PICKS_PER_SEGMENT:
-                print(f"   🚫 {len(names)}개 추출됨(>{MAX_PICKS_PER_SEGMENT}) — 테마나열로 판단, 전체 버림: {names}")
-                return []
+            # ★ 2026-09-16 도입, 2026-09-17 제거: "3개 초과면 테마나열로
+            #   간주해 통째로 버림" 규칙이, 여러 전문가가 연달아 각자
+            #   종목을 추천하는 구간(4000자 안에 여러 실명이 들어감)까지
+            #   같이 날려버리는 걸 실측으로 확인(대장이 매일경제TV를 직접
+            #   보면서 "9개 정도 나오는데 우리는 놓친다"고 지적, 로그에서
+            #   실제 종목명(한전기술/RF-HIC/한선엔지니어링 등)이 4개
+            #   추출됐다는 이유만으로 통째 폐기된 사례 확인). 이제
+            #   generate_comment()의 목표가/손절가 게이트가 훨씬 강한
+            #   2차 필터라 진짜 테마나열(가격 없음)은 거기서 걸러지므로
+            #   이 cap은 불필요 + 유해 판정, 제거.
             return names
         except Exception as e:
             print(f"   ⚠️ 로컬AI 추출 오류(시도 {attempt+1}/2): {e}")
