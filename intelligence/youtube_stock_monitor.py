@@ -389,10 +389,56 @@ price) 또는 손절가(stop-loss price)를 찾아줘. 규칙:
         return ""
 
 
+_ALL_STOCK_NAMES_CACHE = None
+
+
+def _get_all_stock_names() -> list:
+    """kr_theme_finance.db의 전체 종목명(마켓/코드 제거된 순수명) 캐시.
+    프로세스 생애주기 동안 DB가 안 바뀌니 한 번만 로드."""
+    global _ALL_STOCK_NAMES_CACHE
+    if _ALL_STOCK_NAMES_CACHE is not None:
+        return _ALL_STOCK_NAMES_CACHE
+    names = []
+    try:
+        conn = sqlite3.connect(THEME_DB, timeout=5)
+        conn.execute("PRAGMA query_only = ON")
+        rows = conn.execute("SELECT DISTINCT stock_name FROM kr_theme_stocks").fetchall()
+        conn.close()
+        for (raw,) in rows:
+            m = re.match(r"^(.*?)(KOSPI|KOSDAQ)\s", raw)
+            if m:
+                names.append(m.group(1))
+    except Exception as e:
+        print(f"   ⚠️ 종목명 캐시 로드 오류: {e}")
+    _ALL_STOCK_NAMES_CACHE = names
+    return names
+
+
+def _edit_distance_1(a: str, b: str) -> bool:
+    """편집거리(삽입/삭제/치환) 1 이하인지 — 길이 차 2 이상이면 즉시 False."""
+    if abs(len(a) - len(b)) > 1:
+        return False
+    if a == b:
+        return True
+    if len(a) == len(b):
+        return sum(x != y for x, y in zip(a, b)) <= 1
+    # 길이가 1 다르면 짧은 쪽을 긴 쪽에 한 글자 삽입/삭제로 맞출 수 있는지
+    short, long_ = (a, b) if len(a) < len(b) else (b, a)
+    for i in range(len(long_)):
+        if short == long_[:i] + long_[i + 1:]:
+            return True
+    return False
+
+
 def validate_stock_name(name: str) -> str:
     """kr_theme_finance.db 대조 — 실제 상장종목명이면 정규화된 이름, 아니면 빈문자열.
     로컬 AI(소형모델)가 합성어 중간에 공백을 끼워넣는 경우가 잦아서
-    (예: "삼성 전기" → "삼성전기") 공백 제거본으로도 한 번 더 대조한다."""
+    (예: "삼성 전기" → "삼성전기") 공백 제거본으로도 한 번 더 대조한다.
+    ★ 2026-09-17: "비나텍"이 매번 "비나택"으로, "포스코퓨처엠"이 "포스코
+    퓨처앰"으로 — Whisper가 같은 종목명을 반복적으로 한 글자씩 다르게
+    잘못 알아듣는 패턴을 실측(5회 연속 동일오류)으로 확인. 정확매칭
+    실패시 편집거리 1(한 글자 치환/삽입/삭제) 이내 종목명이 있으면
+    그걸로 보정 — 짧은 이름(2글자 이하)은 편집거리 1도 위험해서 제외."""
     name = re.sub(r"^\(?주\)?\s*", "", name).strip()
     if not name:
         return ""
@@ -416,6 +462,13 @@ def validate_stock_name(name: str) -> str:
         conn.close()
     except Exception as e:
         print(f"   ⚠️ 종목명 검증 오류: {e}")
+        return ""
+
+    if len(stripped) > 2:
+        for real_name in _get_all_stock_names():
+            if _edit_distance_1(stripped, real_name):
+                print(f"   🔧 오인식 보정: {name} → {real_name}")
+                return real_name
     return ""
 
 
