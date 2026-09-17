@@ -543,6 +543,19 @@ def main():
     print(f"\n✅ [유튜브] 완료 — 신규 저장 {len(total_saved)}건, 리포팅 {report_count}건")
 
 
+def build_2plus_report_lines(names) -> list:
+    """14일 기준 2번 이상 언급된 종목만 "종목명(최초일자, N회)" 형태로
+    포맷 — 실시간 알림(notify_report)과 일일리포트(youtube_daily_digest)가
+    공유하는 임계치/포맷 로직."""
+    report_lines = []
+    for name in sorted(set(names)):
+        dates = get_mention_dates(name, days=14)
+        if len(dates) >= 2:
+            first_date = dates[0][5:].replace("-", "/")  # 09/15
+            report_lines.append(f"{name}({first_date}, {len(dates)}회)")
+    return report_lines
+
+
 def notify_report(total_saved: list) -> int:
     """★ 2026-09-15: 개별 신규 저장 건 나열 대신, 14일 기준(그 이전 언급은
     카운트에서 자동 제외) 2번 이상 언급된 종목만 "종목명(최초일자, N회)"
@@ -551,12 +564,7 @@ def notify_report(total_saved: list) -> int:
     (youtube_live_monitor)가 이 함수를 공유해서 알림 포맷을 통일한다.
     total_saved: [(pick_date, stock_name, channel_label), ...]
     반환: 리포팅된 종목 수."""
-    report_lines = []
-    for name in sorted({n for _, n, _ in total_saved}):
-        dates = get_mention_dates(name, days=14)
-        if len(dates) >= 2:
-            first_date = dates[0][5:].replace("-", "/")  # 09/15
-            report_lines.append(f"{name}({first_date}, {len(dates)}회)")
+    report_lines = build_2plus_report_lines(n for _, n, _ in total_saved)
 
     if report_lines:
         try:

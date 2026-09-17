@@ -73,6 +73,12 @@ AUDIO_FORMAT       = "233"  # yt-dlp 포맷ID: 오디오 전용 저비트레이�
 YTDLP_BIN          = os.path.join(os.path.dirname(sys.executable), "yt-dlp")  # venv 안 실행파일 절대경로 사용(PATH 의존 X)
 TRANSCRIPT_SUB_CHUNK = 4000  # 60분 전사(~2만자)를 이 크기로 쪼개서 전체를 다 훑음(num_ctx=8192 여유 감안)
 
+# ★ 2026-09-18: 대장 요청 — "24시간 81건이네.. 넘 많다. 유튜브는 07시부터
+# 20시까지만 하자." 새벽~아침 이른시간 방송은 캐치해봐야 의미 없다고 판단,
+# 활성 시간대 밖에서는 캡처 자체를 안 함(가벼운 폴링만 하며 대기).
+ACTIVE_HOUR_START = 7
+ACTIVE_HOUR_END   = 20  # 07:00~19:59 활성, 20:00부터 다음날 07:00까지 휴식
+
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                   "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -195,10 +201,22 @@ def process_chunk(handle: str, channel_label: str, llm, model):
     return True
 
 
+def _within_active_hours() -> bool:
+    return ACTIVE_HOUR_START <= datetime.datetime.now().hour < ACTIVE_HOUR_END
+
+
 def channel_worker(handle: str, channel_label: str, llm, model):
     print(f"👀 [{channel_label}] 라이브 모니터링 스레드 시작")
+    was_active = True
     while True:
         try:
+            if not _within_active_hours():
+                if was_active:
+                    print(f"😴 [{channel_label}] 활성시간({ACTIVE_HOUR_START}~{ACTIVE_HOUR_END}시) 아님 — 대기")
+                    was_active = False
+                time.sleep(POLL_INTERVAL_SEC)
+                continue
+            was_active = True
             was_live = process_chunk(handle, channel_label, llm, model)
         except Exception as e:
             print(f"⚠️ [{channel_label}] 워커 오류: {e}")

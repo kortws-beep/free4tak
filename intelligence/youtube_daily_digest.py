@@ -2,21 +2,16 @@
 youtube_daily_digest.py — 유튜브 라이브 모니터 일일 리포트
 ================================================================
 [하는 일]
-youtube_live_monitor.py가 밤새 잡은 (목표가/손절가 있는) 종목 중,
-1회성이라 실시간 알림(notify_report, "14일내 2회+"만 통과) 문턱을
-못 넘은 것들도 대장이 놓치지 않도록, 매일 06시에 전일 06시~당일 06시
-구간 전체 리스트를 한 번에 보여준다.
-
-★ 2026-09-17: 대장 요청 — "실시간 알림은 2회+ 문턱 현상유지하고
-대신 06시에 전일 06~당일06시까지의 리스트를 한번 보여주는게 낫겠다."
-(밤새 목표가/손절가 있는 진짜 픽 11건이 전부 1회성이라 실시간 알림은
-0건이었던 걸 확인한 뒤 나온 절충안)
+매일 06시에 최근 24시간 동안 나온 종목 중 "14일 내 2회 이상 언급"
+문턱을 넘긴 것들을 한 번에 정리해서 보여준다. 실시간 알림
+(notify_report)과 완전히 같은 문턱/포맷을 쓴다 — 원래는 목표가/
+손절가만 있으면 다 보여줬는데(2026-09-17), 그마저도 하루 81건까지
+나와서 "너무 많다"는 지적을 받고 실시간과 동일한 2회+ 기준으로 통일.
 
 크론: 매일 06:00 (day_trade_scout처럼 크론 기반, 상시서비스 아님)
 ================================================================
 """
 import os
-import re
 import sys
 import sqlite3
 
@@ -33,45 +28,32 @@ for _ep in [os.path.join(_here, ".env"), os.path.join(_base, ".env")]:
         load_dotenv(_ep)
         break
 
-from youtube_stock_monitor import DB_PATH
+from youtube_stock_monitor import DB_PATH, build_2plus_report_lines
 
 
-_PRICE_RE = re.compile(r"(목표가|손절가)\s*[:：]?\s*[\d,]+")
-
-
-def get_last_24h_picks() -> list:
-    """★ 2026-09-16 가격게이트 배포 이전 데이터가 섞여있으면(과거 실행
-    잔재) evaluation에 목표가/손절가 숫자가 없는 저품질 건도 같이 나올
-    수 있어서, 디제스트에서도 한 번 더 걸러낸다 — 82건 전량 발송으로
-    테스트하다 발견(대장이 우려했던 "종목수 폭발"이 알림채널만
-    실시간→일일로 바뀌어 그대로 재현될 뻔함)."""
+def get_last_24h_names() -> set:
     conn = sqlite3.connect(DB_PATH, timeout=5)
     conn.execute("PRAGMA query_only = ON")
     rows = conn.execute("""
-        SELECT stock_name, channel, evaluation, created_at
-        FROM youtube_picks
+        SELECT DISTINCT stock_name FROM youtube_picks
         WHERE created_at >= datetime('now', 'localtime', '-1 day')
-        ORDER BY created_at
     """).fetchall()
     conn.close()
-    return [
-        {"name": r[0], "channel": r[1], "evaluation": r[2], "created_at": r[3]}
-        for r in rows if r[2] and _PRICE_RE.search(r[2])
-    ]
+    return {r[0] for r in rows}
 
 
 def main():
-    picks = get_last_24h_picks()
-    if not picks:
+    names = get_last_24h_names()
+    if not names:
         print("😴 [유튜브 일일리포트] 지난 24시간 캐치 없음")
         return
 
-    lines = []
-    for p in picks:
-        ev = (p["evaluation"] or "").replace("\n", " ").strip()
-        lines.append(f"- {p['name']} ({p['channel']}): {ev}" if ev else f"- {p['name']} ({p['channel']})")
+    report_lines = build_2plus_report_lines(names)
+    if not report_lines:
+        print("😴 [유튜브 일일리포트] 2회+ 언급 종목 없음")
+        return
 
-    msg = f"[유튜브 일일리포트] 최근 24시간 캐치 {len(picks)}건\n" + "\n".join(lines)
+    msg = f"[유튜브 일일리포트] 14일내 2회+ 언급 종목 {len(report_lines)}건\n" + ", ".join(report_lines)
     try:
         from notifier import Notifier
         Notifier(name="유튜브스카우트").send(msg)
