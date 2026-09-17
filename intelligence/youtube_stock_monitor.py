@@ -430,6 +430,16 @@ def _edit_distance_1(a: str, b: str) -> bool:
     return False
 
 
+# ★ 2026-09-17: 로컬 LLM이 국문 종목명을 영문 약칭/브랜드명으로 바꿔
+# 뽑는 경우 — DB엔 "에스피지"/"케이엠더블유"로만 있는데 "SPG"/"KMW"로
+# 나와서 편집거리 보정으로도 못 잡음(스크립트 자체가 다름). 실측으로
+# 발견된 것부터 수동 등록, 발견되는 대로 추가.
+NAME_ALIASES = {
+    "SPG": "에스피지",
+    "KMW": "케이엠더블유",
+}
+
+
 def validate_stock_name(name: str) -> str:
     """kr_theme_finance.db 대조 — 실제 상장종목명이면 정규화된 이름, 아니면 빈문자열.
     로컬 AI(소형모델)가 합성어 중간에 공백을 끼워넣는 경우가 잦아서
@@ -442,6 +452,9 @@ def validate_stock_name(name: str) -> str:
     name = re.sub(r"^\(?주\)?\s*", "", name).strip()
     if not name:
         return ""
+    if name in NAME_ALIASES:
+        print(f"   🔧 영문약칭 보정: {name} → {NAME_ALIASES[name]}")
+        name = NAME_ALIASES[name]
     candidates = [name]
     stripped = name.replace(" ", "")
     if stripped != name:
