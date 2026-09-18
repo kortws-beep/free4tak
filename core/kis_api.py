@@ -710,14 +710,14 @@ class KisAPI:
         name = (code_name_map or {}).get(code, code)
         print(f"💡 매수계산 {code}({name}) | {order_cash:,}원 | {qty}주 | 지정가:{limit_price:,}")
 
-        # ★ 2026-09-19: KRX 매수 가능시간이 20시까지 늘어나면서(sbot/sbo2
-        #   BUY_END_TIME 확장) 정규장 밖 매수도 실제로 시도되게 됐는데,
-        #   ORD_DVSN이 "00"(정규장 지정가) 고정이라 그대로 두면 15:30
-        #   이후 주문이 거부될 것으로 판단 — sell()의 시간대별 분기를
-        #   그대로 적용(09:00~15:30만 정규장 지정가, 그 외 08:00~20:00은
-        #   시간외단일가).
+        # ★ 2026-09-19: KRX가 09-14부터 애프터마켓(16~20시) 제도를 개편 —
+        #   기존 "시간외단일가"(10분 단위 일괄체결)가 폐지되고 정규장과
+        #   동일한 실시간 매칭으로 바뀜(대장 확인+뉴스 검증). 프리장
+        #   (08:00~09:00)은 이번 개편 대상이 아닌 것으로 보여 기존
+        #   "62"(시간외단일가) 유지, 09:00~20:00은 전부 정규장과 동일한
+        #   "00"(지정가)로 통일. 월요일 실거래로 재검증 필요.
         now_t = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9))).strftime("%H%M")
-        ord_dvsn = "00" if "0900" <= now_t < "1530" else "62"
+        ord_dvsn = "62" if "0800" <= now_t < "0900" else "00"
 
         url  = f"{self.base_url}/uapi/domestic-stock/v1/trading/order-cash"
         data = {"CANO": self.cano, "ACNT_PRDT_CD": self.acnt,
@@ -777,23 +777,20 @@ class KisAPI:
     def sell(self, code: str, qty: int, price: int = 0) -> bool:
         """
         시간대별 매도 (실제 장 시간 기준):
-        - 08:00~09:00 프리장      : NEXT종목만 거래 가능 — ORD_DVSN=62 (시간외단일가)
-        - 09:00~15:30 정규장      : ORD_DVSN=01 (시장가)
-        - 15:30~18:00 시간외단일가: ORD_DVSN=62 (가격 필요)
-        - 18:00~20:00 시간외프리장: NEXT종목만 거래 가능 — ORD_DVSN=62
+        - 08:00~09:00 프리장  : ORD_DVSN=62 (시간외단일가)
+        - 09:00~20:00 정규장+애프터마켓: ORD_DVSN=01 (시장가)
+          ★ 2026-09-19: KRX 09-14 애프터마켓 개편 — 기존 15:30~20:00
+            시간외단일가(10분 일괄체결)가 폐지되고 정규장과 동일한
+            실시간 매칭으로 바뀜(대장 확인+뉴스 검증). 프리장(08~09시)은
+            이번 개편 대상이 아닌 것으로 보여 기존 로직 유지. 월요일
+            실거래로 재검증 필요.
         """
         now_t = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9))).strftime("%H%M")
         if "0800" <= now_t < "0900":
             ord_dvsn = "62"   # 프리장 — NEXT 종목만 (시간외단일가)
             ord_unpr = str(price) if price > 0 else "0"
-        elif "1530" <= now_t < "1800":
-            ord_dvsn = "62"   # 시간외단일가
-            ord_unpr = str(price) if price > 0 else "0"
-        elif "1800" <= now_t < "2000":
-            ord_dvsn = "62"   # 시간외프리장 — NEXT 종목만
-            ord_unpr = str(price) if price > 0 else "0"
         else:
-            ord_dvsn = "01"   # 정규장 시장가 (09:00~15:30)
+            ord_dvsn = "01"   # 정규장+애프터마켓 시장가 (09:00~20:00)
             ord_unpr = "0"
         url  = f"{self.base_url}/uapi/domestic-stock/v1/trading/order-cash"
         data = {"CANO": self.cano, "ACNT_PRDT_CD": self.acnt,
