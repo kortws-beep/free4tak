@@ -232,6 +232,10 @@ REG_MARKET_END   = "1530"
 #   (사용자 결정 — S7 대형주만 오르고 나머지는 다 빠지는 쏠림장을
 #   겪은 뒤 안전장치로 도입).
 BUY_START_TIME   = "0920"         # ★ 09:20 이후 매수
+# ★ 2026-09-19: KRX가 NXT처럼 20시까지 연장돼서(대장 확인) 매수도
+#   정규장(15:30) 마감 이후 계속 열어두도록 변경 — 08:00~09:20은 기존대로
+#   매도체크만, 09:20~20:00은 매수/매도 둘 다.
+BUY_END_TIME     = "2000"         # ★ 09:20~20:00 매수 가능
 SELL_CHECK_START = "0800"         # ★ 08:00부터 매도 체크
 SELL_CHECK_END   = "2000"         # ★ 20:00까지 매도 체크
 SLEEP_INTERVAL   = 60
@@ -1484,13 +1488,13 @@ class SBot:
                 # ── 시간대별 동작 ─────────────────────────
                 is_reg      = REG_MARKET_START <= now_t <= REG_MARKET_END
                 is_sell_ok  = SELL_CHECK_START <= now_t <= SELL_CHECK_END
-                is_buy_ok   = REG_MARKET_START <= now_t <= REG_MARKET_END and now_t >= BUY_START_TIME
+                is_buy_ok   = BUY_START_TIME <= now_t <= BUY_END_TIME
 
                 if not is_sell_ok:
                     print(f"😴 [{now}] 장외 대기 (20시 이후)...")
                     time.sleep(300); continue
 
-                print(f"\n📈 [SWING] {'정규장' if is_reg else '장전/후 매도체크'} [{now}]")
+                print(f"\n📈 [SWING] {'정규장' if is_reg else ('매수/매도' if is_buy_ok else '장전/후 매도체크')} [{now}]")
 
                 st              = _read_state()
                 self._is_paused = st.get("paused", False)
