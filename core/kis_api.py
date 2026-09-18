@@ -710,10 +710,19 @@ class KisAPI:
         name = (code_name_map or {}).get(code, code)
         print(f"💡 매수계산 {code}({name}) | {order_cash:,}원 | {qty}주 | 지정가:{limit_price:,}")
 
+        # ★ 2026-09-19: KRX 매수 가능시간이 20시까지 늘어나면서(sbot/sbo2
+        #   BUY_END_TIME 확장) 정규장 밖 매수도 실제로 시도되게 됐는데,
+        #   ORD_DVSN이 "00"(정규장 지정가) 고정이라 그대로 두면 15:30
+        #   이후 주문이 거부될 것으로 판단 — sell()의 시간대별 분기를
+        #   그대로 적용(09:00~15:30만 정규장 지정가, 그 외 08:00~20:00은
+        #   시간외단일가).
+        now_t = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9))).strftime("%H%M")
+        ord_dvsn = "00" if "0900" <= now_t < "1530" else "62"
+
         url  = f"{self.base_url}/uapi/domestic-stock/v1/trading/order-cash"
         data = {"CANO": self.cano, "ACNT_PRDT_CD": self.acnt,
                 "PDNO": code, "ORD_QTY": str(qty),
-                "ORD_UNPR": str(limit_price), "ORD_DVSN": "00"}
+                "ORD_UNPR": str(limit_price), "ORD_DVSN": ord_dvsn}
         headers = {"authorization": f"Bearer {self.token}",
                    "appkey": self.appkey, "appsecret": self.secret,
                    "tr_id": "TTTC0802U", "hashkey": self.get_hashkey(data)}
