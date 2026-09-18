@@ -153,7 +153,12 @@ class CBotBacktestConfig:
     #   충족시 목표1때와 동일한 메커니즘(50%매도+stage1 승격)을 조기발동.
     #   승자를 전량 잘라내는 트레일링과 달리 절반만 챙기고 나머지는 계속
     #   태울 수 있어 다른 결과가 나올 수 있음.
-    enable_stage0_partial: bool = False
+    # ★ 2026-09-19: 실험 검증 후 실전 cbot.py에 무조건 적용(토글 없이
+    #   STAGE0_PARTIAL_THRESHOLD=0.10 항상 발동)됐는데 백테스터 기본값은
+    #   계속 꺼짐(False)으로 남아있어 "기본" 시나리오가 실전과 어긋나
+    #   있었음(stagnant_rotation과 동일 클래스 드리프트, 주말 점검으로 발견) —
+    #   실전값으로 동기화.
+    enable_stage0_partial: bool = True
     stage0_partial_threshold: float = 0.10
 
 

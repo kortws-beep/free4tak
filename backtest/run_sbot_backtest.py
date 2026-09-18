@@ -194,7 +194,7 @@ def main():
                         help="초기 자본 (sbot 기본 1000만원)")
     parser.add_argument("--base-buy-amt",  type=int, default=500_000,
                         help="기본 매수금액 (sbot 기본 50만원)")
-    parser.add_argument("--max-positions", type=int, default=2)
+    parser.add_argument("--max-positions", type=int, default=4)  # ★2026-09-19: 실전 sbot 09-12 5→4 반영
     parser.add_argument("--buy-score-min", type=int, default=75,
                         help="매수 최소 점수 (sbot 점수분포상 75~90 권장)")
     parser.add_argument("--max-hold-days", type=int, default=9999,

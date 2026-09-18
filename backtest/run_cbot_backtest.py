@@ -146,6 +146,12 @@ def main():
         conn.close()
         codes = [r[0] for r in rows]
 
+    # ★ 2026-09-19: 실전 cbot.py의 EXCLUDE_MARKETS(KRW-TRUMP, KRW-USDT)를
+    #   백테스터는 반영 안 하고 있어서 실전에선 절대 안 사는 종목이
+    #   백테스트엔 계속 섞여있던 드리프트 발견(주말 점검) — 동기화.
+    _CBOT_EXCLUDE = ["KRW-TRUMP", "KRW-USDT"]
+    codes = [c for c in codes if c not in _CBOT_EXCLUDE]
+
     print(f"📋 [CBOT] 대상 종목 {len(codes)}개")
     if not codes:
         print("❌ 종목 없음")

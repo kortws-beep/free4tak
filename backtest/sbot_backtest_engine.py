@@ -143,7 +143,9 @@ class SBotBacktestConfig:
     # 자본 (sbot 실전: 종목당 50만~200만원)
     initial_cash:      int   = 10_000_000
     base_buy_amt:      int   = 500_000
-    max_positions:     int   = 2
+    # ★ 2026-09-19: 실전 sbot.py MAX_POSITIONS는 09-12에 5→4로 변경됐는데
+    #   백테스터 기본값은 2로 계속 남아있던 드리프트 발견(주말 점검) — 동기화.
+    max_positions:     int   = 4
     # 매수 임계치
     buy_score_min:     int   = 65
     # 종목 필터

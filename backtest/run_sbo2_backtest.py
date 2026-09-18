@@ -254,7 +254,7 @@ def main():
 
     # 결과 저장
     ts       = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_path = os.path.join(args.results_dir, f"sbot_result_{ts}.json")
+    out_path = os.path.join(args.results_dir, f"sbo2_result_{ts}.json")
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(
             [{**r, "trades": r["trades"][:50]} for r in results],
