@@ -127,6 +127,26 @@ def save_pick(pick_date: str, stock_name: str, channel: str,
     return saved
 
 
+EXPIRE_DAYS = 20  # ★ 2026-09-19: 대장 — "픽된 후 매수안되고 20일지나면
+# 제외시키자. 안그럼 계속 쌓이기만 할거야." 실제 매매판단(sbo2 관심종목
+# 슬롯)은 이미 5일 창만 보므로 매매 로직엔 영향 없음 — 순수 DB 하우스
+# 키핑(youtube_picks 테이블 무한증식 방지) 목적.
+
+
+def cleanup_old_picks(days: int = EXPIRE_DAYS) -> int:
+    """days일보다 오래된 픽을 DB에서 삭제. 반환: 삭제된 행 수."""
+    conn = sqlite3.connect(DB_PATH, timeout=10)
+    conn.execute("PRAGMA journal_mode=WAL")
+    cur = conn.execute("""
+        DELETE FROM youtube_picks
+        WHERE pick_date < date('now', 'localtime', ? || ' days')
+    """, (f"-{days}",))
+    conn.commit()
+    deleted = cur.rowcount
+    conn.close()
+    return deleted
+
+
 def get_recent_picks(days: int = 1) -> list:
     conn = sqlite3.connect(DB_PATH, timeout=5)
     conn.execute("PRAGMA query_only = ON")
