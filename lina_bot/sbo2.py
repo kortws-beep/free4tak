@@ -768,55 +768,70 @@ def _calc_overlap_boost(name: str, code: str, curr_price: float,
 # 안 쓰이고 있었음 — 트렌드 슬롯의 name_filter도 이 김에 제거하고
 # 전체시장 스캔으로 복귀(대장 결정).
 # ============================================================
-# 한투 관심그룹 'new' (★ 2026-07-17 추가)
+# 유튜브 라이브 모니터 관심종목 (★ 2026-09-19 — 한투 'new' 그룹 대체)
 # ============================================================
-_KIS_WATCHLIST_CACHE = {"ts": 0.0, "names": set()}
+# ★ 2026-09-19: 관심종목(SLOT_WATCHLIST) 소스를 한투 'new' 관심그룹에서
+# 유튜브 라이브 모니터 수집 종목으로 교체(대장 결정) — sbot도 동일한
+# 한투 'new' 그룹을 이미 쓰고 있어 완전 중복 소스였음. 5일 이내 3회
+# 이상 언급된 종목만, 추천 당시 종가 대비 10% 이상 오른 건 제외
+# (이미 너무 올라버린 뒷북매수 방지).
+_YT_WATCHLIST_CACHE = {"ts": 0.0, "names": set()}
 WATCHLIST_REFRESH_SEC = 600  # ★ 2026-09-15: 하루1회→10분 캐시로 변경(아래 사유)
+YT_MENTION_DAYS = 5
+YT_MENTION_MIN_COUNT = 3
+YT_MAX_RISE_PCT = 0.10
 
-def _get_kis_new_watchlist_names(api) -> set:
-    """
-    sbot(_load_new_codes)과 동일하게 한투 'new' 관심그룹에서 종목명을
-    받아온다. 사용자가 직접 계속 갱신하는(유망종목 추가/제거) 목록이라
-    sbo2 전체 후보가 적거나 없을 때 보조 소스로 사용 — 전체 시장 스캔
-    실패 시의 안전망.
-
-    ★ 2026-09-15: 기존엔 하루 1회(날짜기준) 캐시라, 대장이 장중에 계속
-    추가/제외하는 변경사항이 다음날까지 반영이 안 됐음(대장 지적 —
-    "장중엔 모멘텀+new 관심종목만 자주 갱신하면 시간이 줄지 않을까").
-    API 호출이 2개뿐인 가벼운 조회라 시간기반(10분) 캐시로 바꿔 매 루프
-    호출해도 부담 없게 하고, _refresh_watchlist_candidates()가 momentum과
-    동일하게 이 슬롯만 독립적으로 자주 재계산하도록 함.
-    """
+def _get_youtube_watchlist_names() -> set:
+    """유튜브 라이브 모니터(intelligence/youtube_picks.db)가 잡은 추천종목 중
+    최근 5일 내 3회 이상 언급된 종목만, 최초 언급일 종가 대비 현재(최신
+    일봉) 종가가 10% 이상 오른 건 제외하고 반환."""
     now = time.time()
-    if now - _KIS_WATCHLIST_CACHE["ts"] < WATCHLIST_REFRESH_SEC:
-        return _KIS_WATCHLIST_CACHE["names"]
+    if now - _YT_WATCHLIST_CACHE["ts"] < WATCHLIST_REFRESH_SEC:
+        return _YT_WATCHLIST_CACHE["names"]
 
     names = set()
     try:
-        if api is None:
-            return set()
-        hts_id = os.getenv("KIS_HTS_ID2", os.getenv("KIS_HTS_ID", ""))
-        if not hts_id:
-            return set()
-        groups = api.get_watchlist_groups(hts_id)
-        target = next(
-            ((gc, gn) for gc, gn in groups.items()
-             if gn.lower() in ("new", "신규추천", "신규", "new추천")),
-            None,
-        )
-        if not target:
-            print("   ⚠️ 한투 'new' 관심그룹 없음")
-        else:
-            grp_code, _ = target
-            stocks = api.get_watchlist_stocks(grp_code, hts_id)
-            names = {name for _, name in stocks if name}
-            if names:
-                print(f"   🆕 한투 관심그룹 'new': {len(names)}종목")
-    except Exception as e:
-        print(f"⚠️ [sbo2] 한투 관심그룹 조회 오류: {e}")
+        yt_db = os.path.join(os.path.dirname(BASE_DIR), "intelligence", "youtube_picks.db")
+        conn = sqlite3.connect(yt_db, timeout=5)
+        conn.execute("PRAGMA query_only = ON")
+        rows = conn.execute("""
+            SELECT stock_name, pick_date FROM youtube_picks
+            WHERE pick_date >= date('now', 'localtime', ? || ' days')
+            ORDER BY pick_date
+        """, (f"-{YT_MENTION_DAYS - 1}",)).fetchall()
+        conn.close()
 
-    _KIS_WATCHLIST_CACHE["names"] = names
-    _KIS_WATCHLIST_CACHE["ts"]    = now
+        mentions = {}
+        for name, pdate in rows:
+            mentions.setdefault(name, []).append(pdate)
+        qualifying = {name: dates[0] for name, dates in mentions.items()
+                      if len(dates) >= YT_MENTION_MIN_COUNT}
+
+        if qualifying:
+            fconn = sqlite3.connect(os.path.join(BASE_DIR, "kr_theme_finance.db"), timeout=5)
+            for name, first_date in qualifying.items():
+                base_row = fconn.execute(
+                    "SELECT close_price FROM kr_stock_daily_data WHERE stock_name=? AND date=?",
+                    (name, first_date)).fetchone()
+                latest_row = fconn.execute(
+                    "SELECT close_price FROM kr_stock_daily_data WHERE stock_name=? ORDER BY date DESC LIMIT 1",
+                    (name,)).fetchone()
+                if not base_row or not base_row[0] or not latest_row or not latest_row[0]:
+                    continue  # 가격 데이터 없으면 보수적으로 제외
+                base_price, latest_price = base_row[0], latest_row[0]
+                if latest_price >= base_price * (1 + YT_MAX_RISE_PCT):
+                    print(f"   ⏭️ [sbo2-유튜브] {name} 제외 — 추천일({first_date}) 종가 대비 "
+                          f"{(latest_price/base_price-1)*100:+.1f}%")
+                    continue
+                names.add(name)
+            fconn.close()
+        if names:
+            print(f"   📺 유튜브 관심종목: {len(names)}종목")
+    except Exception as e:
+        print(f"⚠️ [sbo2] 유튜브 관심종목 조회 오류: {e}")
+
+    _YT_WATCHLIST_CACHE["names"] = names
+    _YT_WATCHLIST_CACHE["ts"]    = now
     return names
 
 
@@ -853,6 +868,12 @@ def get_candidates(api=None) -> list:
       정도로 장 자체가 얕음. 촉매(실시간 뉴스/수급 신호)는 있는데 아직
       정식 기술적 패턴을 못 갖춘 종목을 완화조건(_check_light_chart_health,
       모멘텀 스캐너와 동일 로직)으로 최소한만 걸러 최하위 슬롯으로 편입.
+    - watchlist     : 전체 후보가 적을 때만 보조 (★ 2026-07-17 추가,
+      2026-09-19 소스 교체) — 원래 한투 'new' 관심그룹이었으나 sbot이
+      동일 그룹을 이미 쓰고 있어 완전 중복 소스였음(대장 지적). 유튜브
+      라이브 모니터(intelligence/youtube_picks.db) 수집 종목 중 5일
+      내 3회 이상 언급 + 추천일 종가 대비 10% 미만 상승분만 채택
+      (_get_youtube_watchlist_names).
     api: KisAPI 인스턴스 (완화트랙의 거래량서지 패턴에서 실시간 시세 조회용,
          없으면 해당 패턴은 건너뜀 — 나머지 슬롯엔 영향 없음)
     """
@@ -974,15 +995,16 @@ def get_candidates(api=None) -> list:
     light_list.sort(key=lambda x: x["score"], reverse=True)
     candidates += light_list[:CANDIDATE_CAP_PER_SLOT]
 
-    # ── 슬롯6: 한투 'new' 관심종목 (전체 후보가 적거나 없을 때만 보조) ──
-    # ★ 2026-07-17 추가: "sbo2 종목이 적거나 없으면 한투 new관심종목도
-    #   같이 걸어도 된다 — 내가 계속 갱신하는 유망종목이니까"(사용자
-    #   결정). 항상 쓰지 않고 위 5개 슬롯 합쳐서 min_positions 미만일
-    #   때만 안전망으로 사용. 사용자가 직접 큐레이션한 목록이라도 실거래
-    #   진입이라 완화트랙과 동일한 최소 안전장치(_check_light_chart_health)
-    #   는 그대로 적용.
+    # ── 슬롯6: 유튜브 관심종목 (전체 후보가 적거나 없을 때만 보조) ──
+    # ★ 2026-07-17 추가, 2026-09-19 소스 교체: 원래 한투 'new' 관심그룹을
+    #   썼는데 sbot도 동일 그룹을 이미 쓰고 있어 완전 중복이었음(대장
+    #   지적) — 유튜브 라이브 모니터 수집 종목(5일내3회+, 추천일종가대비
+    #   10%이상상승 제외)으로 교체. 항상 쓰지 않고 위 슬롯들 합쳐서
+    #   min_positions 미만일 때만 안전망으로 사용. 실거래 진입이라
+    #   완화트랙과 동일한 최소 안전장치(_check_light_chart_health)는
+    #   그대로 적용.
     if len(candidates) < MAX_POSITIONS:
-        watchlist_names = _get_kis_new_watchlist_names(api) - already_covered - set(light_pool if light_pool else [])
+        watchlist_names = _get_youtube_watchlist_names() - already_covered - set(light_pool if light_pool else [])
         watchlist_list = []
         if watchlist_names:
             conn = sqlite3.connect(os.path.join(BASE_DIR, "kr_theme_finance.db"), timeout=5)
@@ -1002,7 +1024,7 @@ def get_candidates(api=None) -> list:
                         "rr":       round((wl["tgt_price"] - wl["curr_price"]) /
                                            (wl["curr_price"] - wl["stop_price"]), 1)
                                     if wl["curr_price"] > wl["stop_price"] else 0,
-                        "themes":   [f"관심종목:{wl['pattern']}"],
+                        "themes":   [f"유튜브관심:{wl['pattern']}"],
                     })
             conn.close()
         watchlist_list.sort(key=lambda x: x["score"], reverse=True)
@@ -1366,9 +1388,14 @@ class Sbo2:
         자주 갱신하면 시간이 줄지 않을까". 전체갱신(_refresh_candidates)은
         키움조건검색+미장45종목스캔+전체시장 추세분석이 다 들어있어
         무거워서 하루 1회로 유지하되, 관심종목(SLOT_WATCHLIST)은 API
-        호출 2개뿐인 가벼운 조회(_get_kis_new_watchlist_names, 이번에
-        10분 캐시로 전환)라 momentum과 동일하게 매 루프 독립 갱신한다
-        — 대장이 하루 중 계속 추가/제외하는 게 반영되게.
+        호출 2개뿐인 가벼운 조회라 momentum과 동일하게 매 루프 독립
+        갱신한다.
+
+        ★ 2026-09-19: 소스를 한투 'new' 관심그룹 → 유튜브 라이브 모니터
+        수집 종목으로 교체(대장 결정 — sbot도 동일한 한투 'new' 그룹을
+        이미 쓰고 있어 완전 중복 소스였음). _get_youtube_watchlist_names()
+        가 5일내3회+ 언급 & 추천일종가대비 10%미만상승 필터를 내부에서
+        처리(DB 조회만이라 여전히 가벼움).
 
         ★ 게이트 기준: 처음엔 get_candidates() 원본과 동일하게 "후보
         풀 개수(non_watchlist) >= MAX_POSITIONS면 스킵"으로 짰는데,
@@ -1378,9 +1405,9 @@ class Sbo2:
         수 있어 "풀 개수"는 "실제로 살 수 있는지"의 근사치로 부적절.
         **실제 보유 슬롯이 비었는지**(len(self.positions))로 게이트를
         바꿈 — 슬롯이 하나라도 열려있으면 항상 new도 후보 풀에 포함시켜
-        놓고, 어차피 실제 매수 우선순위(교집합>모멘텀>추세>완화>
-        관심종목>키움풀)는 _check_buy()의 슬롯 순회에서 이미 보장되므로
-        "다른 슬롯이 다 채우고 남으면 그때 관심종목 차례"가 자연히 지켜짐."""
+        놓고, 어차피 실제 매수 우선순위(모멘텀>추세>완화>관심종목)는
+        _check_buy()의 슬롯 순회에서 이미 보장되므로 "다른 슬롯이 다
+        채우고 남으면 그때 관심종목 차례"가 자연히 지켜짐."""
         if not self.candidates:
             return
         held_codes = set(self.positions.keys())
@@ -1394,7 +1421,7 @@ class Sbo2:
 
         already_covered = {c["name"] for c in non_watchlist
                             if c["grade"] in (SLOT_TREND, SLOT_MOMENTUM, SLOT_LIGHT)}
-        watchlist_names = _get_kis_new_watchlist_names(self.api) - already_covered
+        watchlist_names = _get_youtube_watchlist_names() - already_covered
         watchlist_names = {n for n in watchlist_names
                             if get_stock_code(n) not in held_codes and n not in held_names}
 
@@ -1411,7 +1438,7 @@ class Sbo2:
                         "rr": round((wl["tgt_price"] - wl["curr_price"]) /
                                     (wl["curr_price"] - wl["stop_price"]), 1)
                             if wl["curr_price"] > wl["stop_price"] else 0,
-                        "themes": [f"관심종목:{wl['pattern']}"],
+                        "themes": [f"유튜브관심:{wl['pattern']}"],
                     })
             conn.close()
         watchlist_list.sort(key=lambda x: x["score"], reverse=True)
