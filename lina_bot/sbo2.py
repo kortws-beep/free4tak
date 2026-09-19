@@ -536,17 +536,15 @@ def calc_buy_amount(grade: str, psbl_cash: int, score: int = 0) -> int:
       매수금액에 전혀 반영되지 않던 불일치를 해소)
     - 주문가능금액 초과 시 조정
     """
-    if grade == SLOT_INTER:
-        amount = BASE_BUY_AMT               # 150만원
-    elif grade in (SLOT_MOMENTUM, SLOT_TREND):
+    # ★ 2026-09-19: 교집합/키움풀 분기 제거(슬롯 자체를 없앰) — 레거시
+    #   폴백(else)이 100만원으로 동일하게 처리하므로 과거 보유분도 안전.
+    if grade in (SLOT_MOMENTUM, SLOT_TREND):
         amount = int(BASE_BUY_AMT * 0.83)   # 125만원
     elif grade == SLOT_LIGHT:
         amount = int(BASE_BUY_AMT * 0.67)   # 100만원 — 완화트랙(2026-07-14), 정식조건 미충족이라 최소 사이즈
     elif grade == SLOT_WATCHLIST:
         amount = int(BASE_BUY_AMT * 0.67)   # 100만원 — 한투 관심그룹(2026-07-17), 완화트랙과 동일 사이즈
-    elif grade == SLOT_POOL:
-        amount = int(BASE_BUY_AMT * 0.67)   # 100만원 — 키움풀 최소게이트(2026-07-18), 완화트랙과 동일 사이즈
-    else:                                    # 레거시 tele 폴백 (도달 안 함)
+    else:                                    # 레거시 tele/교집합/키움풀 폴백
         amount = int(BASE_BUY_AMT * 0.67)   # 100만원
 
     if score >= 80:
@@ -763,59 +761,12 @@ def _calc_overlap_boost(name: str, code: str, curr_price: float,
 
 
 # ============================================================
-# 키움 조건검색식 풀 (★ 2026-07-17 추가)
-# ============================================================
-_KIWOOM_POOL_CACHE = {"date": "", "names": set()}
-# ★ 2026-09-08: 기존 "추세"/"VCP"/"눌림목" 3개 검색식이 전부 응답
-#   타임아웃을 반복하면서 API헬스체크 watchdog이 5분마다 sbo2를
-#   재시작시키는 무한루프에 빠짐(08:01~08:25 사이 5차례 재시작, 후보
-#   0건). 이 3개는 응답이 안정적이지 않은 것으로 확인돼, sbot에서
-#   이미 검증된 "주도주검색식3" 하나로 통일(대장 지시 — "실제 컨텍하는
-#   주도주만 가져오자").
-KIWOOM_POOL_KEYWORDS = ["주도주"]
-
-def _get_kiwoom_condition_pool() -> set:
-    """
-    sbot과 동일하게 키움 조건검색식으로 1차 후보 풀을 받아온다. sbot은
-    모든 검색식(단타 제외)을 그대로 종목 풀로 쓰지만, sbo2는 KIWOOM_POOL_
-    KEYWORDS에 매칭되는 검색식만 골라 쓴다 — 전체 시장을 EOD 데이터로
-    스캔하며 반복 발견됐던 자기모순/과필터링 버그의 근본 원인(라이브
-    사전검증이 아예 없었음)을 없애기 위함. VCP/추세 스코어링 자체는
-    그대로 유지하되, 스캔 범위를 이 "이미 실시간으로 살아있다고
-    확인된" 풀로 좁힌다.
-    검색식이 아직 없으면(사용자가 준비 중) 빈 set 반환 — 호출부가
-    자동으로 전체시장 스캔(기존 동작)으로 폴백한다.
-    """
-    today = today_str()
-    if _KIWOOM_POOL_CACHE["date"] == today:
-        return _KIWOOM_POOL_CACHE["names"]
-
-    names = set()
-    try:
-        import asyncio
-        from kiwoom_api import KiwoomAPI
-        kapi = KiwoomAPI()
-        if kapi.enabled:
-            name_map = {}
-            loop = asyncio.new_event_loop()
-            try:
-                codes = loop.run_until_complete(kapi.get_condition_codes(
-                    use_keywords=KIWOOM_POOL_KEYWORDS, code_name_map=name_map))
-            finally:
-                loop.close()
-            names = {name_map[c] for c in codes if name_map.get(c)}
-            if names:
-                print(f"   🔍 키움 조건검색 풀({'/'.join(KIWOOM_POOL_KEYWORDS)}): {len(names)}종목")
-            else:
-                print(f"   ⚠️ 키움 조건검색식({'/'.join(KIWOOM_POOL_KEYWORDS)}) 미발견 — 전체시장 스캔으로 폴백")
-    except Exception as e:
-        print(f"⚠️ [sbo2] 키움 조건검색 풀 조회 오류: {e}")
-
-    _KIWOOM_POOL_CACHE["names"] = names
-    _KIWOOM_POOL_CACHE["date"]  = today
-    return names
-
-
+# ★ 2026-09-19: 키움 조건검색식 풀(_get_kiwoom_condition_pool, 07-17 추가)
+# 완전 제거 — 이 검색식("주도주검색식3")이 sbot과 동시에 호출되며 반복
+# 타임아웃을 빚었고(09-08엔 API헬스체크 watchdog까지 오작동시켜 5차례
+# 재시작 루프), 최종 산출물(키움풀 슬롯)도 실측 94.1% 0개로 거의
+# 안 쓰이고 있었음 — 트렌드 슬롯의 name_filter도 이 김에 제거하고
+# 전체시장 스캔으로 복귀(대장 결정).
 # ============================================================
 # 한투 관심그룹 'new' (★ 2026-07-17 추가)
 # ============================================================
@@ -874,11 +825,14 @@ def _get_kis_new_watchlist_names(api) -> set:
 # ============================================================
 def get_candidates(api=None) -> list:
     """
-    6슬롯 전략별 후보 반환
-    - inter (교집합): 추세 + 촉매 동시 통과 → 슬롯1 최우선 (★ 2026-08-15:
-      VCP 레그 제거 — 아래 momentum 슬롯 설명 참고, 원래 vcp∩추세∩촉매
-      였으나 VCP가 빠지며 추세∩촉매로 재정의됨)
-    - momentum     : AI 모멘텀 스캐너 당일 픽 (VCP 대체)  → 슬롯2
+    4슬롯 전략별 후보 반환 (★ 2026-09-19: 교집합/키움풀 제거 — 대장이
+    "이참에 정리하자"고 요청, 실측 222루프 샘플 결과 교집합 99.5%
+    0개(사실상 죽은 소스), 키움풀도 94.1% 0개인데다 sbot과 같은 키움
+    조건검색식을 동시에 두드리며 반복 타임아웃(API충돌)까지 빚고
+    있어서 완전 제거. 추세 슬롯의 name_filter도 이 김에 kiwoom_pool
+    의존을 없애고 전체시장 스캔으로 복귀 — 과거 "자기모순/과필터링"
+    버그(name_filter 도입 계기) 재발 여부는 지켜봐야 함.)
+    - momentum     : AI 모멘텀 스캐너 당일 픽 (VCP 대체)  → 슬롯1
       (★ 2026-08-15: VCP(SLOT_SWING) 제거 — 백테스트 퍼널 진단 결과
       7개월간 30일 신고가 돌파+거래량 서지 동시조건을 통과한 게 2건뿐,
       최종 거래량서지까지 걸리면 0건으로 사실상 죽은 소스였음(사용자
@@ -904,9 +858,8 @@ def get_candidates(api=None) -> list:
     """
     from trend_analyzer import get_trend_data
 
-    kiwoom_pool  = _get_kiwoom_condition_pool()
     catalyst_set = _get_catalyst_stocks()
-    trend_data   = get_trend_data(top_n=20, name_filter=kiwoom_pool or None)
+    trend_data   = get_trend_data(top_n=20)
 
     # ★ 2026-07-18 추가 — 겹침점수 보정용 소스 (텔레그램/MBN뉴스, catalyst_set은
     #   위에서 이미 조회, 한경컨센서스는 종목별 실시간 조회라
@@ -929,30 +882,10 @@ def get_candidates(api=None) -> list:
 
     candidates = []
 
-    # ── 슬롯1: 교집합 (추세 + 촉매, ★ 08-15 VCP 레그 제거) ──────
-    # ★ 2026-07-02: 스윙/추세 슬롯과 달리 캡이 없어서 교집합에 걸리는 종목이
-    #   많은 날엔 _check_buy가 매 루프(30초)마다 그 후보 전체를 현재가+MA40
-    #   조회하며 KIS API 호출이 몰리는 원인이 됐음 — 다른 슬롯과 동일하게
-    #   점수 상위 N개로 캡.
+    # ★ 2026-09-19: 교집합(SLOT_INTER) 후보생성 제거 — 실측 99.5% 0개로
+    #   사실상 죽은 소스였음. inter_names 자체는 모멘텀 슬롯 중복제외
+    #   판단에 계속 쓰여서 계산만 유지.
     inter_names = trend_names & catalyst_set
-    inter_list = []
-    for name in inter_names:
-        d = detail_map.get(name, {})
-        inter_list.append({
-            "name":     name,
-            "grade":    SLOT_INTER,
-            "score":    d.get("score", 100),  # 교집합 최고 우선순위
-            "vcp":      False,
-            "trend":    True,
-            "catalyst": True,
-            "curr":     d.get("curr_price", 0),
-            "stop":     d.get("stop_price", 0),
-            "tgt":      d.get("tgt_price", 0),
-            "rr":       d.get("rr_ratio", 0),
-            "themes":   d.get("themes", []),
-        })
-    inter_list.sort(key=lambda x: x["score"], reverse=True)
-    candidates += inter_list[:CANDIDATE_CAP_PER_SLOT]
 
     # ── 슬롯2: 모멘텀 (AI 모멘텀 스캐너 당일 픽, 교집합 제외, ★ 08-15 VCP 대체) ──
     momentum_names = set()
@@ -1075,35 +1008,10 @@ def get_candidates(api=None) -> list:
         watchlist_list.sort(key=lambda x: x["score"], reverse=True)
         candidates += watchlist_list[:CANDIDATE_CAP_PER_SLOT]
 
-    # ── 슬롯7: 키움풀 최소게이트 ──────────────────────────────
-    # ★ 2026-07-18 추가: 키움 조건검색(눌림목/VCP/상승추세)이 이미
-    #   기술적 패턴을 검증했다는 전제로, VCP/추세 엄격조건을 통과 못 한
-    #   나머지 풀 종목엔 최소게이트만 적용(이중필터링 방지, 사용자 결정).
-    pool_only = kiwoom_pool - already_covered
-    pool_list = []
-    if pool_only:
-        conn = sqlite3.connect(os.path.join(BASE_DIR, "kr_theme_finance.db"), timeout=5)
-        for name in pool_only:
-            mg = _check_minimal_gate(name, conn)
-            if mg:
-                pool_list.append({
-                    "name":     name,
-                    "grade":    SLOT_POOL,
-                    "score":    50,
-                    "vcp":      False,
-                    "trend":    False,
-                    "catalyst": name in catalyst_set,
-                    "curr":     mg["curr_price"],
-                    "stop":     mg["stop_price"],
-                    "tgt":      mg["tgt_price"],
-                    "rr":       round((mg["tgt_price"] - mg["curr_price"]) /
-                                       (mg["curr_price"] - mg["stop_price"]), 1)
-                                if mg["curr_price"] > mg["stop_price"] else 0,
-                    "themes":   ["키움풀:최소게이트"],
-                })
-        conn.close()
-    pool_list.sort(key=lambda x: x["score"], reverse=True)
-    candidates += pool_list[:CANDIDATE_CAP_PER_SLOT]
+    # ★ 2026-09-19: 키움풀(SLOT_POOL) 후보생성 제거 — 실측 94.1% 0개인데다
+    #   이 슬롯이 의존하던 _get_kiwoom_condition_pool()이 sbot과 동일한
+    #   조건검색식("주도주검색식3")을 동시에 두드리며 반복 타임아웃(API
+    #   충돌)까지 빚고 있어서 완전 제거(대장 결정 — 교집합 처리와 함께).
 
     # ── 겹침 점수 보정 (전체 슬롯 공통) ────────────────────────
     # ★ 2026-07-18 추가, 2026-07-25 생쇼 소스 폐지로 4개로 축소:
@@ -1381,11 +1289,10 @@ class Sbo2:
         except Exception as e:
             print(f"⚠️ 후보 갱신 오류: {e}")
 
-        inter    = sum(1 for c in self.candidates if c["grade"] == SLOT_INTER)
         momentum = sum(1 for c in self.candidates if c["grade"] == SLOT_MOMENTUM)
         trend    = sum(1 for c in self.candidates if c["grade"] == SLOT_TREND)
         light    = sum(1 for c in self.candidates if c["grade"] == SLOT_LIGHT)
-        print(f"   교집합:{inter}개 모멘텀:{momentum}개 추세:{trend}개 완화:{light}개")
+        print(f"   모멘텀:{momentum}개 추세:{trend}개 완화:{light}개")
         for c in self.candidates:
             save_candidate(
                 name=c["name"], grade=c["grade"], score=c["score"],
@@ -1408,7 +1315,6 @@ class Sbo2:
             return  # 전체갱신이 아직 한 번도 안 됐으면(기동 직후) 건너뜀
         held_codes = set(self.positions.keys())
         held_names = {p.get("name") for p in self.positions.values()}
-        inter_names = {c["name"] for c in self.candidates if c["grade"] == SLOT_INTER}
 
         try:
             _mconn = sqlite3.connect(
@@ -1426,7 +1332,7 @@ class Sbo2:
         momentum_names = set()
         momentum_list = []
         for name, buy_price, stop_price, tgt_price, theme in _mrows:
-            if name in momentum_names or name in inter_names:
+            if name in momentum_names:
                 continue
             if get_stock_code(name) in held_codes or name in held_names:
                 continue
@@ -1487,7 +1393,7 @@ class Sbo2:
             return
 
         already_covered = {c["name"] for c in non_watchlist
-                            if c["grade"] in (SLOT_INTER, SLOT_TREND, SLOT_MOMENTUM, SLOT_LIGHT)}
+                            if c["grade"] in (SLOT_TREND, SLOT_MOMENTUM, SLOT_LIGHT)}
         watchlist_names = _get_kis_new_watchlist_names(self.api) - already_covered
         watchlist_names = {n for n in watchlist_names
                             if get_stock_code(n) not in held_codes and n not in held_names}
@@ -1595,12 +1501,13 @@ class Sbo2:
                     and get_stock_code(c["name"]) not in held_codes]
 
         # 슬롯별 이미 상한(2개) 도달 여부 확인
-        has_inter = grade_counts[SLOT_INTER] >= MAX_PER_SLOT_TYPE
+        # ★ 2026-09-19: 교집합/키움풀 슬롯 제거(대장 결정 — 실측 99.5%/
+        #   94.1% 0개로 사실상 죽은 소스 + 키움풀은 sbot과 조건검색
+        #   API충돌까지 빚음). has_inter/has_pool 및 관련 buyable 라인 삭제.
         has_momentum = grade_counts[SLOT_MOMENTUM] >= MAX_PER_SLOT_TYPE
         has_trend = grade_counts[SLOT_TREND] >= MAX_PER_SLOT_TYPE
         has_light = grade_counts[SLOT_LIGHT] >= MAX_PER_SLOT_TYPE
         has_watchlist = grade_counts[SLOT_WATCHLIST] >= MAX_PER_SLOT_TYPE
-        has_pool = grade_counts[SLOT_POOL] >= MAX_PER_SLOT_TYPE
 
         # ★ 2026-07-06: 텔레스윙을 매수 소스에서 제외 (사용자 결정) —
         #   사후검증 결과 텔레스윙이 표본 1368건 중 손절률 77.3%로 압도적으로
@@ -1613,10 +1520,8 @@ class Sbo2:
         # ★ 2026-07-25: 생쇼(SLOT_SSHOW) 슬롯 제거 — MBN이 생쇼 뉴스 코너
         #   자체를 폐지해서 소스가 영구 중단됨.
         # ★ 2026-08-15: VCP(SLOT_SWING) 제거 → SLOT_MOMENTUM으로 대체.
-        # 우선순위: 교집합 → 점수 높은 순 (모멘텀/추세/완화)
+        # 우선순위: 모멘텀 → 점수 높은 순 (추세/완화/관심종목)
         buyable = []
-        if not has_inter:
-            buyable += sorted(_buyable(SLOT_INTER), key=lambda x: x["score"], reverse=True)
         if not has_momentum:
             buyable += sorted(_buyable(SLOT_MOMENTUM), key=lambda x: x["score"], reverse=True)
         if not has_trend:
@@ -1625,13 +1530,10 @@ class Sbo2:
             buyable += sorted(_buyable(SLOT_LIGHT), key=lambda x: x["score"], reverse=True)
         if not has_watchlist:
             buyable += sorted(_buyable(SLOT_WATCHLIST), key=lambda x: x["score"], reverse=True)
-        if not has_pool:
-            buyable += sorted(_buyable(SLOT_POOL), key=lambda x: x["score"], reverse=True)
 
-        print(f"   매수후보: 교집합{len(_buyable(SLOT_INTER))} 모멘텀{len(_buyable(SLOT_MOMENTUM))} "
+        print(f"   매수후보: 모멘텀{len(_buyable(SLOT_MOMENTUM))} "
               f"추세{len(_buyable(SLOT_TREND))} "
-              f"완화{len(_buyable(SLOT_LIGHT))} 관심종목{len(_buyable(SLOT_WATCHLIST))} "
-              f"키움풀{len(_buyable(SLOT_POOL))} (텔레 제외됨)")
+              f"완화{len(_buyable(SLOT_LIGHT))} 관심종목{len(_buyable(SLOT_WATCHLIST))} (텔레 제외됨)")
 
         for cand in buyable:
             if slots <= 0:
