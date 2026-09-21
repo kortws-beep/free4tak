@@ -104,6 +104,11 @@ SEED_MONEY       = 6_000_000   # 시드머니 600만원 (2026-08-10 재투입분
 BASE_BUY_AMT     = 1_000_000   # 1종목 기본 매수금액 100만원
 MAX_POSITIONS    = 6
 A_GRADE_RATIO    = 0.7          # A급 상위 70%만 매수
+# ★ 2026-09-21: 목표1(ATR×2.0)이 도달 전에 눌리는 경우가 많아 거의
+#   발동을 못 함(대장 관찰 — "1차 달성한게 거의 없다"). 목표가 도달과
+#   무관하게 수익률 자체가 STAGE1_PROFIT_PCT 이상이면 목표1과 동일하게
+#   50%매도+손절상향 트리거 — 둘 중 먼저 오는 쪽으로 발동.
+STAGE1_PROFIT_PCT = 8.0
 
 # 슬롯 전략 구분
 SLOT_INTER  = "inter"   # 교집합 (VCP+추세+촉매)
@@ -1916,16 +1921,21 @@ class Sbo2:
                     reason = f"트레일링({rate:+.1f}%)"
 
             # ④ 목표가 달성 → 손절/목표가 상향 (매도 안 함)
-            if not reason and target_next > 0 and curr >= target_next:
+            # ★ 2026-09-21: stage 0에서는 목표가1(ATR×2.0) 도달 OR 수익률
+            #   STAGE1_PROFIT_PCT(8%) 도달, 둘 중 먼저 오는 쪽으로 트리거.
+            stage0_hit  = stage == 0 and rate >= STAGE1_PROFIT_PCT
+            target_hit  = target_next > 0 and curr >= target_next
+            if not reason and (stage0_hit or target_hit):
                 if stage == 0:
-                    # ★ 목표가1 달성 → 50% 매도(수익실현)
+                    # ★ 목표가1 달성 또는 수익률 8%(STAGE1_PROFIT_PCT) 도달 → 50% 매도(수익실현)
+                    trigger_label = "목표1익절50%" if target_hit else f"익절{STAGE1_PROFIT_PCT:.0f}%달성50%"
                     half_qty = qty if qty <= 1 else qty // 2
                     ok_half = False
                     if half_qty > 0:
                         ok_half = self.api.sell(code, half_qty, price=int(curr))
                         if ok_half:
                             save_sell_trade(
-                                code=code, sell_price=curr, reason=f"목표1익절50%({rate:+.1f}%)",
+                                code=code, sell_price=curr, reason=f"{trigger_label}({rate:+.1f}%)",
                                 entry_price=entry, qty=half_qty, buy_time=pos.get("buy_time", ""),
                                 stock_name=name, grade=pos.get("grade", ""),
                                 stage=stage,
@@ -1934,11 +1944,11 @@ class Sbo2:
                                 _master_record(
                                     bot_type="sbo2", code=code, stock_name=name,
                                     buy_price=entry, sell_price=curr, qty=half_qty,
-                                    sell_reason=f"목표1익절50%({rate:+.1f}%)",
+                                    sell_reason=f"{trigger_label}({rate:+.1f}%)",
                                     buy_tag=pos.get("grade", ""), ai_score=pos.get("score", 0),
                                 )
                             pos["qty"] = qty - half_qty
-                            print(f"💰 목표1 50%매도 {code} | {half_qty}주 @ {curr:,.0f}원")
+                            print(f"💰 {trigger_label} {code} | {half_qty}주 @ {curr:,.0f}원")
                     # ★ 2026-09-03: 매도 실패(API 오류/호가 부족 등) 시 stage를
                     #   올리지 않도록 이 블록 전체를 if ok_half: 안으로 이동
                     #   (재점검 리포트로 발견 — 원래는 이 밖에 있어서 1주도
@@ -1956,10 +1966,10 @@ class Sbo2:
                         #   목표를 이미 달성했으니 더 이상 걸어둘 이유가 없음.
                         pos["hold"]        = False
                         self._save_state()
-                        print(f"🎯 목표가1 달성 {code} ({rate:+.1f}%) | "
+                        print(f"🎯 {trigger_label} {code} ({rate:+.1f}%) | "
                               f"손절↑:{new_stop:,.0f} | 새목표:{new_target:,.0f}")
                         _notify(
-                            f"🎯 [sbo2] 목표가1 달성 {name}({code}) — 50%매도\n"
+                            f"🎯 [sbo2] {trigger_label} {name}({code})\n"
                             f"   {rate:+.1f}% | 손절↑:{new_stop:,.0f} | 새목표:{new_target:,.0f}",
                             critical=False
                         )
@@ -2359,7 +2369,7 @@ class Sbo2:
             f"🚀 [영암9 SWING2] 스윙봇 가동\n"
             f"⏰ {now_kst().strftime('%Y-%m-%d %H:%M:%S')}\n"
             f"💰 1차:{BASE_BUY_AMT:,}원 / 최대 {MAX_POSITIONS}종목\n"
-            f"🎯 ATR×2 목표가 상향추종 | 손절:ATR×2 | 1차달성시 50%매도+상향\n"
+            f"🎯 ATR×2 목표가 상향추종 | 손절:ATR×2 | 목표1 또는 {STAGE1_PROFIT_PCT:.0f}%익절시 50%매도+상향\n"
             f"⏳ 매수: {BUY_START_TIME} 이후",
             critical=True,
         )
