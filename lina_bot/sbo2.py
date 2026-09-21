@@ -1433,9 +1433,11 @@ class Sbo2:
         수 있어 "풀 개수"는 "실제로 살 수 있는지"의 근사치로 부적절.
         **실제 보유 슬롯이 비었는지**(len(self.positions))로 게이트를
         바꿈 — 슬롯이 하나라도 열려있으면 항상 new도 후보 풀에 포함시켜
-        놓고, 어차피 실제 매수 우선순위(모멘텀>추세>완화>유튜브)는
-        _check_buy()의 슬롯 순회에서 이미 보장되므로 "다른 슬롯이 다
-        채우고 남으면 그때 유튜브 차례"가 자연히 지켜짐."""
+        놓는다. (★ 2026-09-21 갱신: 이전엔 _check_buy()가 모멘텀→추세→
+        완화→유튜브 고정순서로 태워 "다른 슬롯이 다 채우고 남으면 그때
+        유튜브 차례"였지만, 이제 모멘텀만 1픽이고 추세/완화/유튜브는
+        점수순 통합정렬이라 유튜브 픽도 점수만 높으면 바로 매수될 수
+        있음 — 대장 지적: "종류에 상관없이 고점수부터 매입")."""
         if not self.candidates:
             return
         held_codes = set(self.positions.keys())
@@ -1578,16 +1580,24 @@ class Sbo2:
         # ★ 2026-07-25: 생쇼(SLOT_SSHOW) 슬롯 제거 — MBN이 생쇼 뉴스 코너
         #   자체를 폐지해서 소스가 영구 중단됨.
         # ★ 2026-08-15: VCP(SLOT_SWING) 제거 → SLOT_MOMENTUM으로 대체.
-        # 우선순위: 모멘텀 → 추세 → 완화 → 유튜브 (각 단계 내에서는 점수 높은 순)
+        # ★ 2026-09-21: 모멘텀만 1픽 고정 우선(적중률 검증된 고정점수 소스라
+        #   항상 먼저 소진). 나머지 추세/완화/유튜브는 각각 내부점수를 이미
+        #   갖고 있으니(대장 지적 — "종류에 상관없이 고점수부터 매입") 더는
+        #   추세→완화→유튜브 고정순서로 태우지 않고 셋을 합쳐 점수순 정렬.
+        #   유튜브종목 수동매매 결과가 좋았는데 기존 고정순서라면 완화보다
+        #   항상 뒤로 밀려 기회를 놓치고 있었음.
         buyable = []
         if not has_momentum:
             buyable += sorted(_buyable(SLOT_MOMENTUM), key=lambda x: x["score"], reverse=True)
+
+        rest = []
         if not has_trend:
-            buyable += sorted(_buyable(SLOT_TREND), key=lambda x: x["score"], reverse=True)
+            rest += _buyable(SLOT_TREND)
         if not has_light:
-            buyable += sorted(_buyable(SLOT_LIGHT), key=lambda x: x["score"], reverse=True)
+            rest += _buyable(SLOT_LIGHT)
         if not has_youtube:
-            buyable += sorted(_buyable(SLOT_YOUTUBE), key=lambda x: x["score"], reverse=True)
+            rest += _buyable(SLOT_YOUTUBE)
+        buyable += sorted(rest, key=lambda x: x["score"], reverse=True)
 
         print(f"   매수후보: 모멘텀{len(_buyable(SLOT_MOMENTUM))} "
               f"추세{len(_buyable(SLOT_TREND))} "
