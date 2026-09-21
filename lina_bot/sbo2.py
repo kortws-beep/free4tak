@@ -1555,9 +1555,23 @@ class Sbo2:
         #   슬롯제한이 의미가 없지"). 모멘텀은 항상 최우선(무제한), 나머지는
         #   점수순 통합정렬 그대로 — 특정 등급이 슬롯을 다 채워도 더 이상
         #   막지 않음.
-        buyable  = sorted(_buyable(SLOT_MOMENTUM), key=lambda x: x["score"], reverse=True)
+        # ★ 같은 날 이어서 발견: 추세 점수는 자체 스케일이 105~121(겹침보정
+        #   포함)인데 완화/유튜브는 50~83으로 스케일이 안 맞아서, 점수순
+        #   통합정렬을 해도 추세가 사실상 항상 이겨버려 "종류 무관 고점수
+        #   우선"이라는 취지가 실질적으로 안 지켜짐(대장 지적, DB 실측:
+        #   추세평균112 vs 완화평균60 vs 유튜브고정50). 매수금액 산정에
+        #   쓰이는 cand["score"]는 그대로 두고(건드리면 80점↑ +20% 사이징
+        #   보너스가 의도치 않게 달라짐), 정렬 전용 키만 별도로 하한을
+        #   둬서 추세와 경쟁 가능한 수준으로 보정. 하한값 110은 추세
+        #   실측평균(112)에 맞춰 — 추세가 평균 이상인 날은 추세가 이기고
+        #   평균 이하인 날은 완화/유튜브가 이기는, 진짜 "경쟁"이 되도록.
+        RANK_SCORE_FLOOR = {SLOT_LIGHT: 110, SLOT_YOUTUBE: 110}
+        def _rank_score(c):
+            return max(c["score"], RANK_SCORE_FLOOR.get(c["grade"], 0))
+
+        buyable  = sorted(_buyable(SLOT_MOMENTUM), key=_rank_score, reverse=True)
         rest     = _buyable(SLOT_TREND) + _buyable(SLOT_LIGHT) + _buyable(SLOT_YOUTUBE)
-        buyable += sorted(rest, key=lambda x: x["score"], reverse=True)
+        buyable += sorted(rest, key=_rank_score, reverse=True)
 
         print(f"   매수후보: 모멘텀{len(_buyable(SLOT_MOMENTUM))} "
               f"추세{len(_buyable(SLOT_TREND))} "
