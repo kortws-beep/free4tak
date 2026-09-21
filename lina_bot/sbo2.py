@@ -1570,7 +1570,7 @@ class Sbo2:
         # ★ 2026-07-25: 생쇼(SLOT_SSHOW) 슬롯 제거 — MBN이 생쇼 뉴스 코너
         #   자체를 폐지해서 소스가 영구 중단됨.
         # ★ 2026-08-15: VCP(SLOT_SWING) 제거 → SLOT_MOMENTUM으로 대체.
-        # 우선순위: 모멘텀 → 점수 높은 순 (추세/완화/관심종목)
+        # 우선순위: 모멘텀 → 추세 → 완화 → 유튜브 (각 단계 내에서는 점수 높은 순)
         buyable = []
         if not has_momentum:
             buyable += sorted(_buyable(SLOT_MOMENTUM), key=lambda x: x["score"], reverse=True)
