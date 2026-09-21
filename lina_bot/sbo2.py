@@ -124,17 +124,23 @@ SLOT_LIGHT  = "light"   # 완화트랙 (★ 2026-07-14 추가) — 촉매종목 
                         # 7거래일 연속 0개를 내는 문제 발견(사용자 지적) —
                         # 모멘텀 스캐너의 완화트랙(_check_light_chart_health)과
                         # 동일 로직을 실거래 후보에도 최하위 우선순위로 도입.
-SLOT_WATCHLIST = "watchlist"  # 한투 관심그룹 'new' (★ 2026-07-17 추가) — sbot과
-                        # 동일하게, 사용자가 직접 계속 갱신하는 한투 'new'
-                        # 관심그룹을 전체 후보가 적거나 없을 때만 보조로 사용.
-                        # 사용자가 직접 큐레이션한 목록이라 완전 무필터는
-                        # 아니고 완화트랙과 동일한 최소 안전장치만 적용.
-SLOT_POOL   = "pool"    # 키움풀 최소게이트 (★ 2026-07-18 추가) — 키움
-                        # 조건검색(눌림목/VCP/상승추세)이 이미 기술적
-                        # 패턴을 검증했다는 전제로, VCP/추세 엄격조건
-                        # 통과 못 한 풀 종목엔 최소게이트(_check_minimal_gate)
-                        # 만 적용하고 텔레그램/한경컨센서스/MBN뉴스/촉매
-                        # 겹침 점수(_calc_overlap_boost)로 순위를 매긴다.
+SLOT_WATCHLIST = "watchlist"  # ★ 2026-07-17 신설, 2026-09-19 소스 완전교체로
+                        # 사실상 폐지 — 원래 한투 'new' 관심그룹이었으나
+                        # 유튜브 라이브 모니터로 소스 이관(SLOT_YOUTUBE).
+                        # 이 등급으로는 더 이상 신규 후보 생성 안 함(레거시
+                        # 표식만 유지 — 09-19 이전에 산 기존 보유분(대원전선/
+                        # 하나마이크론)이 여전히 이 grade를 달고 있어서
+                        # 등급 자체를 지우면 표시가 깨짐).
+SLOT_POOL   = "pool"    # ★ 2026-07-18 신설, 2026-09-19 완전폐지 — 키움
+                        # 조건검색 API가 sbot과 충돌해서 제거(신규 후보
+                        # 생성 없음, 레거시 표식만 유지).
+SLOT_YOUTUBE = "youtube"  # ★ 2026-09-21 신설 — 유튜브 라이브 모니터 수집
+                        # 종목(5일내2회+ 언급, 추천일종가대비10%미만상승).
+                        # 처음엔 SLOT_WATCHLIST를 재사용했는데, 09-19 이전
+                        # 한투 'new' 소스로 산 기존 보유분과 같은 슬롯상한
+                        # (MAX_PER_SLOT_TYPE=2)을 공유해서 신규 유튜브 픽이
+                        # 못 들어가는 문제가 바로 발생(대장 지적) — 완전히
+                        # 별도 등급으로 분리.
 
 SLOT_LABEL = {
     SLOT_INTER: "교집합",
@@ -142,8 +148,9 @@ SLOT_LABEL = {
     SLOT_TREND: "추세",
     SLOT_TELE:  "텔레",
     SLOT_LIGHT: "완화",
-    SLOT_WATCHLIST: "관심종목",
+    SLOT_WATCHLIST: "관심종목(레거시)",
     SLOT_POOL:  "키움풀",
+    SLOT_YOUTUBE: "유튜브",
     "실계좌":   "실계좌",
     "S":        "S급",
     "A":        "A급",
@@ -542,9 +549,9 @@ def calc_buy_amount(grade: str, psbl_cash: int, score: int = 0) -> int:
         amount = int(BASE_BUY_AMT * 0.83)   # 125만원
     elif grade == SLOT_LIGHT:
         amount = int(BASE_BUY_AMT * 0.67)   # 100만원 — 완화트랙(2026-07-14), 정식조건 미충족이라 최소 사이즈
-    elif grade == SLOT_WATCHLIST:
-        amount = int(BASE_BUY_AMT * 0.67)   # 100만원 — 한투 관심그룹(2026-07-17), 완화트랙과 동일 사이즈
-    else:                                    # 레거시 tele/교집합/키움풀 폴백
+    elif grade == SLOT_YOUTUBE:
+        amount = int(BASE_BUY_AMT * 0.67)   # 100만원 — 유튜브 관심종목(2026-09-21), 완화트랙과 동일 사이즈
+    else:                                    # 레거시 tele/교집합/키움풀/watchlist 폴백
         amount = int(BASE_BUY_AMT * 0.67)   # 100만원
 
     if score >= 80:
@@ -999,24 +1006,29 @@ def get_candidates(api=None) -> list:
     candidates += light_list[:CANDIDATE_CAP_PER_SLOT]
 
     # ── 슬롯6: 유튜브 관심종목 (전체 후보가 적거나 없을 때만 보조) ──
-    # ★ 2026-07-17 추가, 2026-09-19 소스 교체: 원래 한투 'new' 관심그룹을
-    #   썼는데 sbot도 동일 그룹을 이미 쓰고 있어 완전 중복이었음(대장
-    #   지적) — 유튜브 라이브 모니터 수집 종목(5일내3회+, 추천일종가대비
-    #   10%이상상승 제외)으로 교체. 항상 쓰지 않고 위 슬롯들 합쳐서
+    # ★ 2026-07-17 추가, 2026-09-19 소스 교체, 2026-09-21 등급 완전분리:
+    #   원래 한투 'new' 관심그룹(SLOT_WATCHLIST)을 썼는데 sbot도 동일
+    #   그룹을 이미 쓰고 있어 완전 중복이었음(대장 지적) — 유튜브 라이브
+    #   모니터 수집 종목으로 교체. 처음엔 SLOT_WATCHLIST를 그대로
+    #   재사용했는데, 09-19 이전 한투소스로 산 기존 보유분(대원전선/
+    #   하나마이크론)과 같은 슬롯상한(MAX_PER_SLOT_TYPE=2)을 공유해서
+    #   새 유튜브 픽이 상한 때문에 못 들어가는 문제가 즉시 발생(대장
+    #   지적: "유튜브쪽는 슬롯 배정 안했잖아? 그게 관심종목도 아니고")
+    #   — SLOT_YOUTUBE로 완전 분리. 항상 쓰지 않고 위 슬롯들 합쳐서
     #   min_positions 미만일 때만 안전망으로 사용. 실거래 진입이라
     #   완화트랙과 동일한 최소 안전장치(_check_light_chart_health)는
     #   그대로 적용.
     if len(candidates) < MAX_POSITIONS:
-        watchlist_names = _get_youtube_watchlist_names() - already_covered - set(light_pool if light_pool else [])
-        watchlist_list = []
-        if watchlist_names:
+        youtube_names = _get_youtube_watchlist_names() - already_covered - set(light_pool if light_pool else [])
+        youtube_list = []
+        if youtube_names:
             conn = sqlite3.connect(os.path.join(BASE_DIR, "kr_theme_finance.db"), timeout=5)
-            for name in watchlist_names:
+            for name in youtube_names:
                 wl = _check_light_chart_health(name, conn, api)
                 if wl:
-                    watchlist_list.append({
+                    youtube_list.append({
                         "name":     name,
-                        "grade":    SLOT_WATCHLIST,
+                        "grade":    SLOT_YOUTUBE,
                         "score":    50,
                         "vcp":      False,
                         "trend":    False,
@@ -1030,8 +1042,8 @@ def get_candidates(api=None) -> list:
                         "themes":   [f"유튜브관심:{wl['pattern']}"],
                     })
             conn.close()
-        watchlist_list.sort(key=lambda x: x["score"], reverse=True)
-        candidates += watchlist_list[:CANDIDATE_CAP_PER_SLOT]
+        youtube_list.sort(key=lambda x: x["score"], reverse=True)
+        candidates += youtube_list[:CANDIDATE_CAP_PER_SLOT]
 
     # ★ 2026-09-19: 키움풀(SLOT_POOL) 후보생성 제거 — 실측 94.1% 0개인데다
     #   이 슬롯이 의존하던 _get_kiwoom_condition_pool()이 sbot과 동일한
@@ -1397,45 +1409,50 @@ class Sbo2:
         ★ 2026-09-19: 소스를 한투 'new' 관심그룹 → 유튜브 라이브 모니터
         수집 종목으로 교체(대장 결정 — sbot도 동일한 한투 'new' 그룹을
         이미 쓰고 있어 완전 중복 소스였음). _get_youtube_watchlist_names()
-        가 5일내3회+ 언급 & 추천일종가대비 10%미만상승 필터를 내부에서
+        가 5일내2회+ 언급 & 추천일종가대비 10%미만상승 필터를 내부에서
         처리(DB 조회만이라 여전히 가벼움).
 
+        ★ 2026-09-21: SLOT_WATCHLIST를 그대로 재사용했다가, 09-19 이전
+        한투소스로 산 기존 보유분과 슬롯상한(MAX_PER_SLOT_TYPE=2)을
+        공유해서 새 유튜브 픽이 못 들어가는 문제 발견(대장 지적) —
+        SLOT_YOUTUBE로 완전 분리.
+
         ★ 게이트 기준: 처음엔 get_candidates() 원본과 동일하게 "후보
-        풀 개수(non_watchlist) >= MAX_POSITIONS면 스킵"으로 짰는데,
+        풀 개수(non_youtube) >= MAX_POSITIONS면 스킵"으로 짰는데,
         대장이 지적 — "슬롯이 비었을 때는 모멘텀+추세+완화 8개에서
         후보를 못 구하면 new에서 구해야 해". 후보 풀이 많아도(예:8개)
         실제 매수단계에서 MA40/시총/거래량/이미보유 등으로 다 걸러질
         수 있어 "풀 개수"는 "실제로 살 수 있는지"의 근사치로 부적절.
         **실제 보유 슬롯이 비었는지**(len(self.positions))로 게이트를
         바꿈 — 슬롯이 하나라도 열려있으면 항상 new도 후보 풀에 포함시켜
-        놓고, 어차피 실제 매수 우선순위(모멘텀>추세>완화>관심종목)는
+        놓고, 어차피 실제 매수 우선순위(모멘텀>추세>완화>유튜브)는
         _check_buy()의 슬롯 순회에서 이미 보장되므로 "다른 슬롯이 다
-        채우고 남으면 그때 관심종목 차례"가 자연히 지켜짐."""
+        채우고 남으면 그때 유튜브 차례"가 자연히 지켜짐."""
         if not self.candidates:
             return
         held_codes = set(self.positions.keys())
         held_names = {p.get("name") for p in self.positions.values()}
-        non_watchlist = [c for c in self.candidates if c["grade"] != SLOT_WATCHLIST]
+        non_youtube = [c for c in self.candidates if c["grade"] != SLOT_YOUTUBE]
 
         if len(self.positions) >= MAX_POSITIONS:
-            if len(non_watchlist) != len(self.candidates):
-                self.candidates = non_watchlist  # 실제 슬롯이 꽉 참 — 관심종목 비움
+            if len(non_youtube) != len(self.candidates):
+                self.candidates = non_youtube  # 실제 슬롯이 꽉 참 — 유튜브 후보 비움
             return
 
-        already_covered = {c["name"] for c in non_watchlist
+        already_covered = {c["name"] for c in non_youtube
                             if c["grade"] in (SLOT_TREND, SLOT_MOMENTUM, SLOT_LIGHT)}
-        watchlist_names = _get_youtube_watchlist_names() - already_covered
-        watchlist_names = {n for n in watchlist_names
-                            if get_stock_code(n) not in held_codes and n not in held_names}
+        youtube_names = _get_youtube_watchlist_names() - already_covered
+        youtube_names = {n for n in youtube_names
+                          if get_stock_code(n) not in held_codes and n not in held_names}
 
-        watchlist_list = []
-        if watchlist_names:
+        youtube_list = []
+        if youtube_names:
             conn = sqlite3.connect(os.path.join(BASE_DIR, "kr_theme_finance.db"), timeout=5)
-            for name in watchlist_names:
+            for name in youtube_names:
                 wl = _check_light_chart_health(name, conn, self.api)
                 if wl:
-                    watchlist_list.append({
-                        "name": name, "grade": SLOT_WATCHLIST, "score": 50,
+                    youtube_list.append({
+                        "name": name, "grade": SLOT_YOUTUBE, "score": 50,
                         "vcp": False, "trend": False, "catalyst": False,
                         "curr": wl["curr_price"], "stop": wl["stop_price"], "tgt": wl["tgt_price"],
                         "rr": round((wl["tgt_price"] - wl["curr_price"]) /
@@ -1444,17 +1461,17 @@ class Sbo2:
                         "themes": [f"유튜브관심:{wl['pattern']}"],
                     })
             conn.close()
-        watchlist_list.sort(key=lambda x: x["score"], reverse=True)
-        watchlist_list = watchlist_list[:CANDIDATE_CAP_PER_SLOT]
+        youtube_list.sort(key=lambda x: x["score"], reverse=True)
+        youtube_list = youtube_list[:CANDIDATE_CAP_PER_SLOT]
 
-        old_names = {c["name"] for c in self.candidates if c["grade"] == SLOT_WATCHLIST}
-        new_names = {c["name"] for c in watchlist_list}
+        old_names = {c["name"] for c in self.candidates if c["grade"] == SLOT_YOUTUBE}
+        new_names = {c["name"] for c in youtube_list}
         if new_names == old_names:
             return
 
-        self.candidates = non_watchlist + watchlist_list
-        print(f"   🔄 [sbo2] 관심종목(new) 후보 갱신: {len(new_names)}개 ({', '.join(new_names) or '없음'})")
-        for c in watchlist_list:
+        self.candidates = non_youtube + youtube_list
+        print(f"   🔄 [sbo2] 유튜브 관심종목 후보 갱신: {len(new_names)}개 ({', '.join(new_names) or '없음'})")
+        for c in youtube_list:
             save_candidate(
                 name=c["name"], grade=c["grade"], score=c["score"],
                 vcp=c["vcp"], trend=c["trend"], catalyst=c["catalyst"],
@@ -1537,7 +1554,10 @@ class Sbo2:
         has_momentum = grade_counts[SLOT_MOMENTUM] >= MAX_PER_SLOT_TYPE
         has_trend = grade_counts[SLOT_TREND] >= MAX_PER_SLOT_TYPE
         has_light = grade_counts[SLOT_LIGHT] >= MAX_PER_SLOT_TYPE
-        has_watchlist = grade_counts[SLOT_WATCHLIST] >= MAX_PER_SLOT_TYPE
+        # ★ 2026-09-21: SLOT_WATCHLIST(레거시)가 아니라 SLOT_YOUTUBE 전용
+        #   상한 — 09-19 이전 한투소스로 산 기존 보유분(watchlist 등급)이
+        #   이 상한을 갉아먹지 않도록 완전 분리(대장 지적).
+        has_youtube = grade_counts[SLOT_YOUTUBE] >= MAX_PER_SLOT_TYPE
 
         # ★ 2026-07-06: 텔레스윙을 매수 소스에서 제외 (사용자 결정) —
         #   사후검증 결과 텔레스윙이 표본 1368건 중 손절률 77.3%로 압도적으로
@@ -1558,12 +1578,12 @@ class Sbo2:
             buyable += sorted(_buyable(SLOT_TREND), key=lambda x: x["score"], reverse=True)
         if not has_light:
             buyable += sorted(_buyable(SLOT_LIGHT), key=lambda x: x["score"], reverse=True)
-        if not has_watchlist:
-            buyable += sorted(_buyable(SLOT_WATCHLIST), key=lambda x: x["score"], reverse=True)
+        if not has_youtube:
+            buyable += sorted(_buyable(SLOT_YOUTUBE), key=lambda x: x["score"], reverse=True)
 
         print(f"   매수후보: 모멘텀{len(_buyable(SLOT_MOMENTUM))} "
               f"추세{len(_buyable(SLOT_TREND))} "
-              f"완화{len(_buyable(SLOT_LIGHT))} 관심종목{len(_buyable(SLOT_WATCHLIST))} (텔레 제외됨)")
+              f"완화{len(_buyable(SLOT_LIGHT))} 유튜브{len(_buyable(SLOT_YOUTUBE))} (텔레 제외됨)")
 
         for cand in buyable:
             if slots <= 0:
