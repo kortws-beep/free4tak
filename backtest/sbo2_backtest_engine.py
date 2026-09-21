@@ -137,9 +137,10 @@ class SwingTrade:
 # ============================================================
 @dataclass
 class SBo2BacktestConfig:
-    # 자본 (sbot 실전: 종목당 50만~200만원)
-    initial_cash:      int   = 10_000_000
-    base_buy_amt:      int   = 1_000_000
+    # 자본 — ★ 2026-09-21: 실전 sbo2(SEED_MONEY=600만/BASE_BUY_AMT=150만)와
+    #   어긋나 있던 드리프트 발견/수정(주말점검과 동일 클래스).
+    initial_cash:      int   = 6_000_000
+    base_buy_amt:      int   = 1_500_000
     max_positions:     int   = 4
     # 매수 임계치
     buy_score_min:     int   = 65

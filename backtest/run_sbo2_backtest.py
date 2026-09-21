@@ -186,10 +186,10 @@ def main():
     parser.add_argument("--codes",         default="",
                         help="쉼표구분 종목코드 (비우면 DB 전체)")
     parser.add_argument("--max-codes",     type=int, default=50)
-    parser.add_argument("--initial-cash",  type=int, default=10_000_000,
-                        help="초기 자본 (sbo2 기본 1000만원)")
-    parser.add_argument("--base-buy-amt",  type=int, default=1_000_000,
-                        help="기본 매수금액 (sbo2 기본 100만원)")
+    parser.add_argument("--initial-cash",  type=int, default=6_000_000,
+                        help="초기 자본 (sbo2 실전 600만원)")
+    parser.add_argument("--base-buy-amt",  type=int, default=1_500_000,
+                        help="기본 매수금액 (sbo2 실전 150만원)")
     parser.add_argument("--max-positions", type=int, default=4)
     parser.add_argument("--ma-period",     type=int, default=20,
                         help="MA이탈 매도 기준 기간 (기본20, 검증용 40)")
