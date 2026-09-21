@@ -480,21 +480,26 @@ class SBot:
             )
             loop.close()
 
-            if codes:
-                # new 그룹 추가
-                try:
-                    self._load_new_codes()
-                    added = 0
-                    for nc in self.new_codes_list:
-                        if nc not in codes:
-                            codes.append(nc); added += 1
-                            if nc not in self.code_tag_map:
-                                self.code_tag_map[nc] = "expert"  # new그룹=전문가추천
-                    if added:
-                        print(f"  🆕 new 종목 {added}개 풀 추가")
-                except Exception as e:
-                    print(f"⚠️ new 그룹 오류: {e}")
+            # ★ 2026-09-21: new 그룹 추가가 "if codes:" 안에 있어서, 조건검색
+            #   ("주도주검색식3")이 0개인 날엔 new 관심그룹이 멀쩡히 있어도
+            #   아예 안 걸리고 "종목 풀 없음"으로 통째로 매수가 막히는 버그
+            #   발견(대장 — "슬롯을 하나씩 비웠는데 매수를 안하네" 조사 중
+            #   실측: 조건검색 +0개인 날 확인). 조건검색 결과와 무관하게
+            #   항상 new 그룹을 시도하도록 게이트 제거.
+            try:
+                self._load_new_codes()
+                added = 0
+                for nc in self.new_codes_list:
+                    if nc not in codes:
+                        codes.append(nc); added += 1
+                        if nc not in self.code_tag_map:
+                            self.code_tag_map[nc] = "expert"  # new그룹=전문가추천
+                if added:
+                    print(f"  🆕 new 종목 {added}개 풀 추가")
+            except Exception as e:
+                print(f"⚠️ new 그룹 오류: {e}")
 
+            if codes:
                 result = codes[:POOL_SIZE]
                 print(f"🎯 스윙 종목 풀: {len(result)}개")
                 return result
