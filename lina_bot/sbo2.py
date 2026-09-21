@@ -778,7 +778,10 @@ def _calc_overlap_boost(name: str, code: str, curr_price: float,
 _YT_WATCHLIST_CACHE = {"ts": 0.0, "names": set()}
 WATCHLIST_REFRESH_SEC = 600  # ★ 2026-09-15: 하루1회→10분 캐시로 변경(아래 사유)
 YT_MENTION_DAYS = 5
-YT_MENTION_MIN_COUNT = 3
+# ★ 2026-09-21: 3회로 시작했는데 첫 거래일에 3회+가 이미보유종목 1개뿐
+#   (2회는 26개나 있었음) — 대장 사전예고대로("안나오면 2회로 줄이자")
+#   3→2로 하향.
+YT_MENTION_MIN_COUNT = 2
 YT_MAX_RISE_PCT = 0.10
 
 def _get_youtube_watchlist_names() -> set:
