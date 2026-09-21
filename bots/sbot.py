@@ -589,9 +589,6 @@ class SBot:
             except Exception as _e:
                 print(f'⚠️ master_positions upsert 오류: {_e}')
 
-        if not is_second:
-            self.sold_today[code] = now_hms()
-
     def _do_sell(self, code: str, qty: int, reason: str, sell_price: float) -> bool:
         """
         매도 주문 실행.
@@ -614,7 +611,12 @@ class SBot:
         held_qty     = current_pos.get("qty", 0)
         is_full_sell = (qty >= held_qty)
 
-        is_loss = "손절" in reason or "본절" in reason
+        # ★ 2026-09-21: reason 문자열("손절"/"본절") 매칭 대신 실제 손익
+        #   부호로 판단(대장 지적 — "손절했거나 수익을 못내고 팔았을경우만
+        #   재매수 금지, 소규모 익절이라도 수익나면 재매수금지 안 걸리게").
+        #   문자열 매칭은 "미너비니200일이탈" 등 손실 사유를 놓칠 수 있었음.
+        entry_price = current_pos.get("entry_price", sell_price)
+        is_loss = sell_price <= entry_price
         emoji   = "💔" if is_loss else "💰"
         self._notify(
             f"{emoji} 매도 {code}({self._name(code)}) | {reason} | {qty}주",
@@ -680,10 +682,10 @@ class SBot:
                     stage=self.peak_tracker.get(code, {}).get("stage", 0),
                 )
 
-        # ★ 손절/본절만 당일 재매수 금지 — 익절/수동매도는 재진입 허용
+        # ★ 손실/본절(수익 없음)만 당일 재매수 금지 — 소규모 익절도 재진입 허용
         if is_loss:
             self.sold_today[code] = now_hms()
-            print(f"🚫 [SWING] {code} 손절/본절 → 당일 재매수 금지")
+            print(f"🚫 [SWING] {code} 손실/본절 매도 → 당일 재매수 금지")
 
         # 상태 파일에도 sold_today 저장
         # ★ 2026-09-03: 락 없는 수동 read+write → 안전한 _update_state로 교체

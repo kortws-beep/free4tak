@@ -1860,7 +1860,17 @@ class CBot:
                     f"{emoji} [매도] {market} | {reason} | {qty:.6f}개",
                     critical=True,
                 )
-                self.sold_today[market] = time.time()  # ★ 09-15: 5시간 롤링 쿨다운용 실제 타임스탬프
+                # ★ 2026-09-21: 손실/본절(수익 없음)만 재매수 쿨다운 등록 —
+                #   소규모 익절도 재진입 허용(대장 지적 — "손절했거나 수익을
+                #   못내고 팔았을경우만 재매수 금지"). profit_krw는 이미
+                #   08-18에 reason 문자열매칭 대신 실제 손익 부호로 바꿔둔
+                #   값이라 그대로 재사용. ★ 키는 손익 무관 항상 등록 — 값을
+                #   None(비쿨다운)/timestamp(쿨다운)로 구분(1793행 1차매수
+                #   등록과 동일 컨벤션). 키 자체가 없으면 다음 루프의
+                #   수동매도 감지가 self.positions 미반영 구간(sell() 호출
+                #   직후~다음 포지션동기화 전)에 이 봇매도를 "수동매도"로
+                #   오탐해 중복 기록/알림을 낼 수 있어 반드시 등록 필요.
+                self.sold_today[market] = time.time() if profit_krw <= 0 else None
                 if _master_remove:
                     try:
                         _master_remove('cbot', market)
@@ -2339,11 +2349,20 @@ class CBot:
                             print(f"   🛡️ {_code} 매수직후 동기화 보호 중 — 수동매도 감지 스킵")
                             _guarded_codes.append(_code)
                             continue
-                        self.sold_today[_code] = _now_ts  # ★ 09-15: 5시간 롤링 쿨다운용
-                        print(f"🔍 수동매도 감지: {_code} → sold_today 추가")
+                        print(f"🔍 수동매도 감지: {_code}")
                         _old_pos = self.positions.get(_code, {})
                         _prices = self.get_current_price([_code])
                         _sell_price = _prices.get(_code, _old_pos.get("entry_price", 0))
+                        # ★ 2026-09-21: 손실/본절만 재매수 쿨다운 등록(대장
+                        #   지적 — 소규모 익절도 재진입 허용). 정확한 체결가가
+                        #   아닌 추정 시세라 오차는 있을 수 있으나, 진입가
+                        #   대비 부호는 대체로 신뢰 가능. ★ 키는 항상 등록
+                        #   (None=비쿨다운/timestamp=쿨다운) — 안 그러면 다음
+                        #   루프에서 self.positions 미반영 구간 동안 이미
+                        #   처리한 걸 다시 "수동매도"로 오탐해 중복기록됨.
+                        _entry_price = _old_pos.get("entry_price", 0)
+                        _is_loss = _entry_price <= 0 or _sell_price <= _entry_price
+                        self.sold_today[_code] = _now_ts if _is_loss else None
                         self._save_manual_trade(
                             _code, _old_pos.get("entry_price", 0), _sell_price,
                             _old_pos.get("qty", 0))

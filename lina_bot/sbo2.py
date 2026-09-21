@@ -1981,10 +1981,16 @@ class Sbo2:
             if _master_remove:
                 _master_remove("sbo2", code)
 
-            # ★ 매도 사유 무관하게 모든 매도는 당일 재매수 금지
-            #   (이전: "손절"만 등록 → MA20이탈 등은 재매수 금지가 안 걸려
-            #    매수↔매도 무한 반복 버그 발생. 2026-06-19 확인)
-            self.sold_today[code] = now_hms()
+            # ★ 2026-09-21: 손실/본절(수익 없음)만 당일 재매수 금지, 소규모
+            #   익절도 재진입 허용(대장 지적 — "손절했거나 수익을 못내고
+            #   팔았을경우만 재매수 금지"). 이 매도경로(손절/트레일링)는
+            #   손절만 실손실이고 트레일링은 목표1(stage≥1) 달성 후에만
+            #   발동해 항상 수익 구간이라, rate 부호로 판단하면 둘 다
+            #   올바르게 갈림 (이전엔 사유 무관 항상 등록 — 2026-06-19
+            #   당시엔 MA20이탈 같은 손실성 매도가 안 걸리는 문제였는데,
+            #   MA20이탈 로직 자체가 이후 제거되어 더는 해당 안 됨).
+            if rate <= 0:
+                self.sold_today[code] = now_hms()
 
             del self.positions[code]
             self._save_state()
@@ -2152,8 +2158,7 @@ class Sbo2:
                 _pdata = self.api.get_period_trade_profit(today_ymd, today_ymd)
                 _prows = {r["pdno"]: r for r in _pdata.get("trades", [])}
             for code in manual_sold_codes:
-                self.sold_today[code] = now_hms()
-                print(f"   🔍 수동매도 감지: {code} → sold_today 추가")
+                print(f"   🔍 수동매도 감지: {code}")
                 pos = self.positions.get(code, {})
                 row = _prows.get(code)
                 if row and int(row.get("sll_qty", 0) or 0) > 0:
@@ -2164,6 +2169,15 @@ class Sbo2:
                     mdata = self.api.get_market_data(code)
                     sell_price = float(mdata.get("stck_prpr", 0)) if mdata else pos.get("entry_price", 0)
                     sell_qty   = pos.get("qty", 0)
+                # ★ 2026-09-21: 손실/본절(수익 없음)만 재매수 금지 — 수동매도도
+                #   봇 매도와 동일 원칙 적용(대장 지적). 진입가를 못 구하면
+                #   기존과 동일하게 보수적으로 금지 처리.
+                entry_price = pos.get("entry_price", 0)
+                if entry_price <= 0 or sell_price <= entry_price:
+                    self.sold_today[code] = now_hms()
+                    print(f"   🚫 {code} 손실/본절 수동매도 → 재매수 금지")
+                else:
+                    print(f"   ✅ {code} 익절 수동매도 → 재매수 허용")
                 save_sell_trade(
                     code=code, sell_price=sell_price, reason="수동매도",
                     entry_price=pos.get("entry_price", 0), qty=sell_qty,
