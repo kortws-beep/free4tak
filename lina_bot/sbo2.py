@@ -1667,8 +1667,15 @@ class Sbo2:
             #   거의 빼버리니까 발생한 문제 같아"). 완화트랙/키움풀 등
             #   여러 슬롯이 늘면서 정작 잡주 배제 안전장치가 약해진 걸
             #   보완 — 모든 매수 경로가 거치는 이 지점에 공통 게이트로 추가.
+            # ★ 2026-09-21: 대장 지적 — "종목의 매입가가 5만원,30만원,100만원,
+            #   200만원대면 거래량의 크기도 달라져야지?" — 고정 주식수(30만주)
+            #   기준은 주가가 비쌀수록 부당하게 걸리고(HMM/RFHIC 등 고가주가
+            #   실제로는 거래대금이 충분한데도 "거래량 미달"로 계속 탈락)
+            #   저가주는 반대로 헐렁해지는 문제였음. _check_light_chart_health
+            #   가 이미 쓰는 거래대금(MIN_TRADING_VALUE_EOK=50억원) 기준으로
+            #   통일 — 주식수 대신 "전일거래량×전일종가"로 계산.
             MIN_MARKET_CAP_EOK = 3000     # 시가총액 3,000억원 이상
-            MIN_PREV_VOLUME    = 300_000  # 전일거래량 30만주 이상
+            MIN_TRADING_VALUE_EOK = 50    # 전일거래대금 50억원 이상 (swing_analyzer.MIN_TRADING_VALUE_EOK와 동일 기준)
             _mkt_cap = float(mdata.get("hts_avls", 0) or 0)  # 억원 단위 (KIS 시가총액)
             if _mkt_cap > 0 and _mkt_cap < MIN_MARKET_CAP_EOK:
                 print(f"⏭️ {name} 패스 — 시가총액({_mkt_cap:,.0f}억) < 최소기준({MIN_MARKET_CAP_EOK:,}억)")
@@ -1680,17 +1687,18 @@ class Sbo2:
             try:
                 _vconn = sqlite3.connect(os.path.join(BASE_DIR, "kr_theme_finance.db"), timeout=5)
                 _vrow = _vconn.execute("""
-                    SELECT volume FROM kr_stock_daily_data
+                    SELECT volume, close_price FROM kr_stock_daily_data
                     WHERE stock_name = ? ORDER BY date DESC LIMIT 1
                 """, (name,)).fetchone()
                 _vconn.close()
-                _prev_vol = _vrow[0] if _vrow and _vrow[0] else 0
-                if _prev_vol and _prev_vol < MIN_PREV_VOLUME:
-                    print(f"⏭️ {name} 패스 — 전일거래량({_prev_vol:,}주) < 최소기준({MIN_PREV_VOLUME:,}주)")
+                _prev_vol, _prev_close = (_vrow[0], _vrow[1]) if _vrow else (0, 0)
+                _prev_trading_value_eok = (_prev_vol or 0) * (_prev_close or 0) / 1e8
+                if _prev_vol and _prev_trading_value_eok < MIN_TRADING_VALUE_EOK:
+                    print(f"⏭️ {name} 패스 — 전일거래대금({_prev_trading_value_eok:,.0f}억) < 최소기준({MIN_TRADING_VALUE_EOK:,}억)")
                     save_candidate(name=name, grade=cand["grade"], score=cand["score"],
                                    vcp=cand["vcp"], trend=cand["trend"], catalyst=cand["catalyst"],
                                    curr=curr_price, stop=cand["stop"], tgt=cand["tgt"], rr=cand["rr"],
-                                   bought=False, skip_reason="거래량미달")
+                                   bought=False, skip_reason="거래대금미달")
                     continue
             except Exception as _e:
                 print(f"⚠️ 거래량 조회 오류 {name}: {_e}")
