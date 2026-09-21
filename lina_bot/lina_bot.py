@@ -1928,6 +1928,22 @@ async def on_ready():
     #   실제로는 최초 기동 때의 루프가 끊김 없이 계속 돌고 있어 기능
     #   장애는 아니었지만, 매번 이 노이즈가 재발하는 걸 막기 위해
     #   is_running() 가드 추가.
+    # ★ 2026-09-21: 기동 로그가 스케줄 시각과 무관한 뒤죽박죽 순서로 찍혀
+    #   눈에 계속 걸린다는 대장 지적("순서좀 맞춰주라") — 실제 동작(각
+    #   스케줄러의 .start() 호출 순서)은 서로 독립적이라 바뀌어도 무해,
+    #   출력 순서만 스케줄 시각순으로 재배열.
+    try:
+        if not daily_news_report.is_running():
+            daily_news_report.start()
+        print("✅ [시스템] 07시 뉴스 스케줄러 가동 성공!")
+    except Exception as e: print(f"⚠️ [에러] 뉴스 스케줄러: {e}")
+
+    try:
+        if not daily_master_report.is_running():
+            daily_master_report.start()
+        print("✅ [시스템] 07:20 마스터 리포트 스케줄러 가동 성공!")
+    except Exception as e: print(f"⚠️ [에러] 마스터 스케줄러: {e}")
+
     try:
         if not daily_morning_report.is_running():
             daily_morning_report.start()
@@ -1946,22 +1962,16 @@ async def on_ready():
     # except Exception as e: print(f"⚠️ [에러] 텔레그램 스케줄러: {e}")
 
     try:
-        if not daily_news_report.is_running():
-            daily_news_report.start()
-        print("✅ [시스템] 07시 뉴스 스케줄러 가동 성공!")
-    except Exception as e: print(f"⚠️ [에러] 뉴스 스케줄러: {e}")
+        if not daily_tele_swing_report.is_running():
+            daily_tele_swing_report.start()
+        print("✅ [시스템] 07:50 텔레스윙 스케줄러 가동 성공!")
+    except Exception as e: print(f"⚠️ [에러] 텔레스윙 스케줄러: {e}")
 
     try:
         if not daily_strategy_report.is_running():
             daily_strategy_report.start()
         print("✅ [시스템] 08:50 MBN 투자전략 요약 스케줄러 가동 성공!")
     except Exception as e: print(f"⚠️ [에러] 투자전략 스케줄러: {e}")
-
-    try:
-        if not daily_market_context_report.is_running():
-            daily_market_context_report.start()
-        print("✅ [시스템] 09:35 시장 쏠림 종합 브리핑 스케줄러 가동 성공! (관찰 전용)")
-    except Exception as e: print(f"⚠️ [에러] 쏠림 브리핑 스케줄러: {e}")
 
     try:
         if not daily_momentum_am_report.is_running():
@@ -1980,16 +1990,10 @@ async def on_ready():
     except Exception as e: print(f"⚠️ [에러] 키움풀 스캔 스케줄러: {e}")
 
     try:
-        if not daily_master_report.is_running():
-            daily_master_report.start()
-        print("✅ [시스템] 07:20 마스터 리포트 스케줄러 가동 성공!")
-    except Exception as e: print(f"⚠️ [에러] 마스터 스케줄러: {e}")
-
-    try:
-        if not daily_tele_swing_report.is_running():
-            daily_tele_swing_report.start()
-        print("✅ [시스템] 07:50 텔레스윙 스케줄러 가동 성공!")
-    except Exception as e: print(f"⚠️ [에러] 텔레스윙 스케줄러: {e}")
+        if not daily_market_context_report.is_running():
+            daily_market_context_report.start()
+        print("✅ [시스템] 09:35 시장 쏠림 종합 브리핑 스케줄러 가동 성공! (관찰 전용)")
+    except Exception as e: print(f"⚠️ [에러] 쏠림 브리핑 스케줄러: {e}")
 
     try:
         if not daily_tele_swing_afternoon.is_running():
