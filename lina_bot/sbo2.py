@@ -1539,17 +1539,9 @@ class Sbo2:
             print(f"   💰 주문가능({psbl_cash:,}원) < 최소기준({MIN_BUY_CHECK_CASH:,}원) — 후보 조회 스킵")
             return
 
-        # ── 4슬롯 전략별 매수 후보 구성 ────────────────────────
+        # ── 전략별 매수 후보 구성 ────────────────────────
         held_codes = set(self.positions.keys())
         held_names = {p.get("name") for p in self.positions.values()}
-        # ★ 2026-08-18: 슬롯당 보유 1종목 제한 → 슬롯당 최대 2종목으로 완화
-        #   (사용자 지적 — "하나의 슬롯은 계속 놀아.. 같은 종류는 2개까지
-        #   허용하자"). 슬롯별 후보가 마르면(예: 교집합 0건) 그 슬롯 자리가
-        #   MAX_POSITIONS 안 채워진 채로 계속 비어있는 문제가 있었음 — 다른
-        #   슬롯이 후보가 있으면 그 슬롯에서 2번째 종목을 채울 수 있게 함.
-        MAX_PER_SLOT_TYPE = 2
-        from collections import Counter as _Counter
-        grade_counts = _Counter(p.get("grade", "") for p in self.positions.values())
 
         def _buyable(grade):
             return [c for c in self.candidates
@@ -1557,46 +1549,14 @@ class Sbo2:
                     and c["name"] not in held_names
                     and get_stock_code(c["name"]) not in held_codes]
 
-        # 슬롯별 이미 상한(2개) 도달 여부 확인
-        # ★ 2026-09-19: 교집합/키움풀 슬롯 제거(대장 결정 — 실측 99.5%/
-        #   94.1% 0개로 사실상 죽은 소스 + 키움풀은 sbot과 조건검색
-        #   API충돌까지 빚음). has_inter/has_pool 및 관련 buyable 라인 삭제.
-        has_momentum = grade_counts[SLOT_MOMENTUM] >= MAX_PER_SLOT_TYPE
-        has_trend = grade_counts[SLOT_TREND] >= MAX_PER_SLOT_TYPE
-        has_light = grade_counts[SLOT_LIGHT] >= MAX_PER_SLOT_TYPE
-        # ★ 2026-09-21: SLOT_WATCHLIST(레거시)가 아니라 SLOT_YOUTUBE 전용
-        #   상한 — 09-19 이전 한투소스로 산 기존 보유분(watchlist 등급)이
-        #   이 상한을 갉아먹지 않도록 완전 분리(대장 지적).
-        has_youtube = grade_counts[SLOT_YOUTUBE] >= MAX_PER_SLOT_TYPE
-
-        # ★ 2026-07-06: 텔레스윙을 매수 소스에서 제외 (사용자 결정) —
-        #   사후검증 결과 텔레스윙이 표본 1368건 중 손절률 77.3%로 압도적으로
-        #   나빴음. 뉴스/언급 기반이라 사실상 단타에 가까운 신호라 스윙
-        #   매수 판단에는 더 이상 쓰지 않고, 시장 판단 참고자료로만 남긴다
-        #   (텔레스윙 스캔/리포트 자체는 lina_bot.py 07:50·14:40 스케줄러와
-        #   !텔레스윙 명령으로 계속 제공됨 — 여기서 빼는 건 sbo2 매수풀뿐).
-        # ★ 2026-07-14: 완화트랙(SLOT_LIGHT) 추가 — 정식조건 미충족 최하위
-        #   신뢰도 슬롯이라 우선순위 맨 뒤에 둔다.
-        # ★ 2026-07-25: 생쇼(SLOT_SSHOW) 슬롯 제거 — MBN이 생쇼 뉴스 코너
-        #   자체를 폐지해서 소스가 영구 중단됨.
-        # ★ 2026-08-15: VCP(SLOT_SWING) 제거 → SLOT_MOMENTUM으로 대체.
-        # ★ 2026-09-21: 모멘텀만 1픽 고정 우선(적중률 검증된 고정점수 소스라
-        #   항상 먼저 소진). 나머지 추세/완화/유튜브는 각각 내부점수를 이미
-        #   갖고 있으니(대장 지적 — "종류에 상관없이 고점수부터 매입") 더는
-        #   추세→완화→유튜브 고정순서로 태우지 않고 셋을 합쳐 점수순 정렬.
-        #   유튜브종목 수동매매 결과가 좋았는데 기존 고정순서라면 완화보다
-        #   항상 뒤로 밀려 기회를 놓치고 있었음.
-        buyable = []
-        if not has_momentum:
-            buyable += sorted(_buyable(SLOT_MOMENTUM), key=lambda x: x["score"], reverse=True)
-
-        rest = []
-        if not has_trend:
-            rest += _buyable(SLOT_TREND)
-        if not has_light:
-            rest += _buyable(SLOT_LIGHT)
-        if not has_youtube:
-            rest += _buyable(SLOT_YOUTUBE)
+        # ★ 2026-09-21: 등급별 상한(MAX_PER_SLOT_TYPE=2) 완전 폐지(대장 결정
+        #   — "등급별상한은 풀어야해.. 모멘텀은 어차피 탑픽이니까 슬롯이
+        #   생기고 종목이 있으면 최우선으로 들어갈거고 나머진 점수기반이니
+        #   슬롯제한이 의미가 없지"). 모멘텀은 항상 최우선(무제한), 나머지는
+        #   점수순 통합정렬 그대로 — 특정 등급이 슬롯을 다 채워도 더 이상
+        #   막지 않음.
+        buyable  = sorted(_buyable(SLOT_MOMENTUM), key=lambda x: x["score"], reverse=True)
+        rest     = _buyable(SLOT_TREND) + _buyable(SLOT_LIGHT) + _buyable(SLOT_YOUTUBE)
         buyable += sorted(rest, key=lambda x: x["score"], reverse=True)
 
         print(f"   매수후보: 모멘텀{len(_buyable(SLOT_MOMENTUM))} "
@@ -1606,13 +1566,6 @@ class Sbo2:
         for cand in buyable:
             if slots <= 0:
                 break
-
-            # ★ 2026-08-18: buyable 리스트는 루프 시작 시점 스냅샷이라,
-            #   같은 루프 안에서 한 슬롯의 후보 여러 개를 연달아 사고
-            #   MAX_PER_SLOT_TYPE(2) 상한을 넘겨버릴 수 있음 — 매수 성공할
-            #   때마다 grade_counts를 갱신해 실시간으로 다시 체크.
-            if grade_counts[cand["grade"]] >= MAX_PER_SLOT_TYPE:
-                continue
 
             name = cand["name"]
             code = get_stock_code(name)
@@ -1816,7 +1769,6 @@ class Sbo2:
                 "trend":       cand["trend"],
                 "catalyst":    cand["catalyst"],
             }
-            grade_counts[cand["grade"]] += 1   # ★ 슬롯당 상한(2) 실시간 반영
             self._save_state()
 
             # DB 저장
