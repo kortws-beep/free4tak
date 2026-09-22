@@ -536,38 +536,19 @@ def _save_cand_date(date: str):
 # ============================================================
 def calc_buy_amount(grade: str, psbl_cash: int, score: int = 0) -> int:
     """
-    전략별 매수금액 (BASE_BUY_AMT 대비 비율, 2026-09-21 100만원 기준):
-    - momentum/trend       → 83만원 (83%) 기준
-    - light/youtube/그 외(레거시 tele) → 67만원 (67%) 기준 — 텔레스윙은 2026-07-06
-      매수 소스에서 제외되어 신규 후보엔 더 이상 생성되지 않음. 이 분기는
-      제거 전에 매수된 기존 보유 종목의 grade가 여전히 "tele"인 경우를
-      위한 폴백일 뿐, 실제로는 도달하지 않음 (calc_buy_amount는 신규
-      후보 매수 시에만 호출되고, 기존 포지션 재계산엔 안 쓰임).
-    - 점수 보정: 80점 이상 +20%, 50점 미만 -20%, 그 사이는 기준 그대로
-      (★ 2026-06-29 추가 — 기존엔 docstring에 "매수금액: 점수 비례"라고
-      적혀 있었으나 실제로는 슬롯 등급으로만 고정금액이 정해져 점수가
-      매수금액에 전혀 반영되지 않던 불일치를 해소)
-    - 주문가능금액 초과 시 조정
+    매수금액 = BASE_BUY_AMT 고정, 주문가능금액 부족시에만 축소.
+
+    ★ 2026-09-22: 등급별 0.83/0.67 차등 배분 + 점수 ±20% 보정 전부 폐지
+      (대장 지적 — "sbo2종목 매수 들어갔는데 1종목당 60만원선이야.
+      100만원 셋팅하자.. 최종은 남은만큼만이고"). BASE_BUY_AMT가
+      150만→100만(09-21)으로 바뀌면서 등급별 0.67배가 67만원까지
+      내려가 "100만×6슬롯" 재구성 취지(슬롯당 약 100만원)와 어긋났음.
+      점수 보정(80점↑+20%)도 09-21 발견된 등급간 점수스케일 불일치
+      (추세 105~121 vs 완화/유튜브 50~83)로 인해 등급마다 들쭉날쭉하게
+      적용되고 있어 같이 제거 — 이제 모든 등급이 동일하게 BASE_BUY_AMT를
+      목표로 하고, 실제 축소는 주문가능금액 부족 상황에서만 일어남.
     """
-    # ★ 2026-09-19: 교집합/키움풀 분기 제거(슬롯 자체를 없앰) — 레거시
-    #   폴백(else)이 동일하게 처리하므로 과거 보유분도 안전.
-    # ★ 2026-09-21: BASE_BUY_AMT 150만→100만원 재구성 — 아래 금액은
-    #   BASE_BUY_AMT 기준 비율(83%/67%)이라 자동으로 따라감(83만원/67만원).
-    if grade in (SLOT_MOMENTUM, SLOT_TREND):
-        amount = int(BASE_BUY_AMT * 0.83)
-    elif grade == SLOT_LIGHT:
-        amount = int(BASE_BUY_AMT * 0.67)   # 완화트랙(2026-07-14), 정식조건 미충족이라 최소 사이즈
-    elif grade == SLOT_YOUTUBE:
-        amount = int(BASE_BUY_AMT * 0.67)   # 유튜브 관심종목(2026-09-21), 완화트랙과 동일 사이즈
-    else:                                    # 레거시 tele/교집합/키움풀/watchlist 폴백
-        amount = int(BASE_BUY_AMT * 0.67)
-
-    if score >= 80:
-        amount = int(amount * 1.2)
-    elif score < 50:
-        amount = int(amount * 0.8)
-
-    amount = min(amount, psbl_cash)
+    amount = min(BASE_BUY_AMT, psbl_cash)
     return amount
 
 
