@@ -768,22 +768,31 @@ def _calc_overlap_boost(name: str, code: str, curr_price: float,
 # ============================================================
 # ★ 2026-09-19: 관심종목(SLOT_WATCHLIST) 소스를 한투 'new' 관심그룹에서
 # 유튜브 라이브 모니터 수집 종목으로 교체(대장 결정) — sbot도 동일한
-# 한투 'new' 그룹을 이미 쓰고 있어 완전 중복 소스였음. 5일 이내 3회
-# 이상 언급된 종목만, 추천 당시 종가 대비 10% 이상 오른 건 제외
-# (이미 너무 올라버린 뒷북매수 방지).
+# 한투 'new' 그룹을 이미 쓰고 있어 완전 중복 소스였음. 아래 상수 참고
+# (YT_MENTION_DAYS일 이내 YT_MENTION_MIN_COUNT회 이상 언급 & 추천 당시
+# 종가 대비 YT_MAX_RISE_PCT 이상 오른 건 제외 — 이미 너무 올라버린
+# 뒷북매수 방지, 단 너무 타이트하면 추세타는 종목까지 조기제외되니 주의).
 _YT_WATCHLIST_CACHE = {"ts": 0.0, "names": set()}
 WATCHLIST_REFRESH_SEC = 600  # ★ 2026-09-15: 하루1회→10분 캐시로 변경(아래 사유)
-YT_MENTION_DAYS = 5
+# ★ 2026-09-22: 5→21일로 확대(대장 지적 — 대덕전자가 09-16/09-22 두 번
+#   언급됐는데 5일 윈도우(09-18~09-22)에서 09-16건이 이미 창밖으로
+#   밀려나 "2회+" 기준을 못 채우고 빠졌던 사례 발견). 언급 간격이 길어도
+#   반복 추천되는 종목을 놓치지 않도록 관찰기간을 3주로 넉넉하게 확대.
+YT_MENTION_DAYS = 21
 # ★ 2026-09-21: 3회로 시작했는데 첫 거래일에 3회+가 이미보유종목 1개뿐
 #   (2회는 26개나 있었음) — 대장 사전예고대로("안나오면 2회로 줄이자")
 #   3→2로 하향.
 YT_MENTION_MIN_COUNT = 2
-YT_MAX_RISE_PCT = 0.10
+# ★ 2026-09-22: 10%→15%로 상향(대장 결정) — 유튜브 픽은 추천 이후에도
+#   추세를 타고 계속 오르는 경우가 많아, 10%면 상승여력이 아직 남은
+#   종목까지 너무 일찍 제외되고 있었음.
+YT_MAX_RISE_PCT = 0.15
 
 def _get_youtube_watchlist_names() -> set:
     """유튜브 라이브 모니터(intelligence/youtube_picks.db)가 잡은 추천종목 중
-    최근 5일 내 3회 이상 언급된 종목만, 최초 언급일 종가 대비 현재(최신
-    일봉) 종가가 10% 이상 오른 건 제외하고 반환."""
+    최근 YT_MENTION_DAYS일 내 YT_MENTION_MIN_COUNT회 이상 언급된 종목만,
+    최초 언급일 종가 대비 현재(최신 일봉) 종가가 YT_MAX_RISE_PCT 이상
+    오른 건 제외하고 반환."""
     now = time.time()
     if now - _YT_WATCHLIST_CACHE["ts"] < WATCHLIST_REFRESH_SEC:
         return _YT_WATCHLIST_CACHE["names"]
