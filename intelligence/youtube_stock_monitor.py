@@ -66,9 +66,15 @@ STATE_PATH  = os.path.join(_BASE, "intelligence", "youtube_monitor_state.json")
 THEME_DB    = os.path.join(_BASE, "lina_bot", "kr_theme_finance.db")
 
 # ── 모니터링 대상 채널 (핸들 기준) ─────────────────────────────
+# ★ 2026-09-25: 토마토TV(토마토증권통) 추가(대장 — "매일경제는 네임밸류
+#   있고 MTN은 중간, 토마토증권통은 상대적으로 낮지만 다양한 전문가
+#   추천을 통합해볼려고"). 핸들은 영상 페이지 원본(ytInitialData)에서
+#   channelId/canonicalBaseUrl 직접 확인해 검증함(TomatoTV_Official,
+#   channelId=UCgJ5pT6S2NuTVP-6-AlLZew).
 CHANNELS = {
-    "mtn":          "MTN 머니투데이방송",
-    "MKeconomy_TV": "매일경제TV",
+    "mtn":               "MTN 머니투데이방송",
+    "MKeconomy_TV":      "매일경제TV",
+    "TomatoTV_Official": "토마토TV 증권통",
 }
 
 # 채널당 한 번에 처리할 최대 영상 수 (전체 백필 방지).
