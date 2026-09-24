@@ -30,13 +30,18 @@ import os
 import sys
 import re
 import json
+import time
 import sqlite3
 import datetime
 import requests
 
 _here = os.path.dirname(os.path.abspath(__file__))
 _base = os.path.dirname(_here)
-for _d in ["core", "intelligence", "interface", "bots", ""]:
+# ★ 2026-09-25: lina_bot 추가 — 수동매매 참고용 리포트에 텔레그램/촉매
+#   교차확인 강조표시를 붙이면서 tele_swing_analyzer/swing_master의
+#   기존 검증된 소스함수를 재사용하기 위함 (아래 build_manual_ref_
+#   report_lines 참고).
+for _d in ["core", "intelligence", "interface", "bots", "lina_bot", ""]:
     _p = os.path.join(_base, _d)
     if _p not in sys.path:
         sys.path.insert(0, _p)
@@ -595,23 +600,168 @@ def build_2plus_report_lines(names) -> list:
     return report_lines
 
 
+# ============================================================
+# ★ 2026-09-25 신설 — 수동매매 참고용(실시간 notify_report) 전용 필터
+# ============================================================
+# 대장: "수동매매 참고용만 범위를 좁혀서 10일이내 2회언급과 언급1회차
+# 대비 20%이상 상승종목은 제외하는 걸로 방향을 설정하자. 그리고
+# 1.텔레그램/뉴스/컨센서스에 있는종목, 2.3회 이상 언급 -> 리포팅시
+# 별표표시등 강조표시하면 어떨까? 즉 단타용2가 되는거지."
+# build_2plus_report_lines()(06시 일일리포트, 21일 유지)와는 완전히
+# 분리된 별도 기준 — 일일리포트는 관찰용으로 넓게, 이건 실제 수동매매
+# 참고용으로 더 좁고 신선한 신호만.
+MANUAL_REF_DAYS         = 10
+MANUAL_REF_MIN_COUNT    = 2
+MANUAL_REF_MAX_RISE_PCT = 0.20
+
+_MBN_NEWS_CACHE    = {"ts": 0.0, "names": set()}
+MBN_NEWS_CACHE_SEC = 1800  # 30분 — 이 리포트는 채널당 시간 1회 정도
+                           # 호출되지만 매번 로그인크롤링하면 mbngold.com
+                           # 에 부담이라 캐시 추가(sbo2는 하루 1회라 캐시 없었음).
+
+
+def _get_mbn_news_names_cached() -> set:
+    """MBN골드 뉴스(service_id=10001) 종목명 매칭. lina_bot/sbo2.py의
+    _get_mbn_news_names() 포팅(무거운 lina_bot.py 전체 import를 피하는
+    기존 컨벤션과 동일 이유) + 30분 캐시."""
+    now = time.time()
+    if now - _MBN_NEWS_CACHE["ts"] < MBN_NEWS_CACHE_SEC:
+        return _MBN_NEWS_CACHE["names"]
+
+    names = set()
+    try:
+        from bs4 import BeautifulSoup as _BS
+
+        base_url = "https://www.mbngold.com"
+        headers  = {"User-Agent": "Mozilla/5.0", "Referer": f"{base_url}/mg/mypage/login.php"}
+        sess = requests.Session()
+        sess.post(f"{base_url}/mg/mypage/login_action.php", headers=headers, data={
+            "mode": "login", "rURL": f"{base_url}/mg/news/",
+            "mID": os.getenv("MBNGOLD_ID", ""), "mPWD": os.getenv("MBNGOLD_PW", ""),
+        }, timeout=10)
+
+        list_url = f"{base_url}/mg/news/index.php?news_service_id=10001"
+        res  = sess.get(list_url, headers=headers, timeout=10)
+        soup = _BS(res.content.decode("utf-8", errors="ignore"), "html.parser")
+
+        titles = []
+        for a in soup.find_all("a", href=True):
+            if "view.php" in a["href"] and "news_no=MM" in a["href"]:
+                t = a.get_text(strip=True)
+                if t:
+                    titles.append(t)
+            if len(titles) >= 15:
+                break
+
+        if titles:
+            conn = sqlite3.connect(THEME_DB, timeout=5)
+            stock_names = set()
+            for (sname,) in conn.execute("SELECT DISTINCT stock_name FROM kr_stock_daily_data"):
+                pure = re.sub(r"\s*(KOSPI|KOSDAQ)\s*\d{6}$", "", sname).strip()
+                if len(pure) >= 2:
+                    stock_names.add(pure)
+            conn.close()
+
+            combined = " ".join(titles)
+            for name in stock_names:
+                if name in combined:
+                    names.add(name)
+    except Exception as e:
+        print(f"⚠️ [유튜브리포트] MBN뉴스 조회 오류: {e}")
+
+    _MBN_NEWS_CACHE["ts"]    = now
+    _MBN_NEWS_CACHE["names"] = names
+    return names
+
+
+def _rose_too_much(name: str, first_date: str, max_rise_pct: float) -> bool:
+    """최초 언급일 종가 대비 현재(최신 일봉) 종가가 max_rise_pct 이상
+    올랐으면 True — sbo2._get_youtube_watchlist_names()와 동일 로직."""
+    try:
+        conn = sqlite3.connect(THEME_DB, timeout=5)
+        base_row = conn.execute(
+            "SELECT close_price FROM kr_stock_daily_data WHERE stock_name=? AND date=?",
+            (name, first_date)).fetchone()
+        latest_row = conn.execute(
+            "SELECT close_price FROM kr_stock_daily_data WHERE stock_name=? ORDER BY date DESC LIMIT 1",
+            (name,)).fetchone()
+        conn.close()
+        if not base_row or not base_row[0] or not latest_row or not latest_row[0]:
+            return False  # 가격 데이터 없으면 보수적으로 포함(제외하지 않음)
+        base_price, latest_price = base_row[0], latest_row[0]
+        return latest_price >= base_price * (1 + max_rise_pct)
+    except Exception as e:
+        print(f"⚠️ [유튜브리포트] 상승폭 조회 오류 {name}: {e}")
+        return False
+
+
+def build_manual_ref_report_lines(names) -> list:
+    """수동매매 참고용(실시간 알림) 전용 리포트 — MANUAL_REF_DAYS(10일)
+    내 MANUAL_REF_MIN_COUNT(2)회+ 언급 & 최초언급일 대비
+    MANUAL_REF_MAX_RISE_PCT(20%) 미만 상승만 대상. 텔레그램/촉매/MBN뉴스
+    중 하나라도 겹치거나 3회+ 언급이면 ⭐ 강조(한경컨센서스는 종목별
+    API 호출이 추가로 필요해 이번엔 제외 — 필요하면 나중에 추가)."""
+    try:
+        from tele_swing_analyzer import _get_tele_stocks
+        tele_scores = _get_tele_stocks()
+    except Exception as e:
+        print(f"⚠️ [유튜브리포트] 텔레그램 조회 오류: {e}")
+        tele_scores = {}
+    try:
+        from swing_master import _get_catalyst_stocks
+        catalyst_names = _get_catalyst_stocks()
+    except Exception as e:
+        print(f"⚠️ [유튜브리포트] 촉매 조회 오류: {e}")
+        catalyst_names = set()
+    news_names = _get_mbn_news_names_cached()
+
+    scored = []
+    for name in sorted(set(names)):
+        dates = get_mention_dates(name, days=MANUAL_REF_DAYS)
+        if len(dates) < MANUAL_REF_MIN_COUNT:
+            continue
+        first_date = dates[0]
+        if _rose_too_much(name, first_date, MANUAL_REF_MAX_RISE_PCT):
+            continue
+        reasons = []
+        if tele_scores.get(name, 0) >= 30:
+            reasons.append("텔레그램")
+        if name in catalyst_names:
+            reasons.append("촉매")
+        if name in news_names:
+            reasons.append("뉴스")
+        is_star = bool(reasons) or len(dates) >= 3
+        scored.append((is_star, len(dates), name, first_date[5:].replace("-", "/"), reasons))
+    scored.sort(key=lambda x: (not x[0], -x[1], x[2]))  # 별표 먼저, 그다음 횟수 내림차순
+
+    report_lines = []
+    for is_star, count, name, fdate, reasons in scored:
+        mark  = "⭐" if is_star else "▫️"
+        extra = f" [{'/'.join(reasons)}]" if reasons else ""
+        report_lines.append(f"{mark} {name} ({fdate}~, {count}회){extra}")
+    return report_lines
+
+
 def notify_report(total_saved: list) -> int:
     """★ 2026-09-15: 개별 신규 저장 건 나열 대신, N일 기준(그 이전 언급은
     카운트에서 자동 제외) 2번 이상 언급된 종목만 "종목명(최초일자, N회)"
     형태로 간단히 리포팅 (대장 요청 — 날짜 나열은 헷갈려서 최초언급일+
     횟수로 축약). VOD 스캔(youtube_stock_monitor)과 라이브 모니터
     (youtube_live_monitor)가 이 함수를 공유해서 알림 포맷을 통일한다.
-    ★ 2026-09-25: 한 줄 콤마나열 → 줄바꿈 리스트로 변경(대장 요청 —
-    "시각적으로 파악하기 쉽게 정리해서 보여주면 좋겠다").
+    ★ 2026-09-25: 이게 실제 "수동매매 참고용" 채널이라는 게 확인돼서
+    (대장 — "수동매매 참고용만 범위를 좁혀서..") 06시 일일리포트용
+    build_2plus_report_lines()(21일, 관찰용)와 분리, 전용
+    build_manual_ref_report_lines()(10일/2회+/20%상승제외/⭐강조)로 교체.
     total_saved: [(pick_date, stock_name, channel_label), ...]
     반환: 리포팅된 종목 수."""
-    report_lines = build_2plus_report_lines(n for _, n, _ in total_saved)
+    report_lines = build_manual_ref_report_lines(n for _, n, _ in total_saved)
 
     if report_lines:
         try:
             from notifier import Notifier
             Notifier(name="유튜브스카우트").send(
-                f"[유튜브] {REPORT_MENTION_DAYS}일내 2회+ 언급 종목 ({len(report_lines)}건)\n"
+                f"[유튜브] {MANUAL_REF_DAYS}일내 {MANUAL_REF_MIN_COUNT}회+ 언급 종목 "
+                f"({len(report_lines)}건, ⭐=교차확인/3회+)\n"
                 + "\n".join(report_lines)
             )
         except Exception as e:
