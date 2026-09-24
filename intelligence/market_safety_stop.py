@@ -58,6 +58,7 @@ for _ep in [os.path.join(_here, ".env"), os.path.join(_base, ".env")]:
         break
 
 from market_concentration import compute_snapshot, save_snapshot, init_db
+from kis_api import KisAPI
 
 BREADTH_DANGER_THRESHOLD = 50.0   # 시장폭 이 값 미만이면 위험 (2026-08-21 실측 비교로 결정)
 TARGET_SERVICES = ["yeongam9-sbot", "yeongam9-sbo2"]
@@ -88,6 +89,16 @@ def _stop_service(service: str) -> bool:
 
 
 def main():
+    # ★ 2026-09-24: cron이 평일에만 걸려있고 실제 휴장일 판단이 없었음 —
+    #   휴장일엔 market_concentration이 지난 거래일 잔여 데이터를 돌려줄
+    #   경우 breadth_ratio가 우연히 50% 밑으로 나와 이미 자체적으로 쉬고
+    #   있는 sbot/sbo2에 불필요한 정지 명령 + 거짓 경보 알림을 보낼 위험이
+    #   있어(day_trade_scout/sector_monitor와 동일 클래스 버그, 대장 지적
+    #   으로 발견) 실행 즉시 휴장일 여부부터 확인.
+    if KisAPI().is_market_open() is False:
+        print("🎌 오늘은 휴장일 — 시장안전장치 스킵")
+        return
+
     init_db()
     snapshot = compute_snapshot()
     save_snapshot(snapshot)

@@ -310,6 +310,16 @@ def main():
         print(f"😴 장외 시간({now_hhmm}) — 건너뜀")
         return
 
+    # ★ 2026-09-24: cron이 평일 09~15시에만 걸려있고 실제 휴장일 판단이
+    #   없었음 — 대체공휴일에도 이 스크립트가 계속 돌면서 지난 거래일
+    #   잔여 데이터로 breadth_ratio 등을 계산/저장, market_safety_stop.py
+    #   가 그 값을 보고 오판할 위험이 있었음(day_trade_scout/sector_monitor
+    #   와 동일 클래스, 대장 지적으로 발견). 실행 즉시 휴장일이면 스킵.
+    from kis_api import KisAPI
+    if KisAPI().is_market_open() is False:
+        print("🎌 오늘은 휴장일 — 건너뜀")
+        return
+
     init_db()
     snapshot = compute_snapshot()
     save_snapshot(snapshot)
