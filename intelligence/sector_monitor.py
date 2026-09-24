@@ -403,7 +403,9 @@ def main():
     code_name_map = {}
     theme_cache   = {}
 
-    last_flow_time = 0
+    last_flow_time  = 0
+    _holiday_checked = ""
+    _is_holiday       = False
 
     print(f"📡 수집 시작 (테마:{TOP_THEMES}개, 종목:{TOP_STOCKS}개/테마)")
     print(f"⏰ 장 시간: {MARKET_START} ~ {MARKET_END}")
@@ -412,10 +414,30 @@ def main():
         while True:
             now_hhmm = datetime.datetime.now().strftime("%H%M")
             now_wday = datetime.datetime.now().weekday()
+            today    = datetime.date.today().isoformat()
 
             # 주말 스킵
             if now_wday >= 5:
                 print("😴 주말 — 대기 중")
+                time.sleep(300)
+                continue
+
+            # ── 휴장일(대체공휴일 등 캘린더 기준) ─────────────
+            # ★ 2026-09-24: 기존엔 주말/장시간 체크만 있고 실제 휴장일
+            #   판단(KIS 캘린더 기준)이 빠져있어, 대체공휴일에도 평일+
+            #   장시간이라는 이유만으로 1분마다 KIS/키움 API를 계속
+            #   두드리고 있었음(대장 지적 — "오늘 장 쉬는데 테마검색은
+            #   왜 하고 있을까?"). sbot/sbo2와 동일한 패턴(하루 1회 체크
+            #   + API 실패시 그날 캐시 안 하고 재시도) 적용.
+            if _holiday_checked != today:
+                _open = api.is_market_open()
+                if _open is None:
+                    print(f"⚠️ [{now_hhmm}] 휴장일 판단 실패 — 다음 루프 재시도")
+                else:
+                    _is_holiday      = not _open
+                    _holiday_checked = today
+            if _is_holiday:
+                print(f"🎌 [{now_hhmm}] 휴장일 — 대기 중...")
                 time.sleep(300)
                 continue
 
