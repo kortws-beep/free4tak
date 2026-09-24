@@ -89,6 +89,18 @@ HEADERS = {
 _TMP_DIR = os.path.join(tempfile.gettempdir(), "youtube_live_monitor")
 os.makedirs(_TMP_DIR, exist_ok=True)
 
+# ★ 2026-09-25: 프로세스가 오디오 캡처/전사 도중(주로 코드배포 재시작)에
+#   죽으면 process_chunk()의 finally 블록이 못 돌아 .m4a/.m4a.part가
+#   고아로 남는 문제 발견(대장 지적 — 174MB, 9일치 잔재). 이 디렉터리는
+#   이 서비스 전용이라 프로세스 시작 시점에 남아있는 파일은 100% 전
+#   실행분의 잔재(현재 실행 중인 캡처가 이 파일을 새로 만들었을 리 없음)
+#   — 시작할 때마다 통째로 비움.
+for _f in os.listdir(_TMP_DIR):
+    try:
+        os.remove(os.path.join(_TMP_DIR, _f))
+    except OSError:
+        pass
+
 # 두 채널 스레드가 whisper 모델 인스턴스 하나를 공유 — 동시 추론 방지용 락
 _whisper_lock = threading.Lock()
 
