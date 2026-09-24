@@ -127,10 +127,12 @@ def save_pick(pick_date: str, stock_name: str, channel: str,
     return saved
 
 
-EXPIRE_DAYS = 20  # ★ 2026-09-19: 대장 — "픽된 후 매수안되고 20일지나면
-# 제외시키자. 안그럼 계속 쌓이기만 할거야." 실제 매매판단(sbo2 관심종목
-# 슬롯)은 이미 5일 창만 보므로 매매 로직엔 영향 없음 — 순수 DB 하우스
-# 키핑(youtube_picks 테이블 무한증식 방지) 목적.
+EXPIRE_DAYS = 25  # ★ 2026-09-19: 대장 — "픽된 후 매수안되고 20일지나면
+# 제외시키자. 안그럼 계속 쌓이기만 할거야." 순수 DB 하우스키핑(무한증식
+# 방지) 목적. ★ 2026-09-25: 20→25로 상향 — sbo2 YT_MENTION_DAYS/리포트
+# REPORT_MENTION_DAYS가 21일로 늘어났는데 20일에 먼저 삭제되면 21일째
+# 언급을 리포트/매매판단이 보기 전에 데이터가 사라지는 모순이 있었음.
+# 참조 창(21일)보다 넉넉히 긴 값을 유지할 것.
 
 
 def cleanup_old_picks(days: int = EXPIRE_DAYS) -> int:
@@ -563,25 +565,44 @@ def main():
     print(f"\n✅ [유튜브] 완료 — 신규 저장 {len(total_saved)}건, 리포팅 {report_count}건")
 
 
+# ★ 2026-09-25: 14→21일로 확대(대장 — "둘을 통일시켜야 하지 않을까?").
+#   lina_bot/sbo2.py의 YT_MENTION_DAYS(트레이딩 후보선정용, 09-22에
+#   21일로 확대됨)와 이 리포트(관찰용)가 서로 다른 창을 쓰고 있어
+#   혼란스러웠음 — 두 모듈이 물리적으로 분리돼 있어 상수 자체를
+#   공유하진 못하지만, 값은 21로 맞춤. 앞으로 sbo2의 YT_MENTION_DAYS를
+#   바꾸면 여기 REPORT_MENTION_DAYS도 같이 바꿀 것.
+REPORT_MENTION_DAYS = 21
+
+
 def build_2plus_report_lines(names) -> list:
-    """14일 기준 2번 이상 언급된 종목만 "종목명(최초일자, N회)" 형태로
-    포맷 — 실시간 알림(notify_report)과 일일리포트(youtube_daily_digest)가
-    공유하는 임계치/포맷 로직."""
-    report_lines = []
+    """REPORT_MENTION_DAYS 기준 2번 이상 언급된 종목만 "종목명(최초일자,
+    N회)" 형태로 포맷, 언급횟수 내림차순 정렬 — 실시간 알림(notify_report)
+    과 일일리포트(youtube_daily_digest)가 공유하는 임계치/포맷 로직.
+    ★ 2026-09-25: 시각적으로 파악하기 쉽게(대장 요청) 언급 많은 순으로
+    정렬 + 3회 이상은 🔥로 구분."""
+    scored = []
     for name in sorted(set(names)):
-        dates = get_mention_dates(name, days=14)
+        dates = get_mention_dates(name, days=REPORT_MENTION_DAYS)
         if len(dates) >= 2:
             first_date = dates[0][5:].replace("-", "/")  # 09/15
-            report_lines.append(f"{name}({first_date}, {len(dates)}회)")
+            scored.append((len(dates), name, first_date))
+    scored.sort(key=lambda x: (-x[0], x[1]))
+
+    report_lines = []
+    for count, name, first_date in scored:
+        mark = "🔥" if count >= 3 else "▫️"
+        report_lines.append(f"{mark} {name} ({first_date}~, {count}회)")
     return report_lines
 
 
 def notify_report(total_saved: list) -> int:
-    """★ 2026-09-15: 개별 신규 저장 건 나열 대신, 14일 기준(그 이전 언급은
+    """★ 2026-09-15: 개별 신규 저장 건 나열 대신, N일 기준(그 이전 언급은
     카운트에서 자동 제외) 2번 이상 언급된 종목만 "종목명(최초일자, N회)"
     형태로 간단히 리포팅 (대장 요청 — 날짜 나열은 헷갈려서 최초언급일+
     횟수로 축약). VOD 스캔(youtube_stock_monitor)과 라이브 모니터
     (youtube_live_monitor)가 이 함수를 공유해서 알림 포맷을 통일한다.
+    ★ 2026-09-25: 한 줄 콤마나열 → 줄바꿈 리스트로 변경(대장 요청 —
+    "시각적으로 파악하기 쉽게 정리해서 보여주면 좋겠다").
     total_saved: [(pick_date, stock_name, channel_label), ...]
     반환: 리포팅된 종목 수."""
     report_lines = build_2plus_report_lines(n for _, n, _ in total_saved)
@@ -590,7 +611,8 @@ def notify_report(total_saved: list) -> int:
         try:
             from notifier import Notifier
             Notifier(name="유튜브스카우트").send(
-                "[유튜브] 14일내 2회+ 언급 종목\n" + ", ".join(report_lines)
+                f"[유튜브] {REPORT_MENTION_DAYS}일내 2회+ 언급 종목 ({len(report_lines)}건)\n"
+                + "\n".join(report_lines)
             )
         except Exception as e:
             print(f"⚠️ 알림 전송 오류: {e}")
