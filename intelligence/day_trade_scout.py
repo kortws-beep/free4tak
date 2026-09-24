@@ -389,6 +389,18 @@ def _run_scan(trigger_label: str, notify_on_empty: bool = False,
 
 
 def main():
+    # ★ 2026-09-24: 이 스크립트는 cron(평일 09:35 + 09~15시 10분마다)이라
+    #   요일만 걸러지고 실제 휴장일(대체공휴일 등) 판단이 없었음 — 그래서
+    #   장이 쉬는 날에도 조건검색이 남긴 지난 거래일 잔여 데이터를 그대로
+    #   "장 초반 급등"처럼 AI가 서술해 오전 리포트가 발송된 사고 발견
+    #   (대장 지적 — "키키의 단타후보도 온다.. 하하", sector_monitor의
+    #   동일 클래스 휴장일 누락 버그를 고치던 중 같이 발견). 실행 즉시
+    #   휴장일이면 조용히 종료.
+    _open = KisAPI().is_market_open()
+    if _open is False:
+        print("🎌 오늘은 휴장일 — 단타 스카우트 스킵")
+        return
+
     sector_check_mode = "--sector-check" in sys.argv
     state = _load_state()
 
