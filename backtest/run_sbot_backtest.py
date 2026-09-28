@@ -69,6 +69,19 @@ def get_sbot_scenarios(base: SBotBacktestConfig) -> list:
                        "buy_score_min": 80,
                        "max_positions": 3},
         },
+        # ★ 2026-09-29: sbot×sbo2 통합 슬롯구조 검증(대장 승인 계획 2단계) —
+        #   base가 이미 신규(6×165만)이므로, 구조 변경분만 비교하려면
+        #   "기존(4×150만)"을 명시적으로 재구성해 대조.
+        {
+            "name": "기존구조(4슬롯×150만,임계치75)",
+            "config": {**base.__dict__, "buy_score_min": 75,
+                       "max_positions": 4, "base_buy_amt": 1_500_000},
+        },
+        {
+            "name": "신규구조(6슬롯×165만,임계치75)",
+            "config": {**base.__dict__, "buy_score_min": 75,
+                       "max_positions": 6, "base_buy_amt": 1_650_000},
+        },
     ]
 
 
@@ -191,10 +204,11 @@ def main():
                         help="쉼표구분 종목코드 (비우면 DB 전체)")
     parser.add_argument("--max-codes",     type=int, default=50)
     parser.add_argument("--initial-cash",  type=int, default=10_000_000,
-                        help="초기 자본 (sbot 기본 1000만원)")
-    parser.add_argument("--base-buy-amt",  type=int, default=500_000,
-                        help="기본 매수금액 (sbot 기본 50만원)")
-    parser.add_argument("--max-positions", type=int, default=4)  # ★2026-09-19: 실전 sbot 09-12 5→4 반영
+                        help="초기 자본 (sbot×sbo2 통합 후 1000만원)")
+    parser.add_argument("--base-buy-amt",  type=int, default=1_650_000,
+                        help="기본 매수금액 (★2026-09-29: 실전 150만→165만 반영 — "
+                             "기존 default(50만원)는 이미 실전 150만원과도 안 맞던 드리프트였음)")
+    parser.add_argument("--max-positions", type=int, default=6)  # ★2026-09-29: sbot×sbo2 통합, 4→6 반영
     parser.add_argument("--buy-score-min", type=int, default=75,
                         help="매수 최소 점수 (sbot 점수분포상 75~90 권장)")
     parser.add_argument("--max-hold-days", type=int, default=9999,

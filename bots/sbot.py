@@ -28,8 +28,8 @@ sbot.py — 영암9 스윙봇 메인 (전면 재구성판)
 
 [모듈 구조]
   sbot.py          ← 메인 루프 (이 파일)
-  kis_api.py       ← 한투 API (검증됨, 그대로)
-  kiwoom_api.py    ← 키움 API (검증됨, 그대로)
+  kis_api.py       ← 한투 API (검증됨, 그대로) — ★2026-09-29 키움 제거,
+                       sbot은 한투(KIS)만 사용(대장 결정, 단타봇용으로 분리)
   notifier.py      ← 디스코드 알림 (재시도 강화)
   sbot_strategy.py ← 스윙 전략 (본절보호/effective_entry)
   sbot_analyzer.py ← AI 분석 (점수 분포 명확)
@@ -53,7 +53,6 @@ import os
 import time
 import pathlib
 import json
-import asyncio
 import datetime
 from dotenv import load_dotenv
 import sqlite3 as _sqlite3
@@ -71,7 +70,6 @@ from common_utils  import (
     check_api_health,
 )
 from kis_api       import KisAPI
-from kiwoom_api    import KiwoomAPI
 from notifier      import Notifier
 from sbot_strategy import SwingStrategy
 from sbot_analyzer import SwingAnalyzer
@@ -185,8 +183,9 @@ def get_swing_theme_bonus(code: str, theme_group_map: dict) -> tuple:
 # ★ 2026-09-29: sbot×sbo2 통합(대장 결정) — sbot이 생존봇, sbo2 계좌/자본
 #   흡수. 6슬롯×약165만원, 시드머니 목표 1,000만원(SEED_MONEY_TARGET,
 #   코드로 강제하진 않음 — 실계좌 잔액이 실제 제약). 종목풀도 sbot 원천
-#   (키움조건검색/KIS new그룹) + sbo2 원천(모멘텀/추세/완화/유튜브) +
-#   S7을 전부 하나의 점수순 통합풀로 병합(core/candidate_pool.py 참고).
+#   (KIS new그룹) + sbo2 원천(모멘텀/추세/완화/유튜브) + S7을 전부
+#   하나의 점수순 통합풀로 병합(core/candidate_pool.py 참고). 키움
+#   조건검색 소스는 완전 제거(아래 SLOT 상수 정의부 참고).
 MAX_POSITIONS    = 6              # 4→6 (통합 후 슬롯구조, 대장 결정)
 SEED_MONEY_TARGET = 10_000_000    # 문서용 — 코드에서 강제하지 않음, 실계좌 잔액이 실제 제약
 
@@ -211,22 +210,24 @@ MEGA_CAP_LOOKBACK_DAYS  = 10
 MEGA_CAP_REFRESH_SEC    = 1800    # S7 후보 재조회 캐시(30분) — 8종목 OHLC 매루프 조회 방지
 BUY_1ST_AMT_BASE = 1_650_000    # 1차 매수 기본 금액 (2026-09-29: 150만→165만,
                                  # sbot×sbo2 통합 6슬롯 구조 반영. 켈리+ATR로
-                                 # 이 기준값에서 유동적으로 조정됨(키움/new 슬롯만))
+                                 # 이 기준값에서 유동적으로 조정됨(new 슬롯만))
 
 # ── 통합 후보풀 슬롯 상수 ────────────────────────────────────
-# sbot 자체 소스(키움조건검색/KIS new그룹/S7) + core/candidate_pool.py의
-# sbo2 원천 소스(momentum/trend/light/youtube)를 합쳐 하나의 점수순
-# 랭킹으로 매수 우선순위를 정한다.
-SLOT_KIWOOM = "kiwoom"     # 키움 "주도주검색식3" 조건검색
+# sbot 자체 소스(KIS new그룹/S7) + core/candidate_pool.py의 sbo2 원천
+# 소스(momentum/trend/light/youtube)를 합쳐 하나의 점수순 랭킹으로
+# 매수 우선순위를 정한다.
+# ★ 2026-09-29: 키움 조건검색 소스(SLOT_KIWOOM) 완전 제거(대장 결정 —
+#   "키움은 다 빼버리고 SBOT은 한투로만 가자. 키움은 단타봇용하고
+#   다른 우리가 추출하는 것으로 사용하자"). sbot은 이제 KIS(한투) API만
+#   사용 — 키움은 이 봇에서 완전히 빠지고 향후 별도 단타봇 몫으로 남김.
 SLOT_KISNEW = "kisnew"     # KIS "new" 관심그룹
 SLOT_S7     = "s7"         # 대형주 급락매수(S7)
 SLOT_LABEL = {
-    SLOT_KIWOOM: "키움조건검색",
     SLOT_KISNEW: "KIS관심그룹",
     SLOT_S7:     "S7급락매수",
 }
 # ★ 추세(SLOT_TREND)는 실측 평균(~112)이 자체 경쟁력 있어 플로어 없음
-#   (sbo2 2026-09-25 기준과 동일). 키움/new는 BUY_SCORE_ENTER(85) 사전
+#   (sbo2 2026-09-25 기준과 동일). new그룹은 BUY_SCORE_ENTER(85) 사전
 #   게이트를 통과한 후보만 여기 들어오므로, 그 후보들도 다른 슬롯과
 #   동등하게 경쟁하도록 110 플로어 적용(대장 결정 — "85+ 통과후 110
 #   플로어 적용").
@@ -234,7 +235,6 @@ RANK_SCORE_FLOOR = {
     "momentum":  110,   # candidate_pool.SLOT_MOMENTUM
     "light":     110,   # candidate_pool.SLOT_LIGHT
     "youtube":   110,   # candidate_pool.SLOT_YOUTUBE
-    SLOT_KIWOOM: 110,
     SLOT_KISNEW: 110,
     SLOT_S7:     110,
 }
@@ -277,12 +277,6 @@ BUY_END_TIME     = "2000"         # ★ 09:20~20:00 매수 가능
 SELL_CHECK_START = "0800"         # ★ 08:00부터 매도 체크
 SELL_CHECK_END   = "2000"         # ★ 20:00까지 매도 체크
 SLEEP_INTERVAL   = 60
-
-# 키움 조건검색식에서 단타용 키워드는 제외 (스윙엔 부적합)
-SKIP_COND_KEYWORDS = ["종가","단타", "장개장", "직후", "시가이탈", "오전중저가", "090930", "당일고가",
-                      "눌림목", "VCP", "상승추세"]  # ★ 2026-07-22: sbo2 전용 검색식 (sbo2.py
-                                                    #   KIWOOM_POOL_KEYWORDS와 동일) - sbot은
-                                                    #   자체 검색식만 사용하도록 제외
 
 # 약세장 방어
 MARKET_WEAK_THRESH = -2.0   # -1.5%→-2.0% 완화 (nbot과 통일)
@@ -346,7 +340,6 @@ class SBot:
             cano  =os.getenv("KIS_CANO2"),
             acnt  =os.getenv("KIS_ACNT_PRDT_CD2"),
         )
-        self.kiwoom    = KiwoomAPI()
         self.notifier  = Notifier(name="sbot")
         self.strategy  = SwingStrategy()
         self.ai        = SwingAnalyzer()
@@ -423,9 +416,6 @@ class SBot:
         #   candidate_pool.py의 refresh_*() 함수와 짝을 이룸)
         self._pool_candidates    = []
         self._pool_cand_date     = ""
-
-        if self.kiwoom.enabled:
-            print(f"✅ 키움 연동 활성화 | 단타 제외: {SKIP_COND_KEYWORDS}")
 
     # ============================================================
     # 알림
@@ -504,52 +494,24 @@ class SBot:
     # 종목 풀 조회
     # ============================================================
     def _get_pool(self) -> list:
-        """키움 '주도주' 조건검색식 + new 그룹 종목 합성.
-        ★ 2026-09-07: 종목선정 단순화(대장 요청) — 기존엔 단타 키워드만
-          제외하고 나머지 조건검색식(수익/수익성/성장주/저평가/실적호전 등)을
-          전부 합쳤는데, "주도주검색식3" 하나 + new 관심그룹 이렇게 2개
-          소스로 좁힘. 수동 관심종목(watchlist 상태파일) 반영도 같이 제거."""
-        if not self.kiwoom.enabled:
-            print("⚠️ 키움 없음 — 빈 풀")
-            return []
+        """KIS 'new' 관심그룹 종목만 사용.
+        ★ 2026-09-29: sbot×sbo2 통합(대장 결정) — "키움은 다 빼버리고
+          SBOT은 한투로만 가자. 키움은 단타봇용하고 다른 우리가 추출하는
+          것으로 사용하자." 기존 키움 조건검색("주도주검색식3") 소스를
+          완전 제거, KIS 'new' 관심그룹(SLOT_KISNEW)만 남김. 부수효과:
+          이 조건검색식을 sbo2도 과거에 같이 썼다가 동시호출 API충돌로
+          09-19에 sbo2 쪽만 뺐던 적이 있는데, 이번에 sbot에서도 완전히
+          빠지면서 그 충돌 우려 자체가 근본적으로 사라짐."""
         try:
-            loop  = asyncio.new_event_loop()
-            codes = loop.run_until_complete(
-                self.kiwoom.get_condition_codes(
-                    use_keywords=["주도주"],     # ★ 주도주검색식3만 사용
-                    skip_keywords=SKIP_COND_KEYWORDS,  # 단타 제외
-                    code_name_map=self.code_name_map,
-                    code_tag_map=self.code_tag_map,   # ★ 검색식명 태그 저장
-                )
-            )
-            loop.close()
-
-            # ★ 2026-09-21: new 그룹 추가가 "if codes:" 안에 있어서, 조건검색
-            #   ("주도주검색식3")이 0개인 날엔 new 관심그룹이 멀쩡히 있어도
-            #   아예 안 걸리고 "종목 풀 없음"으로 통째로 매수가 막히는 버그
-            #   발견(대장 — "슬롯을 하나씩 비웠는데 매수를 안하네" 조사 중
-            #   실측: 조건검색 +0개인 날 확인). 조건검색 결과와 무관하게
-            #   항상 new 그룹을 시도하도록 게이트 제거.
-            try:
-                self._load_new_codes()
-                added = 0
-                for nc in self.new_codes_list:
-                    if nc not in codes:
-                        codes.append(nc); added += 1
-                        if nc not in self.code_tag_map:
-                            self.code_tag_map[nc] = "expert"  # new그룹=전문가추천
-                if added:
-                    print(f"  🆕 new 종목 {added}개 풀 추가")
-            except Exception as e:
-                print(f"⚠️ new 그룹 오류: {e}")
-
-            if codes:
-                result = codes[:POOL_SIZE]
-                print(f"🎯 스윙 종목 풀: {len(result)}개")
-                return result
+            self._load_new_codes()
+            for nc in self.new_codes_list:
+                if nc not in self.code_tag_map:
+                    self.code_tag_map[nc] = "expert"  # new그룹=전문가추천
+            result = self.new_codes_list[:POOL_SIZE]
+            print(f"🎯 스윙 종목 풀(KIS new): {len(result)}개")
+            return result
         except Exception as e:
-            print(f"⚠️ 키움 오류: {e}")
-            self.kiwoom.reset_token()  # ★ 토큰 초기화 → 다음 호출 시 재발급
+            print(f"⚠️ new 그룹 오류: {e}")
         return []
 
     # ============================================================
@@ -1043,8 +1005,8 @@ class SBot:
         #   (RemoteDisconnected) 사고가 실제로 발생함. 종목 간 짧은
         #   딜레이를 넣어 순간 호출량을 분산.
         # ★ 2026-07-01: 장 개장 직후(09:00~09:20)에 재시작이 가장 잦음 —
-        #   이 시간대는 키움 조건검색 + 신규종목 분석이 동시에 몰리므로
-        #   딜레이를 0.15 → 0.3초로 강화.
+        #   이 시간대는 신규종목 분석이 몰리므로 딜레이를 0.15 → 0.3초로
+        #   강화.
         _open_hour = now_t[:4] <= "0920"
         ANALYSIS_DELAY_SEC = 0.3 if _open_hour else 0.15
         if _open_hour and new_codes:
@@ -1159,23 +1121,24 @@ class SBot:
         #   후보(BUY_SCORE_ENTER 사전게이트 통과분만)를 정규화된 dict로
         #   반환 — 통합후보풀(_get_unified_candidates)이 모멘텀/추세/완화/
         #   유튜브/S7과 합쳐서 점수순 랭킹 후 한 번에 매수실행한다.
-        return self._normalize_kiwoom_candidates(top10, score_enter)
+        return self._normalize_kisnew_candidates(top10, score_enter)
 
-    def _normalize_kiwoom_candidates(self, top10: list, score_enter: int) -> list:
+    def _normalize_kisnew_candidates(self, top10: list, score_enter: int) -> list:
         """(code, score, data) 튜플 리스트를 통합 후보풀 dict 포맷으로 변환,
-        BUY_SCORE_ENTER 사전게이트(score_enter 미만 제외)를 여기서 적용."""
+        BUY_SCORE_ENTER 사전게이트(score_enter 미만 제외)를 여기서 적용.
+        ★ 2026-09-29: 키움 소스 제거 이후 _get_pool()이 KIS new그룹만
+        반환하므로 grade는 항상 SLOT_KISNEW."""
         normalized = []
         for code, score, data in top10:
             if score < score_enter:
                 continue
-            is_new = code in self.new_codes_list
             normalized.append({
                 "code":     code,
                 "name":     data.get("stock_name") or self._name(code),
-                "grade":    SLOT_KISNEW if is_new else SLOT_KIWOOM,
+                "grade":    SLOT_KISNEW,
                 "score":    score,
                 "curr":     data.get("current_price", 0),
-                "is_new":   is_new,
+                "is_new":   True,
                 "ai_reason": data.get("ai_reason", ""),
                 "raw_data": data,
             })
@@ -1378,11 +1341,11 @@ class SBot:
                 print(f"✅ {reason} {code}")
 
             # ★ 2026-09-29: 매수금액 산정 이원화(대장 결정 — "원천별 이원화
-            #   유지") — 키움/new 슬롯은 기존 RiskManager(켈리/AI점수 기반)
+            #   유지") — new 슬롯은 기존 RiskManager(켈리/AI점수 기반)
             #   그대로, 나머지 신규 슬롯(모멘텀/추세/완화/유튜브/S7)은
             #   sbo2식 단순 고정금액(현금캡만 적용).
             atr_rate = self._get_atr_rate(code)
-            if grade in (SLOT_KIWOOM, SLOT_KISNEW):
+            if grade == SLOT_KISNEW:
                 buy_amount = self.risk.calc_buy_amount(
                     score=score, atr_rate=atr_rate,
                     is_theme=is_new, psbl_cash=psbl_cash,
@@ -1397,7 +1360,7 @@ class SBot:
                 print(f"⏭️ [SWING] {code} 패스 — 예산({buy_amount:,}원) < 주가({cand['curr']:,.0f}원)")
                 continue
 
-            tag = " 🆕new" if is_new else f" [{SLOT_LABEL.get(grade, grade)}]" if grade not in (SLOT_KIWOOM, SLOT_KISNEW) else ""
+            tag = " 🆕new" if is_new else f" [{SLOT_LABEL.get(grade, grade)}]" if grade != SLOT_KISNEW else ""
             print(f"🚀 [SWING] 매수 {code} | {score}점 | {fmt_won(buy_amount)}{tag}"
                   + (f" | ATR{atr_rate*100:.1f}%" if atr_rate else ""))
 
@@ -1407,8 +1370,8 @@ class SBot:
                 "stock_name": cand["name"],
             }
             # ★ 신규 슬롯(모멘텀/추세/완화/유튜브/S7) 출처를 buy_tag로 남김
-            #   (키움/new는 _get_pool()/condition-search가 이미 태깅함)
-            if grade not in (SLOT_KIWOOM, SLOT_KISNEW):
+            #   (new는 _get_pool()이 이미 "expert"로 태깅함)
+            if grade != SLOT_KISNEW:
                 self.code_tag_map[code] = grade
                 if code not in self.code_name_map:
                     self.code_name_map[code] = cand["name"]
@@ -2090,11 +2053,11 @@ class SBot:
                 #   하도록 순서 유지 — 포지션이 꽉 찼으면 애초에 조회 자체를
                 #   건너뜀(키움 조건검색 타임아웃/재시도로 루프가 몇 분씩
                 #   걸리는 문제 방지, 대장 신고로 발견됐던 지점).
-                # ★ 2026-09-29: sbot×sbo2 통합 — 키움/new/모멘텀/추세/완화/
+                # ★ 2026-09-29: sbot×sbo2 통합 — new/모멘텀/추세/완화/
                 #   유튜브/S7 전체를 _get_unified_candidates()가 하나의
                 #   점수순 랭킹으로 병합, _execute_buys_unified()가 한 번에
                 #   순회하며 매수(등급별 사이징/S7전용예산 폐지 등은
-                #   각 헬퍼 안에서 처리됨).
+                #   각 헬퍼 안에서 처리됨). 키움은 완전 제거, KIS(한투)만 사용.
                 익절중 = sum(
                     1 for c in self.positions
                     if self.peak_tracker.get(c, {}).get("stage", 0) >= 1

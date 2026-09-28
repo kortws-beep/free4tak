@@ -277,9 +277,16 @@ class SBotBacktestEngine:
         return True
 
     def _simulate_sell(self, code: str, qty: int, price: float,
-                       reason: str, date: str):
+                       reason: str, date: str) -> bool:
+        # ★ 2026-09-29: 반환값이 없어(항상 암묵적 None) sbot_strategy.py의
+        #   check_sell()이 목표1/STAGE1_PROFIT_PCT 50%매도 성공 여부를
+        #   판단 못 하고 매번 "매도 실패"로 오판 — 실제로는 매도가 정상
+        #   체결되는데도 stage가 0에서 영원히 못 올라가 트레일링/본절보호가
+        #   전혀 시뮬레이션 안 되던 버그(실전 코드는 2026-09-04에 이미
+        #   이 클래스 버그를 고쳤는데 백테스터엔 이식이 안 돼 있었음 —
+        #   sbot×sbo2 통합 백테스트 검증 중 발견). bool 반환 추가.
         if code not in self.positions:
-            return
+            return False
 
         fill_price = price * (1 - self.config.slippage)
         revenue    = fill_price * qty
@@ -326,6 +333,7 @@ class SBotBacktestEngine:
         if self.config.verbose:
             print(f"   🔴 매도 {code} {qty}주 @ {fill_price:,.0f} "
                   f"({profit_rate:+.2%}) | {reason}")
+        return True
 
     def _on_loss(self):
         pass  # _simulate_sell에서 카운트
