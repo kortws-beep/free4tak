@@ -952,6 +952,14 @@ class CBot:
             #   개를 훑느라 메인루프가 10~15초씩 블로킹되던 문제(재점검
             #   리포트로 발견) — ThreadPoolExecutor로 병렬화. 고정코인은
             #   조회 자체를 안 해도 되므로 제외.
+            # ★ 2026-09-29: max_workers=10이 업비트 캔들API 레이트리밋(초당
+            #   9건, 응답헤더로 실측 확인)을 넘겨서 대부분 429로 튕기고
+            #   있었음 — 코드가 이를 "캔들 데이터 없음"으로 오판해 BCH/
+            #   ETC/AVAX/LINK/ADA/SUI 등 오래전부터 상장된 메이저 코인까지
+            #   풀에서 통째로 빠지던 버그(대장 지적으로 발견: 종목풀이
+            #   30개 캡인데 실제론 14개뿐이었음, 재현 확인 — 53개 동시조회시
+            #   43개 429). CANDLE_RATE_LIMIT_PER_SEC(8, 안전마진) 단위로
+            #   배치를 나눠 배치 사이에 1초씩 쉬도록 수정.
             need_check = [c for c in candidates if c[0] not in FIXED_COINS]
             has_enough_candles: dict = {}
 
@@ -960,21 +968,29 @@ class CBot:
                     res_c = self.session.get(
                         f"{BASE_URL}/candles/minutes/{CANDLE_UNIT}",
                         params={"market": market, "count": 21}, timeout=3,
-                    ).json()
-                    return isinstance(res_c, list) and len(res_c) >= 21
+                    )
+                    if res_c.status_code != 200:
+                        return False
+                    data = res_c.json()
+                    return isinstance(data, list) and len(data) >= 21
                 except Exception:
                     return False
 
+            CANDLE_RATE_LIMIT_PER_SEC = 8
             if need_check:
                 from concurrent.futures import ThreadPoolExecutor
-                with ThreadPoolExecutor(max_workers=10) as ex:
-                    futures = {ex.submit(_check_candles, c[0]): c[0] for c in need_check}
-                    for fut in futures:
-                        market = futures[fut]
-                        try:
-                            has_enough_candles[market] = fut.result()
-                        except Exception:
-                            has_enough_candles[market] = False
+                for i in range(0, len(need_check), CANDLE_RATE_LIMIT_PER_SEC):
+                    batch = need_check[i:i + CANDLE_RATE_LIMIT_PER_SEC]
+                    with ThreadPoolExecutor(max_workers=CANDLE_RATE_LIMIT_PER_SEC) as ex:
+                        futures = {ex.submit(_check_candles, c[0]): c[0] for c in batch}
+                        for fut in futures:
+                            market = futures[fut]
+                            try:
+                                has_enough_candles[market] = fut.result()
+                            except Exception:
+                                has_enough_candles[market] = False
+                    if i + CANDLE_RATE_LIMIT_PER_SEC < len(need_check):
+                        time.sleep(1.0)
 
             filtered = []
             for market, trade_price, acc_trade, change_rate in candidates:
