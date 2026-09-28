@@ -133,7 +133,9 @@ MAJOR_COINS  = ["KRW-BTC", "KRW-ETH"]
 ALT_COINS    = ["KRW-XRP", "KRW-SOL"]
 
 # 종목 풀 설정
-POOL_SIZE         = 30    # 20→30, 회복장 대비 후보군 확대
+# ★ 2026-09-29: POOL_SIZE(상위 N개 절단) 폐지 — 필터(거래대금/등락률/
+#   4시간봉 존재) 통과한 전체를 풀로 사용(대장 결정, cbot.py:_update_coin_pool
+#   참고). 매수후보 스캔이 순차+5분캐시라 풀 크기와 무관하게 부담 없음.
 MIN_TRADE_AMT_B   = 5_000_000_000   # 24시간 거래대금 50억 (원) — 100억→50억, 극단공포 장 대응
 MAX_CHANGE_RATE   = 25.0            # +25% 이상) 제외
 MIN_CHANGE_RATE   = -20.0           # 폭락 (-20% 이하) 제외
@@ -895,7 +897,8 @@ class CBot:
     # ============================================================
     def _update_coin_pool(self):
         """
-        업비트 KRW 마켓에서 거래대금 상위 POOL_SIZE개 자동 선별.
+        업비트 KRW 마켓에서 거래대금/등락률/4시간봉존재 필터를 통과한
+        전체 코인을 자동 선별(★ 2026-09-29: 상위 N개 절단 폐지).
         고정 코인(FIXED_COINS)은 항상 포함.
         """
         if time.time() - self._pool_cache_ts < 300:
@@ -1004,9 +1007,14 @@ class CBot:
                     "price":     trade_price,
                 })
 
-            # 5) 거래대금 상위 POOL_SIZE
+            # 5) 거래대금순 정렬 (★ 2026-09-29: 대장 — "30개 풀로 구성하지
+            #   말고 체크통과된거들 전체를 풀로 하면 무리가 갈까?" 확인해보니
+            #   4시간봉 확인은 어차피 필터통과 전체를 대상으로 이미 돌고
+            #   있고(방금 레이트리밋 배치처리로 고침), 매수후보 스캔도
+            #   순차+5분캐시라 풀 크기와 무관하게 안전 — POOL_SIZE 절단
+            #   제거, 필터 통과한 전체를 풀로 사용)
             filtered.sort(key=lambda x: x["trade_amt"], reverse=True)
-            top_markets = [f["market"] for f in filtered[:POOL_SIZE]]
+            top_markets = [f["market"] for f in filtered]
 
             # 6) 고정 코인 우선 병합
             pool = list(FIXED_COINS)
@@ -1014,7 +1022,7 @@ class CBot:
                 if m not in pool:
                     pool.append(m)
 
-            self.coin_pool      = pool[:POOL_SIZE + len(FIXED_COINS)]
+            self.coin_pool      = pool
             self._pool_cache_ts = time.time()
 
             new_coins = [m for m in self.coin_pool if m not in FIXED_COINS]
@@ -2261,7 +2269,7 @@ class CBot:
     def run(self):
         self.notify(
             f"🚀 [영암9 COIN v3] ATR 추세추종 + 단일매수\n"
-            f"🪙 거래대금 상위 {POOL_SIZE}개 자동 + 고정 {len(FIXED_COINS)}개\n"
+            f"🪙 필터 통과 전체 자동 + 고정 {len(FIXED_COINS)}개\n"
             f"💰 단일매수:{BUY_1ST_AMT:,}원 | 최대:{MAX_POSITIONS}코인\n"
             f"🎯 ATR 추세추종 | 손절:ATR×2 | 목표:ATR×3 | 트레일:ATR×1.5\n"
             f"🛡️ BTC약세:{BTC_WEAK_THRESH:.0f}% | 탐욕MIN:{FEAR_GREED_MIN} | "
