@@ -49,8 +49,13 @@ class SwingDB:
                     sell_reason TEXT,
                     ai_score    INTEGER,
                     ai_reason   TEXT,
-                    buy_tag     TEXT    DEFAULT '',  -- 검색식명 (momentum/profit/growth/value/earnings/expert)
-                    hold_days   INTEGER DEFAULT 0
+                    buy_tag     TEXT    DEFAULT '',  -- 검색식명/슬롯출처 (kiwoom/kisnew/momentum/trend/light/youtube/s7/minervini/수동)
+                    hold_days   INTEGER DEFAULT 0,
+                    -- ★ 2026-09-29: sbot×sbo2 통합 — sbo2_trades.db가 갖고
+                    --   있던 포렌식 컬럼 포팅(대장 승인 계획 문서 참고)
+                    grade            TEXT    DEFAULT '',  -- 통합 후보풀 슬롯 출처(buy_tag와 동일값, 조회 편의용 중복)
+                    stage_reached    INTEGER DEFAULT 0,    -- 매도 시점까지 도달한 목표단계(0=목표1 미달성, 1+=단계익절 진행)
+                    atr_val_at_entry REAL    DEFAULT 0     -- 매수 시점 ATR 절대값
                 )
             """)
             conn.execute("CREATE INDEX IF NOT EXISTS idx_sbot_code ON trades(code, sell_time)")
@@ -62,32 +67,37 @@ class SwingDB:
 
     def save_buy(self, code: str, buy_price: float, qty: int,
                  ai_score: int, ai_reason: str, stock_name: str = "",
-                 buy_tag: str = ""):
+                 buy_tag: str = "", grade: str = "", atr_val_at_entry: float = 0.0):
         try:
             now  = datetime.datetime.now().isoformat(timespec="seconds")
             conn = _connect()
-            # buy_tag 컬럼 없는 구버전 DB 대응
-            try:
-                conn.execute("ALTER TABLE trades ADD COLUMN buy_tag TEXT DEFAULT ''")
-                conn.commit()
-            except Exception:
-                pass
-            try:
-                conn.execute("ALTER TABLE trades ADD COLUMN hold_days INTEGER DEFAULT 0")
-                conn.commit()
-            except Exception:
-                pass
+            # 구버전 DB 대응 — 없는 컬럼만 조용히 추가(sbo2.py의 safe-migration
+            # 패턴과 동일: try/except로 이미 있으면 무시)
+            for _ddl in (
+                "ALTER TABLE trades ADD COLUMN buy_tag TEXT DEFAULT ''",
+                "ALTER TABLE trades ADD COLUMN hold_days INTEGER DEFAULT 0",
+                "ALTER TABLE trades ADD COLUMN grade TEXT DEFAULT ''",
+                "ALTER TABLE trades ADD COLUMN stage_reached INTEGER DEFAULT 0",
+                "ALTER TABLE trades ADD COLUMN atr_val_at_entry REAL DEFAULT 0",
+            ):
+                try:
+                    conn.execute(_ddl)
+                    conn.commit()
+                except Exception:
+                    pass
             conn.execute("""
                 INSERT INTO trades
-                    (code, stock_name, buy_price, buy_time, qty, ai_score, ai_reason, buy_tag)
-                VALUES (?,?,?,?,?,?,?,?)
-            """, (code, stock_name, buy_price, now, qty, ai_score, ai_reason, buy_tag))
+                    (code, stock_name, buy_price, buy_time, qty, ai_score, ai_reason,
+                     buy_tag, grade, atr_val_at_entry)
+                VALUES (?,?,?,?,?,?,?,?,?,?)
+            """, (code, stock_name, buy_price, now, qty, ai_score, ai_reason,
+                  buy_tag, grade or buy_tag, atr_val_at_entry))
             conn.commit(); conn.close()
         except Exception as e:
             print(f"⚠️ 스윙 매수 저장 오류 {code}: {e}")
 
     def save_sell(self, code: str, sell_price: float, sell_reason: str,
-                  sold_qty: int = 0):
+                  sold_qty: int = 0, stage_reached: int = 0):
         """전량/부분 매도 자동 처리"""
         try:
             now  = datetime.datetime.now().isoformat(timespec="seconds")
@@ -107,19 +117,21 @@ class SwingDB:
             if sold_qty == 0 or sold_qty >= total_qty:
                 conn.execute("""
                     UPDATE trades
-                    SET sell_price=?, sell_time=?, profit_rate=?, sell_reason=?
+                    SET sell_price=?, sell_time=?, profit_rate=?, sell_reason=?, stage_reached=?
                     WHERE id=?
-                """, (sell_price, now, round(profit_rate, 2), sell_reason, trade_id))
+                """, (sell_price, now, round(profit_rate, 2), sell_reason, stage_reached, trade_id))
             else:
                 # 분할 매도: 매도된 수량만 새 행 추가
                 conn.execute("""
                     INSERT INTO trades
                         (code, buy_price, buy_time, qty, sell_price, sell_time,
-                         profit_rate, sell_reason, stock_name, ai_score, ai_reason)
-                    SELECT code, buy_price, buy_time, ?, ?, ?, ?, ?, stock_name, ai_score, ai_reason
+                         profit_rate, sell_reason, stock_name, ai_score, ai_reason,
+                         grade, atr_val_at_entry, stage_reached)
+                    SELECT code, buy_price, buy_time, ?, ?, ?, ?, ?, stock_name, ai_score, ai_reason,
+                           grade, atr_val_at_entry, ?
                     FROM trades WHERE id=?
                 """, (sold_qty, sell_price, now, round(profit_rate, 2),
-                      sell_reason, trade_id))
+                      sell_reason, stage_reached, trade_id))
                 conn.execute("UPDATE trades SET qty=? WHERE id=?",
                            (total_qty - sold_qty, trade_id))
 

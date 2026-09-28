@@ -55,6 +55,13 @@ TARGET1_CAP_RATE = 0.20   # ★ 목표가1 상한 +20% (ATR×3과 비교해 작�
 ATR_RAISE_MULT   = 1.0    # 목표1 달성 후 손절 올림: 매수가 + ATR × 1
 ATR_TRAIL_MULT   = 1.5    # 트레일링: 고점 - ATR × 1.5
 
+# ★ 2026-09-29: sbot×sbo2 통합 작업 중 포팅 — sbo2가 2026-09-21에 추가한
+#   "목표1(ATR×3) 도달 전에 눌리는 경우가 많아 stage1 진입 자체가 거의
+#   안 됨" 문제의 대체트리거. 목표가 도달 여부와 무관하게 수익률이
+#   STAGE1_PROFIT_PCT(%) 이상이면 목표1 달성과 동일하게 50%매도+손절상향
+#   트리거, 둘 중 먼저 오는 쪽으로 발동(stage==0 한정).
+STAGE1_PROFIT_PCT = 8.0   # 단위: %
+
 # ATR 데이터 없을 때 폴백 고정 %
 FALLBACK_STOP    = -0.07  # -7%
 FALLBACK_TARGET  = 0.12   # +12%
@@ -342,19 +349,26 @@ class SwingStrategy:
 
         # ----------------------------------------------------------
         # ⑤ 목표가 달성 → 손절/목표가 상향
+        # ★ 2026-09-29: stage 0에서는 목표가1(ATR) 도달 OR 수익률
+        #   STAGE1_PROFIT_PCT% 도달, 둘 중 먼저 오는 쪽으로 트리거
+        #   (sbo2에서 포팅, 09-21 원본 로직).
         # ----------------------------------------------------------
-        if current >= target_next:
+        stage0_profit_hit = stage == 0 and rate * 100 >= STAGE1_PROFIT_PCT
+        target_hit         = current >= target_next
+        if stage0_profit_hit or target_hit:
             if stage == 0:
-                # ★ 목표가1 달성 → 50% 매도(수익실현) + 손절을 매수가+ATR×1로 올림
+                # ★ 목표가1 달성 또는 수익률 STAGE1_PROFIT_PCT% 도달 →
+                #   50% 매도(수익실현) + 손절을 매수가+ATR×1로 올림
                 # ★ 2026-09-04: 매도 성공 여부를 확인하지 않고 무조건 stage를
                 #   올리던 버그 수정(sbo2에서 09-03에 먼저 발견/수정된 것과
                 #   동일 클래스 — 1주도 안 팔렸는데 손절가가 상향된 2단계로
                 #   넘어가는 실거래 위험). on_sell()이 성공(True)했을 때만
                 #   stage/손절/목표 갱신.
+                trigger_label = "목표1익절50%" if target_hit else f"익절{STAGE1_PROFIT_PCT:.0f}%달성50%"
                 sell_qty = qty if qty <= 1 else qty // 2
                 ok_half = False
                 if sell_qty > 0:
-                    ok_half = on_sell(code, sell_qty, f"목표1익절50%({rate:+.2%})", current)
+                    ok_half = on_sell(code, sell_qty, f"{trigger_label}({rate:+.2%})", current)
                 if ok_half:
                     new_stop   = round(entry + atr_val * ATR_RAISE_MULT, 0)
                     new_target = round(current + atr_val * ATR_TARGET_MULT, 0)
@@ -366,10 +380,10 @@ class SwingStrategy:
                     #   홀드는 "1차목표 전 손절 안 당하게" 걸어두는 용도였는데,
                     #   목표를 이미 달성했으니 더 이상 걸어둘 이유가 없음.
                     tracker["hold"]        = False
-                    print(f"🎯 목표가1 달성 {code} ({rate:+.2%}) | 50%매도:{sell_qty}주 | "
+                    print(f"🎯 {trigger_label} {code} ({rate:+.2%}) | 50%매도:{sell_qty}주 | "
                           f"손절 상향:{new_stop:,.0f} | 새목표:{new_target:,.0f}")
                 else:
-                    print(f"⚠️ 목표1 매도 실패 {code} — stage 유지, 손절가 그대로")
+                    print(f"⚠️ {trigger_label} 매도 실패 {code} — stage 유지, 손절가 그대로")
             else:
                 # 목표가2+ 달성 → 손절을 직전 목표가로 올림
                 new_stop   = target_next   # 직전 목표가가 새 손절

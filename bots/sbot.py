@@ -40,7 +40,11 @@ sbot.py — 영암9 스윙봇 메인 (전면 재구성판)
 import sys as _sys
 import os as _os
 _BASE = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
-for _d in ["core", "intelligence", "interface", "bots", ""]:
+# ★ 2026-09-29: sbot×sbo2 통합 — core/candidate_pool.py가 lina_bot의
+#   swing_master/trend_analyzer/tele_swing_analyzer/kr_theme_finance.db를
+#   재사용하므로 lina_bot 추가(intelligence/youtube_stock_monitor.py가
+#   이미 쓰던 것과 동일 패턴).
+for _d in ["core", "intelligence", "interface", "bots", "lina_bot", ""]:
     _p = _os.path.join(_BASE, _d)
     if _p not in _sys.path:
         _sys.path.insert(0, _p)
@@ -73,6 +77,7 @@ from sbot_strategy import SwingStrategy
 from sbot_analyzer import SwingAnalyzer
 from sbot_db       import SwingDB
 from risk_manager  import RiskManager
+import candidate_pool as _cpool   # sbot×sbo2 통합 — 모멘텀/추세/완화/유튜브 소스
 try:
     from account_sync import sync_positions as _sync_positions
 except ImportError:
@@ -177,16 +182,20 @@ def get_swing_theme_bonus(code: str, theme_group_map: dict) -> tuple:
 # ============================================================
 # 상수 (튜닝 포인트)
 # ============================================================
-MAX_POSITIONS    = 4              # 최대 보유 종목 (★2026-09-12: 5→4, 대장 결정.
-                                   # 150만×4=600만 + S7전용 100만 = 총 700만원 산술과 맞춤)
+# ★ 2026-09-29: sbot×sbo2 통합(대장 결정) — sbot이 생존봇, sbo2 계좌/자본
+#   흡수. 6슬롯×약165만원, 시드머니 목표 1,000만원(SEED_MONEY_TARGET,
+#   코드로 강제하진 않음 — 실계좌 잔액이 실제 제약). 종목풀도 sbot 원천
+#   (키움조건검색/KIS new그룹) + sbo2 원천(모멘텀/추세/완화/유튜브) +
+#   S7을 전부 하나의 점수순 통합풀로 병합(core/candidate_pool.py 참고).
+MAX_POSITIONS    = 6              # 4→6 (통합 후 슬롯구조, 대장 결정)
+SEED_MONEY_TARGET = 10_000_000    # 문서용 — 코드에서 강제하지 않음, 실계좌 잔액이 실제 제약
 
-# ★ 대형주 급락매수 전용 슬롯 (2026-06-23 추가) — 기존 MAX_POSITIONS와 별개로 운영
-#   최근 10일 최고가 대비 -15% 하락 시 매수, ATR 추세추종 로직에 편입
-# ★ 2026-09-07: 기존 "5대장주"(임의 선정 5종목)에서 "S7"(intelligence/
-#   market_concentration.py의 MEGA_CAP_CODES와 동일 — 한국증시 쏠림 기준
-#   대형주 7종목, 2026-07-02 사용자 지정) + 현대차로 교체. 시장쏠림
-#   관찰용 워치리스트와 같은 기준을 쓰도록 통일(대장 요청). 두 파일이
-#   물리적으론 분리돼있으니 S7 구성을 바꾸면 이쪽도 같이 맞출 것.
+# ★ 대형주 급락매수(S7) — 2026-09-29부로 전용슬롯/전용예산 폐지, 통합
+#   후보풀의 한 소스(SLOT_S7)로 편입되어 나머지 슬롯과 동일하게 경쟁
+#   (대장 결정 — "S7용 슬롯등 특정 슬롯은 없애고 6종목 풀로 가자").
+#   MEGA_CAP_CODES/DROP_THRESHOLD/LOOKBACK_DAYS는 감지 조건으로 계속
+#   사용, MEGA_CAP_BUY_AMT/CHECK_INTERVAL은 폐지(사이징은 다른 신규
+#   슬롯과 동일하게 BUY_1ST_AMT_BASE 고정금액, 감지주기는 캐시로 대체).
 MEGA_CAP_CODES = {
     "005930": "삼성전자",
     "000660": "SK하이닉스",
@@ -197,13 +206,42 @@ MEGA_CAP_CODES = {
     "028260": "삼성물산",
     "005380": "현대차",
 }
-MEGA_CAP_DROP_THRESHOLD = -0.10   # 10일 최고가 대비 -10% (★2026-09-12: -15%→-10%, 대장 결정 — 너무 과도해서 거의 발동 안 함)
+MEGA_CAP_DROP_THRESHOLD = -0.10   # 10일 최고가 대비 -10%
 MEGA_CAP_LOOKBACK_DAYS  = 10
-MEGA_CAP_BUY_AMT        = 1_000_000
-MEGA_CAP_CHECK_INTERVAL = 1800    # 30분마다 체크
-BUY_1ST_AMT_BASE = 1_500_000    # 1차 매수 기본 금액 (2026-08-07: 봇당 600만원/5종목
-                                 # 재검증 계획에 맞춰 100만→150만 상향, 켈리+ATR로
-                                 # 이 기준값에서 유동적으로 조정됨, 최대종목수는 5 유지)
+MEGA_CAP_REFRESH_SEC    = 1800    # S7 후보 재조회 캐시(30분) — 8종목 OHLC 매루프 조회 방지
+BUY_1ST_AMT_BASE = 1_650_000    # 1차 매수 기본 금액 (2026-09-29: 150만→165만,
+                                 # sbot×sbo2 통합 6슬롯 구조 반영. 켈리+ATR로
+                                 # 이 기준값에서 유동적으로 조정됨(키움/new 슬롯만))
+
+# ── 통합 후보풀 슬롯 상수 ────────────────────────────────────
+# sbot 자체 소스(키움조건검색/KIS new그룹/S7) + core/candidate_pool.py의
+# sbo2 원천 소스(momentum/trend/light/youtube)를 합쳐 하나의 점수순
+# 랭킹으로 매수 우선순위를 정한다.
+SLOT_KIWOOM = "kiwoom"     # 키움 "주도주검색식3" 조건검색
+SLOT_KISNEW = "kisnew"     # KIS "new" 관심그룹
+SLOT_S7     = "s7"         # 대형주 급락매수(S7)
+SLOT_LABEL = {
+    SLOT_KIWOOM: "키움조건검색",
+    SLOT_KISNEW: "KIS관심그룹",
+    SLOT_S7:     "S7급락매수",
+}
+# ★ 추세(SLOT_TREND)는 실측 평균(~112)이 자체 경쟁력 있어 플로어 없음
+#   (sbo2 2026-09-25 기준과 동일). 키움/new는 BUY_SCORE_ENTER(85) 사전
+#   게이트를 통과한 후보만 여기 들어오므로, 그 후보들도 다른 슬롯과
+#   동등하게 경쟁하도록 110 플로어 적용(대장 결정 — "85+ 통과후 110
+#   플로어 적용").
+RANK_SCORE_FLOOR = {
+    "momentum":  110,   # candidate_pool.SLOT_MOMENTUM
+    "light":     110,   # candidate_pool.SLOT_LIGHT
+    "youtube":   110,   # candidate_pool.SLOT_YOUTUBE
+    SLOT_KIWOOM: 110,
+    SLOT_KISNEW: 110,
+    SLOT_S7:     110,
+}
+# ★ 1차 익절 후 슬롯 반환 보너스 적용 현금 하한선 — 기존 100만원에서
+#   50만원으로 완화(대장 지정 — 슬롯이 165만원으로 커진 것과 별개로
+#   적은 잔액도 기회를 놓치지 않게).
+BONUS_SLOT_MIN_CASH = 500_000
 # ★ 2026-07-03: 주문가능금액이 이 밑이면 신규 후보 분석 자체를 건너뜀
 #   (sbo2의 MIN_BUY_CHECK_CASH와 동일 목적 — 슬롯은 남아도 살 돈이
 #   없으면 종목풀 전체를 API로 조회/분석할 필요가 없음. 이 분석
@@ -379,6 +417,12 @@ class SBot:
         self.code_tag_map      = {}   # {code: 검색식명} buy_tag 추적용
         self._last_market_check = 0
         self._last_megacap_check = 0
+        self._megacap_cache      = []    # S7 후보 캐시(30분)
+        # ★ 2026-09-29: sbot×sbo2 통합 — 모멘텀/추세/완화/유튜브 후보풀
+        #   캐시(sbo2._cand_date/self.candidates 패턴 포팅, core/
+        #   candidate_pool.py의 refresh_*() 함수와 짝을 이룸)
+        self._pool_candidates    = []
+        self._pool_cand_date     = ""
 
         if self.kiwoom.enabled:
             print(f"✅ 키움 연동 활성화 | 단타 제외: {SKIP_COND_KEYWORDS}")
@@ -553,6 +597,11 @@ class SBot:
         )
 
         # DB 저장
+        # ★ 2026-09-29: sbot×sbo2 통합 — atr_val_at_entry 포렌식 컬럼
+        #   기록(sbo2_trades.db와 동일 목적). grade는 buy_tag와 동일값이라
+        #   save_buy() 안에서 buy_tag로 자동 폴백(명시 전달 불필요).
+        _atr_rate_for_db = self._get_atr_rate(code)
+        _atr_val_for_db  = round(price * _atr_rate_for_db, 2) if _atr_rate_for_db else 0.0
         self.db.save_buy(
             code      = code,
             buy_price = price,
@@ -560,7 +609,8 @@ class SBot:
             ai_score  = ctx.get("ai_score", 0),
             ai_reason = ctx.get("ai_reason", ""),
             stock_name= self._name(code),
-            buy_tag   = self.code_tag_map.get(code, "unknown"),  # ★ 검색식명
+            buy_tag   = self.code_tag_map.get(code, "unknown"),  # ★ 검색식명/슬롯출처
+            atr_val_at_entry = _atr_val_for_db,
         )
 
         # ★ master_positions 등록
@@ -624,8 +674,12 @@ class SBot:
         )
 
         # DB 저장
+        # ★ 2026-09-29: sbot×sbo2 통합 — stage_reached 포렌식 컬럼 기록
+        #   (sbo2_trades.db와 동일 목적, 매도 시점까지 도달한 목표단계).
+        _stage_for_db = self.peak_tracker.get(code, {}).get("stage", 0)
         self.db.save_sell(code, sell_price, reason,
-                         sold_qty=0 if is_full_sell else qty)
+                         sold_qty=0 if is_full_sell else qty,
+                         stage_reached=_stage_for_db)
         # ★ master_trades 기록
         if _master_record:  # 전량 + 분할매도 모두 기록
             ctx = self.buy_context.get(code, {})
@@ -1084,7 +1138,7 @@ class SBot:
                 1 for c in self.positions
                 if self.peak_tracker.get(c, {}).get("stage", 0) >= 1
             )
-            보너스 = 익절중 if psbl_cash >= 1_000_000 else 0
+            보너스 = 익절중 if psbl_cash >= BONUS_SLOT_MIN_CASH else 0
             avail = MAX_POSITIONS - len(self.positions) + 보너스
             existing_codes = set(c for c, _, _ in top10)
             existing_codes.update(self.positions.keys())
@@ -1101,19 +1155,181 @@ class SBot:
         except Exception as e:
             print(f"⚠️ 미너비니 추천 오류: {e}")
 
-        # 7) 매수 실행
-        self._execute_buys(top10, now_t, score_enter, psbl_cash)
+        # 7) ★ 2026-09-29: 여기서 직접 매수실행하지 않고, 키움/new 통합
+        #   후보(BUY_SCORE_ENTER 사전게이트 통과분만)를 정규화된 dict로
+        #   반환 — 통합후보풀(_get_unified_candidates)이 모멘텀/추세/완화/
+        #   유튜브/S7과 합쳐서 점수순 랭킹 후 한 번에 매수실행한다.
+        return self._normalize_kiwoom_candidates(top10, score_enter)
 
-    def _execute_buys(self, top10: list, now_t: str,
-                      score_enter: int, psbl_cash: int):
-        """매수 가능한 종목 실제 주문"""
+    def _normalize_kiwoom_candidates(self, top10: list, score_enter: int) -> list:
+        """(code, score, data) 튜플 리스트를 통합 후보풀 dict 포맷으로 변환,
+        BUY_SCORE_ENTER 사전게이트(score_enter 미만 제외)를 여기서 적용."""
+        normalized = []
+        for code, score, data in top10:
+            if score < score_enter:
+                continue
+            is_new = code in self.new_codes_list
+            normalized.append({
+                "code":     code,
+                "name":     data.get("stock_name") or self._name(code),
+                "grade":    SLOT_KISNEW if is_new else SLOT_KIWOOM,
+                "score":    score,
+                "curr":     data.get("current_price", 0),
+                "is_new":   is_new,
+                "ai_reason": data.get("ai_reason", ""),
+                "raw_data": data,
+            })
+        return normalized
 
-        # 1차 익절 후 슬롯 반환 (주문가능금액 100만원 이상일 때만)
+    def _get_megacap_candidates(self, psbl_cash: int) -> list:
+        """S7(대형주 급락) 후보 생성 — 2026-09-29부로 전용슬롯/예산 폐지,
+        통합 후보풀의 한 소스(SLOT_S7)로 편입. 30분 캐시(8종목 OHLC를
+        매루프 조회하지 않도록)."""
+        now = time.time()
+        if now - self._last_megacap_check < MEGA_CAP_REFRESH_SEC:
+            return self._megacap_cache
+        self._last_megacap_check = now
+
+        # 이미 S7 중 보유중인 종목이 있으면 후보 생성 스킵(과집중 방지)
+        if any(c in self.positions for c in MEGA_CAP_CODES):
+            self._megacap_cache = []
+            return self._megacap_cache
+        if psbl_cash < MIN_ANALYSIS_CASH:
+            self._megacap_cache = []
+            return self._megacap_cache
+
+        drops = []
+        for code, name in MEGA_CAP_CODES.items():
+            try:
+                ohlc = self.api.get_daily_ohlc(code, days=MEGA_CAP_LOOKBACK_DAYS)
+                if not ohlc or len(ohlc) < 3:
+                    continue
+                highs = [c["high"] for c in ohlc if c.get("high", 0) > 0]
+                if not highs:
+                    continue
+                recent_high = max(highs)
+                mdata = self.api.get_market_data(code)
+                if not mdata:
+                    continue
+                current = float(mdata.get("stck_prpr", 0))
+                if current <= 0 or recent_high <= 0:
+                    continue
+                drop_rate = (current - recent_high) / recent_high
+                if drop_rate <= MEGA_CAP_DROP_THRESHOLD:
+                    drops.append((drop_rate, code, name, current))
+            except Exception as e:
+                print(f"⚠️ S7 {name} 조회 오류: {e}")
+                continue
+
+        if not drops:
+            self._megacap_cache = []
+            return self._megacap_cache
+
+        # 가장 많이 빠진 종목 1개만 후보로
+        drops.sort(key=lambda x: x[0])
+        drop_rate, code, name, current = drops[0]
+        self._megacap_cache = [{
+            "code":      code,
+            "name":      name,
+            "grade":     SLOT_S7,
+            "score":     75,   # candidate_pool의 모멘텀과 동급 취급
+            "curr":      current,
+            "is_new":    False,
+            "ai_reason": f"S7급락매수(10일최고대비{drop_rate:+.1%})",
+            "raw_data":  None,
+        }]
+        return self._megacap_cache
+
+    def _normalize_pool_candidate(self, c: dict) -> dict:
+        """candidate_pool(모멘텀/추세/완화/유튜브) 스타일 dict(name 키)를
+        통합 후보풀 dict 포맷(code 키)으로 변환."""
+        code = _cpool.get_stock_code(c["name"])
+        return {
+            "code":     code,
+            "name":     c["name"],
+            "grade":    c["grade"],
+            "score":    c["score"],
+            "curr":     c.get("curr", 0),
+            "is_new":   False,
+            "ai_reason": "/".join(c.get("themes", [])) if c.get("themes") else "",
+            "raw_data": None,
+        }
+
+    def _rank_score(self, c: dict) -> float:
+        return max(c["score"], RANK_SCORE_FLOOR.get(c["grade"], 0))
+
+    def _refresh_pool_candidates(self):
+        """모멘텀/추세/완화/유튜브 후보 캐시 갱신 — sbo2._refresh_candidates()
+        패턴 포팅. 전체(추세/완화 포함)는 하루 1회, 모멘텀/유튜브는 API
+        호출이 가벼워서 매루프 독립 갱신."""
+        held_codes = set(self.positions.keys())
+        held_names = {p.get("name", "") for p in self.positions.values()}
+        # positions는 code 키인데 candidate_pool의 refresh 함수들은
+        # sbo2 스타일로 {code_or_name: {"name":...}} 형태를 기대 — sbot의
+        # positions는 name을 안 들고 있으므로 code_name_map으로 보강한
+        # 임시 뷰를 만들어 전달.
+        positions_view = {
+            code: {"name": self.code_name_map.get(code, code)}
+            for code in self.positions
+        }
+
+        self._pool_candidates, self._pool_cand_date, changed = _cpool.refresh_full_candidates(
+            self._pool_candidates, self._pool_cand_date, positions_view, api=self.api,
+        )
+        self._pool_candidates, _ = _cpool.refresh_momentum_candidates(
+            self._pool_candidates, positions_view,
+        )
+        self._pool_candidates, _ = _cpool.refresh_youtube_candidates(
+            self._pool_candidates, positions_view, MAX_POSITIONS, api=self.api,
+        )
+
+    def _get_unified_candidates(self, now_t: str, score_enter: int, psbl_cash: int) -> list:
+        """모든 소스(키움/new/모멘텀/추세/완화/유튜브/S7)를 하나의 점수순
+        랭킹 리스트로 병합."""
+        all_candidates = []
+
+        codes = self._get_pool()
+        if not codes:
+            print("⚠️ 종목 풀 없음(키움/new)")
+        else:
+            kiwoom_kisnew = self._run_analysis(codes, now_t, score_enter, psbl_cash)
+            if kiwoom_kisnew:
+                all_candidates += kiwoom_kisnew
+
+        self._refresh_pool_candidates()
+        all_candidates += [self._normalize_pool_candidate(c) for c in self._pool_candidates]
+
+        all_candidates += self._get_megacap_candidates(psbl_cash)
+
+        # code 중복 제거(같은 종목이 여러 소스에서 나올 경우 더 높은
+        # rank_score를 쓰는 쪽만 유지)
+        best_by_code = {}
+        for c in all_candidates:
+            if not c.get("code"):
+                continue
+            code = c["code"]
+            if code not in best_by_code or self._rank_score(c) > self._rank_score(best_by_code[code]):
+                best_by_code[code] = c
+
+        buyable = sorted(best_by_code.values(), key=self._rank_score, reverse=True)
+        by_grade = {}
+        for c in buyable:
+            by_grade[c["grade"]] = by_grade.get(c["grade"], 0) + 1
+        summary = " ".join(f"{SLOT_LABEL.get(g, g)}{n}" for g, n in by_grade.items())
+        print(f"   매수후보(통합): {summary or '없음'}")
+        return buyable
+
+    def _execute_buys_unified(self, buyable: list, now_t: str, psbl_cash: int):
+        """매수 가능한 종목 실제 주문 — 통합 후보풀(키움/new/모멘텀/추세/
+        완화/유튜브/S7) 전체를 점수순으로 순회하며 슬롯이 찰 때까지 매수.
+        buyable은 이미 _rank_score 기준 내림차순 정렬된 상태로 전달됨."""
+
+        # 1차 익절 후 슬롯 반환 (주문가능금액 BONUS_SLOT_MIN_CASH 이상일 때만)
         익절중 = sum(
             1 for c in self.positions
             if self.peak_tracker.get(c, {}).get("stage", 0) >= 1
         )
-        보너스 = 익절중 if psbl_cash >= 1_000_000 else 0
+        보너스 = 익절중 if psbl_cash >= BONUS_SLOT_MIN_CASH else 0
         slots = MAX_POSITIONS - len(self.positions) + 보너스
         if 익절중:
             print(f"  ♻️ 익절진행중 {익절중}종목 슬롯 반환 → 가용:{slots}")
@@ -1136,21 +1352,22 @@ class SBot:
             print("📦 [SWING] 포지션 FULL")
             return
 
-        for code, score, data in top10:
+        for cand in buyable:
             if slots <= 0:
                 break
+            code, grade, score = cand["code"], cand["grade"], cand["score"]
+            if not code:
+                continue
             if code in self.positions:
                 continue
-            if data["current_price"] <= 0:
-                continue
-            if score < score_enter:
+            if cand["curr"] <= 0:
                 continue
             if code in self.sold_today:
                 print(f"🚫 [SWING] 재매수 금지 {code}")
                 continue
 
             # ★ 시장 상태 체크 (약세장이라도 new 종목은 허용)
-            is_new = code in self.new_codes_list
+            is_new = cand["is_new"]
             allow, reason = self.risk.allow_buy_in_market(
                 self.market_status, is_sector_match=is_new,
             )
@@ -1160,37 +1377,50 @@ class SBot:
             if reason:
                 print(f"✅ {reason} {code}")
 
-            # ★ 포지션 사이징
+            # ★ 2026-09-29: 매수금액 산정 이원화(대장 결정 — "원천별 이원화
+            #   유지") — 키움/new 슬롯은 기존 RiskManager(켈리/AI점수 기반)
+            #   그대로, 나머지 신규 슬롯(모멘텀/추세/완화/유튜브/S7)은
+            #   sbo2식 단순 고정금액(현금캡만 적용).
             atr_rate = self._get_atr_rate(code)
-            buy_amount = self.risk.calc_buy_amount(
-                score=score, atr_rate=atr_rate,
-                is_theme=is_new, psbl_cash=psbl_cash,
-                code=code,                           # ★ 켈리: 종목별 성과 반영
-                db_path="sbot_trade_history.db",     # ★ 켈리: sbot DB 사용
-            )
+            if grade in (SLOT_KIWOOM, SLOT_KISNEW):
+                buy_amount = self.risk.calc_buy_amount(
+                    score=score, atr_rate=atr_rate,
+                    is_theme=is_new, psbl_cash=psbl_cash,
+                    code=code,                           # ★ 켈리: 종목별 성과 반영
+                    db_path="sbot_trade_history.db",     # ★ 켈리: sbot DB 사용
+                )
+            else:
+                buy_amount = min(BUY_1ST_AMT_BASE, psbl_cash)
 
             # ★ 1주도 못 사면 패스
-            cur_price = data.get("current_price", 0)
-            if cur_price > 0 and buy_amount < cur_price:
-                print(f"⏭️ [SWING] {code} 패스 — 예산({buy_amount:,}원) < 주가({cur_price:,}원)")
+            if buy_amount < cand["curr"]:
+                print(f"⏭️ [SWING] {code} 패스 — 예산({buy_amount:,}원) < 주가({cand['curr']:,.0f}원)")
                 continue
 
-            tag = " 🆕new" if is_new else ""
+            tag = " 🆕new" if is_new else f" [{SLOT_LABEL.get(grade, grade)}]" if grade not in (SLOT_KIWOOM, SLOT_KISNEW) else ""
             print(f"🚀 [SWING] 매수 {code} | {score}점 | {fmt_won(buy_amount)}{tag}"
                   + (f" | ATR{atr_rate*100:.1f}%" if atr_rate else ""))
 
             self.buy_context[code] = {
                 "ai_score":   score,
-                "ai_reason":  data.get("ai_reason", ""),
-                "stock_name": data.get("stock_name", ""),
+                "ai_reason":  cand["ai_reason"],
+                "stock_name": cand["name"],
             }
+            # ★ 신규 슬롯(모멘텀/추세/완화/유튜브/S7) 출처를 buy_tag로 남김
+            #   (키움/new는 _get_pool()/condition-search가 이미 태깅함)
+            if grade not in (SLOT_KIWOOM, SLOT_KISNEW):
+                self.code_tag_map[code] = grade
+                if code not in self.code_name_map:
+                    self.code_name_map[code] = cand["name"]
+
             # ★ sbo2 교차 보유 방지 — master_db 기반 (2026-07-02)
             #   기존엔 sbo2_state.json을 직접 열어 읽었음(파일 스키마 의존 +
             #   락 없음). 두 봇 다 매수/매도마다 이미 기록하는
             #   master_db(master_positions)를 단일 기준으로 사용.
             #   조회 실패 시엔 기존과 동일하게 "교차 보유 없음"으로 보고
             #   매수를 막지는 않음(부가 안전장치 — 매수 자체를 중단시킬
-            #   이유는 아님).
+            #   이유는 아님). ★ 2026-09-29: sbo2 통합/퇴역 이후에도 잔재
+            #   데이터 방어용으로 당분간 유지(계획 문서 리스크 섹션 참고).
             sbo2_pos = set()
             if get_all_positions:
                 try:
@@ -1200,18 +1430,20 @@ class SBot:
             if code in sbo2_pos:
                 print(f"⛔ {code} sbo2 보유 중 — sbot 매수 제외")
                 continue
-            self._do_buy(code, data["current_price"], buy_amount)
+            self._do_buy(code, cand["curr"], buy_amount)
 
             # ★ peak_tracker 즉시 초기화 (v3 — ATR 추세추종)
             # ★ 공통 헬퍼로 통일 — 기존엔 buy_date 필드가 빠져 있어서
             #   25일 보유기한 매도 로직이 이 종목에는 평생 작동하지 않는
             #   버그가 있었음 (sbot_strategy.check_sell의 tracker 자동
             #   초기화 분기는 code가 peak_tracker에 "없을 때만" 실행되는데,
-            #   여기서 이미 채워 넣으니 그 분기가 다시는 안 돔)
-            _entry    = data["current_price"]
+            #   여기서 이미 채워 넣으니 그 분기가 다시는 안 돔). ★ 2026-09-29:
+            #   신규 슬롯도 예외 없이 이 헬퍼를 거치도록 통일(계획 문서
+            #   리스크 섹션 — peak_tracker 필드 누락시 그 루프 이후 모든
+            #   보유종목 매도체크가 스킵되는 실제 버그 이력 있는 지점).
             _atr_rate = self._get_atr_rate(code)
             self.peak_tracker[code] = self._make_peak_tracker_entry(
-                entry_price=_entry, atr_rate=_atr_rate,
+                entry_price=cand["curr"], atr_rate=_atr_rate,
             )
             slots -= 1
             time.sleep(1)
@@ -1854,22 +2086,20 @@ class SBot:
                     time.sleep(LOOP_SLEEP); continue
 
                 # ── 분석 + 매수 ───────────────────────────
-                # ★ 2026-09-10: 슬롯/자금 부족 판단을 키움 조건검색(_get_pool)
-                #   호출보다 먼저 하도록 순서 변경 — 기존엔 포지션이 풀(5/5)
-                #   이라 신규 분석을 어차피 스킵할 상황에서도 매 루프
-                #   _get_pool()을 그대로 호출하고 있었음. 이 호출이 키움
-                #   조건검색 4개를 순서대로 조회하는데, 타임아웃 나면
-                #   재시도(최대 65초×3회)까지 겹쳐서 루프 하나가 몇 분씩
-                #   걸릴 수 있음 — 대장이 "포지션 풀인데 계속 검색하네,
-                #   멈춘 것처럼 보인다"고 신고해서 발견. 슬롯/자금 없으면
-                #   애초에 조회할 필요가 없으므로 그 경우엔 호출 자체를
-                #   건너뜀.
+                # ★ 2026-09-10: 슬롯/자금 부족 판단을 종목풀 조회보다 먼저
+                #   하도록 순서 유지 — 포지션이 꽉 찼으면 애초에 조회 자체를
+                #   건너뜀(키움 조건검색 타임아웃/재시도로 루프가 몇 분씩
+                #   걸리는 문제 방지, 대장 신고로 발견됐던 지점).
+                # ★ 2026-09-29: sbot×sbo2 통합 — 키움/new/모멘텀/추세/완화/
+                #   유튜브/S7 전체를 _get_unified_candidates()가 하나의
+                #   점수순 랭킹으로 병합, _execute_buys_unified()가 한 번에
+                #   순회하며 매수(등급별 사이징/S7전용예산 폐지 등은
+                #   각 헬퍼 안에서 처리됨).
                 익절중 = sum(
                     1 for c in self.positions
                     if self.peak_tracker.get(c, {}).get("stage", 0) >= 1
                 )
-                # ★ 주문가능금액 100만원 이상일 때만 보너스 슬롯 적용
-                보너스 = 익절중 if psbl_cash >= 1_000_000 else 0
+                보너스 = 익절중 if psbl_cash >= BONUS_SLOT_MIN_CASH else 0
                 avail_slots = MAX_POSITIONS - len(self.positions) + 보너스
                 if avail_slots <= 0:
                     print(f"⛔ 슬롯 없음 ({len(self.positions)}/{MAX_POSITIONS}) — 종목검색/신규분석 스킵")
@@ -1877,20 +2107,9 @@ class SBot:
                     print(f"💰 주문가능({psbl_cash:,}원) < 최소기준({MIN_ANALYSIS_CASH:,}원) "
                           f"— 종목검색/신규분석 스킵")
                 else:
-                    codes = self._get_pool()
-                    if not codes:
-                        print("⚠️ 종목 풀 없음")
-                    else:
-                        self._run_analysis(codes, now_t, score_enter, psbl_cash)
-
-                # ── S7 급락 매수 (30분마다, 정규장 중) ──
-                if (is_buy_ok and
-                        time.time() - self._last_megacap_check > MEGA_CAP_CHECK_INTERVAL):
-                    try:
-                        self._check_megacap_dip_buy(psbl_cash)
-                    except Exception as e:
-                        print(f"⚠️ S7 체크 오류: {e}")
-                    self._last_megacap_check = time.time()
+                    buyable = self._get_unified_candidates(now_t, score_enter, psbl_cash)
+                    if buyable:
+                        self._execute_buys_unified(buyable, now_t, psbl_cash)
 
                 # ── 매도 체크 ─────────────────────────────
                 self._check_all_sells(pos_mkt_cache)
@@ -1911,119 +2130,6 @@ class SBot:
                 print(f"🚨 [SWING] 루프 오류: {e}")
                 import traceback; traceback.print_exc()
                 time.sleep(5)
-
-    # ============================================================
-    # ★ S7 급락 매수 (전용 슬롯, 2026-06-23 추가, 2026-09-07 5대장주→S7 교체)
-    # ============================================================
-    def _check_megacap_dip_buy(self, psbl_cash: int):
-        """
-        삼성전자/SK하이닉스/SK스퀘어/삼성전자우/삼성전기/삼성생명/삼성물산
-        + 현대차 — S7(MEGA_CAP_CODES) 중 최근 10일 최고가 대비 -15% 이상
-        하락한 종목이 있으면 1개 매수.
-        기존 MAX_POSITIONS 슬롯과는 완전히 별개(전용 1슬롯).
-        매수 후에는 일반 positions/peak_tracker에 합류시켜
-        기존 ATR 추세추종(_check_all_sells)이 그대로 관리하게 함.
-        """
-        # 이미 S7 중 보유중인 종목이 있으면 스킵 (전용슬롯 1개)
-        held_megacaps = [c for c in MEGA_CAP_CODES if c in self.positions]
-        if held_megacaps:
-            return
-
-        # ★ 2026-09-12: 최소현금 하한선 — 이 슬롯은 원래 정규 4슬롯(150만×4=
-        #   600만)과 별개로 남겨둔 100만원 예산용인데, 하한선이 없어서
-        #   정규슬롯이 다 차고 잔액이 몇만원~십몇만원만 남아도 그 돈으로
-        #   비싼 종목(SK스퀘어 등) 1주를 사버리는 문제가 있었음(대장 지적).
-        #   MIN_ANALYSIS_CASH(20만원)와 동일 기준 재사용.
-        if psbl_cash < MIN_ANALYSIS_CASH:
-            return
-
-        candidates = []
-        for code, name in MEGA_CAP_CODES.items():
-            try:
-                ohlc = self.api.get_daily_ohlc(code, days=MEGA_CAP_LOOKBACK_DAYS)
-                if not ohlc or len(ohlc) < 3:
-                    continue
-                highs = [c["high"] for c in ohlc if c.get("high", 0) > 0]
-                if not highs:
-                    continue
-                recent_high = max(highs)
-                mdata = self.api.get_market_data(code)
-                if not mdata:
-                    continue
-                current = float(mdata.get("stck_prpr", 0))
-                if current <= 0 or recent_high <= 0:
-                    continue
-                drop_rate = (current - recent_high) / recent_high
-                if drop_rate <= MEGA_CAP_DROP_THRESHOLD:
-                    candidates.append((drop_rate, code, name, current, mdata))
-            except Exception as e:
-                print(f"⚠️ S7 {name} 조회 오류: {e}")
-                continue
-
-        if not candidates:
-            return
-
-        # 가장 많이 빠진 종목 1개만 매수
-        candidates.sort(key=lambda x: x[0])
-        drop_rate, code, name, current, mdata = candidates[0]
-
-        amount = min(MEGA_CAP_BUY_AMT, psbl_cash)
-        if amount < current:
-            print(f"⏭️ S7 {name} 패스 — 예산({amount:,}) < 주가({current:,.0f})")
-            return
-
-        ok, orgno, odno, qty = self.api.buy(code, current, amount, {code: name})
-        if not ok or qty <= 0:
-            print(f"❌ S7 매수 실패: {name}")
-            return
-
-        print(f"🛒 [S7 급락매수] {name}({code}) | 10일최고대비:{drop_rate:+.1%} | "
-              f"{qty}주 @ {current:,.0f}")
-        self._notify(
-            f"🛒 [S7 급락매수] {name}\n"
-            f"10일 최고가 대비: {drop_rate:+.1%}\n"
-            f"{qty}주 @ {current:,.0f}원",
-            critical=True,
-        )
-
-        self.positions[code] = {"entry_price": current, "qty": qty}
-        self._pending_orders[code] = (orgno or "", odno or "", qty)
-        # ★ 2026-09-03: 매수직후 동기화 보호 (일반 매수 경로와 동일)
-        self._buy_sync_guard[code] = time.time()
-
-        # ATR 기반 손절/목표가 — 기존 추세추종 로직에 그대로 편입
-        # ★ 공통 헬퍼로 통일 (기존 자체 ATR 재계산 코드 제거 — _get_atr_rate와
-        #   동일한 risk.calc_atr_rate 기반이라 중복이었음)
-        _atr_rate = self._get_atr_rate(code)
-        self.peak_tracker[code] = self._make_peak_tracker_entry(
-            entry_price=current, atr_rate=_atr_rate, buy2_done=True,
-        )
-        if code not in self.code_name_map:
-            self.code_name_map[code] = name
-
-        # ★ 2026-09-03: 재점검 리포트로 발견 — 일반 매수 경로(_do_buy)와 달리
-        #   이 경로는 DB 저장/master_positions 등록/buy_context 생성을
-        #   전부 빼먹고 있었음. 나중에 이 종목이 팔릴 때 AI점수/매수사유
-        #   없이 기록되고 대시보드에도 매수시점이 안 잡히는 문제 → 추가.
-        _ai_reason = f"S7급락매수(10일최고대비{drop_rate:+.1%})"
-        self.buy_context[code] = {
-            "ai_score": 0, "ai_reason": _ai_reason, "stock_name": name,
-        }
-        self.db.save_buy(
-            code=code, buy_price=current, qty=qty,
-            ai_score=0, ai_reason=_ai_reason,
-            stock_name=name, buy_tag="S7",
-        )
-        if _master_upsert:
-            try:
-                _master_upsert(
-                    bot_type='sbot', code=code, stock_name=name,
-                    entry_price=current, current_price=current, qty=qty,
-                    buy_time=now_hms(), buy_tag="S7", ai_score=0,
-                )
-            except Exception as _e:
-                print(f'⚠️ master_positions upsert 오류: {_e}')
-        self.sold_today[code] = now_hms()
 
     # ============================================================
     # 상태 저장
