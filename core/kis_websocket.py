@@ -364,7 +364,19 @@ class KisWebSocket:
                 print(f"✅ [WS] 초기 잔고 로드: {len(pos)}종목")
             if cash:
                 self.cash = cash
-                print(f"✅ [WS] 초기 예수금 로드: {cash:,}원")
+                # ★ 2026-09-29: 대장 지적 — "예수금"(정산완료 잔액)만 찍히면
+                #   당일 매도대금이 아직 반영 안 된 것처럼 보여 헷갈림
+                #   (실측: daybot 계좌 예수금 103,819원인데 실제 주문가능
+                #   금액은 3,878,882원). self.cash 값 자체(sbot이 실거래에
+                #   쓰는 값)는 그대로 두고, 로그에 참고용 매수가능금액만
+                #   추가로 표시 — 특정 종목가 기준이 필요한 API라 대표종목
+                #   (삼성전자)으로 조회.
+                try:
+                    psbl = api.get_psbl_order_cash("005930")
+                    print(f"✅ [WS] 초기 예수금 로드: {cash:,}원 "
+                          f"(참고: 매수가능금액 {psbl:,}원)")
+                except Exception:
+                    print(f"✅ [WS] 초기 예수금 로드: {cash:,}원")
             else:
                 print(f"⚠️ [WS] 초기 예수금 로드 실패 (0 또는 None 반환)")
         except Exception as e:
