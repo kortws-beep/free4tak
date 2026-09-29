@@ -146,9 +146,10 @@ BOT_TOKEN  = os.getenv("DISCORD_BOT_TOKEN")
 CHANNEL_ID = int(os.getenv("DISCORD_CHANNEL_ID", "0"))
 
 # DB 파일
-SBOT_HIST_DB  = "sbot_trade_history.db"
-SBO2_HIST_DB  = os.path.join("lina_bot", "sbo2_trades.db")
-CBOT_HIST_DB  = "cbot_trade_history.db"
+SBOT_HIST_DB   = "sbot_trade_history.db"
+SBO2_HIST_DB   = os.path.join("lina_bot", "sbo2_trades.db")
+CBOT_HIST_DB   = "cbot_trade_history.db"
+DAYBOT_HIST_DB = "daybot_trade_history.db"
 AI_CACHE_DB   = "ai_cache.db"
 
 # 대화 히스토리
@@ -160,6 +161,7 @@ BOT_STATE_FILES = {
     "sbot": "sbot_state.json",
     "sbo2": os.path.join("lina_bot", "sbo2_state.json"),
     "cbot": "cbot_state.json",
+    "daybot": "daybot_state.json",
 }
 
 # AI 모델
@@ -741,6 +743,7 @@ class AIAssistant:
 [재시작] (systemd 서비스 자체를 완전히 새로 켬 — 시작/정지와 다름)
 "스윙/스윙봇 재시작해줘/다시 켜줘(정지 안 된 상태에서)" → CMD:!s재시작
 "sbo2/스윙2 재시작해줘" → CMD:!sbo2재시작
+"daybot/단타봇 재시작해줘" → CMD:!daybot재시작
 "코인봇/cbot 재시작해줘" → CMD:!c재시작
 "텔레그램/텔레 재시작해줘" → CMD:!t재시작
 "섹터/섹터모니터 재시작해줘" → CMD:!섹터재시작
@@ -935,6 +938,21 @@ async def execute_command(ctx, cmd: str):
         await cmd_pause(ctx, False, "sbo2")
     elif cmd == "!sbo2재시작":
         await cmd_restart(ctx, "sbo2")
+    # ── daybot (단타봇) ──────────────────────────────────────
+    elif cmd in ("!daybot상태", "!상태 daybot"):
+        await cmd_status(ctx, "daybot")
+    elif cmd.startswith("!daybot매도"):
+        parts = cmd.split()
+        if len(parts) == 2:
+            await cmd_sell(ctx, parts[1], "daybot")
+        else:
+            await ctx.send("❌ 사용법: !daybot매도 005930")
+    elif cmd == "!daybot정지":
+        await cmd_pause(ctx, True, "daybot")
+    elif cmd == "!daybot시작":
+        await cmd_pause(ctx, False, "daybot")
+    elif cmd == "!daybot재시작":
+        await cmd_restart(ctx, "daybot")
     elif cmd.startswith("!s관심"):
         parts = cmd.split()
         if len(parts) == 2:
@@ -1110,6 +1128,7 @@ async def on_ready():
         if "sbo2" in active_names: bot_status_line.append("📊 스윙2")
         if "sbot" in active_names: bot_status_line.append("📊 스윙")
         if "cbot" in active_names: bot_status_line.append("🪙 코인")
+        if "daybot" in active_names: bot_status_line.append("⚡ 단타")
         bots_str = " | ".join(bot_status_line) if bot_status_line else "감지된 봇 없음"
 
         await ch.send(
@@ -1174,7 +1193,9 @@ async def on_message(message):
                     # ★ "!h "(공백 포함)로 매칭 — "!hts관심"처럼 무해한 명령까지
                     #   확인절차에 걸리지 않게 구분.
                     danger_cmds = ["!매도","!s매도","!sbo2매도","!c매도","!c전체매도",
+                                   "!daybot매도",
                                    "!정지","!s정지","!sbo2정지","!c정지","!e정지",
+                                   "!daybot정지",
                                    "!h ","!r "]
                     is_danger   = any(cmd.startswith(d) for d in danger_cmds)
                     if is_danger:

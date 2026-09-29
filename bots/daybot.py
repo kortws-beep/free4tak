@@ -143,6 +143,7 @@ class DayBot:
         self._is_holiday      = False
         self._holiday_checked = ""
         self._last_scan_ts    = 0.0
+        self._is_paused       = False
 
         # ★ 2026-09-29 대장 지정 — 19:50 EOD청산 실패분(하한가/거래정지 등)은
         #   그날 밤 내내 재시도하지 않고 익일 09:00에 딱 한 번 더 시도.
@@ -499,6 +500,11 @@ class DayBot:
                 if self._is_holiday:
                     time.sleep(300); continue
 
+                # 4-1) 키키 !daybot정지/!daybot시작 반영 — sbot과 동일 패턴:
+                #      정지돼도 보유종목 매도체크/EOD청산/이월재시도는 계속
+                #      돌고, 신규매수(11번)만 멈춘다.
+                self._is_paused = _read_state().get("paused", False)
+
                 # 5) 일일 초기화 — 새 날이면 당일 관련 플래그 전부 리셋
                 if today != self._sold_today_date:
                     self.sold_today = {}
@@ -540,8 +546,9 @@ class DayBot:
                 # 10) 포지션 실시간감시
                 self._check_all_positions_for_exit()
 
-                # 11) 후보스캔(240초 주기, 슬롯 여유+매수시간대일 때만)
-                if (len(self.positions) < MAX_POSITIONS
+                # 11) 후보스캔(240초 주기, 슬롯 여유+매수시간대일 때만, 정지중이면 스킵)
+                if (not self._is_paused
+                        and len(self.positions) < MAX_POSITIONS
                         and BUY_START_TIME <= now_t <= BUY_END_TIME
                         and time.time() - self._last_scan_ts >= SCAN_INTERVAL_SEC):
                     self._run_candidate_scan_and_maybe_buy()

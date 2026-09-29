@@ -39,6 +39,7 @@ RESTART_SERVICES = {
     "sbo2":     "yeongam9-sbo2",
     "sbot":     "yeongam9-sbot",
     "cbot":     "yeongam9-cbot",
+    "daybot":   "yeongam9-daybot",
     "telegram": "yeongam9-telegram",
     "sector":   "yeongam9-sector",
 }
@@ -299,7 +300,7 @@ async def cmd_analyze(ctx, code: str):
 
 
 async def cmd_pause(ctx, pause: bool, bot_name: str = "sbot"):
-    labels = {"sbot": "스윙봇", "sbo2": "스윙봇2", "cbot": "코인봇"}
+    labels = {"sbot": "스윙봇", "sbo2": "스윙봇2", "cbot": "코인봇", "daybot": "단타봇"}
     label  = labels.get(bot_name, bot_name)
     if pause:
         update_state(bot_name, paused=True)
@@ -1358,6 +1359,7 @@ async def cmd_help(ctx):
 ━━━ ⌨️ 명령어 직접 입력 ━━━
 **📈 sbot**   `!상태`(=`!s상태`) `!정지`(=`!s정지`) `!시작`(=`!s시작`) `!재시작`(=`!s재시작`) `!s매도 코드` `!점수기준 숫자` `!s관심 [코드]`
 **📊 sbo2**   `!sbo2상태` `!sbo2매도 코드` `!sbo2정지` `!sbo2시작` `!sbo2재시작`
+**⚡ daybot**  `!daybot상태` `!daybot매도 코드` `!daybot정지` `!daybot시작` `!daybot재시작`
 **🪙 코인봇** `!c상태` `!c정지` `!c시작` `!c재시작` `!c매도 BTC` `!c전체매도` `!c성과`
 **📡 텔레그램/섹터** `!t재시작`  `!섹터재시작`
 

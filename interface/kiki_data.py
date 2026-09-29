@@ -28,14 +28,16 @@ from common_utils import read_state as _read_state_atomic
 
 # DB 경로 상수
 _base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SBOT_HIST_DB  = os.path.join(_base, "sbot_trade_history.db")
-SBO2_HIST_DB  = os.path.join(_base, "lina_bot", "sbo2_trades.db")
-CBOT_HIST_DB  = os.path.join(_base, "cbot_trade_history.db")
+SBOT_HIST_DB   = os.path.join(_base, "sbot_trade_history.db")
+SBO2_HIST_DB   = os.path.join(_base, "lina_bot", "sbo2_trades.db")
+CBOT_HIST_DB   = os.path.join(_base, "cbot_trade_history.db")
+DAYBOT_HIST_DB = os.path.join(_base, "daybot_trade_history.db")
 
 BOT_STATE_FILES = {
     "sbot": "sbot_state.json",
     "sbo2": os.path.join("lina_bot", "sbo2_state.json"),
     "cbot": "cbot_state.json",
+    "daybot": "daybot_state.json",
 }
 
 def read_state(bot: str = "sbot") -> dict:
@@ -100,10 +102,17 @@ def get_recent_performance(limit: int = 20, db: str = None) -> list:
         return []
 
 def get_open_positions_from_db(bot: str = "sbot") -> list:
-    """DB의 미청산 매수 건"""
-    db        = SBO2_HIST_DB if bot == "sbo2" else SBOT_HIST_DB
-    table     = "sbo2_trades" if bot == "sbo2" else "trades"
-    score_col = "score" if bot == "sbo2" else "ai_score"
+    """DB의 미청산 매수 건.
+    ★ 2026-09-29: daybot 추가 — daybot_trade_history.db는 sbot_db.py와
+    같은 "trades" 테이블 구조를 쓰지만 ai_score 컬럼이 없어(고정%/호가
+    게이트만 쓰는 단순전략이라 AI스코어링 자체가 없음), 그 자리에
+    buy_tag(진입 tier: tier1_overlap 등)를 대신 넣는다."""
+    if bot == "sbo2":
+        db, table, score_col = SBO2_HIST_DB, "sbo2_trades", "score"
+    elif bot == "daybot":
+        db, table, score_col = DAYBOT_HIST_DB, "trades", "buy_tag"
+    else:
+        db, table, score_col = SBOT_HIST_DB, "trades", "ai_score"
     try:
         conn = _ro_connect(db)
         rows = conn.execute(f"""
