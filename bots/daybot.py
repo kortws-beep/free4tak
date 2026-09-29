@@ -10,7 +10,8 @@ sbot/sbo2(스윙, 며칠~1주일 보유)와 달리, daybot은 하루 안에 사�
 - 매수조건: 위 조건검색 통과 + 호가창 매도잔량이 매수잔량의 3배 이상
   ("눌린 스프링")일 때만 매수 진행
 - 매수금액: 1종목당 100만원+, 최대 2종목 동시보유
-- 매도기준: 고정 +2.5%/-3.5% (ATR 아님, 단순 % 비교)
+- 매도기준: 손절 -3.5% 고정, 익절은 +2.5% 도달시 즉시매도 대신 트레일링
+  스탑 전환(급등주는 10%+ 가는 경우가 많아서) — 고점 대비 -2% 밀리면 매도
 - 매매시간: 08:00(프리장)~19:30(매수마감), 19:50부터 무조건 전량 강제청산
 - 보유기간: 당일청산 원칙 — 단, 하한가/거래정지 등으로 19:50 강제청산이
   실패한 종목은 그날 밤 재시도하지 않고 익일 09:00에 딱 한 번 더 시도
@@ -86,6 +87,13 @@ MAX_POSITIONS    = 2                  # 1~2종목 몰빵회전
 BUY_AMT_PER_SLOT = 1_000_000          # 종목당 100만원+ (부족하면 kis_api.buy()가 자체적으로 최소1주까지 축소시도)
 TAKE_PROFIT_PCT  = 2.5                # 익절 +2~3% 중간값
 STOP_LOSS_PCT    = -3.5               # 손절 -3~4% 중간값
+# ★ 2026-09-29 밤 대장 지정 — 급등주 특성상 오르면 10%+ 가는 경우가
+#   많아서, +2.5% 도달해도 바로 전량매도하지 말고 트레일링스탑으로
+#   전환해서 더 큰 상승을 노림. 손절(-3.5%)은 트레일링 전환 전까지만
+#   유효 — 일단 +2.5%를 찍고 나면 트레일링(고점대비 하락폭)만으로 매도
+#   판단(원 손절선은 그 시점부터 현재가보다 한참 아래라 실질적으로
+#   트레일링이 항상 더 타이트해서 자연스럽게 대체됨).
+TRAILING_STOP_PCT = 2.0                # 고점 대비 이만큼 밀리면 매도("여유있게")
 
 # ★ 2026-09-29 대장 지정 — 한투 애프터마켓 개편(09-14, 20시까지 정규장과
 #   동일 실시간매칭) 반영해 매수시간을 08:00(프리장)~19:30까지 확장.
@@ -239,28 +247,40 @@ class DayBot:
             return 0.0
 
     # ============================================================
-    # 매도 판단 — 고정 %, ATR/윈도우 불필요
+    # 매도 판단 — 고정% 손절 + (+2.5% 도달 후) 트레일링스탑
     # ============================================================
-    def _check_exit(self, current: float, entry_price: float):
-        """Returns (should_sell: bool, reason: str)."""
-        if entry_price <= 0 or current <= 0:
-            return False, ""
-        rate = (current - entry_price) / entry_price * 100
-        if rate >= TAKE_PROFIT_PCT:
-            return True, f"익절(+{rate:.2f}%)"
-        if rate <= STOP_LOSS_PCT:
-            return True, f"손절({rate:.2f}%)"
-        return False, ""
-
     def _check_all_positions_for_exit(self):
+        """★ 2026-09-29 밤 대장 지정 — 급등주는 오르면 10%+ 가는 경우가
+        많아 +2.5% 찍었다고 바로 전량매도하지 않고 트레일링모드로
+        전환한다. 트레일링 진입 전까지는 기존처럼 고정 손절(-3.5%)만
+        체크, 진입 후엔 고점(peak_price) 대비 TRAILING_STOP_PCT(2%)
+        하락시에만 매도 — 원 손절선은 진입 시점부터 현재가보다 한참
+        아래라 트레일링이 항상 먼저 걸리므로 별도 분기 불필요."""
         for code in list(self.positions.keys()):
             pos     = self.positions[code]
             current = self._get_current_price(code)
             if current <= 0:
                 continue
-            should_sell, reason = self._check_exit(current, pos["entry_price"])
-            if should_sell:
-                self._do_sell(code, pos["qty"], reason, current)
+            entry = pos["entry_price"]
+            rate  = (current - entry) / entry * 100 if entry > 0 else 0
+
+            if pos.get("peak_price") is not None:
+                if current > pos["peak_price"]:
+                    pos["peak_price"] = current
+                trail_stop = pos["peak_price"] * (1 - TRAILING_STOP_PCT / 100)
+                if current <= trail_stop:
+                    self._do_sell(code, pos["qty"],
+                                  f"트레일링청산(고점{pos['peak_price']:,.0f}대비"
+                                  f"-{TRAILING_STOP_PCT:.1f}%, 총{rate:+.2f}%)", current)
+                continue
+
+            if rate >= TAKE_PROFIT_PCT:
+                pos["peak_price"] = current
+                print(f"📈 [daybot] {code} +{rate:.2f}% 도달 — 트레일링 모드 전환 "
+                      f"(고점:{current:,.0f}, -{TRAILING_STOP_PCT:.1f}% 밀리면 매도)")
+                continue
+            if rate <= STOP_LOSS_PCT:
+                self._do_sell(code, pos["qty"], f"손절({rate:.2f}%)", current)
 
     def _force_close_all(self, reason: str) -> set:
         """전량 강제청산 시도. 반환값은 매도 실패해서 여전히 self.positions에
@@ -297,6 +317,7 @@ class DayBot:
         self.positions[code] = {
             "entry_price": price, "qty": qty, "buy_time": now,
             "source_tier": source_tier, "buy_tag": source_tier,
+            "peak_price": None,   # +2.5% 도달 전까지는 None(트레일링 미활성)
         }
         self._pending_orders[code] = (orgno, odno, qty, time.time())
         self.code_name_map[code] = name
