@@ -1,0 +1,24 @@
+[Unit]
+Description=영암9 단타봇 (daybot)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=free4tak
+WorkingDirectory=/home/free4tak/k-bot/stock_bot
+Environment=PATH=/home/free4tak/k-bot/stock_bot/venv/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/home/free4tak/k-bot/stock_bot/venv/bin/python3 -u bots/daybot.py
+
+Restart=on-failure
+RestartSec=30s
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+StandardOutput=append:/home/free4tak/k-bot/stock_bot/logs/daybot.log
+StandardError=append:/home/free4tak/k-bot/stock_bot/logs/daybot.log
+
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target

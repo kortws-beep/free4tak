@@ -54,6 +54,13 @@ REST_URL    = "https://openapi.koreainvestment.com:9443"
 TR_체결통보  = "H0STCNI0"   # 실전
 TR_체결통보모의 = "H0STCNI9"  # 모의
 
+# ★ 2026-09-29: 단타봇용 실시간 체결가(시세) TR — 체결통보(H0STCNI0)와는
+#   별개로, 보유종목의 실시간 가격 틱을 받기 위한 구독. 이 코드베이스에
+#   기존 사용 선례가 없어 필드 레이아웃(STCK_PRPR=index 2 가정)은 미검증 —
+#   실사용 전 실제 구독 테스트로 반드시 확인할 것(잘못되면 손절/익절
+#   판단에 실계좌 손실 직결).
+TR_체결가 = "H0STCNT0"
+
 
 class KisWebSocket:
     """
@@ -87,6 +94,12 @@ class KisWebSocket:
         self.cash: int       = 0
         self.connected: bool = False
         self.last_update: float = 0.0
+
+        # ★ 2026-09-29: 단타봇용 실시간 체결가(H0STCNT0) — 기존 체결통보
+        #   (H0STCNI0) 경로와 완전히 분리된 opt-in 기능. 아무도 subscribe_
+        #   price()를 안 부르면 기존 sbot/sbo2 동작에 전혀 영향 없음.
+        self.live_prices: dict = {}   # {"코드": {"price": float, "ts": float}}
+        self._price_sub_codes: set = set()
 
         # ── 내부 ──────────────────────────────────────────
         self._approval_key: str = ""
@@ -175,6 +188,8 @@ class KisWebSocket:
 
             if tr_id in (TR_체결통보, TR_체결통보모의):
                 self._parse_체결통보(data)
+            elif tr_id == TR_체결가:
+                self._parse_체결가(data)
 
         except Exception as e:
             print(f"⚠️ [WS] 메시지 파싱 오류: {e}")
@@ -257,6 +272,51 @@ class KisWebSocket:
         except Exception as e:
             print(f"⚠️ [WS] 체결통보 파싱 오류: {e} | {data[:100]}")
 
+    def _parse_체결가(self, data: str):
+        """
+        ★ 2026-09-29 단타봇 신규 — 실시간 체결가(H0STCNT0) 파싱.
+        기존 H0STCNI0(체결통보)와 무관한 opt-in 경로.
+        ⚠️ 필드 레이아웃 미검증 — KIS 공식 문서 기준 index 2가
+        STCK_PRPR(현재가)로 추정되나, 이 코드베이스엔 선례가 없어
+        실제 구독 테스트로 반드시 재확인할 것.
+        """
+        try:
+            fields = data.split("^")
+            if len(fields) < 3:
+                return
+            code  = fields[0]
+            price = float(fields[2]) if fields[2] else 0
+            if price <= 0:
+                return
+            self.live_prices[code] = {"price": price, "ts": time.time()}
+        except Exception as e:
+            print(f"⚠️ [WS] 체결가 파싱 오류: {e} | {data[:100]}")
+
+    # ============================================================
+    # 실시간 체결가 구독 (단타봇용, opt-in)
+    # ============================================================
+    def subscribe_price(self, code: str):
+        """보유종목의 실시간 체결가(H0STCNT0) 구독 등록.
+        재연결 시 _on_open()이 self._price_sub_codes를 보고 자동 재구독."""
+        self._price_sub_codes.add(code)
+        if self._ws and self.connected:
+            try:
+                self._ws.send(self._build_subscribe(TR_체결가, code))
+            except Exception as e:
+                print(f"⚠️ [WS] 체결가 구독 오류 {code}: {e}")
+
+    def unsubscribe_price(self, code: str):
+        """실시간 체결가 구독 해제."""
+        self._price_sub_codes.discard(code)
+        self.live_prices.pop(code, None)
+        if self._ws and self.connected:
+            try:
+                msg = json.loads(self._build_subscribe(TR_체결가, code))
+                msg["header"]["tr_type"] = "2"   # 1=등록, 2=해제
+                self._ws.send(json.dumps(msg))
+            except Exception as e:
+                print(f"⚠️ [WS] 체결가 구독해제 오류 {code}: {e}")
+
     # ============================================================
     # 웹소켓 이벤트 핸들러
     # ============================================================
@@ -266,6 +326,14 @@ class KisWebSocket:
 
         # 체결 통보 구독 (HTS ID로 구독)
         ws.send(self._build_subscribe(self.tr_체결, self.hts_id))
+
+        # ★ 2026-09-29: 재연결 시 실시간 체결가 구독도 그대로 복원
+        #   (단타봇이 subscribe_price()로 등록해둔 종목들)
+        for code in list(self._price_sub_codes):
+            try:
+                ws.send(self._build_subscribe(TR_체결가, code))
+            except Exception as e:
+                print(f"⚠️ [WS] 체결가 재구독 오류 {code}: {e}")
 
     def _on_message(self, ws, message):
         self._parse_message(message)

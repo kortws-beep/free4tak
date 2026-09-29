@@ -87,6 +87,10 @@ MAX_CHANGE_RATE_PCT = 15.0
 TELEGRAM_DB_PATH = os.path.join(_here, "telegram_events.db")
 TELEGRAM_LOOKBACK_HOURS = 6
 STATE_FILE = os.path.join(_here, "day_trade_scout_state.json")
+# ★ 2026-09-29: 단타봇(daybot) 3순위 fallback 후보소스용 — 기존 Discord/
+#   Claude요약 경로는 그대로 두고, enriched 후보를 기계가 읽을 수 있는
+#   형태로 별도 저장만 추가(순수 추가, 기존 동작 무변경).
+SHARED_CANDIDATES_FILE = os.path.join(_here, "day_trade_scout_candidates.json")
 BATON_ACCEL_THRESHOLD = 30.0  # detect_baton_touch의 "급가속" 기준과 동일(재확인용)
 # ★ 2026-09-15: 섹터(테마)명 표시 요청(대장) — swing_master.py/swing_analyzer.py와
 #   동일하게 lina_bot/kr_theme_finance.db 사용(다른 두 사본은 0바이트 빈 파일).
@@ -298,6 +302,29 @@ def _enrich(candidates: list, kis: KisAPI) -> list:
     return enriched
 
 
+def _persist_shared_candidates(enriched: list, trigger_label: str):
+    """★ 2026-09-29 신규 — 순수 추가 함수, 기존 동작 변경 없음.
+    daybot의 3순위 fallback이 Claude 요약/Discord를 거치지 않고 바로
+    읽을 수 있도록 enriched 후보(그대로, _build_prompt()가 쓰는 것과
+    동일한 리스트)를 JSON으로 저장. 이 파일에 걸리는 MAX_CHANGE_RATE_PCT
+    (15%) 필터는 사람용 스윙 리서치 기준을 그대로 상속한다 — daybot
+    입장에선 3순위(최후 fallback)에만 영향을 주므로 일단 그대로 둠."""
+    try:
+        payload = {
+            "updated_at": datetime.datetime.now().isoformat(timespec="seconds"),
+            "trigger":    trigger_label,
+            "candidates": [
+                {"code": e["code"], "name": e["name"], "tags": e["tags"],
+                 "chg": e["chg"], "vol": e["vol"]}
+                for e in enriched[:MAX_CANDIDATES_TO_LLM]
+            ],
+        }
+        with open(SHARED_CANDIDATES_FILE, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False)
+    except Exception as e:
+        print(f"⚠️ 공유 후보 저장 오류: {e}")
+
+
 def _build_prompt(enriched: list) -> str:
     lines = []
     for e in enriched[:MAX_CANDIDATES_TO_LLM]:
@@ -376,6 +403,7 @@ def _run_scan(trigger_label: str, notify_on_empty: bool = False,
 
     kis = KisAPI()
     enriched = _enrich(candidates, kis)
+    _persist_shared_candidates(enriched, trigger_label)
 
     prompt = _build_prompt(enriched)
     summary = _call_claude(prompt)

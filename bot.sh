@@ -11,7 +11,13 @@
 #   ./bot.sh log all      # 전체 실시간 로그
 # ============================================================
 
-BOTS="sbot sbo2 cbot kiki sector dashboard telegram lina"
+# ★ 2026-09-29: sbot×sbo2 통합(대장 결정)으로 sbo2 의도적 정지 — 전체
+#   start/restart/enable에 끼어있으면 되살아나버리므로 목록에서 제외.
+#   개별 "./bot.sh {start|stop|restart} sbo2"는 여전히 동작(서비스 자체는
+#   롤백 대비 살아있음), status/log/today도 인자로 sbo2 주면 그대로 조회 가능.
+# ★ 2026-09-29 밤: daybot(단타봇) 신설 — sbo2가 쓰던 계좌 재사용, 키움
+#   스크리닝+KIS 실행 하이브리드. 배포 전 sbo2 완전정지(disable) 필수.
+BOTS="sbot cbot daybot kiki sector dashboard telegram lina"
 
 case "$1" in
 
@@ -137,18 +143,22 @@ case "$1" in
         sudo systemctl enable yeongam9-watchdog-sbo2.timer
         sudo systemctl start yeongam9-watchdog-sbot.timer
         sudo systemctl enable yeongam9-watchdog-sbot.timer
-        echo "  ✅ sbo2 + sbot watchdog 시작 (30초 간격, 5분 무응답 시 재시작)"
+        sudo systemctl start yeongam9-watchdog-daybot.timer
+        sudo systemctl enable yeongam9-watchdog-daybot.timer
+        echo "  ✅ sbo2 + sbot + daybot watchdog 시작 (30초 간격, 5분 무응답 시 재시작)"
         ;;
       stop)
         echo "🐕 watchdog 정지..."
         sudo systemctl stop yeongam9-watchdog-sbo2.timer
         sudo systemctl stop yeongam9-watchdog-sbot.timer
-        echo "  ⏹  sbo2 + sbot watchdog 정지"
+        sudo systemctl stop yeongam9-watchdog-daybot.timer
+        echo "  ⏹  sbo2 + sbot + daybot watchdog 정지"
         ;;
       status)
         echo "🐕 watchdog 상태"
         systemctl status yeongam9-watchdog-sbo2.timer --no-pager
         systemctl status yeongam9-watchdog-sbot.timer --no-pager
+        systemctl status yeongam9-watchdog-daybot.timer --no-pager
         ;;
       *)
         echo "사용법: $0 watchdog {start|stop|status}"
@@ -162,7 +172,7 @@ case "$1" in
     echo "  stop          — 전체 봇 정지"
     echo "  restart       — 전체 봇 재시작"
     echo "  status        — 봇별 실행 상태"
-    echo "  log [bot]     — 실시간 로그 (all/sbot/sbo2/cbot/kiki/lina)"
+    echo "  log [bot]     — 실시간 로그 (all/sbot/sbo2/cbot/daybot/kiki/lina)"
     echo "  today [bot]   — 오늘 로그"
     echo "  enable        — 부팅 자동시작 등록"
     echo "  disable       — 부팅 자동시작 해제"

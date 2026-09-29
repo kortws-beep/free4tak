@@ -1,0 +1,501 @@
+"""
+daybot.py — 영암9 단타봇 (당일청산 회전매매)
+================================================================
+[이 파일이 하는 일 — 비개발자용 설명]
+
+sbot/sbo2(스윙, 며칠~1주일 보유)와 달리, daybot은 하루 안에 사고 파는
+순수 단타봇입니다.
+- 대상: 키움 조건검색 3개(주도주검색식3/단타000/장개장직후 종목찾기)
+  중 2개 이상 겹친 종목 우선
+- 매수금액: 1종목당 100만원+, 최대 2종목 동시보유
+- 매도기준: 고정 +2.5%/-3.5% (ATR 아님, 단순 % 비교)
+- 보유기간: 당일청산 원칙 — 15:20부터 무조건 전량 강제청산
+
+[아키텍처 — 키움 스크리닝 + KIS 실행 하이브리드]
+키움은 조건검색(스크리닝) 전용으로만 사용 — 주문/체결통보 기능이
+전혀 없어(조사로 확인됨) 매수/매도/실시간감시는 전부 KIS(한투)로 한다.
+실행계좌는 sbo2가 쓰던 계좌(무접미사 KIS_* 환경변수)를 재사용 —
+이 계좌엔 매도 안 한 대원전선(006340)이 그대로 남아있으니 daybot은
+이 종목을 절대 건드리지 않는다(자기가 산 종목만 self.positions로
+추적, 계좌 전체 보유종목과 절대 혼동 금지).
+
+[모듈 구조]
+  daybot.py        ← 메인 루프 (이 파일)
+  kis_api.py       ← 한투 API (매수/매도/취소, sbot과 동일 모듈)
+  kis_websocket.py ← 실시간 체결통보(H0STCNI0)+체결가(H0STCNT0, 신규)
+  kiwoom_api.py    ← 조건검색 전용(get_condition_codes)
+  daybot_db.py     ← 매매이력 DB
+  common_utils.py  ← 공통 헬퍼
+================================================================
+"""
+import sys as _sys
+import os as _os
+_BASE = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+for _d in ["core", "intelligence", "interface", "bots", ""]:
+    _p = _os.path.join(_BASE, _d)
+    if _p not in _sys.path:
+        _sys.path.insert(0, _p)
+
+import os
+import time
+import json
+import asyncio
+import pathlib
+import datetime
+from dotenv import load_dotenv
+
+HB_FILE = "/tmp/hb_daybot"
+
+from common_utils import (
+    now_hhmm, now_hms, today_str, is_weekend,
+    read_state, write_state,
+)
+from kis_api import KisAPI
+from kis_websocket import KisWebSocket
+from kiwoom_api import KiwoomAPI
+from notifier import Notifier
+from daybot_db import DayTradeDB
+
+load_dotenv(_os.path.join(_BASE, ".env"))
+
+try:
+    from master_db import (
+        record_trade    as _master_record,
+        upsert_position as _master_upsert,
+        remove_position as _master_remove,
+        get_all_positions,
+    )
+except Exception:
+    _master_record = None
+    _master_upsert = None
+    _master_remove = None
+    get_all_positions = None
+    print("⚠️ master_db 없음 → 크로스보유가드/대시보드 연동 비활성")
+
+
+# ============================================================
+# 상수
+# ============================================================
+BOT_STATE_FILE = "daybot_state.json"
+
+MAX_POSITIONS    = 2                  # 1~2종목 몰빵회전
+BUY_AMT_PER_SLOT = 1_000_000          # 종목당 100만원+ (부족하면 kis_api.buy()가 자체적으로 최소1주까지 축소시도)
+TAKE_PROFIT_PCT  = 2.5                # 익절 +2~3% 중간값
+STOP_LOSS_PCT    = -3.5               # 손절 -3~4% 중간값
+
+REG_MARKET_START = "0900"
+REG_MARKET_END   = "1530"
+BUY_START_TIME   = "0900"
+BUY_END_TIME     = "1500"             # 15:00 이후 신규매수 중단 — EOD청산 전 버퍼
+FORCE_EOD_TIME   = "1520"             # 15:20부터 무조건 전량강제청산(최우선)
+
+SCAN_INTERVAL_SEC = 240               # 조건검색 풀사이클(3개조건) 주기 — 65초 재시도
+                                       # 백오프까지 감안한 안전마진(core/kiwoom_api.py 참고)
+LOOP_SLEEP_SEC     = 5                # 포지션감시/EOD체크용 빠른 루프 틱
+PENDING_ORDER_TIMEOUT_SEC = 30        # 미체결 주문 취소 판단 기준(daybot 5초루프 기준 조정값)
+MIN_ANALYSIS_CASH  = 200_000          # 이 밑이면 스캔 자체 스킵(API 낭비 방지)
+
+CONDITION_KEYWORDS = ["주도주검색식3", "단타000", "장개장직후 종목찾기"]
+# ★ "5본봉거래대금단타"는 대장이 수동단타에서 안 쓰던 검색식이라 제외
+
+SCOUT_CANDIDATES_PATH = _os.path.join(_BASE, "intelligence", "day_trade_scout_candidates.json")
+SCOUT_STALE_SEC = 7200   # day_trade_scout.py 결과가 이 이상 오래되면 3순위 fallback에서 제외
+
+
+def _read_state() -> dict:
+    return read_state(BOT_STATE_FILE, default={})
+
+
+class DayBot:
+
+    def __init__(self):
+        self.api = KisAPI(
+            appkey=os.getenv("KIS_APPKEY"),
+            secret=os.getenv("KIS_SECRET"),
+            cano  =os.getenv("KIS_CANO"),
+            acnt  =os.getenv("KIS_ACNT_PRDT_CD"),
+        )   # ★ sbo2가 쓰던 계좌(무접미사) 재사용 — sbot(...2 접미사)과 다른 계좌
+        self.notifier = Notifier(name="daybot")
+        self.db       = DayTradeDB()
+        self.db.init_db()
+
+        # daybot 자신이 산 종목만 추적 — 절대 계좌 전체 보유종목과 혼동 금지
+        # (이 계좌엔 매도 안 한 대원전선이 남아있음)
+        self.positions: dict     = {}   # {code: {entry_price, qty, buy_time, source_tier, buy_tag}}
+        self.code_name_map: dict = {}
+        self.sold_today: dict    = {}   # {code: sell_hms} — 당일 재매수 방지
+        self._sold_today_date    = ""
+        self._pending_orders: dict = {}  # {code: (orgno, odno, qty, placed_ts)}
+
+        self._is_holiday      = False
+        self._holiday_checked = ""
+        self._last_scan_ts    = 0.0
+
+        self.kiwoom = KiwoomAPI()
+
+        # KIS 웹소켓 — 체결통보(H0STCNI0, 기존) + 실시간 체결가(H0STCNT0, 신규, opt-in)
+        self._ws = KisWebSocket(
+            appkey=os.getenv("KIS_APPKEY"),
+            secret=os.getenv("KIS_SECRET"),
+            cano  =os.getenv("KIS_CANO"),
+            acnt  =os.getenv("KIS_ACNT_PRDT_CD"),
+        )
+        self._ws.start()
+
+    # ============================================================
+    # 알림
+    # ============================================================
+    def _notify(self, msg: str, critical: bool = False):
+        self.notifier.send(msg, critical=critical)
+
+    def _name(self, code: str) -> str:
+        return self.code_name_map.get(code, code)
+
+    # ============================================================
+    # 상태 저장/복구
+    # ============================================================
+    def _save_state(self):
+        write_state(BOT_STATE_FILE, {
+            "positions":        self.positions,
+            "sold_today":       self.sold_today,
+            "sold_today_date":  self._sold_today_date,
+            "code_name_map":    self.code_name_map,
+            "last_update":      now_hms(),
+        })
+
+    def _restore_state(self):
+        """재시작 시 daybot 자신의 상태를 복구하고 실계좌와 교차확인.
+        ★ 대원전선처럼 daybot이 모르는 종목은 절대 자동입양하지 않는다
+        (core/account_sync.py::sync_positions()는 계좌의 모든 미인식
+        종목을 자동으로 흡수하는 구조라 여기선 재사용 금지)."""
+        saved = _read_state()
+        self.positions       = saved.get("positions", {})
+        self.sold_today      = saved.get("sold_today", {})
+        self._sold_today_date = saved.get("sold_today_date", today_str())
+        self.code_name_map.update(saved.get("code_name_map", {}))
+
+        if self._sold_today_date != today_str():
+            self.sold_today = {}
+            self._sold_today_date = today_str()
+
+        real_pos = self.api.get_current_positions()
+        if real_pos is None:
+            print("⚠️ 재시작 시 실계좌 조회 실패 — 저장된 상태 그대로 신뢰")
+        else:
+            for code in list(self.positions.keys()):
+                if code not in real_pos:
+                    self._notify(f"⚠️ {code} 재시작 시 계좌에 없음 — 포지션 제거", critical=False)
+                    self.positions.pop(code, None)
+                else:
+                    self.positions[code]["qty"] = real_pos[code]["qty"]
+
+            unknown = set(real_pos.keys()) - set(self.positions.keys())
+            if unknown:
+                print(f"ℹ️ 계좌 내 daybot 소관 외 종목 (건드리지 않음): {unknown}")
+
+        for code in self.positions:
+            self._ws.subscribe_price(code)
+
+        print(f"📦 [daybot] 상태복구 완료 — 보유 {len(self.positions)}종목")
+
+    # ============================================================
+    # 가격 조회 (실시간 우선, REST 폴백)
+    # ============================================================
+    def _get_current_price(self, code: str) -> float:
+        tick = self._ws.live_prices.get(code)
+        if tick and time.time() - tick["ts"] < 30:
+            return tick["price"]
+        mdata = self.api.get_market_data(code) or {}
+        try:
+            return float(mdata.get("stck_prpr", 0) or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    # ============================================================
+    # 매도 판단 — 고정 %, ATR/윈도우 불필요
+    # ============================================================
+    def _check_exit(self, current: float, entry_price: float):
+        """Returns (should_sell: bool, reason: str)."""
+        if entry_price <= 0 or current <= 0:
+            return False, ""
+        rate = (current - entry_price) / entry_price * 100
+        if rate >= TAKE_PROFIT_PCT:
+            return True, f"익절(+{rate:.2f}%)"
+        if rate <= STOP_LOSS_PCT:
+            return True, f"손절({rate:.2f}%)"
+        return False, ""
+
+    def _check_all_positions_for_exit(self):
+        for code in list(self.positions.keys()):
+            pos     = self.positions[code]
+            current = self._get_current_price(code)
+            if current <= 0:
+                continue
+            should_sell, reason = self._check_exit(current, pos["entry_price"])
+            if should_sell:
+                self._do_sell(code, pos["qty"], reason, current)
+
+    def _force_close_all(self, reason: str):
+        for code, pos in list(self.positions.items()):
+            current = self._get_current_price(code) or pos["entry_price"]
+            self._do_sell(code, pos["qty"], reason, current)
+        self._notify(f"🔔 [daybot] {reason} — 전량 청산 완료", critical=True)
+
+    # ============================================================
+    # 매수/매도 실행
+    # ============================================================
+    def _do_buy(self, code: str, name: str, price: float, source_tier: str):
+        psbl_cash = self.api.get_psbl_order_cash(code, price)
+        if psbl_cash < MIN_ANALYSIS_CASH:
+            return False
+        amount = min(BUY_AMT_PER_SLOT, psbl_cash)
+        ok, orgno, odno, qty = self.api.buy(
+            code, price, amount, code_name_map=self.code_name_map,
+            psbl_cash=psbl_cash,
+        )
+        if not ok or qty <= 0:
+            return False
+
+        now = now_hms()
+        self.positions[code] = {
+            "entry_price": price, "qty": qty, "buy_time": now,
+            "source_tier": source_tier, "buy_tag": source_tier,
+        }
+        self._pending_orders[code] = (orgno, odno, qty, time.time())
+        self.code_name_map[code] = name
+        self._ws.subscribe_price(code)
+
+        self.db.save_buy(code, price, qty, stock_name=name, buy_tag=source_tier)
+        if _master_upsert:
+            _master_upsert(bot_type="daybot", code=code, stock_name=name,
+                            entry_price=price, current_price=price, qty=qty,
+                            buy_time=now, buy_tag=source_tier)
+
+        self._notify(f"🚀 [daybot] 매수 {code}({name}) | {qty}주 @{price:,.0f}원 | [{source_tier}]")
+        print(f"🚀 [daybot] 매수 {code}({name}) | {qty}주 @{price:,.0f}원 | [{source_tier}]")
+        return True
+
+    def _do_sell(self, code: str, qty: int, reason: str, price: float):
+        name = self._name(code)
+        ok = self.api.sell(code, qty)
+        if not ok:
+            print(f"⚠️ [daybot] 매도 실패 {code} — 다음 루프 재시도")
+            return
+
+        self.db.save_sell(code, price, reason)
+        if _master_record:
+            pos = self.positions.get(code, {})
+            _master_record(bot_type="daybot", code=code, stock_name=name,
+                            buy_price=pos.get("entry_price", price),
+                            sell_price=price, qty=qty, sell_reason=reason,
+                            buy_tag=pos.get("buy_tag", ""))
+        if _master_remove:
+            _master_remove("daybot", code)
+
+        self.positions.pop(code, None)
+        self._pending_orders.pop(code, None)
+        self.sold_today[code] = now_hms()
+        self._ws.unsubscribe_price(code)
+
+        self._notify(f"✅ [daybot] 매도 {code}({name}) | {reason} @{price:,.0f}원")
+        print(f"✅ [daybot] 매도 {code}({name}) | {reason} @{price:,.0f}원")
+
+    def _check_pending_orders(self):
+        """미체결 주문이 PENDING_ORDER_TIMEOUT_SEC 이상 지나면 취소 시도.
+        취소 성공(=진짜 미체결) → 포지션/pending 정리, 실패(=이미 체결됨)
+        → pending만 정리(포지션은 정상 유지). 부분체결 대비 웹소켓
+        체결통보(H0STCNI0)가 알고 있는 실제 체결수량으로 qty 보정
+        (ws.positions는 코드별 dict라 daybot이 산 종목 조회는 대원전선과
+        섞일 위험 없음 — "모르는 종목 자동입양" 문제와는 다른 얘기)."""
+        now_ts = time.time()
+        for code, (orgno, odno, qty, placed_ts) in list(self._pending_orders.items()):
+            if now_ts - placed_ts < PENDING_ORDER_TIMEOUT_SEC:
+                continue
+            if not odno:
+                self._pending_orders.pop(code, None)
+                continue
+            ok = self.api.cancel_order(orgno, odno, code, qty)
+            if ok:
+                print(f"🚫 [daybot] 미체결 취소: {code}")
+                self.positions.pop(code, None)
+                self._ws.unsubscribe_price(code)
+            else:
+                real_qty = self._ws.positions.get(code, {}).get("qty")
+                if real_qty and code in self.positions:
+                    self.positions[code]["qty"] = real_qty
+            self._pending_orders.pop(code, None)
+
+    # ============================================================
+    # 종목소스 — 키움 조건검색 스캔 + 우선순위 워터폴
+    # ============================================================
+    def _scan_conditions(self):
+        """core/kiwoom_api.py의 get_condition_codes()를 그대로 재사용
+        (재구현 금지 — code_multi_tag_map이 이미 겹침추적 해줌)."""
+        if not self.kiwoom.enabled:
+            return [], {}
+        code_name_map, code_multi_tag_map = {}, {}
+        loop = asyncio.new_event_loop()
+        try:
+            codes = loop.run_until_complete(
+                self.kiwoom.get_condition_codes(
+                    use_keywords=CONDITION_KEYWORDS,
+                    code_name_map=code_name_map,
+                    code_multi_tag_map=code_multi_tag_map,
+                )
+            )
+        except Exception as e:
+            print(f"⚠️ [daybot] 조건검색 오류: {e}")
+            self.kiwoom.reset_token()
+            codes = []
+        finally:
+            loop.close()
+        self.code_name_map.update(code_name_map)
+        return codes, code_multi_tag_map
+
+    def _load_scout_tier3_picks(self) -> list:
+        """day_trade_scout.py가 저장한 공유후보 JSON에서 3순위 fallback
+        코드 목록을 읽는다. 오래됐으면(2시간+) 빈 리스트."""
+        try:
+            with open(SCOUT_CANDIDATES_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            updated = datetime.datetime.fromisoformat(data["updated_at"])
+            if (datetime.datetime.now() - updated).total_seconds() > SCOUT_STALE_SEC:
+                return []
+            for c in data.get("candidates", []):
+                self.code_name_map.setdefault(c["code"], c["name"])
+            return [c["code"] for c in data.get("candidates", [])]
+        except Exception:
+            return []
+
+    def _rank_candidates(self, codes: list, code_multi_tag_map: dict) -> list:
+        """1순위 겹침종목 → 2순위 단타000단독 → 3순위 나머지단독+scout fallback."""
+        tier1, tier2, tier3 = [], [], []
+        for code in codes:
+            tags = code_multi_tag_map.get(code, [])
+            if len(tags) >= 2:
+                tier1.append(code)
+            elif tags == ["단타000"]:
+                tier2.append(code)
+            elif tags:
+                tier3.append(code)
+
+        for code in self._load_scout_tier3_picks():
+            if code not in tier1 and code not in tier2 and code not in tier3:
+                tier3.append(code)
+
+        return tier1 + tier2 + tier3
+
+    def _run_candidate_scan_and_maybe_buy(self):
+        codes, code_multi_tag_map = self._scan_conditions()
+        if not codes:
+            return
+        ranked = self._rank_candidates(codes, code_multi_tag_map)
+        if not ranked:
+            return
+
+        held_elsewhere = set()
+        if get_all_positions:
+            try:
+                held_elsewhere = {p["code"] for p in get_all_positions()
+                                   if p["bot_type"] != "daybot"}
+            except Exception:
+                pass
+
+        tags_by_code = code_multi_tag_map
+        for code in ranked:
+            if len(self.positions) >= MAX_POSITIONS:
+                break
+            if code in self.positions or code in self.sold_today:
+                continue
+            if code in held_elsewhere:
+                continue
+            price = self._get_current_price(code)
+            if price <= 0:
+                continue
+            tags = tags_by_code.get(code, [])
+            if len(tags) >= 2:
+                tier = "tier1_overlap"
+            elif tags == ["단타000"]:
+                tier = "tier2_danta000"
+            else:
+                tier = "tier3_fallback"
+            self._do_buy(code, self._name(code), price, tier)
+
+    # ============================================================
+    # 메인 루프
+    # ============================================================
+    def run(self):
+        self._notify("🚀 [DAYBOT] 단타봇 가동", critical=True)
+        print(f"🚀 [DAYBOT] 단타봇 가동 | 최대 {MAX_POSITIONS}종목 | "
+              f"익절+{TAKE_PROFIT_PCT}% 손절{STOP_LOSS_PCT}% | EOD청산 {FORCE_EOD_TIME}")
+        self._restore_state()
+
+        while True:
+            try:
+                today = today_str()
+                now_t = now_hhmm()
+
+                # 1) heartbeat — 항상 최우선(continue 게이트보다 앞)
+                pathlib.Path(HB_FILE).touch()
+
+                # 2) 토큰 갱신 — 역시 continue 게이트보다 앞
+                self.api.refresh_token_if_needed()
+
+                # 3) 주말
+                if is_weekend():
+                    time.sleep(300); continue
+
+                # 4) 휴장일 (None-safe — 판단불가면 캐시 안 하고 다음 루프 재시도)
+                if self._holiday_checked != today:
+                    _open = self.api.is_market_open()
+                    if _open is not None:
+                        self._is_holiday = not _open
+                        self._holiday_checked = today
+                if self._is_holiday:
+                    time.sleep(300); continue
+
+                # 5) 일일 초기화
+                if today != self._sold_today_date:
+                    self.sold_today = {}
+                    self._sold_today_date = today
+
+                # 6) EOD 강제청산 — 최우선, 포지션 있으면 무조건 전량청산
+                if now_t >= FORCE_EOD_TIME and self.positions:
+                    self._force_close_all("EOD 강제청산")
+                    self._save_state()
+                    time.sleep(LOOP_SLEEP_SEC); continue
+
+                # 7) 장외 시간
+                if not (REG_MARKET_START <= now_t <= REG_MARKET_END):
+                    time.sleep(60); continue
+
+                # 8) 미체결 주문 정리
+                self._check_pending_orders()
+
+                # 9) 포지션 실시간감시
+                self._check_all_positions_for_exit()
+
+                # 10) 후보스캔(240초 주기, 슬롯 여유+매수시간대일 때만)
+                if (len(self.positions) < MAX_POSITIONS
+                        and BUY_START_TIME <= now_t <= BUY_END_TIME
+                        and time.time() - self._last_scan_ts >= SCAN_INTERVAL_SEC):
+                    self._run_candidate_scan_and_maybe_buy()
+                    self._last_scan_ts = time.time()
+
+                # 11) 상태 저장
+                self._save_state()
+
+                time.sleep(LOOP_SLEEP_SEC)
+
+            except Exception as e:
+                print(f"⚠️ [daybot] 루프 오류: {e}")
+                time.sleep(10)
+
+
+def main():
+    bot = DayBot()
+    bot.run()
+
+
+if __name__ == "__main__":
+    main()
