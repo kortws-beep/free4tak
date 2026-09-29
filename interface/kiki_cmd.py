@@ -576,14 +576,20 @@ async def cmd_all_status(ctx):
 
 
 async def cmd_restart_all(ctx):
-    """전체 봇 재시작 (kiki 제외) — sbot/sbo2/cbot/telegram/sector"""
+    """전체 봇 재시작 (kiki 제외) — sbot/cbot/telegram/sector.
+    ★ 2026-09-29: sbot×sbo2 통합(대장 결정)으로 sbo2 의도적 정지 —
+    전체재시작에 sbo2가 끼어있으면 되살아나버리므로 여기서만 제외
+    (개별 !sbo2재시작/!sbo2정지/!sbo2시작 명령 자체는 전환 기간 중
+    수동 조작용으로 그대로 남겨둠)."""
     import subprocess as _sp
     import asyncio as _ac
 
-    await ctx.send("🔄 전체 재시작 시작... (kiki 제외)")
+    await ctx.send("🔄 전체 재시작 시작... (kiki, sbo2 제외)")
     results = []
 
     for name, svc in RESTART_SERVICES.items():
+        if name == "sbo2":
+            continue
         try:
             ret = _sp.run(["sudo", "systemctl", "restart", svc],
                           capture_output=True, timeout=15)
