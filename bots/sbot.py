@@ -211,6 +211,13 @@ MEGA_CAP_REFRESH_SEC    = 1800    # S7 후보 재조회 캐시(30분) — 8종�
 BUY_1ST_AMT_BASE = 1_650_000    # 1차 매수 기본 금액 (2026-09-29: 150만→165만,
                                  # sbot×sbo2 통합 6슬롯 구조 반영. 켈리+ATR로
                                  # 이 기준값에서 유동적으로 조정됨(new 슬롯만))
+# ★ 2026-09-29: 대장 지적 — sbo2 자금이체 전 현금이 쪼들릴 때, 고정금액
+#   슬롯(모멘텀/추세/완화/유튜브/S7)이 MIN_ANALYSIS_CASH(20만원)만 넘으면
+#   남은 푼돈 그대로 사버려서 목표(165만원)의 13%짜리 스크랩 포지션(세방
+#   21만원 매수)이 슬롯 하나를 낭비하는 문제 발견. 고정금액 슬롯은 목표
+#   금액의 이 비율 미만이면 그냥 패스(다음 루프에 현금 늘면 재시도) —
+#   켈리기반 KISNEW 슬롯은 원래도 가변사이징이 의도된 설계라 대상 아님.
+FLAT_BUY_MIN_RATIO = 0.5
 
 # ── 통합 후보풀 슬롯 상수 ────────────────────────────────────
 # sbot 자체 소스(KIS new그룹/S7) + core/candidate_pool.py의 sbo2 원천
@@ -1354,6 +1361,13 @@ class SBot:
                 )
             else:
                 buy_amount = min(BUY_1ST_AMT_BASE, psbl_cash)
+                # ★ 2026-09-29: 목표 슬롯금액의 FLAT_BUY_MIN_RATIO 미만이면
+                #   스크랩 매수 방지(대장 지적 — 세방 21만원 매수 건)
+                if buy_amount < BUY_1ST_AMT_BASE * FLAT_BUY_MIN_RATIO:
+                    print(f"⏭️ [SWING] {code} 패스 — 가용현금({buy_amount:,}원)이 "
+                          f"목표 슬롯금액({BUY_1ST_AMT_BASE:,}원)의 "
+                          f"{FLAT_BUY_MIN_RATIO:.0%} 미만")
+                    continue
 
             # ★ 1주도 못 사면 패스
             if buy_amount < cand["curr"]:
