@@ -2016,7 +2016,7 @@ class SBot:
                         print(f"🚫 [SWING] 미체결 취소: {_code}({self._name(_code)}) odno:{_odno}")
                         ok = self.api.cancel_order(_orgno, _odno, _code, _qty)
                         if ok:
-                            self.notify(
+                            self._notify(
                                 f"🚫 [SWING] 미체결 취소\n"
                                 f"종목: {_code}({self._name(_code)})\n"
                                 f"사유: 1루프 내 미체결 → 자금 반환"
