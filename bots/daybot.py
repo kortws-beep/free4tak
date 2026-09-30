@@ -48,6 +48,7 @@ import json
 import asyncio
 import pathlib
 import datetime
+import threading
 from dotenv import load_dotenv
 
 HB_FILE = "/tmp/hb_daybot"
@@ -153,6 +154,19 @@ class DayBot:
         self._holiday_checked = ""
         self._last_scan_ts    = 0.0
         self._is_paused       = False
+        # ★ 2026-09-30 발견 — 키움 조건검색이 3개 조건 전부 타임아웃나면
+        #   최악의 경우(조건당 최대 2회 재시도×65초, core/kiwoom_api.py)
+        #   8분 가까이 걸릴 수 있는데, 이게 메인루프 안에서 동기 실행되고
+        #   있어서 그동안 heartbeat가 안 찍혀 워치독이 5분마다 daybot을
+        #   계속 재시작시키고 있었음(실측: 11:46~15:37 사이 수십 차례).
+        #   스캔을 백그라운드 스레드로 분리해서 메인루프(heartbeat/포지션
+        #   감시/EOD청산)가 스캔 소요시간과 무관하게 계속 돌게 한다.
+        self._scan_thread: threading.Thread = None
+        # ★ 스캔이 백그라운드 스레드로 도는 이상, self.positions에 키를
+        #   추가/삭제하는 지점(_do_buy/_do_sell)과 그걸 통째로 직렬화하는
+        #   _save_state()가 동시에 돌면 "dictionary changed size during
+        #   iteration"로 죽을 수 있어 락으로 보호.
+        self._positions_lock = threading.Lock()
 
         # ★ 2026-09-29 대장 지정 — 19:50 EOD청산 실패분(하한가/거래정지 등)은
         #   그날 밤 내내 재시도하지 않고 익일 09:00에 딱 한 번 더 시도.
@@ -184,8 +198,11 @@ class DayBot:
     # 상태 저장/복구
     # ============================================================
     def _save_state(self):
+        with self._positions_lock:
+            positions_snapshot = dict(self.positions)   # 얕은 복사 — json 직렬화 중
+                                                          # 스캔스레드가 키 추가/삭제해도 안전
         write_state(BOT_STATE_FILE, {
-            "positions":        self.positions,
+            "positions":        positions_snapshot,
             "sold_today":       self.sold_today,
             "sold_today_date":  self._sold_today_date,
             "code_name_map":    self.code_name_map,
@@ -315,11 +332,12 @@ class DayBot:
             return False
 
         now = now_hms()
-        self.positions[code] = {
-            "entry_price": price, "qty": qty, "buy_time": now,
-            "source_tier": source_tier, "buy_tag": source_tier,
-            "peak_price": None,   # +2.5% 도달 전까지는 None(트레일링 미활성)
-        }
+        with self._positions_lock:
+            self.positions[code] = {
+                "entry_price": price, "qty": qty, "buy_time": now,
+                "source_tier": source_tier, "buy_tag": source_tier,
+                "peak_price": None,   # +2.5% 도달 전까지는 None(트레일링 미활성)
+            }
         self._pending_orders[code] = (orgno, odno, qty, time.time())
         self.code_name_map[code] = name
         self._ws.subscribe_price(code)
@@ -351,7 +369,8 @@ class DayBot:
         if _master_remove:
             _master_remove("daybot", code)
 
-        self.positions.pop(code, None)
+        with self._positions_lock:
+            self.positions.pop(code, None)
         self._pending_orders.pop(code, None)
         self.sold_today[code] = now_hms()
         self._ws.unsubscribe_price(code)
@@ -376,7 +395,8 @@ class DayBot:
             ok = self.api.cancel_order(orgno, odno, code, qty)
             if ok:
                 print(f"🚫 [daybot] 미체결 취소: {code}")
-                self.positions.pop(code, None)
+                with self._positions_lock:
+                    self.positions.pop(code, None)
                 self._ws.unsubscribe_price(code)
                 # ★ 2026-09-30: 취소된 매수는 실제 거래가 아니므로 DB/
                 #   master_db 기록도 같이 정리(0035S0 유령거래 실사례)
@@ -585,12 +605,19 @@ class DayBot:
                 self._check_all_positions_for_exit()
 
                 # 11) 후보스캔(240초 주기, 슬롯 여유+매수시간대일 때만, 정지중이면 스킵)
+                #     ★ 백그라운드 스레드로 실행 — 키움 조건검색이 타임아웃/
+                #     재시도로 몇 분씩 걸려도 메인루프(heartbeat/포지션감시/
+                #     EOD청산)는 계속 돈다. 이전 스캔이 아직 안 끝났으면
+                #     새로 안 띄움(중복실행 방지).
                 if (not self._is_paused
                         and len(self.positions) < MAX_POSITIONS
                         and BUY_START_TIME <= now_t <= BUY_END_TIME
-                        and time.time() - self._last_scan_ts >= SCAN_INTERVAL_SEC):
-                    self._run_candidate_scan_and_maybe_buy()
+                        and time.time() - self._last_scan_ts >= SCAN_INTERVAL_SEC
+                        and (self._scan_thread is None or not self._scan_thread.is_alive())):
                     self._last_scan_ts = time.time()
+                    self._scan_thread = threading.Thread(
+                        target=self._run_candidate_scan_and_maybe_buy, daemon=True)
+                    self._scan_thread.start()
 
                 # 12) 상태 저장
                 self._save_state()
