@@ -7,7 +7,8 @@ sbot/sbo2(스윙, 며칠~1주일 보유)와 달리, daybot은 하루 안에 사�
 순수 단타봇입니다.
 - 대상: 키움 조건검색 3개(주도주검색식3/단타000/장개장직후 종목찾기)
   중 2개 이상 겹친 종목 우선
-- 매수조건: 위 조건검색 통과 + 호가창 매도잔량이 매수잔량의 3배 이상
+- 매수조건: 위 조건검색 통과 + 당일 등락률 양수(주도주검색식3은 하락
+  종목도 걸릴 수 있어 제외) + 호가창 매도잔량이 매수잔량의 3배 이상
   ("눌린 스프링")일 때만 매수 진행
 - 매수금액: 1종목당 100만원+, 최대 2종목 동시보유
 - 매도기준: 손절 -3.5% 고정, 익절은 +2.5% 도달시 즉시매도 대신 트레일링
@@ -467,8 +468,19 @@ class DayBot:
                 continue
             if code in held_elsewhere:
                 continue
-            price = self._get_current_price(code)
+            # ★ 2026-09-30 대장 지정 — 주도주검색식3은 거래대금 등 기준이라
+            #   당일 하락 중인 종목도 걸릴 수 있음. daybot은 급등주 추종
+            #   전략이라 등락률이 음수/보합인 후보는 애초에 제외.
+            mdata = self.api.get_market_data(code) or {}
+            try:
+                price = float(mdata.get("stck_prpr", 0) or 0)
+                chg   = float(mdata.get("prdy_ctrt", 0) or 0)
+            except (TypeError, ValueError):
+                continue
             if price <= 0:
+                continue
+            if chg <= 0:
+                print(f"⏭️ [daybot] {code} 패스 — 등락률 {chg:+.2f}% (하락/보합)")
                 continue
             # ★ 2026-09-29 대장 지정 — 매도잔량이 매수잔량의 3배 이상
             #   ("눌린 스프링", core/kis_api.py:get_hoga() 자체 표현)일
