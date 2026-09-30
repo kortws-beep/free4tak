@@ -93,7 +93,8 @@ async def cmd_status(ctx, bot_name: str = "sbot"):
     pos_rows  = get_open_positions_from_db(bot_name)
     now       = now_kst().strftime("%H:%M:%S")
     paused    = "⏸️ 일시중단" if state.get("paused") else "▶️ 실행중"
-    bot_label = "📊 스윙봇" if bot_name == "sbot" else "📊 스윙봇2" if bot_name == "sbo2" else "🤖 봇"
+    bot_label = ("📊 스윙봇" if bot_name == "sbot" else "📊 스윙봇2" if bot_name == "sbo2"
+                 else "⚡ 단타봇" if bot_name == "daybot" else "🤖 봇")
 
     lines = [
         f"{bot_label} **영암9 현황** [{now}]",
@@ -132,7 +133,11 @@ async def cmd_status(ctx, bot_name: str = "sbot"):
     elif pos_rows:
         lines.append("\n**📦 보유종목 (DB 기준)**")
         for code, bp, qty, ais, bt in pos_rows:
-            lines.append(f"  {code} | 매수가:{int(bp):,}원 | {qty}주 | AI:{ais}점")
+            # ★ 2026-10-01: daybot은 AI점수가 아니라 매수출처(tier1_overlap
+            #   등 문자열)를 그 자리에 넣어 반환함(get_open_positions_from_db()
+            #   참고) — "AI:tier3_fallback점"처럼 깨져 보이던 문제 수정.
+            extra = f"출처:{ais}" if bot_name == "daybot" else f"AI:{ais}점"
+            lines.append(f"  {code} | 매수가:{int(bp):,}원 | {qty}주 | {extra}")
     else:
         lines.append("보유종목 없음")
 

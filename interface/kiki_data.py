@@ -66,9 +66,18 @@ def update_state(bot: str = "sbot", **kwargs):
         return
     _update_state_atomic(fname, **kwargs)
 def get_active_bots() -> list:
-    """현재 실행 중인(상태파일이 있는) 봇 목록"""
+    """현재 실행 중인(상태파일이 있는) 봇 목록.
+    ★ 2026-10-01: sbo2는 은퇴했지만 sbo2_state.json 파일 자체는 남아있어
+    "상태파일 존재=활성"이라는 이 함수의 원래 기준으로는 영원히 "활성"
+    으로 잡힘 — !전체상태/!전체재시작 직후 자동상태출력에서 sbo2의
+    DB 잔존기록(34건 전부 미청산 상태로 남아있음) 전체가 매번 끼어나와
+    화면이 정신없어지는 문제 발견(대장 지적). 개별 !sbo2상태/!sbo2매도
+    명령은 전환기간 수동조작용으로 여전히 살려둘 거라 BOT_STATE_FILES
+    자체에서 빼진 않고, 여기서만 명시적으로 제외."""
     active = []
     for name, fname in BOT_STATE_FILES.items():
+        if name == "sbo2":
+            continue
         if os.path.exists(fname):
             state = read_state(name)
             last  = state.get("last_update", "")
