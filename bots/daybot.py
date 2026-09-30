@@ -451,29 +451,45 @@ class DayBot:
         except Exception:
             return []
 
-    def _rank_candidates(self, codes: list, code_multi_tag_map: dict) -> list:
-        """1순위 겹침종목 → 2순위 단타000단독 → 3순위 나머지단독+scout fallback."""
+    def _rank_candidates(self, codes: list, code_multi_tag_map: dict):
+        """1순위 겹침종목 → 2순위 단타000단독 → 3순위 나머지단독+scout fallback.
+        ★ 2026-09-30 대장 지적 — 매수 후 어느 출처에서 나왔는지 구분해야
+        나중에 분석하기 쉬움. 기존엔 3순위를 전부 "tier3_fallback"으로
+        뭉뚱그렸는데(오늘 실거래 4건이 전부 이 라벨이라 뭐가 실제로
+        잘 먹히는지 알 수 없었음), 주도주검색식3단독/장개장직후단독/
+        scout후보를 별도 라벨로 분리. 반환값: (순위리스트, {code: source_label})."""
         tier1, tier2, tier3 = [], [], []
+        source_label = {}
         for code in codes:
             tags = code_multi_tag_map.get(code, [])
             if len(tags) >= 2:
                 tier1.append(code)
+                source_label[code] = "tier1_overlap"
             elif tags == ["단타000"]:
                 tier2.append(code)
+                source_label[code] = "tier2_danta000"
+            elif tags == ["주도주검색식3"]:
+                tier3.append(code)
+                source_label[code] = "tier3_주도주검색식3"
+            elif tags == ["장개장직후 종목찾기"]:
+                tier3.append(code)
+                source_label[code] = "tier3_장개장직후"
             elif tags:
                 tier3.append(code)
+                source_label[code] = "tier3_기타"
 
         for code in self._load_scout_tier3_picks():
             if code not in tier1 and code not in tier2 and code not in tier3:
                 tier3.append(code)
+                source_label[code] = "tier3_scout"
 
-        return tier1 + tier2 + tier3
+        return tier1 + tier2 + tier3, source_label
 
     def _run_candidate_scan_and_maybe_buy(self):
         codes, code_multi_tag_map = self._scan_conditions()
         if not codes:
             return
-        ranked = self._rank_candidates(codes, code_multi_tag_map)
+        ranked, source_label = self._rank_candidates(codes, code_multi_tag_map)
         if not ranked:
             return
 
@@ -485,7 +501,6 @@ class DayBot:
             except Exception:
                 pass
 
-        tags_by_code = code_multi_tag_map
         for code in ranked:
             if len(self.positions) >= MAX_POSITIONS:
                 break
@@ -516,13 +531,7 @@ class DayBot:
                 print(f"⏭️ [daybot] {code} 패스 — 매도/매수잔량비 "
                       f"{hoga.get('ask_bid_ratio', 0):.2f} < {HOGA_ASK_BID_RATIO_MIN}")
                 continue
-            tags = tags_by_code.get(code, [])
-            if len(tags) >= 2:
-                tier = "tier1_overlap"
-            elif tags == ["단타000"]:
-                tier = "tier2_danta000"
-            else:
-                tier = "tier3_fallback"
+            tier = source_label.get(code, "unknown")
             self._do_buy(code, self._name(code), price, tier)
 
     # ============================================================
