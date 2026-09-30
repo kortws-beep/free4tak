@@ -10,7 +10,7 @@ sbot/sbo2(스윙, 며칠~1주일 보유)와 달리, daybot은 하루 안에 사�
 - 매수조건: 위 조건검색 통과 + 당일 등락률 양수(주도주검색식3은 하락
   종목도 걸릴 수 있어 제외) + 호가창 매도잔량이 매수잔량의 3배 이상
   ("눌린 스프링")일 때만 매수 진행
-- 매수금액: 1종목당 150만원+, 최대 2종목 동시보유
+- 매수금액: 1종목당 150만원+, 기본 2종목 동시보유(매수가능금액 50만원+면 3번째 보너스슬롯)
 - 매도기준: 손절 -3.5% 고정, 익절은 +2.5% 도달시 즉시매도 대신 트레일링
   스탑 전환(급등주는 10%+ 가는 경우가 많아서) — 고점 대비 -2% 밀리면 매도
 - 매매시간: 08:00(프리장)~19:30(매수마감), 19:50부터 무조건 전량 강제청산
@@ -85,7 +85,14 @@ except Exception:
 # ============================================================
 BOT_STATE_FILE = "daybot_state.json"
 
-MAX_POSITIONS    = 2                  # 1~2종목 몰빵회전
+BASE_MAX_POSITIONS = 2                # 기본 2종목 몰빵회전
+# ★ 2026-10-01 대장 지정 — 매수가능금액이 이 이상이면 3번째 보너스슬롯
+#   오픈(sbot/sbo2의 BONUS_SLOT_MIN_CASH와 동일 컨셉 — 여유자금 놀리지
+#   않기). MAX_POSITIONS는 보너스 포함 상한값 — 메인루프의 "스캔을
+#   시작할지" 판단에 쓰고, 실제 슬롯이 3개까지 열리는지는 매 스캔 시점
+#   _run_candidate_scan_and_maybe_buy()가 실시간 잔고로 다시 판단한다.
+BONUS_SLOT_MIN_CASH = 500_000
+MAX_POSITIONS = BASE_MAX_POSITIONS + 1
 BUY_AMT_PER_SLOT = 1_500_000          # ★ 2026-10-01 대장 지정 — 단타계좌 자본이 대원전선
                                        # 매도(손실처리) 후 약 330만원으로 늘어나서 100만→150만
                                        # 상향(2슬롯×150만=300만, 여유 있게 들어감). 부족하면
@@ -504,8 +511,17 @@ class DayBot:
             except Exception:
                 pass
 
+        # ★ 2026-10-01 대장 지정 — 기본 2슬롯 꽉 찼을 때만 매수가능금액을
+        #   확인해서 3번째 보너스슬롯 오픈 여부 판단(매 스캔마다 1회, REST
+        #   호출 최소화 — 대표종목 005930 기준으로 계좌 전체 여력 조회).
+        effective_max = BASE_MAX_POSITIONS
+        if len(self.positions) >= BASE_MAX_POSITIONS:
+            psbl = self.api.get_psbl_order_cash("005930") or 0
+            if psbl >= BONUS_SLOT_MIN_CASH:
+                effective_max = BASE_MAX_POSITIONS + 1
+
         for code in ranked:
-            if len(self.positions) >= MAX_POSITIONS:
+            if len(self.positions) >= effective_max:
                 break
             if code in self.positions or code in self.sold_today:
                 continue
@@ -542,7 +558,8 @@ class DayBot:
     # ============================================================
     def run(self):
         self._notify("🚀 [DAYBOT] 단타봇 가동", critical=True)
-        print(f"🚀 [DAYBOT] 단타봇 가동 | 최대 {MAX_POSITIONS}종목 | "
+        print(f"🚀 [DAYBOT] 단타봇 가동 | 기본 {BASE_MAX_POSITIONS}종목"
+              f"(+매수가능금액 {BONUS_SLOT_MIN_CASH:,}원 이상시 1종목 보너스) | "
               f"익절+{TAKE_PROFIT_PCT}% 손절{STOP_LOSS_PCT}% | EOD청산 {FORCE_EOD_TIME}")
         self._restore_state()
 
