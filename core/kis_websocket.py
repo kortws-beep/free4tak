@@ -176,15 +176,26 @@ class KisWebSocket:
                 return
 
             # 실시간 데이터 (|로 구분)
-            # 형식: TR_ID|암호화여부|데이터수|필드1|필드2|...
+            # ★ 2026-09-30: 실제 수신 포맷 실측(daybot H0STCNT0 검증 중 발견) —
+            #   "0|H0STCNT0|010|005930^..." 형태로, 기존 주석/코드가 가정한
+            #   "TR_ID|암호화여부|..." 순서가 거꾸로였음. 실제는
+            #   "암호화여부|TR_ID|데이터수|필드1^필드2^..." — 이 버그 때문에
+            #   tr_id가 항상 "0"/"1"(암호화여부 값)로 잘못 읽혀 아래
+            #   TR_체결통보/TR_체결가 매칭이 한 번도 성립한 적이 없었음.
+            #   즉 H0STCNI0(체결통보) 기반 self.positions/self.cash 실시간
+            #   갱신이 sbot/sbo2 포함 지금까지 전혀 동작하지 않고 있었음
+            #   (실거래 자체는 각 봇이 buy()/sell() 반환값으로 별도 추적해서
+            #   영향 없었지만, WS발 cash/포지션 값은 항상 최초 REST 로드값에
+            #   고정돼 있었던 것 — is_healthy()가 "체결통보 무수신=정상"으로
+            #   오판하게 설계돼 있어 이 문제가 지금까지 드러나지 않았음).
             parts = msg.split("|")
             if len(parts) < 4:
                 return
 
-            tr_id   = parts[0]
-            enc_yn  = parts[1]
+            enc_yn   = parts[0]
+            tr_id    = parts[1]
             data_cnt = int(parts[2]) if parts[2].isdigit() else 1
-            data    = parts[3]
+            data     = parts[3]
 
             if tr_id in (TR_체결통보, TR_체결통보모의):
                 self._parse_체결통보(data)
