@@ -378,6 +378,11 @@ class DayBot:
                 print(f"🚫 [daybot] 미체결 취소: {code}")
                 self.positions.pop(code, None)
                 self._ws.unsubscribe_price(code)
+                # ★ 2026-09-30: 취소된 매수는 실제 거래가 아니므로 DB/
+                #   master_db 기록도 같이 정리(0035S0 유령거래 실사례)
+                self.db.void_buy(code)
+                if _master_remove:
+                    _master_remove("daybot", code)
             else:
                 real_qty = self._ws.positions.get(code, {}).get("qty")
                 if real_qty and code in self.positions:

@@ -115,6 +115,25 @@ class DayTradeDB:
         except Exception as e:
             print(f"⚠️ 단타 매도 저장 오류 {code}: {e}")
 
+    def void_buy(self, code: str):
+        """★ 2026-09-30: 주문은 냈지만 체결 전에 취소된 매수를 DB에서
+        완전히 지운다. save_buy()는 주문 시점에 낙관적으로 먼저 기록하는데,
+        30초 내 미체결로 판명돼 취소되면(daybot.py:_check_pending_orders())
+        실제로는 산 적이 없는 거래라 매도기록 없는 유령 row로 영구히 남는
+        문제(0035S0/빅웨이브로보틱스 실사례로 발견) — 해당 row 자체를
+        삭제해 실현손익 통계 왜곡을 막는다."""
+        try:
+            conn = _connect()
+            conn.execute("""
+                DELETE FROM trades WHERE id = (
+                    SELECT id FROM trades WHERE code=? AND sell_price IS NULL
+                    ORDER BY id DESC LIMIT 1
+                )
+            """, (code,))
+            conn.commit(); conn.close()
+        except Exception as e:
+            print(f"⚠️ 단타 매수취소 정리 오류 {code}: {e}")
+
     def get_today_realized(self, today: str = None) -> int:
         if not today:
             today = datetime.datetime.now().strftime("%Y-%m-%d")
