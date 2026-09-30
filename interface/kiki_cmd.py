@@ -36,12 +36,18 @@ execute_command = None
 #   아예 없었음(사용자 지적 — "전체재시작은 잘 되는데 개별 cbot 등
 #   재시작은 안 먹히네"). cmd_restart_all()도 이 상수를 재사용하도록 변경.
 RESTART_SERVICES = {
-    "sbo2":     "yeongam9-sbo2",
-    "sbot":     "yeongam9-sbot",
-    "cbot":     "yeongam9-cbot",
-    "daybot":   "yeongam9-daybot",
-    "telegram": "yeongam9-telegram",
-    "sector":   "yeongam9-sector",
+    "sbo2":      "yeongam9-sbo2",
+    "sbot":      "yeongam9-sbot",
+    "cbot":      "yeongam9-cbot",
+    "daybot":    "yeongam9-daybot",
+    "telegram":  "yeongam9-telegram",
+    "sector":    "yeongam9-sector",
+    # ★ 2026-10-01: 대장 지적 — !전체재시작 때 리나가 안 켜지고 있었음.
+    #   이 dict에 아예 없어서 cmd_restart_all()이 건드릴 생각조차 안
+    #   했던 것(sudo는 이미 둘 다 허용돼있어서 코드만 빠져있던 거였음).
+    #   같은 이유로 빠져있던 dashboard도 같이 추가.
+    "lina":      "yeongam9-lina",
+    "dashboard": "yeongam9-dashboard",
 }
 
 async def wait_cmd_result(bot_name: str, max_attempts: int = 20,
