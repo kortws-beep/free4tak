@@ -115,6 +115,31 @@ class DayTradeDB:
         except Exception as e:
             print(f"⚠️ 단타 매도 저장 오류 {code}: {e}")
 
+    def save_manual_trade(self, code: str, stock_name: str, buy_price: float,
+                           sell_price: float, qty: int, sell_reason: str,
+                           buy_tag: str = "수동"):
+        """★ 2026-10-01: 대장이 HTS/MTS로 daybot 보유종목을 직접 매도한
+        경우(sbot_db.py의 동일 메서드 그대로 이식) — save_buy/save_sell은
+        봇이 만든 매수 행이 있어야 매도를 매칭하는데, 이 경로는 매수/매도를
+        한 번에 완결 기록한다."""
+        try:
+            now = datetime.datetime.now().isoformat(timespec="seconds")
+            profit_rate = ((sell_price - buy_price) / buy_price * 100
+                           if buy_price else 0)
+            conn = _connect()
+            conn.execute("""
+                INSERT INTO trades
+                    (code, stock_name, buy_price, buy_time, qty,
+                     sell_price, sell_time, profit_rate, sell_reason, buy_tag)
+                VALUES (?,?,?,?,?,?,?,?,?,?)
+            """, (code, stock_name, buy_price, now, qty,
+                  sell_price, now, round(profit_rate, 2), sell_reason, buy_tag))
+            conn.commit(); conn.close()
+            emoji = "✅" if profit_rate >= 0 else "❌"
+            print(f"   {emoji} 단타 수동거래 기록 {code} | {profit_rate:+.2f}% | {sell_reason}")
+        except Exception as e:
+            print(f"⚠️ 단타 수동거래 저장 오류 {code}: {e}")
+
     def void_buy(self, code: str):
         """★ 2026-09-30: 주문은 냈지만 체결 전에 취소된 매수를 DB에서
         완전히 지운다. save_buy()는 주문 시점에 낙관적으로 먼저 기록하는데,

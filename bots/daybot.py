@@ -128,6 +128,15 @@ LOOP_SLEEP_SEC     = 5                # 포지션감시/EOD체크용 빠른 루�
 PENDING_ORDER_TIMEOUT_SEC = 30        # 미체결 주문 취소 판단 기준(daybot 5초루프 기준 조정값)
 MIN_ANALYSIS_CASH  = 200_000          # 이 밑이면 스캔 자체 스킵(API 낭비 방지)
 
+# ★ 2026-10-01 대장 지정 — 대장이 daybot 보유종목을 HTS/MTS로 직접 매도할
+#   계획이라("서진하고 대원은 내가 프리장에서 팔면 팔거야") sbot의 수동매도
+#   감지 패턴을 이식. 60초마다 REST로 실계좌와 대조(매루프 5초마다 하면
+#   API 낭비). 매수직후엔 get_current_positions()의 60초 캐시(core/
+#   kis_api.py) 때문에 실계좌에 아직 안 잡혀 수동매도로 오판할 수 있어
+#   매수 후 이 시간 동안은 검사 제외(sbot의 BUY_SYNC_GUARD_SEC와 동일 취지).
+MANUAL_SELL_CHECK_INTERVAL_SEC = 60
+BUY_SYNC_GUARD_SEC = 90
+
 CONDITION_KEYWORDS = ["주도주검색식3", "단타000", "장개장직후 종목찾기"]
 # ★ "5본봉거래대금단타"는 대장이 수동단타에서 안 쓰던 검색식이라 제외
 
@@ -163,6 +172,7 @@ class DayBot:
         self._is_holiday      = False
         self._holiday_checked = ""
         self._last_scan_ts    = 0.0
+        self._last_manual_check_ts = 0.0
         self._is_paused       = False
         # ★ 2026-09-30 발견 — 키움 조건검색이 3개 조건 전부 타임아웃나면
         #   최악의 경우(조건당 최대 2회 재시도×65초, core/kiwoom_api.py)
@@ -347,6 +357,7 @@ class DayBot:
                 "entry_price": price, "qty": qty, "buy_time": now,
                 "source_tier": source_tier, "buy_tag": source_tier,
                 "peak_price": None,   # +2.5% 도달 전까지는 None(트레일링 미활성)
+                "buy_ts": time.time(),  # ★ 수동매도 오탐 방지 가드용(아래 _check_manual_sells)
             }
         self._pending_orders[code] = (orgno, odno, qty, time.time())
         self.code_name_map[code] = name
@@ -418,6 +429,67 @@ class DayBot:
                 if real_qty and code in self.positions:
                     self.positions[code]["qty"] = real_qty
             self._pending_orders.pop(code, None)
+
+    def _check_manual_sells(self):
+        """★ 2026-10-01 대장 지정 — 대장이 HTS/MTS로 daybot 보유종목을
+        직접 매도할 계획이라 sbot의 수동매도 감지 패턴을 이식(bots/sbot.py
+        참고). daybot이 추적 중인 포지션이 실계좌에서 사라졌으면 수동매도로
+        간주 — DB/master_db 정리 + 재매수 허용(sold_today 등록 안 함).
+        60초 주기로만 호출(매루프 5초마다 하면 REST 낭비)."""
+        if not self.positions:
+            return
+        real_pos = self.api.get_current_positions()
+        if real_pos is None:
+            return  # API 실패 — 다음 체크에서 재시도, 기존 상태 유지
+
+        now_ts = time.time()
+        manual_sold = []
+        for code in list(self.positions.keys()):
+            if code in real_pos:
+                continue
+            buy_ts = self.positions[code].get("buy_ts", 0)
+            if now_ts - buy_ts < BUY_SYNC_GUARD_SEC:
+                continue  # 매수직후 — 실계좌 반영 지연일 수 있어 스킵
+            manual_sold.append(code)
+        if not manual_sold:
+            return
+
+        today_ymd = datetime.datetime.now().strftime("%Y%m%d")
+        profit_rows = {}
+        try:
+            pdata = self.api.get_period_trade_profit(today_ymd, today_ymd)
+            profit_rows = {r["pdno"]: r for r in pdata.get("trades", [])}
+        except Exception:
+            pass
+
+        for code in manual_sold:
+            print(f"🔍 [daybot] 수동매도 감지: {code} → 재매수 허용")
+            old_pos = self.positions.get(code, {})
+            name = self._name(code)
+            row = profit_rows.get(code)
+            if row and int(row.get("sll_qty", 0) or 0) > 0:
+                sell_price = float(row.get("sll_pric", 0) or 0)
+                buy_price  = float(row.get("pchs_unpr", 0) or 0) or old_pos.get("entry_price", 0)
+                sell_qty   = int(row.get("sll_qty", 0) or 0) or old_pos.get("qty", 0)
+            else:
+                mdata = self.api.get_market_data(code) or {}
+                try:
+                    sell_price = float(mdata.get("stck_prpr", 0) or 0)
+                except (TypeError, ValueError):
+                    sell_price = old_pos.get("entry_price", 0)
+                buy_price = old_pos.get("entry_price", 0)
+                sell_qty  = old_pos.get("qty", 0)
+
+            self.db.save_manual_trade(code, name, buy_price, sell_price, sell_qty,
+                                       "수동매도", buy_tag=old_pos.get("buy_tag", "수동"))
+            if _master_remove:
+                _master_remove("daybot", code)
+
+            with self._positions_lock:
+                self.positions.pop(code, None)
+            self._pending_orders.pop(code, None)
+            self._ws.unsubscribe_price(code)
+            # ★ 수동매도는 sold_today에 등록 안 함 — 같은날 재매수 허용(sbot과 동일 정책)
 
     # ============================================================
     # 종목소스 — 키움 조건검색 스캔 + 우선순위 워터폴
@@ -629,6 +701,12 @@ class DayBot:
 
                 # 9) 미체결 주문 정리
                 self._check_pending_orders()
+
+                # 9-1) 수동매도 감지(60초 주기) — 대장이 HTS/MTS로 직접
+                #      매도할 계획이라 daybot이 좀비 포지션을 안 만들게
+                if time.time() - self._last_manual_check_ts >= MANUAL_SELL_CHECK_INTERVAL_SEC:
+                    self._check_manual_sells()
+                    self._last_manual_check_ts = time.time()
 
                 # 10) 포지션 실시간감시
                 self._check_all_positions_for_exit()
