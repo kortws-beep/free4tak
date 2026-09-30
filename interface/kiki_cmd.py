@@ -31,6 +31,19 @@ from performance import PerformanceAnalyzer, MultiPerformanceAnalyzer
 send_long = None
 execute_command = None
 
+# ★ 2026-10-01 — daybot 매수출처(bots/daybot.py:_rank_candidates()의
+#   source_label) 표시용 한글 매핑. 내부 키는 랭킹로직/DB에 그대로 쓰고
+#   여기서 화면표시만 직관적으로 변환(대장 요청 — "주도주/단타/
+#   장개장직후/단타추천 형식으로").
+DAYBOT_SOURCE_DISPLAY = {
+    "tier1_overlap":           "겹침",
+    "tier2_danta000":          "단타",
+    "tier3_주도주검색식3":       "주도주",
+    "tier3_장개장직후":          "장개장직후",
+    "tier3_scout":             "단타추천",
+    "tier3_기타":               "기타",
+}
+
 # ★ 2026-08-07 추가 — 개별 봇 재시작(!재시작 자연어)용 서비스명 매핑.
 #   기존엔 cmd_restart_all()에만 이 목록이 있고 개별 재시작 명령은
 #   아예 없었음(사용자 지적 — "전체재시작은 잘 되는데 개별 cbot 등
@@ -142,7 +155,10 @@ async def cmd_status(ctx, bot_name: str = "sbot"):
             # ★ 2026-10-01: daybot은 AI점수가 아니라 매수출처(tier1_overlap
             #   등 문자열)를 그 자리에 넣어 반환함(get_open_positions_from_db()
             #   참고) — "AI:tier3_fallback점"처럼 깨져 보이던 문제 수정.
-            extra = f"출처:{ais}" if bot_name == "daybot" else f"AI:{ais}점"
+            #   대장 요청 — 내부 라벨(tier3_주도주검색식3 등) 대신 직관적인
+            #   짧은 한글 표시로 매핑(DB/랭킹로직엔 원래 라벨 그대로 저장,
+            #   여기 표시용만 변환).
+            extra = f"출처:{DAYBOT_SOURCE_DISPLAY.get(ais, ais)}" if bot_name == "daybot" else f"AI:{ais}점"
             lines.append(f"  {code} | 매수가:{int(bp):,}원 | {qty}주 | {extra}")
     else:
         lines.append("보유종목 없음")
