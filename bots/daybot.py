@@ -130,11 +130,16 @@ MIN_ANALYSIS_CASH  = 200_000          # 이 밑이면 스캔 자체 스킵(API �
 
 # ★ 2026-10-01 대장 지정 — 대장이 daybot 보유종목을 HTS/MTS로 직접 매도할
 #   계획이라("서진하고 대원은 내가 프리장에서 팔면 팔거야") sbot의 수동매도
-#   감지 패턴을 이식. 60초마다 REST로 실계좌와 대조(매루프 5초마다 하면
-#   API 낭비). 매수직후엔 get_current_positions()의 60초 캐시(core/
-#   kis_api.py) 때문에 실계좌에 아직 안 잡혀 수동매도로 오판할 수 있어
-#   매수 후 이 시간 동안은 검사 제외(sbot의 BUY_SYNC_GUARD_SEC와 동일 취지).
-MANUAL_SELL_CHECK_INTERVAL_SEC = 60
+#   감지 패턴을 이식. REST로 실계좌와 대조(매루프 5초마다 하면 API 낭비).
+#   매수직후엔 get_current_positions()의 60초 캐시(core/kis_api.py) 때문에
+#   실계좌에 아직 안 잡혀 수동매도로 오판할 수 있어 매수 후 이 시간 동안은
+#   검사 제외(sbot의 BUY_SYNC_GUARD_SEC와 동일 취지).
+#   ★ 2026-10-01 실거래 중 "초당 거래건수 초과"(잔고조회 API) 발생 —
+#   60초 주기가 get_current_positions()의 60초 캐시 경계와 거의 맞물려
+#   매번 실제 API를 때리고 있었고, 대장의 동시 HTS/MTS 수동거래까지
+#   겹치면 같은 계좌의 초당 한도를 넘기기 쉬움(대장 지적 — "여유를
+#   줘야하지 않을까"). 120초로 늘려 호출 빈도 자체를 줄임.
+MANUAL_SELL_CHECK_INTERVAL_SEC = 120
 BUY_SYNC_GUARD_SEC = 90
 
 CONDITION_KEYWORDS = ["주도주검색식3", "단타000", "장개장직후 종목찾기"]
