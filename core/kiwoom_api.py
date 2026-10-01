@@ -94,7 +94,14 @@ class KiwoomAPI:
                 await ws.send(json.dumps({"trnm": "LOGIN", "token": token}))
                 res = json.loads(await asyncio.wait_for(ws.recv(), timeout=10))
                 if res.get("return_code") != 0:
-                    print(f"⚠️ 키움 로그인 실패: {res.get('return_msg')}"); return []
+                    print(f"⚠️ 키움 로그인 실패: {res.get('return_msg')}")
+                    # ★ 2026-10-01: 토큰이 24시간 캐시 유효기간 안인데도 서버가
+                    #   거부하는 경우(CODE=8005 "Token이 유효하지 않습니다" —
+                    #   레이트리밋 연쇄로 인한 서버측 세션/토큰 강제종료 추정)
+                    #   캐시된 토큰을 그대로 들고 있으면 다음 호출도 똑같이
+                    #   계속 실패함 — 즉시 초기화해서 다음 호출이 재발급받게 함.
+                    self.reset_token()
+                    return []
 
                 await ws.send(json.dumps({"trnm": "CNSRLST"}))
                 while True:
@@ -152,6 +159,12 @@ class KiwoomAPI:
                         res = json.loads(await asyncio.wait_for(ws.recv(), timeout=10))
                         if res.get("return_code") != 0:
                             print(f"  ⚠️ [{name}] 로그인 실패({attempt}회차): {res.get('return_msg')}")
+                            # ★ 2026-10-01: 토큰이 중간에 무효화되면(CODE=8005)
+                            #   매 재시도가 같은 stale token으로 계속 실패하고
+                            #   있었음 — 즉시 재발급해서 다음 재시도부터는
+                            #   새 토큰 사용.
+                            self.reset_token()
+                            token = self.get_token()
                         else:
                             await ws.send(json.dumps({
                                 "trnm": "CNSRREQ", "seq": seq,
