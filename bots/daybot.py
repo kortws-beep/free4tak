@@ -5,7 +5,7 @@ daybot.py — 영암9 단타봇 (당일청산 회전매매)
 
 sbot/sbo2(스윙, 며칠~1주일 보유)와 달리, daybot은 하루 안에 사고 파는
 순수 단타봇입니다.
-- 대상: 키움 조건검색 3개(주도주검색식3/단타000/장개장직후 종목찾기)
+- 대상: 키움 조건검색 3개(주도주검색식3/단타000/090930타점 시가이탈 오전중저가이탈)
   중 2개 이상 겹친 종목 우선
 - 매수조건: 위 조건검색 통과 + 당일 등락률 양수(주도주검색식3은 하락
   종목도 걸릴 수 있어 제외) + 호가창 매도잔량이 매수잔량의 3배 이상
@@ -142,7 +142,13 @@ MIN_ANALYSIS_CASH  = 200_000          # 이 밑이면 스캔 자체 스킵(API �
 MANUAL_SELL_CHECK_INTERVAL_SEC = 120
 BUY_SYNC_GUARD_SEC = 90
 
-CONDITION_KEYWORDS = ["주도주검색식3", "단타000", "장개장직후 종목찾기"]
+# ★ 2026-10-01 대장 지적 — "장개장직후 종목찾기"가 아니라 "090930타점
+#   시가이탈 오전중저가이탈"이 맞는 검색식이었음(실제 수동단타에서 쓰던
+#   조건). use_keywords는 부분일치라 "090930타점"만 있으면 되지만, 이
+#   밑 _rank_candidates()에서 code_multi_tag_map에 기록되는 값은 매칭된
+#   조건식의 전체 이름이라 그쪽은 전체 이름으로 비교해야 함.
+CONDITION_KEYWORDS = ["주도주검색식3", "단타000", "090930타점"]
+COND_090930 = "090930타점 시가이탈 오전중저가이탈"
 # ★ "5본봉거래대금단타"는 대장이 수동단타에서 안 쓰던 검색식이라 제외
 
 SCOUT_CANDIDATES_PATH = _os.path.join(_BASE, "intelligence", "day_trade_scout_candidates.json")
@@ -558,9 +564,9 @@ class DayBot:
             elif tags == ["주도주검색식3"]:
                 tier3.append(code)
                 source_label[code] = "tier3_주도주검색식3"
-            elif tags == ["장개장직후 종목찾기"]:
+            elif tags == [COND_090930]:
                 tier3.append(code)
-                source_label[code] = "tier3_장개장직후"
+                source_label[code] = "tier3_090930타점"
             elif tags:
                 tier3.append(code)
                 source_label[code] = "tier3_기타"
