@@ -115,6 +115,12 @@ SESSION_START    = "0800"             # 이 시간대 밖이면 루프 자체를
 SESSION_END      = "1950"
 BUY_START_TIME   = "0800"
 BUY_END_TIME     = "1930"             # 19:30 이후 신규매수 중단 — EOD청산 전 버퍼
+# ★ 2026-10-01 대장 확인 — 키움 조건검색은 정규장(09:00~15:30) 데이터 기준이라
+#   장마감 후엔 서버가 응답을 안 줌(전부 타임아웃). 애프터장(15:30~19:30)에
+#   신규후보 스캔을 계속 돌려봐야 3개조건×최대3회×65초만 허비하므로 후보
+#   스캔 자체를 정규장 마감 시각에 멈춘다. 보유종목 감시/EOD청산/수동매도감지는
+#   무관 — 계속 돈다.
+SCAN_END_TIME    = "1530"
 FORCE_EOD_TIME   = "1950"             # 19:50부터 무조건 전량강제청산(최우선, 하루 1회만 시도)
 CARRYOVER_RETRY_TIME = "0900"         # 전날 19:50 강제청산 실패분 — 익일 이 시각부터 최우선 재시도
 
@@ -749,7 +755,7 @@ class DayBot:
                 #     새로 안 띄움(중복실행 방지).
                 if (not self._is_paused
                         and len(self.positions) < MAX_POSITIONS
-                        and BUY_START_TIME <= now_t <= BUY_END_TIME
+                        and BUY_START_TIME <= now_t <= SCAN_END_TIME
                         and time.time() - self._last_scan_ts >= SCAN_INTERVAL_SEC
                         and (self._scan_thread is None or not self._scan_thread.is_alive())):
                     self._last_scan_ts = time.time()
