@@ -7,9 +7,9 @@ sbot/sbo2(스윙, 며칠~1주일 보유)와 달리, daybot은 하루 안에 사�
 순수 단타봇입니다.
 - 대상: 키움 조건검색 3개(주도주검색식3/단타000/090930타점 시가이탈 오전중저가이탈)
   중 2개 이상 겹친 종목 우선
-- 매수조건: 위 조건검색 통과 + 당일 등락률 0~9%(음수/보합 제외, 9%+는
-  추격매수 방지로 제외) + 호가창 매도잔량이 매수잔량의 3배 이상
-  ("눌린 스프링")일 때만 매수 진행
+- 매수조건: 위 조건검색 통과 + 당일 등락률(09:40 이전 "1차"는 3~8%,
+  이후 "2차"는 0~15%) + 호가창 매도잔량이 매수잔량의 3배 이상
+  ("눌린 스프링")일 때만 매수 진행. 익절(트레일링)은 1차/2차 구분 없음
 - 매수금액: 1종목당 150만원+, 기본 2종목 동시보유(매수가능금액 50만원+면 3번째 보너스슬롯)
 - 매도기준: 손절 -3.5% 고정, 익절은 +2.5% 도달시 즉시매도 대신 트레일링
   스탑 전환(급등주는 10%+ 가는 경우가 많아서) — 고점 대비 -2% 밀리면 매도
@@ -121,10 +121,17 @@ CARRYOVER_RETRY_TIME = "0900"         # 전날 19:50 강제청산 실패분 — 
 HOGA_ASK_BID_RATIO_MIN = 3.0          # ★ 대장 지정 — 매도잔량이 매수잔량의 3배 이상("눌린
                                        #   스프링", core/kis_api.py:get_hoga() 자체 docstring
                                        #   표현)일 때만 매수 진행. 미달이면 스킵.
-# ★ 2026-10-01 대장 지정 — 오늘 실거래에서 후보가 늦게 잡혀 이미 많이
-#   오른 뒤에 진입해 손절로 이어진 사례 발견("뒤끝 잡는 분위기"). 당일
-#   등락률이 이미 9% 이상이면 추격매수 안 함 — 상승 초입만 노린다.
-MAX_CHANGE_RATE_PCT = 9.0
+# ★ 2026-10-01 대장 지정 — 대장의 실제 수동단타 기준 재정의: 09:40
+#   이전("1차") 진입은 등락률 3~8% 구간만, 09:40 이후("2차") 진입은
+#   더 넓은 0~15% 구간 허용(1차는 막 확인된 초입 모멘텀, 2차는 이미
+#   어느정도 오른 종목도 받아들임 — 단, 익절은 1차/2차 구분 없이 기존
+#   트레일링스탑 그대로: "간댕이가 작아서 짧게 먹고 나오는" 대장 본인의
+#   수동매매 습관을 봇에 그대로 옮기지 말고, 10~20%까지 가는 건 끝까지
+#   타게 둔다는 명시적 결정).
+EARLY_ENTRY_CUTOFF_TIME = "0940"
+EARLY_MIN_CHANGE_PCT = 3.0
+EARLY_MAX_CHANGE_PCT = 8.0
+LATE_MAX_CHANGE_PCT  = 15.0
 
 SCAN_INTERVAL_SEC = 240               # 조건검색 풀사이클(3개조건) 주기 — 65초 재시도
                                        # 백오프까지 감안한 안전마진(core/kiwoom_api.py 참고)
@@ -614,9 +621,11 @@ class DayBot:
                 continue
             if code in held_elsewhere:
                 continue
-            # ★ 2026-09-30 대장 지정 — 주도주검색식3은 거래대금 등 기준이라
-            #   당일 하락 중인 종목도 걸릴 수 있음. daybot은 급등주 추종
-            #   전략이라 등락률이 음수/보합인 후보는 애초에 제외.
+            # ★ 2026-09-30/10-01 대장 지정 — 주도주검색식3은 거래대금 등
+            #   기준이라 당일 하락 중인 종목도 걸릴 수 있어 제외. 09:40
+            #   이전("1차")엔 막 초입 모멘텀만(3~8%), 이후("2차")엔 이미
+            #   어느정도 오른 종목까지 허용(0~15%) — 대장의 실제 수동단타
+            #   진입기준을 그대로 반영.
             mdata = self.api.get_market_data(code) or {}
             try:
                 price = float(mdata.get("stck_prpr", 0) or 0)
@@ -625,13 +634,16 @@ class DayBot:
                 continue
             if price <= 0:
                 continue
-            if chg <= 0:
-                print(f"⏭️ [daybot] {code} 패스 — 등락률 {chg:+.2f}% (하락/보합)")
-                continue
-            if chg >= MAX_CHANGE_RATE_PCT:
-                print(f"⏭️ [daybot] {code} 패스 — 등락률 {chg:+.2f}% >= {MAX_CHANGE_RATE_PCT}% "
-                      f"(이미 많이 올라 추격매수 제외)")
-                continue
+            if now_hhmm() < EARLY_ENTRY_CUTOFF_TIME:
+                if not (EARLY_MIN_CHANGE_PCT <= chg <= EARLY_MAX_CHANGE_PCT):
+                    print(f"⏭️ [daybot] {code} 패스 — 1차구간(09:40전) 등락률 {chg:+.2f}%"
+                          f"가 {EARLY_MIN_CHANGE_PCT}~{EARLY_MAX_CHANGE_PCT}% 범위 밖")
+                    continue
+            else:
+                if not (0 < chg <= LATE_MAX_CHANGE_PCT):
+                    print(f"⏭️ [daybot] {code} 패스 — 2차구간(09:40후) 등락률 {chg:+.2f}%"
+                          f"가 0~{LATE_MAX_CHANGE_PCT}% 범위 밖")
+                    continue
             # ★ 2026-09-29 대장 지정 — 매도잔량이 매수잔량의 3배 이상
             #   ("눌린 스프링", core/kis_api.py:get_hoga() 자체 표현)일
             #   때만 매수 진행. get_hoga()는 이미 있던 기존 메서드 재사용
