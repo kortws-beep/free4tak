@@ -413,11 +413,19 @@ class DayBot:
             print(f"⚠️ [daybot] 매도 실패 {code} — 다음 루프 재시도")
             return
 
+        pos = self.positions.get(code, {})
+        entry_price = pos.get("entry_price", price)
+        # ★ 2026-10-02 대장 지정 — sbot/sbo2/cbot과 동일 정책(09-21 통일)으로
+        #   맞춤: 손실/본절(수익 없음)로 판 종목만 당일 재매수 금지, 소규모
+        #   익절이라도 수익 났으면 당일 재매수 허용(회전매매 취지상 같은
+        #   종목이 다시 신호를 줄 수 있음). reason 문자열 매칭이 아니라
+        #   실제 손익 부호로 판단(sbot.py와 동일 이유).
+        is_loss = price <= entry_price
+
         self.db.save_sell(code, price, reason)
         if _master_record:
-            pos = self.positions.get(code, {})
             _master_record(bot_type="daybot", code=code, stock_name=name,
-                            buy_price=pos.get("entry_price", price),
+                            buy_price=entry_price,
                             sell_price=price, qty=qty, sell_reason=reason,
                             buy_tag=pos.get("buy_tag", ""))
         if _master_remove:
@@ -426,11 +434,13 @@ class DayBot:
         with self._positions_lock:
             self.positions.pop(code, None)
         self._pending_orders.pop(code, None)
-        self.sold_today[code] = now_hms()
+        if is_loss:
+            self.sold_today[code] = now_hms()
         self._ws.unsubscribe_price(code)
 
-        self._notify(f"✅ [daybot] 매도 {code}({name}) | {reason} @{price:,.0f}원")
-        print(f"✅ [daybot] 매도 {code}({name}) | {reason} @{price:,.0f}원")
+        emoji = "💔" if is_loss else "💰"
+        self._notify(f"{emoji} [daybot] 매도 {code}({name}) | {reason} @{price:,.0f}원")
+        print(f"{emoji} [daybot] 매도 {code}({name}) | {reason} @{price:,.0f}원")
 
     def _check_pending_orders(self):
         """미체결 주문이 PENDING_ORDER_TIMEOUT_SEC 이상 지나면 취소 시도.
