@@ -142,12 +142,20 @@ class SwingTrade:
 class SBotBacktestConfig:
     # 자본 (sbot 실전: 종목당 50만~200만원)
     initial_cash:      int   = 10_000_000
-    base_buy_amt:      int   = 500_000
-    # ★ 2026-09-19: 실전 sbot.py MAX_POSITIONS는 09-12에 5→4로 변경됐는데
-    #   백테스터 기본값은 2로 계속 남아있던 드리프트 발견(주말 점검) — 동기화.
-    max_positions:     int   = 4
-    # 매수 임계치
-    buy_score_min:     int   = 65
+    # ★ 2026-10-03 주말점검 — sbot×sbo2 통합(09-29) 이후 실전값(6슬롯×165만)
+    #   으로 또 드리프트 발견(이 코드베이스에서 반복되는 패턴 — run_sbot_
+    #   backtest.py의 CLI 기본값은 맞게 동기화돼 있어서 평소 --compare
+    #   루틴은 영향 없었지만, 이 dataclass를 직접 import해서 쓰면 틀린
+    #   값으로 조용히 돌아감). base_buy_amt 50만→165만, max_positions
+    #   4→6으로 동기화.
+    base_buy_amt:      int   = 1_650_000
+    max_positions:     int   = 6
+    # 매수 임계치 — 실전 BUY_SCORE_MIN(전체필터)=45, BUY_SCORE_ENTER(스코어링
+    #   게이트)=85. 백테스터는 이 중 "진입 임계치" 의미로 쓰이므로 85에 맞춤
+    #   (45는 사실상 모든 후보를 다 스코어링 테이블에 올리는 느슨한 사전필터라
+    #   backtest 기본값 의미와 다름 — run_sbot_backtest.py의 --compare
+    #   시나리오들도 75~90 구간으로 이미 설계돼 있어 그와 일관되게 85 사용).
+    buy_score_min:     int   = 85
     # 종목 필터
     # ★ 백테스터 DB에 시총(hts_avls) 없음 → 거래대금으로 대형주 필터
     #   삼성전자 일평균 거래대금 ~5,000억 → 100억 이상이면 중대형주
