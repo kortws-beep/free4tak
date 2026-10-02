@@ -18,7 +18,7 @@ sbot/sbo2(스윙, 며칠~1주일 보유)보다는 짧고, 순수 당일청산보
 - 매매시간: 08:00(프리장)~19:30(매수마감), 포지션 감시는 19:50까지
 - 보유기간: ★ 2026-10-02 대장 지정 — 당일 EOD 강제청산 폐지("가랑비에
   옷 젖는다" — 하루만에 강제로 끊어내다 매일 조금씩 손실이 쌓이는 패턴
-  확인). 트레일링(+2.5%) 진입 전까지는 최대 3일(달력일 기준) 보유 후
+  확인). 트레일링(+2.5%) 진입 전까지는 최대 3영업일 보유 후
   손익 무관 강제청산, 트레일링 진입 후(이미 수익중)는 기한 없이
   트레일링 로직에만 맡김(수익나는 종목을 날짜 때문에 억지로 끊지 않음)
 
@@ -135,11 +135,16 @@ BUY_END_TIME     = "1930"             # 19:30 이후 신규매수 중단 — EOD
 #   무관 — 계속 돈다.
 SCAN_END_TIME    = "1530"
 # ★ 2026-10-02 대장 지정 — 당일 EOD 강제청산 폐지, 대신 "트레일링
-#   미진입(아직 +2.5% 못 찍은) 상태로 3일 지나면 손익 무관 강제청산"으로
-#   교체("가랑비에 옷 젖는다" — 매일 EOD에 억지로 끊다 손실만 누적되던
-#   패턴 확인). 이미 트레일링 진입(수익중)인 종목은 기한 없음 — 날짜
-#   때문에 수익나는 포지션을 억지로 끊지 않는다. 이 코드베이스의 다른
-#   "N영업일" 표기들(sbot2_strategy.py 등)과 동일하게 달력일로 근사.
+#   미진입(아직 +2.5% 못 찍은) 상태로 3영업일 지나면 손익 무관 강제청산"
+#   으로 교체("가랑비에 옷 젖는다" — 매일 EOD에 억지로 끊다 손실만
+#   누적되던 패턴 확인). 이미 트레일링 진입(수익중)인 종목은 기한
+#   없음 — 날짜 때문에 수익나는 포지션을 억지로 끊지 않는다.
+#   ★ 대장 재지적(달력일 아니고 영업일이어야 함) — 포지션별로 날짜를
+#   빼는 대신, 메인루프의 일일초기화(새 날 감지, 주말/휴장일이면 그
+#   지점 자체에 도달 못 함)에 맞춰 보유중인 포지션마다 held_trading_days
+#   를 매 실제 거래일마다 +1씩 올리는 방식으로 구현(아래 _do_buy/
+#   run() 참고) — 주말·휴장일은 그 자리(continue)에서 걸러져 자동으로
+#   카운트에서 빠짐, 별도 거래소 캘린더 조회 불필요.
 HOLD_DAYS_LIMIT = 3
 
 HOGA_ASK_BID_RATIO_MIN = 3.0          # ★ 대장 지정 — 매도잔량이 매수잔량의 3배 이상("눌린
@@ -358,11 +363,10 @@ class DayBot:
                 self._do_sell(code, pos["qty"], f"손절({rate:.2f}%)", current)
                 continue
 
-            holding_days = (datetime.date.today()
-                            - datetime.date.fromtimestamp(pos["buy_ts"])).days
-            if holding_days >= HOLD_DAYS_LIMIT:
+            held = pos.get("held_trading_days", 0)
+            if held >= HOLD_DAYS_LIMIT:
                 self._do_sell(code, pos["qty"],
-                              f"보유기한청산({holding_days}일, {rate:+.2f}%)", current)
+                              f"보유기한청산({held}영업일, {rate:+.2f}%)", current)
 
     # ============================================================
     # 매수/매도 실행
@@ -386,6 +390,7 @@ class DayBot:
                 "source_tier": source_tier, "buy_tag": source_tier,
                 "peak_price": None,   # +2.5% 도달 전까지는 None(트레일링 미활성)
                 "buy_ts": time.time(),  # ★ 수동매도 오탐 방지 가드용(아래 _check_manual_sells)
+                "held_trading_days": 0,  # ★ 보유기한청산용 — 실제 영업일만 셈(아래 일일초기화 참고)
             }
         self._pending_orders[code] = (orgno, odno, qty, time.time())
         self.code_name_map[code] = name
@@ -701,10 +706,19 @@ class DayBot:
                 #      정지돼도 보유종목 매도체크는 계속 돌고, 신규매수(9번)만 멈춘다.
                 self._is_paused = _read_state().get("paused", False)
 
-                # 5) 일일 초기화 — 새 날이면 당일 관련 플래그 리셋
+                # 5) 일일 초기화 — 새 날이면 당일 관련 플래그 리셋.
+                #    ★ 이 지점에 도달했다는 것 자체가 "오늘은 주말도 휴장일도
+                #    아니다"(3)/4)번에서 이미 걸러짐)라는 뜻이므로, 보유중인
+                #    포지션의 held_trading_days를 여기서 +1 해도 주말·휴장일이
+                #    끼어드는 전환(예: 금요일→월요일)은 자동으로 1회만 카운트됨
+                #    (보유기한청산 — HOLD_DAYS_LIMIT 참고, 2026-10-02 대장
+                #    지정: 달력일 아니고 영업일 기준이어야 함).
                 if today != self._sold_today_date:
                     self.sold_today = {}
                     self._sold_today_date = today
+                    with self._positions_lock:
+                        for pos in self.positions.values():
+                            pos["held_trading_days"] = pos.get("held_trading_days", 0) + 1
 
                 # 6) 세션 외 시간 (19:50~다음날 08:00) — EOD 강제청산 없이
                 #    그냥 장외엔 감시를 쉰다(최대 3일 보유 허용이므로 매일
