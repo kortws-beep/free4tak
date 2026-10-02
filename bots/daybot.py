@@ -1,21 +1,26 @@
 """
-daybot.py — 영암9 단타봇 (당일청산 회전매매)
+daybot.py — 영암9 단타봇 (회전매매, 최대 3일 보유)
 ================================================================
 [이 파일이 하는 일 — 비개발자용 설명]
 
-sbot/sbo2(스윙, 며칠~1주일 보유)와 달리, daybot은 하루 안에 사고 파는
-순수 단타봇입니다.
+sbot/sbo2(스윙, 며칠~1주일 보유)보다는 짧고, 순수 당일청산보다는
+여유있게 — daybot은 짧은 호흡의 회전매매 봇입니다.
 - 대상: 키움 조건검색 3개(주도주검색식3/단타000/090930타점 시가이탈 오전중저가이탈)
   중 2개 이상 겹친 종목 우선
 - 매수조건: 위 조건검색 통과 + 당일 등락률(09:40 이전 "1차"는 3~8%,
   이후 "2차"는 0~15%) + 호가창 매도잔량이 매수잔량의 3배 이상
   ("눌린 스프링")일 때만 매수 진행. 익절(트레일링)은 1차/2차 구분 없음
-- 매수금액: 1종목당 150만원+, 기본 2종목 동시보유(매수가능금액 50만원+면 3번째 보너스슬롯)
+- 매수금액: 1종목당 100만원(★ 2026-10-02 대장 지정 — 승률 50%+ 달성하면
+  150만원으로 재상향 검토), 기본 3종목 동시보유(매수가능금액 50만원+면
+  4번째 보너스슬롯)
 - 매도기준: 손절 -3.5% 고정, 익절은 +2.5% 도달시 즉시매도 대신 트레일링
   스탑 전환(급등주는 10%+ 가는 경우가 많아서) — 고점 대비 -2% 밀리면 매도
-- 매매시간: 08:00(프리장)~19:30(매수마감), 19:50부터 무조건 전량 강제청산
-- 보유기간: 당일청산 원칙 — 단, 하한가/거래정지 등으로 19:50 강제청산이
-  실패한 종목은 그날 밤 재시도하지 않고 익일 09:00에 딱 한 번 더 시도
+- 매매시간: 08:00(프리장)~19:30(매수마감), 포지션 감시는 19:50까지
+- 보유기간: ★ 2026-10-02 대장 지정 — 당일 EOD 강제청산 폐지("가랑비에
+  옷 젖는다" — 하루만에 강제로 끊어내다 매일 조금씩 손실이 쌓이는 패턴
+  확인). 트레일링(+2.5%) 진입 전까지는 최대 3일(달력일 기준) 보유 후
+  손익 무관 강제청산, 트레일링 진입 후(이미 수익중)는 기한 없이
+  트레일링 로직에만 맡김(수익나는 종목을 날짜 때문에 억지로 끊지 않음)
 
 [아키텍처 — 키움 스크리닝 + KIS 실행 하이브리드]
 키움은 조건검색(스크리닝) 전용으로만 사용 — 주문/체결통보 기능이
@@ -85,18 +90,19 @@ except Exception:
 # ============================================================
 BOT_STATE_FILE = "daybot_state.json"
 
-BASE_MAX_POSITIONS = 2                # 기본 2종목 몰빵회전
-# ★ 2026-10-01 대장 지정 — 매수가능금액이 이 이상이면 3번째 보너스슬롯
+BASE_MAX_POSITIONS = 3                # ★ 2026-10-02 대장 지정(2→3) — 종목당 매수금액을
+                                       # 낮추는 대신 슬롯 수를 늘려 분산
+# ★ 2026-10-01 대장 지정 — 매수가능금액이 이 이상이면 4번째 보너스슬롯
 #   오픈(sbot/sbo2의 BONUS_SLOT_MIN_CASH와 동일 컨셉 — 여유자금 놀리지
 #   않기). MAX_POSITIONS는 보너스 포함 상한값 — 메인루프의 "스캔을
-#   시작할지" 판단에 쓰고, 실제 슬롯이 3개까지 열리는지는 매 스캔 시점
+#   시작할지" 판단에 쓰고, 실제 슬롯이 몇 개까지 열리는지는 매 스캔 시점
 #   _run_candidate_scan_and_maybe_buy()가 실시간 잔고로 다시 판단한다.
 BONUS_SLOT_MIN_CASH = 500_000
 MAX_POSITIONS = BASE_MAX_POSITIONS + 1
-BUY_AMT_PER_SLOT = 1_500_000          # ★ 2026-10-01 대장 지정 — 단타계좌 자본이 대원전선
-                                       # 매도(손실처리) 후 약 330만원으로 늘어나서 100만→150만
-                                       # 상향(2슬롯×150만=300만, 여유 있게 들어감). 부족하면
-                                       # kis_api.buy()가 자체적으로 최소1주까지 축소시도.
+BUY_AMT_PER_SLOT = 1_000_000          # ★ 2026-10-02 대장 지정(150만→100만) — 손실이 계속
+                                       # 쌓이는 걸 보고 종목당 금액을 낮춰 리스크 축소. 승률
+                                       # 50%+ 달성하면 150만으로 재상향 검토(대장 명시).
+                                       # 부족하면 kis_api.buy()가 자체적으로 최소1주까지 축소시도.
 TAKE_PROFIT_PCT  = 2.5                # 익절 +2~3% 중간값
 STOP_LOSS_PCT    = -3.5               # 손절 -3~4% 중간값
 # ★ 2026-09-29 밤 대장 지정 — 급등주 특성상 오르면 10%+ 가는 경우가
@@ -128,8 +134,13 @@ BUY_END_TIME     = "1930"             # 19:30 이후 신규매수 중단 — EOD
 #   스캔 자체를 정규장 마감 시각에 멈춘다. 보유종목 감시/EOD청산/수동매도감지는
 #   무관 — 계속 돈다.
 SCAN_END_TIME    = "1530"
-FORCE_EOD_TIME   = "1950"             # 19:50부터 무조건 전량강제청산(최우선, 하루 1회만 시도)
-CARRYOVER_RETRY_TIME = "0900"         # 전날 19:50 강제청산 실패분 — 익일 이 시각부터 최우선 재시도
+# ★ 2026-10-02 대장 지정 — 당일 EOD 강제청산 폐지, 대신 "트레일링
+#   미진입(아직 +2.5% 못 찍은) 상태로 3일 지나면 손익 무관 강제청산"으로
+#   교체("가랑비에 옷 젖는다" — 매일 EOD에 억지로 끊다 손실만 누적되던
+#   패턴 확인). 이미 트레일링 진입(수익중)인 종목은 기한 없음 — 날짜
+#   때문에 수익나는 포지션을 억지로 끊지 않는다. 이 코드베이스의 다른
+#   "N영업일" 표기들(sbot2_strategy.py 등)과 동일하게 달력일로 근사.
+HOLD_DAYS_LIMIT = 3
 
 HOGA_ASK_BID_RATIO_MIN = 3.0          # ★ 대장 지정 — 매도잔량이 매수잔량의 3배 이상("눌린
                                        #   스프링", core/kis_api.py:get_hoga() 자체 docstring
@@ -223,12 +234,6 @@ class DayBot:
         #   iteration"로 죽을 수 있어 락으로 보호.
         self._positions_lock = threading.Lock()
 
-        # ★ 2026-09-29 대장 지정 — 19:50 EOD청산 실패분(하한가/거래정지 등)은
-        #   그날 밤 내내 재시도하지 않고 익일 09:00에 딱 한 번 더 시도.
-        self._eod_closed_date       = ""   # 오늘자 19:50 EOD시도를 이미 했는지
-        self._carryover_codes: set  = set()  # 전날 EOD청산 실패해서 넘어온 종목
-        self._carryover_retried_date = ""   # 오늘자 09:00 이월재시도를 이미 했는지
-
         self.kiwoom = KiwoomAPI()
 
         # KIS 웹소켓 — 체결통보(H0STCNI0, 기존) + 실시간 체결가(H0STCNT0, 신규, opt-in)
@@ -261,9 +266,6 @@ class DayBot:
             "sold_today":       self.sold_today,
             "sold_today_date":  self._sold_today_date,
             "code_name_map":    self.code_name_map,
-            "eod_closed_date":         self._eod_closed_date,
-            "carryover_codes":         list(self._carryover_codes),
-            "carryover_retried_date":  self._carryover_retried_date,
             "last_update":      now_hms(),
         })
 
@@ -271,16 +273,12 @@ class DayBot:
         """재시작 시 daybot 자신의 상태를 복구하고 실계좌와 교차확인.
         ★ 대원전선처럼 daybot이 모르는 종목은 절대 자동입양하지 않는다
         (core/account_sync.py::sync_positions()는 계좌의 모든 미인식
-        종목을 자동으로 흡수하는 구조라 여기선 재사용 금지). 이월종목
-        추적(_carryover_codes 등)도 워치독 재시작에도 살아남도록 같이 복구."""
+        종목을 자동으로 흡수하는 구조라 여기선 재사용 금지)."""
         saved = _read_state()
         self.positions       = saved.get("positions", {})
         self.sold_today      = saved.get("sold_today", {})
         self._sold_today_date = saved.get("sold_today_date", today_str())
         self.code_name_map.update(saved.get("code_name_map", {}))
-        self._eod_closed_date        = saved.get("eod_closed_date", "")
-        self._carryover_codes        = set(saved.get("carryover_codes", []))
-        self._carryover_retried_date = saved.get("carryover_retried_date", "")
 
         if self._sold_today_date != today_str():
             self.sold_today = {}
@@ -328,7 +326,11 @@ class DayBot:
         전환한다. 트레일링 진입 전까지는 기존처럼 고정 손절(-3.5%)만
         체크, 진입 후엔 고점(peak_price) 대비 TRAILING_STOP_PCT(2%)
         하락시에만 매도 — 원 손절선은 진입 시점부터 현재가보다 한참
-        아래라 트레일링이 항상 먼저 걸리므로 별도 분기 불필요."""
+        아래라 트레일링이 항상 먼저 걸리므로 별도 분기 불필요.
+        ★ 2026-10-02 대장 지정 — 당일 EOD 강제청산 폐지, 대신 트레일링
+        미진입 상태로 HOLD_DAYS_LIMIT(3일) 지나면 손익 무관 강제청산
+        (손실 종목을 매일 억지로 끊다 조금씩 손실이 쌓이던 패턴 방지).
+        트레일링 진입(이미 수익중) 종목은 기한 체크 자체를 안 함."""
         for code in list(self.positions.keys()):
             pos     = self.positions[code]
             current = self._get_current_price(code)
@@ -354,22 +356,13 @@ class DayBot:
                 continue
             if rate <= STOP_LOSS_PCT:
                 self._do_sell(code, pos["qty"], f"손절({rate:.2f}%)", current)
+                continue
 
-    def _force_close_all(self, reason: str) -> set:
-        """전량 강제청산 시도. 반환값은 매도 실패해서 여전히 self.positions에
-        남아있는 종목 코드 집합(하한가/거래정지 등) — 호출부가 이월처리
-        여부를 판단할 수 있게 함."""
-        for code, pos in list(self.positions.items()):
-            current = self._get_current_price(code) or pos["entry_price"]
-            self._do_sell(code, pos["qty"], reason, current)
-        failed = set(self.positions.keys())
-        if failed:
-            self._notify(f"⚠️ [daybot] {reason} — {len(failed)}종목 매도 실패({failed}), "
-                         f"익일 {CARRYOVER_RETRY_TIME[:2]}:{CARRYOVER_RETRY_TIME[2:]} 재시도",
-                         critical=True)
-        else:
-            self._notify(f"🔔 [daybot] {reason} — 전량 청산 완료", critical=True)
-        return failed
+            holding_days = (datetime.date.today()
+                            - datetime.date.fromtimestamp(pos["buy_ts"])).days
+            if holding_days >= HOLD_DAYS_LIMIT:
+                self._do_sell(code, pos["qty"],
+                              f"보유기한청산({holding_days}일, {rate:+.2f}%)", current)
 
     # ============================================================
     # 매수/매도 실행
@@ -676,7 +669,8 @@ class DayBot:
         self._notify("🚀 [DAYBOT] 단타봇 가동", critical=True)
         print(f"🚀 [DAYBOT] 단타봇 가동 | 기본 {BASE_MAX_POSITIONS}종목"
               f"(+매수가능금액 {BONUS_SLOT_MIN_CASH:,}원 이상시 1종목 보너스) | "
-              f"익절+{TAKE_PROFIT_PCT}% 손절{STOP_LOSS_PCT}% | EOD청산 {FORCE_EOD_TIME}")
+              f"익절+{TAKE_PROFIT_PCT}% 손절{STOP_LOSS_PCT}% | "
+              f"미익절 {HOLD_DAYS_LIMIT}일 경과시 강제청산")
         self._restore_state()
 
         while True:
@@ -704,62 +698,37 @@ class DayBot:
                     time.sleep(300); continue
 
                 # 4-1) 키키 !daybot정지/!daybot시작 반영 — sbot과 동일 패턴:
-                #      정지돼도 보유종목 매도체크/EOD청산/이월재시도는 계속
-                #      돌고, 신규매수(11번)만 멈춘다.
+                #      정지돼도 보유종목 매도체크는 계속 돌고, 신규매수(9번)만 멈춘다.
                 self._is_paused = _read_state().get("paused", False)
 
-                # 5) 일일 초기화 — 새 날이면 당일 관련 플래그 전부 리셋
+                # 5) 일일 초기화 — 새 날이면 당일 관련 플래그 리셋
                 if today != self._sold_today_date:
                     self.sold_today = {}
                     self._sold_today_date = today
-                    self._eod_closed_date = ""
-                    self._carryover_retried_date = ""
 
-                # 6) EOD 강제청산 — 19:50부터, 오늘 아직 시도 안 했으면 딱 1회.
-                #    실패분(하한가/거래정지 등)은 _carryover_codes에 남겨
-                #    그날 밤 내내 재시도하지 않고 익일 09:00으로 넘긴다.
-                if (now_t >= FORCE_EOD_TIME and self._eod_closed_date != today
-                        and self.positions):
-                    self._carryover_codes = self._force_close_all("EOD 강제청산")
-                    self._eod_closed_date = today
-                    self._save_state()
-                    time.sleep(LOOP_SLEEP_SEC); continue
-
-                # 7) 세션 외 시간 (19:50~다음날 08:00)
+                # 6) 세션 외 시간 (19:50~다음날 08:00) — EOD 강제청산 없이
+                #    그냥 장외엔 감시를 쉰다(최대 3일 보유 허용이므로 매일
+                #    밤 억지로 정리할 필요가 없어짐, 2026-10-02 대장 지정).
                 if not (SESSION_START <= now_t <= SESSION_END):
                     time.sleep(60); continue
 
-                # 8) 이월종목 익일 09:00 최우선 재시도(하루 1회) — 신규매수보다 먼저.
-                #    08:00~09:00 사이 가격이 자연스레 +2.5%/-3.5%에 걸려 이미
-                #    정상매도됐으면 still_open이 비어있어 아무 일도 안 함.
-                if (self._carryover_codes and now_t >= CARRYOVER_RETRY_TIME
-                        and self._carryover_retried_date != today):
-                    still_open = self._carryover_codes & set(self.positions.keys())
-                    for code in still_open:
-                        pos = self.positions[code]
-                        current = self._get_current_price(code) or pos["entry_price"]
-                        self._do_sell(code, pos["qty"], "이월종목 익일청산", current)
-                    self._carryover_codes = set()
-                    self._carryover_retried_date = today
-                    self._save_state()
-
-                # 9) 미체결 주문 정리
+                # 7) 미체결 주문 정리
                 self._check_pending_orders()
 
-                # 9-1) 수동매도 감지(60초 주기) — 대장이 HTS/MTS로 직접
+                # 7-1) 수동매도 감지(60초 주기) — 대장이 HTS/MTS로 직접
                 #      매도할 계획이라 daybot이 좀비 포지션을 안 만들게
                 if time.time() - self._last_manual_check_ts >= MANUAL_SELL_CHECK_INTERVAL_SEC:
                     self._check_manual_sells()
                     self._last_manual_check_ts = time.time()
 
-                # 10) 포지션 실시간감시
+                # 8) 포지션 실시간감시 (손절/트레일링/보유기한청산 전부 포함)
                 self._check_all_positions_for_exit()
 
-                # 11) 후보스캔(240초 주기, 슬롯 여유+매수시간대일 때만, 정지중이면 스킵)
+                # 9) 후보스캔(240초 주기, 슬롯 여유+매수시간대일 때만, 정지중이면 스킵)
                 #     ★ 백그라운드 스레드로 실행 — 키움 조건검색이 타임아웃/
-                #     재시도로 몇 분씩 걸려도 메인루프(heartbeat/포지션감시/
-                #     EOD청산)는 계속 돈다. 이전 스캔이 아직 안 끝났으면
-                #     새로 안 띄움(중복실행 방지).
+                #     재시도로 몇 분씩 걸려도 메인루프(heartbeat/포지션감시)는
+                #     계속 돈다. 이전 스캔이 아직 안 끝났으면 새로 안 띄움
+                #     (중복실행 방지).
                 if (not self._is_paused
                         and len(self.positions) < MAX_POSITIONS
                         and BUY_START_TIME <= now_t <= SCAN_END_TIME
@@ -770,7 +739,7 @@ class DayBot:
                         target=self._run_candidate_scan_and_maybe_buy, daemon=True)
                     self._scan_thread.start()
 
-                # 12) 상태 저장
+                # 10) 상태 저장
                 self._save_state()
 
                 time.sleep(LOOP_SLEEP_SEC)
