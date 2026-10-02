@@ -634,46 +634,57 @@ class DayBot:
             return []
 
     def _rank_candidates(self, codes: list, code_multi_tag_map: dict):
-        """1순위 겹침종목 → 2순위 주도주검색식3단독 → 3순위 scout fallback.
-        ★ 2026-10-02 대장 지정 — "중복종목이 없으면 주도주중심으로 매수.
-        주도주를 제외하고는 중복으로 뜨면 매수하는 걸로, 조금 더 안전하게"
-        — 단타000 단독/090930타점 단독 히트는 더 이상 단독으로는 매수
-        안 함(겹침에 포함되면 당연히 매수). 계기: 오늘 한솔(+4만)과
-        동국산업(-4만)이 거의 상쇄돼 단독히트의 edge가 약하다는 정황 +
-        동국산업이 실제로는 단타000/090930타점 둘 다에 뜬 진짜 겹침
-        이었는데 스캔타이밍이 갈려 단독으로 잡힌 걸 대장이 직접 확인.
+        """★ 2026-10-03 대장 재지정 — 4개 소스(주도주검색식3/단타000/
+        090930타점/섹터로테이션) 기준으로 전면 재설계:
+        1순위 겹침(4개 소스 중 2개 이상 동시충족) → 2순위 주도주 단독
+        → 3순위 섹터 단독 → 4순위(마지막) 단타000/090930타점 단독
+        → scout fallback(최후, 후보고갈 방지용).
+        ★ 10-02엔 단타000/090930타점 단독 히트를 아예 매수 안 했는데,
+        이번에 "마지막 순위"로 재활성화 — 완전 배제가 아니라 우선순위
+        최하단으로 내림(섹터를 4번째 소스로 추가해 겹침 풀이 넓어진 것도
+        감안).
         ★ 겹침 판정은 이번 스캔의 code_multi_tag_map이 아니라
         self._recent_tags(스캔 여러 사이클 누적, OVERLAP_WINDOW_SEC 윈도우)
-        로 함 — 위 동국산업 케이스처럼 사이클이 갈려도 겹침을 놓치지 않게.
+        사용 — 사이클이 갈려도 겹침을 놓치지 않게(10-02 동국산업 사례).
         반환값: (순위리스트, {code: source_label})."""
-        tier1, tier_judu, tier3 = [], [], []
+        sector_codes = self._get_sector_rotation_boost_codes()
+
+        tier1, tier2, tier3, tier4 = [], [], [], []
         source_label = {}
         for code in codes:
             tags = set(self._recent_tags.get(code, {}).keys()) or set(code_multi_tag_map.get(code, []))
+            if code in sector_codes:
+                tags = tags | {"섹터"}
             if len(tags) >= 2:
                 tier1.append(code)
                 source_label[code] = "tier1_overlap"
             elif tags == {"주도주검색식3"}:
-                tier_judu.append(code)
-                source_label[code] = "tier3_주도주검색식3"
-            # ★ 단타000 단독/090930타점 단독/기타 단독은 의도적으로 제외
-            #   (겹침이면 이미 위 tier1에서 잡힘)
-
-        for code in self._load_scout_tier3_picks():
-            if code not in tier1 and code not in tier_judu:
+                tier2.append(code)
+                source_label[code] = "tier2_주도주"
+            elif tags == {"섹터"}:
                 tier3.append(code)
+                source_label[code] = "tier3_섹터"
+            elif tags == {"단타000"} or tags == {COND_090930}:
+                tier4.append(code)
+                source_label[code] = "tier4_단타090930"
+
+        tier5 = []
+        for code in self._load_scout_tier3_picks():
+            if code not in tier1 and code not in tier2 and code not in tier3 and code not in tier4:
+                tier5.append(code)
                 source_label[code] = "tier3_scout"
 
-        return tier1 + tier_judu + tier3, source_label
+        return tier1 + tier2 + tier3 + tier4 + tier5, source_label
 
     def _get_sector_rotation_boost_codes(self) -> set:
         """★ 2026-10-03 — intelligence/sector_monitor.py의 detect_baton_touch()
         로 최근 5분간 "급가속"(flow_rate>30%) 테마를 찾고, 그 테마에 속한
-        종목코드를 반환. 2번째 슬롯 이상 채울 때 이 코드들을 후보 순위
-        최상단으로 올려서 "섹터교체로 새로 뜬 대장주"를 우선 잡는다
-        (10-01 설계과제, 백테스터와 별개로 오늘 바로 구현 — 대장 지정).
-        실패해도 조용히 빈 set 반환 — 이 기능이 daybot 핵심 매수로직을
-        막으면 안 됨(어디까지나 우선순위 가산 기능)."""
+        종목코드를 반환. _rank_candidates()가 이 결과를 "섹터" 태그로
+        취급해 4개 소스(주도주검색식3/단타000/090930타점/섹터) 겹침판정과
+        3순위(섹터 단독) 분류에 사용(10-01 설계과제, 10-03 전면 재설계로
+        모든 슬롯에 적용 — 처음엔 2번째 슬롯부터만이었는데 섹터를 정식
+        소스로 승격하며 구분 없앰). 실패해도 조용히 빈 set 반환 — 이
+        기능이 daybot 핵심 매수로직을 막으면 안 됨."""
         if _detect_baton_touch is None or _SECTOR_DB_PATH is None:
             return set()
         try:
@@ -704,18 +715,6 @@ class DayBot:
         ranked, source_label = self._rank_candidates(codes, code_multi_tag_map)
         if not ranked:
             return
-
-        # ★ 2026-10-03 대장 지정 — 2번째 슬롯부터는 섹터로테이션(급가속
-        #   테마) 매칭 후보를 순위 최상단으로 끌어올림. 1번째 매수는
-        #   기존 tier 우선순위 그대로(이미 검증된 로직 안 건드림).
-        if self.positions:
-            boost_codes = self._get_sector_rotation_boost_codes()
-            if boost_codes:
-                boosted = [c for c in ranked if c in boost_codes]
-                rest    = [c for c in ranked if c not in boost_codes]
-                if boosted:
-                    print(f"🔥 [daybot] 섹터로테이션 매칭 후보 우선순위 상향: {boosted}")
-                ranked = boosted + rest
 
         held_elsewhere = set()
         if get_all_positions:
