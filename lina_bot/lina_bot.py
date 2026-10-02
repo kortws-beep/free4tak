@@ -89,7 +89,26 @@ DB_PATH_CONCENTRATION = os.path.join(os.path.dirname(base_dir), "intelligence", 
 DB_PATH_FINANCE = os.path.join(base_dir, 'finance.db')
 DB_PATH_MAPPING = os.path.join(base_dir, 'us_kr_mapping.db')  # 💡 신규 맵핑 DB 경로
 DB_PATH_THEME_FINANCE = os.path.join(base_dir, 'kr_theme_finance.db')
-SCOPES = ['https://www.googleapis.com/auth/calendar'] 
+SCOPES = ['https://www.googleapis.com/auth/calendar']
+
+# ============================================================
+# 수동매수 트레일링 알림 (!리나등록, 2026-10-03 대장 지정)
+# ============================================================
+# ★ bots/daybot.py의 TAKE_PROFIT_PCT/TRAILING_STOP_PCT와 동일값 — 대장이
+#   "daybot 로직 재사용"을 명시적으로 요청했음.
+MANUAL_WATCH_TAKE_PROFIT_PCT  = 2.5
+MANUAL_WATCH_TRAILING_STOP_PCT = 2.0
+MANUAL_WATCH_STATE_FILE = os.path.join(base_dir, "manual_watch_state.json")
+
+
+def _load_manual_watches() -> dict:
+    from common_utils import read_state
+    return read_state(MANUAL_WATCH_STATE_FILE, default={})
+
+
+def _save_manual_watches(watches: dict):
+    from common_utils import write_state
+    write_state(MANUAL_WATCH_STATE_FILE, watches)
 
 SYSTEM_PROMPT = (
     "너는 디스코드 서버의 친절하고 활기찬 AI 비서 '리나'야. "
@@ -1154,6 +1173,75 @@ async def _build_momentum_picks(session: str) -> str:
 
 
 @tasks.loop(minutes=1)
+async def manual_watch_trailing_loop():
+    """!리나등록으로 등록된 종목의 트레일링스탑을 매분 체크.
+    ★ 매도 실행은 절대 안 함(키움 주문 API 자체가 없음) — 조건
+    충족시 알림만 보내고 해당 종목은 등록목록에서 자동 제거(한 번
+    알려주면 끝, 재추적하려면 다시 등록)."""
+    kst_now = datetime.datetime.now(KST)
+    hhmm = kst_now.strftime("%H%M")
+    if not ("0800" <= hhmm <= "1950"):
+        return
+    if not _is_trading_day():
+        return
+
+    watches = _load_manual_watches()
+    if not watches:
+        return
+
+    try:
+        from kis_api import KisAPI
+        api = KisAPI()
+        channel = await client.fetch_channel(REPORT_CHANNEL_ID)
+    except Exception as e:
+        print(f"⚠️ [리나등록 추적] 초기화 오류: {e}")
+        return
+
+    changed = False
+    for code, w in list(watches.items()):
+        try:
+            mdata = await asyncio.to_thread(api.get_market_data, code)
+            price = float((mdata or {}).get("stck_prpr", 0) or 0)
+        except Exception as e:
+            print(f"⚠️ [리나등록 추적] {code} 시세조회 오류: {e}")
+            continue
+        if price <= 0:
+            continue
+
+        entry = w["entry_price"]
+        rate = (price - entry) / entry * 100
+
+        if w.get("peak_price") is not None:
+            if price > w["peak_price"]:
+                w["peak_price"] = price
+                changed = True
+            trail_stop = w["peak_price"] * (1 - MANUAL_WATCH_TRAILING_STOP_PCT / 100)
+            if price <= trail_stop:
+                await send_safe_message(
+                    channel,
+                    f"🔔 **[리나등록] {w.get('name', code)}({code}) 매도 신호**\n"
+                    f"   고점 {w['peak_price']:,.0f}원 대비 -{MANUAL_WATCH_TRAILING_STOP_PCT}% "
+                    f"({price:,.0f}원, 총 {rate:+.2f}%) — 키움에서 매도 판단해줘.\n"
+                    f"   (등록은 자동 해제했어. 계속 추적하려면 다시 `!리나등록`)"
+                )
+                watches.pop(code)
+                changed = True
+            continue
+
+        if rate >= MANUAL_WATCH_TAKE_PROFIT_PCT:
+            w["peak_price"] = price
+            changed = True
+            await send_safe_message(
+                channel,
+                f"📈 [리나등록] {w.get('name', code)}({code}) +{rate:.2f}% 도달 — "
+                f"트레일링 추적 시작(고점 {price:,.0f}원, -{MANUAL_WATCH_TRAILING_STOP_PCT}% 밀리면 알려줄게)"
+            )
+
+    if changed:
+        _save_manual_watches(watches)
+
+
+@tasks.loop(minutes=1)
 async def daily_momentum_am_report():
     kst_now = datetime.datetime.now(KST)
     if kst_now.hour != 8 or kst_now.minute != 55:
@@ -2013,6 +2101,12 @@ async def on_ready():
         print("✅ [시스템] 텔레그램 모니터 watchdog (1분 주기, 세션만료 감지) 가동 성공!")
     except Exception as e: print(f"⚠️ [에러] 텔레그램 watchdog 스케줄러: {e}")
 
+    try:
+        if not manual_watch_trailing_loop.is_running():
+            manual_watch_trailing_loop.start()
+        print("✅ [시스템] 리나등록 수동매수 트레일링 추적 (1분 주기) 가동 성공!")
+    except Exception as e: print(f"⚠️ [에러] 리나등록 추적 스케줄러: {e}")
+
 @client.event
 async def on_message(message):
     if message.author == client.user: return
@@ -2224,6 +2318,67 @@ async def on_message(message):
                 await send_safe_message(message.channel, "\n".join(lines))
             except Exception as e:
                 await send_safe_message(message.channel, f"❌ 상태 조회 오류: {e}")
+        return
+
+    # ── !리나등록 / !리나등록해제 (대장 키움 수동매수 트레일링 알림) ──
+    # ★ 2026-10-03 대장 지정 — 키움으로 직접 산 종목을 등록하면 익절
+    #   (트레일링)만 기계가 체크해서 알림을 주고, 손절 판단은 대장이
+    #   직접. 키움은 주문실행 API가 없어 매도는 절대 대신 못 해주니
+    #   "타이밍은 놓치지 않게, 실행은 사람이" 구조 — daybot.py의
+    #   TAKE_PROFIT_PCT/TRAILING_STOP_PCT와 동일 값 재사용.
+    if message.content.startswith("!리나등록해제"):
+        parts = message.content.split()
+        if len(parts) < 2:
+            await send_safe_message(message.channel, "사용법: `!리나등록해제 종목코드`")
+            return
+        code = parts[1].strip()
+        watches = _load_manual_watches()
+        if code not in watches:
+            await send_safe_message(message.channel, f"⚠️ {code}는 등록돼 있지 않아.")
+            return
+        name = watches[code].get("name", code)
+        watches.pop(code)
+        _save_manual_watches(watches)
+        await send_safe_message(message.channel, f"✅ {name}({code}) 등록 해제했어.")
+        return
+
+    if message.content.startswith("!리나등록"):
+        parts = message.content.split()
+        if len(parts) < 2:
+            await send_safe_message(message.channel, "사용법: `!리나등록 종목코드 [진입가] [종목명]`\n"
+                                     "진입가 생략하면 현재가로 등록해. "
+                                     "종목명은 KIS 시세조회에 안 나와서 입력 안 하면 코드로 표시돼.")
+            return
+        code = parts[1].strip()
+        async with message.channel.typing():
+            try:
+                from kis_api import KisAPI
+                api = KisAPI()
+                mdata = api.get_market_data(code) or {}
+                name = parts[3].strip() if len(parts) >= 4 else code
+                if len(parts) >= 3:
+                    entry_price = float(parts[2])
+                else:
+                    entry_price = float(mdata.get("stck_prpr", 0) or 0)
+                if entry_price <= 0:
+                    await send_safe_message(message.channel, f"❌ {code} 현재가 조회 실패 — 진입가를 직접 입력해줘.")
+                    return
+
+                watches = _load_manual_watches()
+                watches[code] = {
+                    "name": name, "entry_price": entry_price, "peak_price": None,
+                    "registered_at": datetime.datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S"),
+                }
+                _save_manual_watches(watches)
+                await send_safe_message(
+                    message.channel,
+                    f"✅ {name}({code}) 등록 완료 — 진입가 {entry_price:,.0f}원\n"
+                    f"   +{MANUAL_WATCH_TAKE_PROFIT_PCT}% 찍으면 트레일링 추적 시작, "
+                    f"고점대비 -{MANUAL_WATCH_TRAILING_STOP_PCT}% 밀리면 알려줄게.\n"
+                    f"   현재 등록: {len(watches)}종목 — 해제는 `!리나등록해제 {code}`"
+                )
+            except Exception as e:
+                await send_safe_message(message.channel, f"❌ 등록 오류: {e}")
         return
 
     # ── !성과 (sbo2 매매 이력) ─────────────────────────────────
