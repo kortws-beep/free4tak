@@ -690,6 +690,7 @@ class DayBot:
             #   이전("1차")엔 막 초입 모멘텀만(3~8%), 이후("2차")엔 이미
             #   어느정도 오른 종목까지 허용(0~15%) — 대장의 실제 수동단타
             #   진입기준을 그대로 반영.
+            tier = source_label.get(code, "unknown")
             mdata = self.api.get_market_data(code) or {}
             try:
                 price = float(mdata.get("stck_prpr", 0) or 0)
@@ -702,11 +703,15 @@ class DayBot:
                 if not (EARLY_MIN_CHANGE_PCT <= chg <= EARLY_MAX_CHANGE_PCT):
                     print(f"⏭️ [daybot] {code} 패스 — 1차구간(09:40전) 등락률 {chg:+.2f}%"
                           f"가 {EARLY_MIN_CHANGE_PCT}~{EARLY_MAX_CHANGE_PCT}% 범위 밖")
+                    self.db.log_candidate(code, self._name(code), tier, price, chg,
+                                           skip_reason="등락률범위밖", raw_market_data=mdata)
                     continue
             else:
                 if not (0 < chg <= LATE_MAX_CHANGE_PCT):
                     print(f"⏭️ [daybot] {code} 패스 — 2차구간(09:40후) 등락률 {chg:+.2f}%"
                           f"가 0~{LATE_MAX_CHANGE_PCT}% 범위 밖")
+                    self.db.log_candidate(code, self._name(code), tier, price, chg,
+                                           skip_reason="등락률범위밖", raw_market_data=mdata)
                     continue
             # ★ 2026-09-29 대장 지정 — 매도잔량이 매수잔량의 3배 이상
             #   ("눌린 스프링", core/kis_api.py:get_hoga() 자체 표현)일
@@ -716,8 +721,14 @@ class DayBot:
             if hoga.get("ask_bid_ratio", 0) < HOGA_ASK_BID_RATIO_MIN:
                 print(f"⏭️ [daybot] {code} 패스 — 매도/매수잔량비 "
                       f"{hoga.get('ask_bid_ratio', 0):.2f} < {HOGA_ASK_BID_RATIO_MIN}")
+                self.db.log_candidate(code, self._name(code), tier, price, chg,
+                                       ask_bid_ratio=hoga.get("ask_bid_ratio", 0),
+                                       skip_reason="호가비율미달",
+                                       raw_market_data=mdata, raw_hoga_data=hoga)
                 continue
-            tier = source_label.get(code, "unknown")
+            self.db.log_candidate(code, self._name(code), tier, price, chg,
+                                   ask_bid_ratio=hoga.get("ask_bid_ratio", 0),
+                                   bought=True, raw_market_data=mdata, raw_hoga_data=hoga)
             self._do_buy(code, self._name(code), price, tier)
 
     # ============================================================

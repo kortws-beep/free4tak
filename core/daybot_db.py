@@ -8,6 +8,7 @@ hold_days는 항상 0에 가깝지만, 다른 봇들과 동일한 DB 관례를 �
 ================================================================
 """
 import sqlite3
+import json
 import datetime
 from typing import Optional
 
@@ -47,10 +48,60 @@ class DayTradeDB:
             """)
             conn.execute("CREATE INDEX IF NOT EXISTS idx_daybot_code ON trades(code, sell_time)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_daybot_sell ON trades(sell_time)")
+
+            # ★ 2026-10-03 대장 지정 — 키움은 종목코드+종목명만 주고(스크리닝
+            #   전용), 실제 가격/거래량/호가 판단은 전부 한투(KIS)에서 가져옴.
+            #   매수로 이어졌든 아니든 "한투에서 조회한 시점의 데이터"를
+            #   전부 남겨두면 나중에 백테스터/다른 단타 전략의 진짜 소스가
+            #   될 수 있다는 대장 아이디어 — 매 후보 검토마다 기록.
+            #   raw_market_data/raw_hoga_data는 get_market_data()/get_hoga()
+            #   원본을 JSON 그대로 보관(지금 안 쓰는 필드라도 나중에 필요해지면
+            #   스키마 변경 없이 꺼내 쓸 수 있게).
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS candidate_log (
+                    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ts             TEXT    NOT NULL,
+                    code           TEXT    NOT NULL,
+                    stock_name     TEXT,
+                    source_tier    TEXT,
+                    price          REAL,
+                    change_rate    REAL,
+                    ask_bid_ratio  REAL,
+                    bought         INTEGER DEFAULT 0,
+                    skip_reason    TEXT,
+                    raw_market_data TEXT,
+                    raw_hoga_data   TEXT
+                )
+            """)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_cand_ts ON candidate_log(ts)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_cand_code ON candidate_log(code, ts)")
+
             conn.commit(); conn.close()
             print(f"✅ 단타 매매이력 DB ({DAYBOT_HIST_DB})")
         except Exception as e:
             print(f"❌ 단타 DB 오류: {e}")
+
+    def log_candidate(self, code: str, stock_name: str, source_tier: str,
+                       price: float = 0.0, change_rate: float = 0.0,
+                       ask_bid_ratio: Optional[float] = None,
+                       bought: bool = False, skip_reason: str = "",
+                       raw_market_data: Optional[dict] = None,
+                       raw_hoga_data: Optional[dict] = None):
+        try:
+            now = datetime.datetime.now().isoformat(timespec="seconds")
+            conn = _connect()
+            conn.execute("""
+                INSERT INTO candidate_log
+                    (ts, code, stock_name, source_tier, price, change_rate,
+                     ask_bid_ratio, bought, skip_reason, raw_market_data, raw_hoga_data)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?)
+            """, (now, code, stock_name, source_tier, price, change_rate,
+                  ask_bid_ratio, 1 if bought else 0, skip_reason,
+                  json.dumps(raw_market_data, ensure_ascii=False) if raw_market_data else None,
+                  json.dumps(raw_hoga_data, ensure_ascii=False) if raw_hoga_data else None))
+            conn.commit(); conn.close()
+        except Exception as e:
+            print(f"⚠️ 단타 후보로그 저장 오류 {code}: {e}")
 
     def save_buy(self, code: str, buy_price: float, qty: int,
                  stock_name: str = "", buy_tag: str = ""):
