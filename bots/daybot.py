@@ -73,6 +73,19 @@ from daybot_db import DayTradeDB
 
 load_dotenv(_os.path.join(_BASE, ".env"))
 
+# ★ 2026-10-03 대장 지정 — "2번째 매수부터는 섹터교체로 새로 뜬 대장주를
+#   빠르게 잡아야" 설계과제(10-01) 구현. intelligence/sector_monitor.py의
+#   detect_baton_touch()를 재사용(market_concentration.py/day_trade_scout.py
+#   와 동일 패턴) — 키움 API를 전혀 안 쓰고 sector_monitor가 이미 수집해둔
+#   KIS 기반 데이터만 읽으므로 daybot 자체 조건검색 부담과 무관.
+try:
+    import sqlite3 as _sqlite3
+    from sector_monitor import detect_baton_touch as _detect_baton_touch
+    from sector_monitor import DB_PATH as _SECTOR_DB_PATH
+except Exception:
+    _detect_baton_touch = None
+    _SECTOR_DB_PATH = None
+
 try:
     from master_db import (
         record_trade    as _master_record,
@@ -653,6 +666,37 @@ class DayBot:
 
         return tier1 + tier_judu + tier3, source_label
 
+    def _get_sector_rotation_boost_codes(self) -> set:
+        """★ 2026-10-03 — intelligence/sector_monitor.py의 detect_baton_touch()
+        로 최근 5분간 "급가속"(flow_rate>30%) 테마를 찾고, 그 테마에 속한
+        종목코드를 반환. 2번째 슬롯 이상 채울 때 이 코드들을 후보 순위
+        최상단으로 올려서 "섹터교체로 새로 뜬 대장주"를 우선 잡는다
+        (10-01 설계과제, 백테스터와 별개로 오늘 바로 구현 — 대장 지정).
+        실패해도 조용히 빈 set 반환 — 이 기능이 daybot 핵심 매수로직을
+        막으면 안 됨(어디까지나 우선순위 가산 기능)."""
+        if _detect_baton_touch is None or _SECTOR_DB_PATH is None:
+            return set()
+        try:
+            conn = _sqlite3.connect(_SECTOR_DB_PATH, timeout=5)
+            signals = _detect_baton_touch(conn)
+            accel_themes = {s["theme_nm"] for s in signals if "급가속" in s.get("status", "")}
+            if not accel_themes:
+                conn.close()
+                return set()
+            placeholders = ",".join("?" * len(accel_themes))
+            rows = conn.execute(f"""
+                SELECT DISTINCT code FROM stock_momentum
+                WHERE theme_nm IN ({placeholders})
+                AND ts >= datetime('now', '-10 minutes', 'localtime')
+            """, tuple(accel_themes)).fetchall()
+            conn.close()
+            if accel_themes:
+                print(f"🔥 [daybot] 섹터로테이션 감지: {', '.join(accel_themes)}")
+            return {r[0] for r in rows}
+        except Exception as e:
+            print(f"⚠️ [daybot] 섹터로테이션 체크 오류: {e}")
+            return set()
+
     def _run_candidate_scan_and_maybe_buy(self):
         codes, code_multi_tag_map = self._scan_conditions()
         if not codes:
@@ -660,6 +704,18 @@ class DayBot:
         ranked, source_label = self._rank_candidates(codes, code_multi_tag_map)
         if not ranked:
             return
+
+        # ★ 2026-10-03 대장 지정 — 2번째 슬롯부터는 섹터로테이션(급가속
+        #   테마) 매칭 후보를 순위 최상단으로 끌어올림. 1번째 매수는
+        #   기존 tier 우선순위 그대로(이미 검증된 로직 안 건드림).
+        if self.positions:
+            boost_codes = self._get_sector_rotation_boost_codes()
+            if boost_codes:
+                boosted = [c for c in ranked if c in boost_codes]
+                rest    = [c for c in ranked if c not in boost_codes]
+                if boosted:
+                    print(f"🔥 [daybot] 섹터로테이션 매칭 후보 우선순위 상향: {boosted}")
+                ranked = boosted + rest
 
         held_elsewhere = set()
         if get_all_positions:
