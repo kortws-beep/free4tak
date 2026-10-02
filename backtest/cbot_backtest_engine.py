@@ -61,6 +61,11 @@ FALLBACK_TARGET = 0.15
 
 MIN_ORDER_AMT = 5_000  # 업비트 최소 주문금액 근사치
 
+# ★ 2026-10-03 주말점검 — 실전 cbot.py의 REBUY_COOLDOWN_SEC(2026-09-15,
+#   "당일 자정까지 금지"에서 롤링 쿨다운으로 변경)이 백테스터엔 아예
+#   없던 드리프트. 손실/본절 매도만 적용(09-21 3봇공통 정책).
+REBUY_COOLDOWN_SEC = 5 * 3600
+
 # ★ 2026-08-17: cbot.py 매수필터 값과 정비 — RSI_MAX/VOL_MULT가 옛날 값으로
 #   하드코딩돼 있어 실전과 어긋났음(RSI_MAX 70→79, VOL_MULT 1.3→1.2 둘 다
 #   실전에서 완화된 이후 백테스터에 반영 안 됨)
@@ -183,6 +188,11 @@ class CBotBacktestEngine:
 
         self._ohlcv_cache: dict = {}
         self._stagnant_info: dict = {}   # ★ {market: {"score":, "current":}} — 이번 틱 회전후보
+        # ★ 2026-10-03 주말점검 — 실전 cbot.py의 REBUY_COOLDOWN_SEC(5시간
+        #   롤링, 손실/본절 매도만 적용)가 백테스터엔 전혀 모델링 안 돼
+        #   있던 드리프트 발견(발견 agent 보고). {market: timestamp(초) or None}
+        #   — None이면 쿨다운 없음(수익매도), 값 있으면 그 시각+5시간까지 재매수 금지.
+        self.sold_at: dict = {}
 
     # ----------------------------------------------------------
     # 데이터 로드 (4시간봉)
@@ -354,6 +364,17 @@ class CBotBacktestEngine:
         profit_krw = net - entry * qty
         profit_rate = (fill_price - entry) / entry
 
+        # ★ 2026-10-03 — 재매수 쿨다운 등록(실전 cbot.py와 동일 컨벤션:
+        #   손실/본절 매도만 타임스탬프, 익절은 None으로 즉시 재매수 허용,
+        #   전량/부분 무관 매 매도마다 갱신).
+        try:
+            self.sold_at[market] = (
+                datetime.datetime.strptime(date, "%Y-%m-%d %H:%M:%S").timestamp()
+                if profit_krw <= 0 else None
+            )
+        except (ValueError, TypeError):
+            pass
+
         ot = self.open_trades.get(market)
         if ot:
             ot.sell_date = date
@@ -389,6 +410,18 @@ class CBotBacktestEngine:
             return (s - b).days
         except Exception:
             return 0
+
+    def _is_rebuy_blocked(self, market: str, now_str: str) -> bool:
+        """실전 cbot.py::_is_rebuy_blocked()와 동일 로직 — REBUY_COOLDOWN_SEC
+        (5시간) 이내 손실/본절 매도 이력이 있으면 재매수 금지."""
+        sold_at = self.sold_at.get(market)
+        if not isinstance(sold_at, (int, float)):
+            return False
+        try:
+            now_ts = datetime.datetime.strptime(now_str, "%Y-%m-%d %H:%M:%S").timestamp()
+        except (ValueError, TypeError):
+            return False
+        return (now_ts - sold_at) < REBUY_COOLDOWN_SEC
 
     # ----------------------------------------------------------
     # 매도 체크 — cbot._check_sell 재현 (ATR+25일+50%매도)
@@ -577,6 +610,8 @@ class CBotBacktestEngine:
             candidates = []
             for market in self.config.codes:
                 if market in self.positions:
+                    continue
+                if self._is_rebuy_blocked(market, date_str):
                     continue
                 df = self._load_ohlcv(market)
                 if ts not in df.index:
