@@ -116,36 +116,38 @@ def _save_manual_watches(watches: dict):
     write_state(MANUAL_WATCH_STATE_FILE, watches)
 
 
-async def _register_manual_watch(channel, code: str, buy_amount: float = None,
+async def _register_manual_watch(channel, code: str, buy_price: float = None,
                                   name_override: str = None):
-    """!리나등록/자연어("등록 종목명 [매수금액]") 공용 등록 로직.
-    ★ 2026-10-03 대장 지정 — 가격 추적(트레일링)은 그대로 현재가 기준으로
-    하되, 매수금액을 같이 받아두면 해제시 매도금액과 비교해 실제 손익을
-    원 단위/퍼센트로 바로 알려줄 수 있음("등록 종목명 매수금액" →
-    해제시 "종목명 % 수익실현" 리포트)."""
+    """!리나등록/자연어("등록 종목명 [평단가]") 공용 등록 로직.
+    ★ 2026-10-03 대장 지정 — 분할매수를 하기 때문에 중간 금액으로는
+    등록 못 함(최종 매수 완료 후에 등록). 그래서 "매수금액" 대신
+    "주당 평균매입가"를 받는다 — 트레일링 추적과 수익률 계산 둘 다
+    이 가격 하나로 처리(% 계산은 금액이든 가격이든 결과가 같음).
+    평단가 생략하면 현재가로 등록(트레일링 추적만, 해제시 수익률은
+    등록시점 대비로 계산됨 — 평단가 정확히 모를 때용)."""
     async with channel.typing():
         try:
             from kis_api import KisAPI
             api = KisAPI()
-            mdata = api.get_market_data(code) or {}
-            entry_price = float(mdata.get("stck_prpr", 0) or 0)
-            if entry_price <= 0:
-                await send_safe_message(channel, f"❌ {code} 현재가 조회 실패.")
+            if buy_price is None:
+                mdata = api.get_market_data(code) or {}
+                buy_price = float(mdata.get("stck_prpr", 0) or 0)
+            if buy_price <= 0:
+                await send_safe_message(channel, f"❌ {code} 현재가 조회 실패 — 평단가를 직접 입력해줘.")
                 return
             name = name_override or get_stock_name(code)
 
             watches = _load_manual_watches()
             watches[code] = {
-                "name": name, "entry_price": entry_price, "peak_price": None,
-                "last_alert_peak": 0, "buy_amount": buy_amount,
+                "name": name, "entry_price": buy_price, "peak_price": None,
+                "last_alert_peak": 0,
                 "registered_at": datetime.datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S"),
             }
             _save_manual_watches(watches)
-            amt_line = f"매수금액 {buy_amount:,.0f}원\n   " if buy_amount else ""
             await send_safe_message(
                 channel,
-                f"✅ {name}({code}) 등록 완료 — 현재가 {entry_price:,.0f}원\n   {amt_line}"
-                f"+{MANUAL_WATCH_TAKE_PROFIT_PCT}% 찍으면 트레일링 추적 시작, "
+                f"✅ {name}({code}) 등록 완료 — 평단가 {buy_price:,.0f}원\n"
+                f"   +{MANUAL_WATCH_TAKE_PROFIT_PCT}% 찍으면 트레일링 추적 시작, "
                 f"고점대비 -{MANUAL_WATCH_TRAILING_STOP_PCT}% 밀리면 알려줄게(계속 감시).\n"
                 f"   현재 등록: {len(watches)}종목 — 해제는 `!리나등록해제 {code}` 또는 `해제 {name}`"
             )
@@ -153,10 +155,11 @@ async def _register_manual_watch(channel, code: str, buy_amount: float = None,
             await send_safe_message(channel, f"❌ 등록 오류: {e}")
 
 
-async def _deregister_manual_watch(channel, code: str, sell_amount: float = None):
-    """!리나등록해제/자연어("해제 종목명 [매도금액]") 공용 해제 로직.
-    매도금액이 주어지고 등록 시 매수금액도 있었으면 실현손익을 바로
-    계산해서 "종목명 ±N% 수익실현"으로 보고(대장 지정)."""
+async def _deregister_manual_watch(channel, code: str, sell_price: float = None):
+    """!리나등록해제/자연어("해제 종목명 [매도가]") 공용 해제 로직.
+    매도가가 주어지면 등록시 평단가 대비 수익률을 바로 계산해서
+    "종목명 ±N% 수익실현"으로 보고(대장 지정 — 분할매도도 고려해 가격
+    기준, 금액 기준 아님)."""
     watches = _load_manual_watches()
     if code not in watches:
         await send_safe_message(channel, f"⚠️ {code}는 등록돼 있지 않아.")
@@ -165,19 +168,15 @@ async def _deregister_manual_watch(channel, code: str, sell_amount: float = None
     name = w.get("name", code)
     _save_manual_watches(watches)
 
-    buy_amount = w.get("buy_amount")
-    if sell_amount is not None and buy_amount:
-        profit_krw = sell_amount - buy_amount
-        profit_rate = profit_krw / buy_amount * 100
-        emoji = "💰" if profit_krw >= 0 else "💔"
+    entry_price = w.get("entry_price")
+    if sell_price is not None and entry_price:
+        profit_rate = (sell_price - entry_price) / entry_price * 100
+        emoji = "💰" if profit_rate >= 0 else "💔"
         await send_safe_message(
             channel,
             f"{emoji} **{name}({code}) {profit_rate:+.2f}% 수익실현**\n"
-            f"   매수 {buy_amount:,.0f}원 → 매도 {sell_amount:,.0f}원 | 손익 {profit_krw:+,.0f}원"
+            f"   평단가 {entry_price:,.0f}원 → 매도가 {sell_price:,.0f}원"
         )
-    elif sell_amount is not None:
-        await send_safe_message(channel, f"✅ {name}({code}) 등록 해제했어. "
-                                 f"(등록할 때 매수금액을 안 줘서 수익률 계산은 못 해)")
     else:
         await send_safe_message(channel, f"✅ {name}({code}) 등록 해제했어.")
 
@@ -2409,43 +2408,43 @@ async def on_message(message):
     if message.content.startswith("!리나등록해제") or message.content.startswith("해제 "):
         parts = message.content.split()
         if len(parts) < 2:
-            await send_safe_message(message.channel, "사용법: `!리나등록해제 종목코드 [매도금액]` 또는 `해제 종목명 [매도금액]`")
+            await send_safe_message(message.channel, "사용법: `!리나등록해제 종목코드 [매도가]` 또는 `해제 종목명 [매도가]`")
             return
         arg = parts[1].strip()
         code = arg if arg.isdigit() else get_stock_code(arg)
         if not code:
             await send_safe_message(message.channel, f"❌ '{arg}' 종목코드를 못 찾았어.")
             return
-        sell_amount = None
+        sell_price = None
         if len(parts) >= 3:
             try:
-                sell_amount = float(parts[2])
+                sell_price = float(parts[2])
             except ValueError:
                 pass
-        await _deregister_manual_watch(message.channel, code, sell_amount)
+        await _deregister_manual_watch(message.channel, code, sell_price)
         return
 
     if message.content.startswith("!리나등록") or message.content.startswith("등록 "):
         parts = message.content.split()
         if len(parts) < 2:
-            await send_safe_message(message.channel, "사용법: `!리나등록 종목코드 [매수금액] [종목명]` 또는 `등록 종목명 [매수금액]`\n"
-                                     "매수금액 생략 가능 — 생략하면 해제할 때 수익률 계산은 안 돼.")
+            await send_safe_message(message.channel, "사용법: `!리나등록 종목코드 [평단가] [종목명]` 또는 `등록 종목명 [평단가]`\n"
+                                     "평단가 생략하면 현재가로 등록해(분할매수 완료 후 평단가로 등록 권장).")
             return
         arg = parts[1].strip()
         code = arg if arg.isdigit() else get_stock_code(arg)
         if not code:
             await send_safe_message(message.channel, f"❌ '{arg}' 종목코드를 못 찾았어.")
             return
-        buy_amount = None
+        buy_price = None
         name_override = None
         if len(parts) >= 3:
             try:
-                buy_amount = float(parts[2])
+                buy_price = float(parts[2])
             except ValueError:
                 pass
         if len(parts) >= 4:
             name_override = parts[3].strip()
-        await _register_manual_watch(message.channel, code, buy_amount, name_override)
+        await _register_manual_watch(message.channel, code, buy_price, name_override)
         return
 
     # ── !성과 (sbo2 매매 이력) ─────────────────────────────────
