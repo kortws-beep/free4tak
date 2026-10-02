@@ -105,6 +105,15 @@ MANUAL_WATCH_TAKE_PROFIT_PCT  = 3.0
 MANUAL_WATCH_TRAILING_STOP_PCT = 2.5
 MANUAL_WATCH_STATE_FILE = os.path.join(base_dir, "manual_watch_state.json")
 
+# ★ 2026-10-03 대장 지정 — 실거래 3건(하이젠알앤엠/스피어/한빛레이저)을
+#   대장의 실제 MTS 수익률과 대조해 역산: 가격기준 등락률과 실제 수익률
+#   차이가 세 종목 다 0.218~0.229%(평균 0.224%)로 거의 일정 — 매수+매도
+#   수수료에 매도시 증권거래세까지 합친 왕복비용으로 추정. 트레일링
+#   발동/정지 "판단"은 원래 가격등락률 그대로 쓰고(차트가 보여주는
+#   움직임 기준), 사용자에게 "보여주는" 수익률(등록현황/수익실현 리포트)
+#   에만 이 상수를 차감해 실제 체감 수익률에 가깝게 보정한다.
+MANUAL_WATCH_FEE_DRAG_PCT = 0.224
+
 
 def _load_manual_watches() -> dict:
     from common_utils import read_state
@@ -170,7 +179,7 @@ async def _deregister_manual_watch(channel, code: str, sell_price: float = None)
 
     entry_price = w.get("entry_price")
     if sell_price is not None and entry_price:
-        profit_rate = (sell_price - entry_price) / entry_price * 100
+        profit_rate = (sell_price - entry_price) / entry_price * 100 - MANUAL_WATCH_FEE_DRAG_PCT
         emoji = "💰" if profit_rate >= 0 else "💔"
         await send_safe_message(
             channel,
@@ -1284,7 +1293,11 @@ async def manual_watch_trailing_loop():
             continue
 
         entry = w["entry_price"]
+        # ★ rate(가격기준)는 트레일링 발동/정지 "판단"에만 사용 — 차트가
+        #   보여주는 실제 가격움직임 기준이어야 함. 알림 문구에 보여줄
+        #   때만 net_rate(수수료+세금 차감한 체감 수익률)로 바꿔치기.
         rate = (price - entry) / entry * 100
+        net_rate = rate - MANUAL_WATCH_FEE_DRAG_PCT
 
         if w.get("peak_price") is not None:
             if price > w["peak_price"]:
@@ -1296,7 +1309,7 @@ async def manual_watch_trailing_loop():
                     channel,
                     f"🔔 **[리나등록] {w.get('name', code)}({code}) 매도 신호**\n"
                     f"   고점 {w['peak_price']:,.0f}원 대비 -{MANUAL_WATCH_TRAILING_STOP_PCT}% "
-                    f"({price:,.0f}원, 총 {rate:+.2f}%) — 키움에서 매도 판단해줘.\n"
+                    f"({price:,.0f}원, 총 {net_rate:+.2f}%) — 키움에서 매도 판단해줘.\n"
                     f"   (계속 감시할게 — 신고점 찍고 또 밀리면 다시 알려줄게. "
                     f"그만 지켜봐도 되면 `!리나등록해제 {code}`)"
                 )
@@ -1309,7 +1322,7 @@ async def manual_watch_trailing_loop():
             changed = True
             await send_safe_message(
                 channel,
-                f"📈 [리나등록] {w.get('name', code)}({code}) +{rate:.2f}% 도달 — "
+                f"📈 [리나등록] {w.get('name', code)}({code}) +{net_rate:.2f}% 도달 — "
                 f"트레일링 추적 시작(고점 {price:,.0f}원, -{MANUAL_WATCH_TRAILING_STOP_PCT}% 밀리면 알려줄게)"
             )
 
@@ -2421,10 +2434,11 @@ async def on_message(message):
                     entry = w.get("entry_price", 0)
                     mdata = api.get_market_data(code) or {}
                     price = float(mdata.get("stck_prpr", 0) or 0)
-                    rate  = (price - entry) / entry * 100 if entry else 0
-                    emoji = "📈" if rate >= 0 else "📉"
+                    raw_rate = (price - entry) / entry * 100 if entry else 0
+                    net_rate = raw_rate - MANUAL_WATCH_FEE_DRAG_PCT
+                    emoji = "📈" if net_rate >= 0 else "📉"
                     trail = f" (트레일링 고점 {w['peak_price']:,.0f})" if w.get("peak_price") else ""
-                    lines.append(f"   {emoji} {name}({code}) {rate:+.2f}% "
+                    lines.append(f"   {emoji} {name}({code}) {net_rate:+.2f}% "
                                  f"| 평단가 {entry:,.0f} → 현재가 {price:,.0f}{trail}")
                 await send_safe_message(message.channel, "\n".join(lines))
             except Exception as e:
