@@ -149,7 +149,7 @@ async def _register_manual_watch(channel, code: str, buy_price: float = None,
                 f"✅ {name}({code}) 등록 완료 — 평단가 {buy_price:,.0f}원\n"
                 f"   +{MANUAL_WATCH_TAKE_PROFIT_PCT}% 찍으면 트레일링 추적 시작, "
                 f"고점대비 -{MANUAL_WATCH_TRAILING_STOP_PCT}% 밀리면 알려줄게(계속 감시).\n"
-                f"   현재 등록: {len(watches)}종목 — 해제는 `!리나등록해제 {code}` 또는 `해제 {name}`"
+                f"   현재 등록: {len(watches)}종목(`등록현황`으로 확인) — 해제는 `!리나등록해제 {code}` 또는 `해제 {name}`"
             )
         except Exception as e:
             await send_safe_message(channel, f"❌ 등록 오류: {e}")
@@ -2405,6 +2405,32 @@ async def on_message(message):
     #   candidate_pool.get_stock_code()로 이름→코드 변환, 가격은 항상
     #   현재가로 등록(자연어 경로는 진입가 직접지정 미지원, 필요하면
     #   !리나등록으로).
+    # ── !리나등록현황 (대장 — "하루에 4~5종목도 등록하니까") ──────
+    if message.content.startswith("!리나등록현황") or message.content.startswith("등록현황"):
+        async with message.channel.typing():
+            watches = _load_manual_watches()
+            if not watches:
+                await send_safe_message(message.channel, "📭 현재 등록된 종목 없어.")
+                return
+            try:
+                from kis_api import KisAPI
+                api = KisAPI()
+                lines = [f"📋 **리나등록 현황** ({len(watches)}종목)"]
+                for code, w in watches.items():
+                    name  = w.get("name", code)
+                    entry = w.get("entry_price", 0)
+                    mdata = api.get_market_data(code) or {}
+                    price = float(mdata.get("stck_prpr", 0) or 0)
+                    rate  = (price - entry) / entry * 100 if entry else 0
+                    emoji = "📈" if rate >= 0 else "📉"
+                    trail = f" (트레일링 고점 {w['peak_price']:,.0f})" if w.get("peak_price") else ""
+                    lines.append(f"   {emoji} {name}({code}) {rate:+.2f}% "
+                                 f"| 평단가 {entry:,.0f} → 현재가 {price:,.0f}{trail}")
+                await send_safe_message(message.channel, "\n".join(lines))
+            except Exception as e:
+                await send_safe_message(message.channel, f"❌ 등록현황 조회 오류: {e}")
+        return
+
     if message.content.startswith("!리나등록해제") or message.content.startswith("해제 "):
         parts = message.content.split()
         if len(parts) < 2:
