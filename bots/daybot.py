@@ -6,7 +6,10 @@ daybot.py — 영암9 단타봇 (회전매매, 최대 3일 보유)
 sbot/sbo2(스윙, 며칠~1주일 보유)보다는 짧고, 순수 당일청산보다는
 여유있게 — daybot은 짧은 호흡의 회전매매 봇입니다.
 - 대상: 키움 조건검색 3개(주도주검색식3/단타000/090930타점 시가이탈 오전중저가이탈)
-  중 2개 이상 겹친 종목 우선
+  중 2개 이상 겹친 종목 우선. ★ 2026-10-02 대장 지정 — 겹침이 없으면
+  주도주검색식3 단독만 매수("시장 관심을 받는 중"이라는 근거), 단타000/
+  090930타점 단독 히트는 더 이상 단독으로는 매수 안 함(겹침에 포함되면
+  당연히 매수) — 단독히트 edge가 약하다는 정황 확인 후 보수화
 - 매수조건: 위 조건검색 통과 + 당일 등락률(09:40 이전 "1차"는 3~8%,
   이후 "2차"는 0~15%) + 호가창 매도잔량이 매수잔량의 3배 이상
   ("눌린 스프링")일 때만 매수 진행. 익절(트레일링)은 1차/2차 구분 없음
@@ -197,6 +200,17 @@ CONDITION_KEYWORDS = ["주도주검색식3", "단타000", "090930타점"]
 COND_090930 = "090930타점 시가이탈 오전중저가이탈"
 # ★ "5본봉거래대금단타"는 대장이 수동단타에서 안 쓰던 검색식이라 제외
 
+# ★ 2026-10-02 대장 지적 — 동국산업이 실제로는 단타000+090930타점 둘 다에
+#   뜬 진짜 겹침종목이었는데, 기존엔 _scan_conditions()가 매 스캔(240초)
+#   마다 code_multi_tag_map을 새로 빈 dict로 만들어서 "이번 한 번의 스캔
+#   안에서 동시에 잡힌" 경우만 겹침으로 인정했음 — 조건마다 응답
+#   타임아웃이 잦고(core/kiwoom_api.py) 종목이 몇 분 간격으로 조건을
+#   들락날락하다 보니, 실제로는 겹치는데 스캔 타이밍이 어긋나 단독
+#   히트로만 기록되는 경우가 있었음(이게 오늘 승패가 거의 반반(한솔
+#   +4만 vs 동국산업 -4만)이었던 이유 중 하나로 추정). 최근 N분 내
+#   관측된 태그를 전부 모아서 겹침 판정하도록 교체.
+OVERLAP_WINDOW_SEC = 1200   # 최근 20분(스캔 240초 기준 약 5사이클) 내 태그는 전부 겹침 판정에 합산
+
 SCOUT_CANDIDATES_PATH = _os.path.join(_BASE, "intelligence", "day_trade_scout_candidates.json")
 SCOUT_STALE_SEC = 7200   # day_trade_scout.py 결과가 이 이상 오래되면 3순위 fallback에서 제외
 
@@ -231,6 +245,12 @@ class DayBot:
         self._last_scan_ts    = 0.0
         self._last_manual_check_ts = 0.0
         self._is_paused       = False
+        # ★ 2026-10-02 대장 지적 — 스캔 사이클(240초)을 넘나드는 겹침종목
+        #   탐지용. {code: {tag: last_seen_ts}} — OVERLAP_WINDOW_SEC 안의
+        #   태그를 전부 모아서 겹침(2개 이상 조건) 판정(아래 _rank_candidates
+        #   참고). 재시작시 휘발돼도 무방(겹침은 그날그날의 실시간 신호라
+        #   영구 보존 불필요) — 상태파일에 저장 안 함.
+        self._recent_tags: dict = {}
         # ★ 2026-09-30 발견 — 키움 조건검색이 3개 조건 전부 타임아웃나면
         #   최악의 경우(조건당 최대 2회 재시도×65초, core/kiwoom_api.py)
         #   8분 가까이 걸릴 수 있는데, 이게 메인루프 안에서 동기 실행되고
@@ -545,7 +565,11 @@ class DayBot:
     # ============================================================
     def _scan_conditions(self):
         """core/kiwoom_api.py의 get_condition_codes()를 그대로 재사용
-        (재구현 금지 — code_multi_tag_map이 이미 겹침추적 해줌)."""
+        (재구현 금지 — code_multi_tag_map이 이미 겹침추적 해줌).
+        ★ 2026-10-02 — 이번 스캔에서 관측된 태그를 self._recent_tags에
+        누적(+타임스탬프)하고, OVERLAP_WINDOW_SEC보다 오래된 태그는 버려서
+        스캔 사이클을 넘나드는 겹침도 잡아낸다(위 OVERLAP_WINDOW_SEC
+        코멘트 참고)."""
         if not self.kiwoom.enabled:
             return [], {}
         code_name_map, code_multi_tag_map = {}, {}
@@ -565,6 +589,20 @@ class DayBot:
         finally:
             loop.close()
         self.code_name_map.update(code_name_map)
+
+        now_ts = time.time()
+        for code, tags in code_multi_tag_map.items():
+            bucket = self._recent_tags.setdefault(code, {})
+            for tag in tags:
+                bucket[tag] = now_ts
+        for code in list(self._recent_tags.keys()):
+            bucket = self._recent_tags[code]
+            for tag in list(bucket.keys()):
+                if now_ts - bucket[tag] > OVERLAP_WINDOW_SEC:
+                    del bucket[tag]
+            if not bucket:
+                del self._recent_tags[code]
+
         return codes, code_multi_tag_map
 
     def _load_scout_tier3_picks(self) -> list:
@@ -583,38 +621,37 @@ class DayBot:
             return []
 
     def _rank_candidates(self, codes: list, code_multi_tag_map: dict):
-        """1순위 겹침종목 → 2순위 단타000단독 → 3순위 나머지단독+scout fallback.
-        ★ 2026-09-30 대장 지적 — 매수 후 어느 출처에서 나왔는지 구분해야
-        나중에 분석하기 쉬움. 기존엔 3순위를 전부 "tier3_fallback"으로
-        뭉뚱그렸는데(오늘 실거래 4건이 전부 이 라벨이라 뭐가 실제로
-        잘 먹히는지 알 수 없었음), 주도주검색식3단독/장개장직후단독/
-        scout후보를 별도 라벨로 분리. 반환값: (순위리스트, {code: source_label})."""
-        tier1, tier2, tier3 = [], [], []
+        """1순위 겹침종목 → 2순위 주도주검색식3단독 → 3순위 scout fallback.
+        ★ 2026-10-02 대장 지정 — "중복종목이 없으면 주도주중심으로 매수.
+        주도주를 제외하고는 중복으로 뜨면 매수하는 걸로, 조금 더 안전하게"
+        — 단타000 단독/090930타점 단독 히트는 더 이상 단독으로는 매수
+        안 함(겹침에 포함되면 당연히 매수). 계기: 오늘 한솔(+4만)과
+        동국산업(-4만)이 거의 상쇄돼 단독히트의 edge가 약하다는 정황 +
+        동국산업이 실제로는 단타000/090930타점 둘 다에 뜬 진짜 겹침
+        이었는데 스캔타이밍이 갈려 단독으로 잡힌 걸 대장이 직접 확인.
+        ★ 겹침 판정은 이번 스캔의 code_multi_tag_map이 아니라
+        self._recent_tags(스캔 여러 사이클 누적, OVERLAP_WINDOW_SEC 윈도우)
+        로 함 — 위 동국산업 케이스처럼 사이클이 갈려도 겹침을 놓치지 않게.
+        반환값: (순위리스트, {code: source_label})."""
+        tier1, tier_judu, tier3 = [], [], []
         source_label = {}
         for code in codes:
-            tags = code_multi_tag_map.get(code, [])
+            tags = set(self._recent_tags.get(code, {}).keys()) or set(code_multi_tag_map.get(code, []))
             if len(tags) >= 2:
                 tier1.append(code)
                 source_label[code] = "tier1_overlap"
-            elif tags == ["단타000"]:
-                tier2.append(code)
-                source_label[code] = "tier2_danta000"
-            elif tags == ["주도주검색식3"]:
-                tier3.append(code)
+            elif tags == {"주도주검색식3"}:
+                tier_judu.append(code)
                 source_label[code] = "tier3_주도주검색식3"
-            elif tags == [COND_090930]:
-                tier3.append(code)
-                source_label[code] = "tier3_090930타점"
-            elif tags:
-                tier3.append(code)
-                source_label[code] = "tier3_기타"
+            # ★ 단타000 단독/090930타점 단독/기타 단독은 의도적으로 제외
+            #   (겹침이면 이미 위 tier1에서 잡힘)
 
         for code in self._load_scout_tier3_picks():
-            if code not in tier1 and code not in tier2 and code not in tier3:
+            if code not in tier1 and code not in tier_judu:
                 tier3.append(code)
                 source_label[code] = "tier3_scout"
 
-        return tier1 + tier2 + tier3, source_label
+        return tier1 + tier_judu + tier3, source_label
 
     def _run_candidate_scan_and_maybe_buy(self):
         codes, code_multi_tag_map = self._scan_conditions()
