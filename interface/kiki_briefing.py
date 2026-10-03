@@ -33,9 +33,15 @@ except Exception:
 # kiki.py on_ready에서 주입받거나 자체 구현 사용
 import os as _os2
 _BOT_STATE_FILES = {
-    "sbot": "sbot_state.json",
-    "sbo2": "lina_bot/sbo2_state.json",
-    "cbot": "cbot_state.json",
+    "sbot":   "sbot_state.json",
+    "sbo2":   "lina_bot/sbo2_state.json",
+    "cbot":   "cbot_state.json",
+    # ★ 2026-10-03 — daybot이 빠져있어서 !daybot매도의 pending_cmd가
+    #   어디에도 안 써지고 조용히 사라지던 버그(kiki.py의 별도
+    #   BOT_STATE_FILES엔 daybot이 있었지만, read_state/write_state/
+    #   update_state()는 이 private 딕셔너리만 참조해서 그 주입이
+    #   무의미했음). bots/daybot.py:BOT_STATE_FILE과 동일 경로로 추가.
+    "daybot": "daybot_state.json",
 }
 
 def read_state(bot: str = "sbot") -> dict:

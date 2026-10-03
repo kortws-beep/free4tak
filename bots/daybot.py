@@ -63,7 +63,7 @@ HB_FILE = "/tmp/hb_daybot"
 
 from common_utils import (
     now_hhmm, now_hms, today_str, is_weekend,
-    read_state, write_state,
+    read_state, update_state,
 )
 from kis_api import KisAPI
 from kis_websocket import KisWebSocket
@@ -312,13 +312,19 @@ class DayBot:
         with self._positions_lock:
             positions_snapshot = dict(self.positions)   # 얕은 복사 — json 직렬화 중
                                                           # 스캔스레드가 키 추가/삭제해도 안전
-        write_state(BOT_STATE_FILE, {
-            "positions":        positions_snapshot,
-            "sold_today":       self.sold_today,
-            "sold_today_date":  self._sold_today_date,
-            "code_name_map":    self.code_name_map,
-            "last_update":      now_hms(),
-        })
+        # ★ 2026-10-03 — write_state()(전체덮어쓰기)를 쓰고 있었던 버그:
+        #   매 루프(5초)마다 여기서 positions/sold_today 등 5개 키만 있는
+        #   dict로 상태파일 전체를 갈아치워서, 키키가 그 사이에 써놓은
+        #   paused/pending_cmd/cmd_result가 한 루프 안에 지워짐(!daybot정지
+        #   가 5초 만에 자동 해제되던 원인). update_state()(부분병합+락)로
+        #   교체 — sbot.py가 이미 쓰는 검증된 패턴과 동일.
+        update_state(BOT_STATE_FILE,
+            positions=positions_snapshot,
+            sold_today=self.sold_today,
+            sold_today_date=self._sold_today_date,
+            code_name_map=self.code_name_map,
+            last_update=now_hms(),
+        )
 
     def _restore_state(self):
         """재시작 시 daybot 자신의 상태를 복구하고 실계좌와 교차확인.
@@ -354,6 +360,44 @@ class DayBot:
             self._ws.subscribe_price(code)
 
         print(f"📦 [daybot] 상태복구 완료 — 보유 {len(self.positions)}종목")
+
+    # ============================================================
+    # 디스코드 명령 처리 (키키 !daybot매도 등)
+    # ============================================================
+    def _handle_pending_command(self, st: dict):
+        """★ 2026-10-03 신규 — interface/kiki_cmd.py의 cmd_sell()이
+        pending_cmd={"type":"sell","code":...}를 상태파일에 써놓고
+        cmd_result를 기다리는데, daybot은 이걸 소비하는 로직이 아예
+        없어서 !daybot매도가 항상 "응답 없음"으로 타임아웃됐음(sbot.py의
+        _handle_pending_command와 동일 패턴으로 신설). 호출부는 sbot과
+        동일하게 주말/휴장 continue보다 먼저 와야 한다(그래야 장외에
+        보낸 명령도 바로 처리됨 — 08-30에 sbot에서 겪은 것과 같은 유형의
+        버그를 daybot에서는 애초에 피해간다)."""
+        pending = st.get("pending_cmd")
+        if not pending:
+            return
+        if pending.get("type") != "sell":
+            return
+
+        sell_code = pending.get("code", "")
+        if sell_code not in self.positions:
+            update_state(BOT_STATE_FILE,
+                         cmd_result=f"⚠️ {sell_code} daybot 보유 중이 아님",
+                         pending_cmd=None)
+            return
+
+        price = self._get_current_price(sell_code)
+        if price <= 0:
+            update_state(BOT_STATE_FILE,
+                         cmd_result=f"⚠️ {sell_code} 시세조회 실패 — 다음 명령 재시도 필요",
+                         pending_cmd=None)
+            return
+
+        qty = self.positions[sell_code]["qty"]
+        self._do_sell(sell_code, qty, "즉시매도(AI비서)", price)
+        update_state(BOT_STATE_FILE,
+                     cmd_result=f"✅ [DAYBOT] {sell_code} 즉시매도 명령 전달 완료",
+                     pending_cmd=None)
 
     # ============================================================
     # 가격 조회 (실시간 우선, REST 폴백)
@@ -825,6 +869,11 @@ class DayBot:
 
                 # 2) 토큰 갱신 — 역시 continue 게이트보다 앞
                 self.api.refresh_token_if_needed()
+
+                # 2-1) 키키 !daybot매도 등 명령 처리 — sbot과 동일하게
+                #      주말/휴장 continue보다 먼저 처리(장외에 보낸
+                #      명령도 다음 개장까지 묵히지 않기 위함).
+                self._handle_pending_command(_read_state())
 
                 # 3) 주말
                 if is_weekend():
