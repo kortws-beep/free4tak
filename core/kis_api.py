@@ -663,6 +663,49 @@ class KisAPI:
     # ============================================================
     # 주문
     # ============================================================
+    # ★ 2026-10-03 대장 지정 — 애프터마켓(15:30~20:00) 주문코드.
+    #   01(시장가)/03(최유리지정가) 전부 "애프터 지정가/최유리/최우선
+    #   주문만 가능합니다"로 거부됨(2026-10-01 daybot EOD청산 실거래
+    #   2회 확인). 기존엔 06(장후시간외, 구 배치방식 코드)으로 우회
+    #   했는데, NXT 주문코드표엔 05/06/41~47이 아예 없음(NXT는 00/03/
+    #   04만 사용) — 06이 KRX 전용일 가능성이 있어 통합계좌 라우팅
+    #   호환을 위해 00(지정가)을 먼저 쓰고 화요일 애프터장 실거래로
+    #   검증한다. 00이 거부되면 이 상수만 "41"(KRX애프터마켓지정가)로
+    #   바꿔서 재시도.
+    AFTERHOURS_ORD_DVSN = "00"
+
+    @staticmethod
+    def _hoga_tick(price: float) -> int:
+        """가격대별 호가단위."""
+        if   price < 1000:   return 1
+        elif price < 5000:   return 5
+        elif price < 10000:  return 10
+        elif price < 50000:  return 50
+        elif price < 100000: return 100
+        elif price < 500000: return 500
+        else:                 return 1000
+
+    def _fake_market_price(self, code: str, side: str, extra_ticks: int = 3) -> int:
+        """
+        ★ 2026-10-03 대장 지정 — 애프터마켓은 00/41 같은 지정가 코드만
+        허용되고 01(시장가)은 거부되는데, 지정가는 반드시 가격이 있어야
+        한다. 호출부가 가격 없이("시장가처럼") 사고/팔고 싶을 때 현재가를
+        조회해 반대편 호가를 확실히 먹도록 매도는 -extra_ticks호가,
+        매수는 +extra_ticks호가를 얹은 "가짜 시장가"를 합성한다.
+        시세조회 실패시 0 반환(호출부가 주문 보류 처리).
+        """
+        try:
+            mdata = self.get_market_data(code) or {}
+            cur = float(mdata.get("stck_prpr", 0) or 0)
+        except Exception:
+            cur = 0
+        if cur <= 0:
+            return 0
+        hoga = self._hoga_tick(cur)
+        offset = hoga * extra_ticks
+        target = cur - offset if side == "sell" else cur + offset
+        return max(hoga, int(target / hoga) * hoga)
+
     def buy(self, code: str, price: float, amount: int,
             code_name_map: dict = None, psbl_cash: int = None,
             extra_ticks: int = 0) -> bool:
@@ -688,13 +731,15 @@ class KisAPI:
 
         order_cash = min(psbl, amount)
 
-        if   price < 1000:   hoga = 1
-        elif price < 5000:   hoga = 5
-        elif price < 10000:  hoga = 10
-        elif price < 50000:  hoga = 50
-        elif price < 100000: hoga = 100
-        elif price < 500000: hoga = 500
-        else:                hoga = 1000
+        if price <= 0:
+            # ★ 2026-10-03 — 가격 없이 "시장가 매수"를 요청한 경우(현재
+            #   호출부는 전부 현재가를 넘겨주지만, 애프터장 자동매매 등
+            #   향후 호출 패턴에 대비) 현재가 조회로 체결 보장 가격을 합성.
+            price = self._fake_market_price(code, "buy")
+            if price <= 0:
+                print(f"⚠️ 매수가 산정 실패(시세조회 불가): {code}"); return False, "", "", 0
+
+        hoga = self._hoga_tick(price)
         limit_price = int(price / hoga) * hoga + hoga * (1 + extra_ticks)
 
         qty = int(order_cash / (limit_price * 1.00015))
@@ -714,10 +759,19 @@ class KisAPI:
         #   기존 "시간외단일가"(10분 단위 일괄체결)가 폐지되고 정규장과
         #   동일한 실시간 매칭으로 바뀜(대장 확인+뉴스 검증). 프리장
         #   (08:00~09:00)은 이번 개편 대상이 아닌 것으로 보여 기존
-        #   "62"(시간외단일가) 유지, 09:00~20:00은 전부 정규장과 동일한
-        #   "00"(지정가)로 통일. 월요일 실거래로 재검증 필요.
+        #   "62"(시간외단일가) 유지.
+        # ★ 2026-10-03: 09:00~15:30 정규장과 15:30~20:00 애프터마켓을
+        #   명시적으로 분리 — buy()는 원래도 "01"(시장가)을 쓴 적이
+        #   없어(항상 지정가+가격) 이 부분 자체는 동작엔 영향 없지만,
+        #   AFTERHOURS_ORD_DVSN(00→필요시 41)을 sell()과 동일하게 적용해
+        #   두 함수가 같은 상수로 같이 움직이게 통일.
         now_t = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9))).strftime("%H%M")
-        ord_dvsn = "62" if "0800" <= now_t < "0900" else "00"
+        if "0800" <= now_t < "0900":
+            ord_dvsn = "62"
+        elif now_t < "1530":
+            ord_dvsn = "00"
+        else:
+            ord_dvsn = self.AFTERHOURS_ORD_DVSN
 
         url  = f"{self.base_url}/uapi/domestic-stock/v1/trading/order-cash"
         data = {"CANO": self.cano, "ACNT_PRDT_CD": self.acnt,
@@ -777,20 +831,23 @@ class KisAPI:
     def sell(self, code: str, qty: int, price: int = 0) -> bool:
         """
         시간대별 매도 (실제 장 시간 기준):
-        - 08:00~09:00 프리장  : ORD_DVSN=62 (시간외단일가)
-        - 09:00~15:30 정규장  : ORD_DVSN=01 (시장가)
-        - 15:30~20:00 애프터마켓: ORD_DVSN=06 (장후시간외)
-          ★ 2026-10-01 1차 시도(ORD_DVSN=03, 최유리지정가)도 "[애프터마켓]
-            애프터 지정가/최유리/최우선 주문만 가능합니다"로 똑같이 실패
-            (daybot EOD강제청산 19:50 실거래, 2회 연속). 오픈소스 KIS
-            라이브러리(github.com/Soju06/python-kis)의 주문종류 코드표에서
-            00=지정가/01=시장가/02=조건부지정가/03=최유리지정가/04=최우선
-            지정가/05=장전시간외/06=장후시간외/07=시간외단일가로 확인 —
-            03(최유리지정가)은 정규장 전용 코드고, KRX 09-14 개편으로 생긴
-            16:00~20:00 실시간매칭 애프터마켓 전용 코드는 06(장후시간외)
-            이었음. 해당 라이브러리의 domestic sell 매핑도 condition='after'
-            → ("06", price=None) 로 명시(가격은 "0"). 정규장(09:00~15:30)은
-            기존 시장가 그대로 유지(오래 검증된 경로, 안 건드림).
+        - 08:00~09:00 프리장    : ORD_DVSN=62 (시간외단일가)
+        - 09:00~15:30 정규장    : ORD_DVSN=01 (시장가)
+        - 15:30~20:00 애프터마켓: ORD_DVSN=AFTERHOURS_ORD_DVSN(기본 00)
+          ★ 2026-10-01: 01(시장가)/03(최유리지정가) 전부 "애프터 지정가/
+            최유리/최우선 주문만 가능합니다"로 거부됨(daybot EOD강제청산
+            19:50 실거래 2회 확인). 당시엔 06(장후시간외, 구 배치방식
+            코드)으로 우회해 성공시켰었음.
+          ★ 2026-10-03 대장 지정 — 대장이 받아온 KRX/NXT 주문종류
+            코드표를 보니 NXT 쪽엔 05/06/41~47이 아예 없음(NXT는 00/03/
+            04만 사용) — 06이 KRX 전용 코드일 가능성이 있어, 통합계좌
+            라우팅 호환을 위해 00(지정가)을 먼저 시도하고 화요일
+            (2026-10-06) 애프터장 실거래로 검증한다. 00도 거부되면
+            AFTERHOURS_ORD_DVSN만 "41"(KRX애프터마켓지정가)로 바꿔서
+            재시도. 00/41은 반드시 가격이 있어야 하므로, 호출부가
+            price=0(시장가 요청)이면 _fake_market_price()로 현재가
+            기준 체결 보장 가격(-extra_ticks호가)을 합성해서 쓴다.
+            정규장(09:00~15:30)은 기존 시장가 그대로 유지(안 건드림).
         """
         now_t = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9))).strftime("%H%M")
         if "0800" <= now_t < "0900":
@@ -800,8 +857,12 @@ class KisAPI:
             ord_dvsn = "01"   # 정규장 시장가 (09:00~15:30)
             ord_unpr = "0"
         else:
-            ord_dvsn = "06"   # 애프터마켓 장후시간외 (15:30~20:00) — 시장가/최유리 불허
-            ord_unpr = "0"
+            ord_dvsn = self.AFTERHOURS_ORD_DVSN   # 애프터마켓(15:30~20:00) — 01/03 거부됨, 반드시 가격 필요
+            order_price = price if price > 0 else self._fake_market_price(code, "sell")
+            if order_price <= 0:
+                print(f"⚠️ 애프터마켓 매도가 산정 실패(시세조회 불가): {code}")
+                return False
+            ord_unpr = str(int(order_price))
         url  = f"{self.base_url}/uapi/domestic-stock/v1/trading/order-cash"
         data = {"CANO": self.cano, "ACNT_PRDT_CD": self.acnt,
                 "PDNO": code, "ORD_QTY": str(qty),
