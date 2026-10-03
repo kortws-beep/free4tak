@@ -37,10 +37,9 @@ import requests
 
 _here = os.path.dirname(os.path.abspath(__file__))
 _base = os.path.dirname(_here)
-# ★ 2026-09-25: lina_bot 추가 — 수동매매 참고용 리포트에 텔레그램/촉매
-#   교차확인 강조표시를 붙이면서 tele_swing_analyzer/swing_master의
-#   기존 검증된 소스함수를 재사용하기 위함 (아래 build_manual_ref_
-#   report_lines 참고).
+# ★ 2026-09-25: lina_bot 추가 — 수동매매 참고용 리포트에 촉매
+#   교차확인 강조표시를 붙이면서 swing_master의 기존 검증된 소스함수를
+#   재사용하기 위함 (아래 build_manual_ref_report_lines 참고).
 for _d in ["core", "intelligence", "interface", "bots", "lina_bot", ""]:
     _p = os.path.join(_base, _d)
     if _p not in sys.path:
@@ -704,15 +703,9 @@ def _rose_too_much(name: str, first_date: str, max_rise_pct: float) -> bool:
 def build_manual_ref_report_lines(names) -> list:
     """수동매매 참고용(실시간 알림) 전용 리포트 — MANUAL_REF_DAYS(10일)
     내 MANUAL_REF_MIN_COUNT(2)회+ 언급 & 최초언급일 대비
-    MANUAL_REF_MAX_RISE_PCT(20%) 미만 상승만 대상. 텔레그램/촉매/MBN뉴스
+    MANUAL_REF_MAX_RISE_PCT(20%) 미만 상승만 대상. 촉매/MBN뉴스
     중 하나라도 겹치거나 3회+ 언급이면 ⭐ 강조(한경컨센서스는 종목별
     API 호출이 추가로 필요해 이번엔 제외 — 필요하면 나중에 추가)."""
-    try:
-        from tele_swing_analyzer import _get_tele_stocks
-        tele_scores = _get_tele_stocks()
-    except Exception as e:
-        print(f"⚠️ [유튜브리포트] 텔레그램 조회 오류: {e}")
-        tele_scores = {}
     try:
         from swing_master import _get_catalyst_stocks
         catalyst_names = _get_catalyst_stocks()
@@ -730,8 +723,6 @@ def build_manual_ref_report_lines(names) -> list:
         if _rose_too_much(name, first_date, MANUAL_REF_MAX_RISE_PCT):
             continue
         reasons = []
-        if tele_scores.get(name, 0) >= 30:
-            reasons.append("텔레그램")
         if name in catalyst_names:
             reasons.append("촉매")
         if name in news_names:

@@ -13,10 +13,10 @@ bots/sbot.py가 이 모듈의 get_candidates()/refresh_*()를 호출해 자체
 소스(키움조건검색/KIS new그룹/S7)와 합쳐 하나의 통합 후보풀을 구성한다.
 
 [의존성]
-swing_master.py/trend_analyzer.py/tele_swing_analyzer.py는 lina_bot/에
-그대로 남아있다(lina_bot.py 스케줄러가 계속 씀) — 이 모듈이 lina_bot을
-sys.path에 추가해서 재사용한다(intelligence/youtube_stock_monitor.py가
-이미 쓰고 있는 검증된 패턴과 동일).
+swing_master.py/trend_analyzer.py는 lina_bot/에 그대로 남아있다
+(lina_bot.py 스케줄러가 계속 씀) — 이 모듈이 lina_bot을 sys.path에
+추가해서 재사용한다(intelligence/youtube_stock_monitor.py가 이미
+쓰고 있는 검증된 패턴과 동일).
 ================================================================
 """
 import os
@@ -240,13 +240,11 @@ def get_mbn_news_names() -> set:
 
 
 def calc_overlap_boost(name: str, code: str, curr_price: float,
-                        tele_scores: dict, catalyst_names: set, news_names: set) -> tuple:
-    """4개 소스(텔레그램/한경컨센서스/MBN뉴스/촉매) 겹침 점수 가산.
+                        catalyst_names: set, news_names: set) -> tuple:
+    """3개 소스(한경컨센서스/MBN뉴스/촉매) 겹침 점수 가산.
     반환: (가산점, 겹친소스 라벨 리스트)"""
     boost = 0
     reasons = []
-    if tele_scores.get(name, 0) >= 30:
-        boost += 10; reasons.append("텔레그램")
     if name in catalyst_names:
         boost += 10; reasons.append("촉매")
     if name in news_names:
@@ -336,14 +334,7 @@ def get_candidates(api=None) -> list:
 
     catalyst_set = _get_catalyst_stocks()
     trend_data   = get_trend_data(top_n=20)
-
-    try:
-        from tele_swing_analyzer import _get_tele_stocks
-        tele_scores = _get_tele_stocks()
-    except Exception as e:
-        print(f"⚠️ [candidate_pool] 텔레그램 조회 오류: {e}")
-        tele_scores = {}
-    news_names = get_mbn_news_names()
+    news_names   = get_mbn_news_names()
 
     trend_names = {d["name"] for d in trend_data}
     detail_map  = {}
@@ -468,7 +459,7 @@ def get_candidates(api=None) -> list:
     for c in candidates:
         code = get_stock_code(c["name"])
         boost, reasons = calc_overlap_boost(
-            c["name"], code, c["curr"], tele_scores, catalyst_set, news_names)
+            c["name"], code, c["curr"], catalyst_set, news_names)
         if boost:
             c["score"] += boost
             c["themes"] = list(c.get("themes", [])) + [f"겹침:{'/'.join(reasons)}"]

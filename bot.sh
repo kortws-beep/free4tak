@@ -17,7 +17,7 @@
 #   롤백 대비 살아있음), status/log/today도 인자로 sbo2 주면 그대로 조회 가능.
 # ★ 2026-09-29 밤: daybot(단타봇) 신설 — sbo2가 쓰던 계좌 재사용, 키움
 #   스크리닝+KIS 실행 하이브리드. 배포 전 sbo2 완전정지(disable) 필수.
-BOTS="sbot cbot daybot kiki sector dashboard telegram lina"
+BOTS="sbot cbot daybot kiki sector dashboard lina"
 
 case "$1" in
 

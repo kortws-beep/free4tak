@@ -79,15 +79,8 @@ def _is_trading_day() -> bool:
             _TRADING_DAY_CACHE["date"]    = today
     return _TRADING_DAY_CACHE["is_open"]
 
-# 💡 리나의 텔레그램 중복 방지용 단기 기억 장치 (마지막 처리한 ID 기억)
-LAST_TELEGRAM_ID = 0
-
 # 🚨 리포트 전송할 디스코드 채널 ID 및 DB 경로
-REPORT_CHANNEL_ID = 1508487747508240525 
-# ★ 수정 (2026-06-23): base_dir(lina_bot/)가 아니라 stock_bot 루트 기준으로 변경.
-#   기존 경로(lina_bot/intelligence/telegram_events.db)는 죽은 옛 사본(6/12 이후 갱신 안됨)을
-#   가리키고 있어, 30분 텔레그램 브리핑이 항상 "새 속보 없음"으로 나오던 근본 원인.
-DB_PATH_TELEGRAM = os.path.join(os.path.dirname(base_dir), "intelligence", "telegram_events.db")
+REPORT_CHANNEL_ID = 1508487747508240525
 DB_PATH_CONCENTRATION = os.path.join(os.path.dirname(base_dir), "intelligence", "market_concentration.db")
 DB_PATH_FINANCE = os.path.join(base_dir, 'finance.db')
 DB_PATH_MAPPING = os.path.join(base_dir, 'us_kr_mapping.db')  # 💡 신규 맵핑 DB 경로
@@ -641,7 +634,7 @@ def _summarize_report_body(text: str) -> str:
 def _build_market_context_summary() -> str:
     """
     intelligence/market_concentration.py의 최신 쏠림지수 스냅샷 +
-    최근 텔레그램 이벤트 + (있으면) 오늘 MBN 투자전략 요약을 모아
+    (있으면) 오늘 MBN 투자전략 요약을 모아
     "오늘 시장 종합 코멘트" 한 문단을 생성한다.
 
     ★ 이 단계는 관찰 전용이다 — sbot/sbo2 스코어링에는 연결하지 않는다.
@@ -672,13 +665,6 @@ def _build_market_context_summary() -> str:
         print(f"⚠️ 쏠림지수 스냅샷이 오래됨({age_min:.0f}분 전, ts={snapshot.get('ts')}) — 브리핑 생략")
         return ""
 
-    # ★ 2026-07-07: minutes_back=150분치를 통째로 넣으면 51건/9천자까지
-    #   불어나서(장중 IR공시 몰릴 때), "보조 참고자료"라는 지시에도 불구하고
-    #   LLM이 이 뉴스 뭉치를 요약해버리는 사고가 있었음(쏠림 갭/섹터랭킹
-    #   숫자는 무시하고 개별 IR 뉴스만 나열). 최근 8건만 남기고 자른다.
-    tele_raw   = fetch_recent_telegram_events(minutes_back=150)
-    tele_items = [l for l in tele_raw.split("\n\n") if l.strip()]
-    tele_context = "\n\n".join(tele_items[-8:])
     recent = get_recent_summaries(days=3)
     trend_text = "\n".join(
         f"- {r['date']}: {r['summary_text'][:150]}..." for r in recent
@@ -722,9 +708,8 @@ def _build_market_context_summary() -> str:
         "어떤 섹터/테마가 주도하고 소외됐는지'를 3~5문장으로 설명하세요.\n"
         "- 첫 문장은 반드시 쏠림 갭·시장폭·섹터 상승/하락 랭킹 중 가장 특징적인 "
         "숫자로 시작하세요 (예: 특정 테마 쏠림이 뚜렷하면 그 테마명을 명시).\n"
-        "- [최근 텔레그램 속보]는 보조 참고자료일 뿐입니다 — 숫자로 뒷받침되지 "
-        "않는 개별 종목 뉴스 나열로 답을 채우지 마세요. 숫자 자체가 밋밋하면 "
-        "'오늘은 특정 섹터로의 뚜렷한 쏠림은 관찰되지 않음'이라고 솔직히 쓰세요.\n"
+        "- 숫자 자체가 밋밋하면 '오늘은 특정 섹터로의 뚜렷한 쏠림은 관찰되지 "
+        "않음'이라고 솔직히 쓰세요.\n"
         "- 숫자를 지어내지 말고 주어진 값만 근거로 삼으세요. 날짜를 언급할 "
         "일이 있다면 위에 알려준 오늘 날짜만 쓰세요.\n"
         "- 특정 종목을 지목해서 언급할 때는 반드시 [대형주 S7 종목별 등락률]에 "
@@ -741,7 +726,6 @@ def _build_market_context_summary() -> str:
         f"(낮을수록 소수 종목/섹터만 오르는 좁은 장세)\n"
         f"- 오늘 섹터/테마 등락률 랭킹: {snapshot.get('sector_ranking') or '데이터 없음'}\n"
         f"- 주도주/섹터 급변 신호: {snapshot.get('rotation_flag') or '없음'}\n\n"
-        f"[최근 텔레그램 속보 — 보조 참고자료]\n{tele_context or '없음'}\n\n"
         f"[최근 3일 종합 코멘트 추세 — 참고용]\n{trend_text}"
     )
     # ★ 2026-09-04: 소넷5가 이 프롬프트류에서 내부적으로 thinking 블록을
@@ -1078,31 +1062,6 @@ def _check_light_chart_health(stock_name: str, conn: sqlite3.Connection, api=Non
     }
 
 
-_STOPWORDS_KO = {
-    "있다", "없다", "한다", "하는", "했다", "되는", "된다", "위해", "대한", "대해",
-    "관련", "이번", "지난", "오늘", "지금", "부터", "까지", "에서", "으로", "그리고",
-    "하지만", "이라고", "라고", "이며", "또한", "통해", "같은", "이는", "것으로",
-    "채널", "내용", "키워드", "가산점", "없음",
-}
-
-
-def _extract_top_keywords(text: str, top_n: int = 10) -> str:
-    """
-    ★ 2026-07-10 Momentum Router 모듈2 — 텔레그램/뉴스 원문이 방대해서
-    (07-07 쏠림브리핑 사고, 07-09 젬마4:26b 타임아웃 등) 로컬 AI에게 그대로
-    던지면 관심이 뉴스 나열 쪽으로 쏠리거나 추론이 안 끝나는 문제가 반복됨.
-    파이썬에서 먼저 빈도수 상위 키워드로 1차 압축해 신호 대 잡음비를 높인다.
-    """
-    tokens = re.findall(r'[가-힣]{2,}', text or "")
-    freq = {}
-    for t in tokens:
-        if t in _STOPWORDS_KO:
-            continue
-        freq[t] = freq.get(t, 0) + 1
-    top = sorted(freq.items(), key=lambda x: x[1], reverse=True)[:top_n]
-    return ", ".join(f"{w}({c})" for w, c in top) if top else "없음"
-
-
 def _build_momentum_context_am() -> str:
     """아침 세션 컨텍스트 — 전일/미장/국제정세/전문가 시황"""
     from swing_master import _get_us_market_movers
@@ -1113,11 +1072,6 @@ def _build_momentum_context_am() -> str:
             us_lines.append(f"{ticker}({chg:+.1f}%) → {', '.join(kr_names[:3])}")
     us_text = "\n".join(us_lines) if us_lines else "데이터 없음"
 
-    tele_raw   = fetch_recent_telegram_events(minutes_back=720)
-    keywords   = _extract_top_keywords(tele_raw)
-    tele_items = [l for l in tele_raw.split("\n\n") if l.strip()]
-    tele_text  = "\n\n".join(tele_items[-8:]) if tele_items else "없음"
-
     from market_concentration import get_recent_summaries
     recent = get_recent_summaries(days=5)
     trend_text = "\n".join(
@@ -1126,8 +1080,6 @@ def _build_momentum_context_am() -> str:
 
     return (
         f"[간밤 미국 증시 — 한국 수혜/피해 종목 매핑]\n{us_text}\n\n"
-        f"[핵심 키워드 빈도 — 간밤~아침 텔레그램]\n{keywords}\n\n"
-        f"[간밤~아침 텔레그램 속보 (국제정세/전일상황 포함)]\n{tele_text}\n\n"
         f"[최근 며칠 쏠림 흐름 — 참고용]\n{trend_text}"
     )
 
@@ -1139,20 +1091,13 @@ def _build_momentum_context_pm() -> str:
     sector_ranking = _calc_sector_ranking()
     rotation_flag  = _calc_rotation_flag()
 
-    tele_raw   = fetch_recent_telegram_events(minutes_back=300)
-    keywords   = _extract_top_keywords(tele_raw)
-    tele_items = [l for l in tele_raw.split("\n\n") if l.strip()]
-    tele_text  = "\n\n".join(tele_items[-8:]) if tele_items else "없음"
-
     return (
         f"[오늘 장중 쏠림 지수 — {snapshot.get('ts', '')}]\n"
         f"- 코스피: {snapshot.get('kospi_rate', 0):+.2f}% / "
         f"대형주평균: {snapshot.get('mega_avg_rate', 0):+.2f}% / "
         f"시장폭: {snapshot.get('breadth_ratio', 0):.1f}%\n"
         f"- 섹터 등락률 랭킹: {sector_ranking or '데이터 없음'}\n"
-        f"- 주도주/섹터 급변 신호: {rotation_flag or '없음'}\n\n"
-        f"[핵심 키워드 빈도 — 장중 텔레그램]\n{keywords}\n\n"
-        f"[장중 텔레그램 속보]\n{tele_text}"
+        f"- 주도주/섹터 급변 신호: {rotation_flag or '없음'}"
     )
 
 
@@ -1486,45 +1431,6 @@ async def before_daily_market_context_report():
     await client.wait_until_ready()
 
 
-def fetch_recent_telegram_events(limit_count=4, minutes_back=65):
-    """
-    ★ 시간 기준으로 변경 (2026-06-23) — 기존 id 기반(LAST_TELEGRAM_ID 전역변수) 방식은
-      재시작/재로드/예외 상황에서 값이 꼬이면 영구적으로 "새 메시지 없음"이 되는
-      버그가 있어 시간 윈도우 방식으로 교체. 메모리 상태에 의존하지 않아 안전.
-    최근 minutes_back분 이내 메시지만 반환.
-    """
-    try:
-        conn = sqlite3.connect(DB_PATH_TELEGRAM, timeout=10)
-        cursor = conn.cursor()
-        cutoff = (datetime.datetime.now() -
-                  datetime.timedelta(minutes=minutes_back)).strftime("%Y-%m-%d %H:%M:%S")
-        query = """
-            SELECT id, channel, message, keywords, themes, score
-            FROM telegram_events
-            WHERE created_at >= ?
-            ORDER BY id ASC
-        """
-        cursor.execute(query, (cutoff,))
-        rows = cursor.fetchall()
-        conn.close()
-
-        if not rows: return ""
-
-        raw_context = ""
-        seen = set()
-        for r in rows:
-            row_id, channel, msg, keywords, themes, score = r
-            msg = str(msg or "").strip().replace("\xed\x8c\xb9리스", "팹리스")
-            if not msg or msg in seen:
-                continue
-            seen.add(msg)
-            kw = ", ".join(json.loads(keywords)) if keywords else "없음"
-            raw_context += f"채널: [{channel}] | 내용: {msg} | 키워드: {kw} | 가산점: +{score or 10}점\n\n"
-
-        return raw_context
-    except Exception as e:
-        return f"디비 접근 오류: {str(e)}"
-
 # 💡 [신규 엔진 기능] 아침 브리핑에 주입할 최고 우량 수급 종목 발굴 엔진
 def fetch_top_institutional_and_foreign_picks():
     # 💡 복잡한 로직은 모듈로 다 보냈으니, 여기선 깔끔하게 Call만 때린다!
@@ -1552,7 +1458,6 @@ async def web_search_hybrid(query):
     if any(kw in query for kw in ["입출금", "출금", "내역", "수입", "지출", "가계부", "장부"]): return get_monthly_report()
     if any(kw in query for kw in ["날씨", "기온", "온도", "비와", "눈와", "기상"]): return f"[국내 대한민국 기상청]:\n{get_weather_kma_pure()}"
     if any(kw in query for kw in ["뉴스", "속보", "mbn", "모닝", "브리핑"]): return "[MBN골드 뉴스]:\n" + await fetch_mbngold_async("10001", 6)
-    if any(kw in query for kw in ["텔레그램", "텔레", "실시간속보"]): return "[텔레그램 속보]:\n" + fetch_recent_telegram_events()
     return ""
 
 # ===================================================
@@ -1571,7 +1476,7 @@ async def daily_morning_report():
         print(f"🎌 [융합브리핑] 주말/휴장일 — 스킵")
         return
 
-    print(f"\n☀️ [{kst_now.strftime('%H:%M')}] 텔레그램+미국장+뉴스+수급 통합 융합 마스터 브리핑 가동!")
+    print(f"\n☀️ [{kst_now.strftime('%H:%M')}] 미국장+뉴스+수급 통합 융합 마스터 브리핑 가동!")
     
     try:
         channel = await client.fetch_channel(REPORT_CHANNEL_ID)
@@ -1597,25 +1502,18 @@ async def daily_morning_report():
         except Exception as e:
             print(f"⚠️ {ticker} 스캔 실패: {e}")
 
-    # STEP 2: 텔레그램 속보 대량 수집 (최근 15개)
-    telegram_context = fetch_recent_telegram_events(limit_count=15)
-    if not telegram_context.strip() or "비어있네" in telegram_context:
-        telegram_context = "- 밤사이 특이 텔레그램 동향 없음"
-
-    # STEP 3: 크롤러 수급
+    # STEP 2: 크롤러 수급
     crawler_finance_context = fetch_top_institutional_and_foreign_picks()
 
-    # STEP 4: AI 융합 브리핑 (미장 + 텔레그램 + 수급)
+    # STEP 3: AI 융합 브리핑 (미장 + 수급)
     prompt = (
         f"너는 대한민국 최고의 모멘텀 단타 트레이더를 보좌하는 수석 참모 리나야.\n"
-        f"제공된 3가지 핵심 데이터를 상호 교차 검증하여 오늘 장초반 시나리오를 짜줘.\n\n"
+        f"제공된 2가지 핵심 데이터를 상호 교차 검증하여 오늘 장초반 시나리오를 짜줘.\n\n"
         f"[데이터 1: 미국장 급등 현황 & 고정 관련주]\n{us_movers_summary if us_movers_summary else '- 특이 급등 종목 없음'}\n\n"
-        f"[데이터 2: 최근 국내 텔레그램 주요 속보 맥락]\n{telegram_context}\n\n"
-        f"[데이터 3: 크롤러 엔진 수집 종목별 메이저 쌍끌이 수급 현황]\n{crawler_finance_context}\n\n"
+        f"[데이터 2: 크롤러 엔진 수집 종목별 메이저 쌍끌이 수급 현황]\n{crawler_finance_context}\n\n"
         f"🚨 [브리핑 핵심 지침]:\n"
-        f"1. **교차 검증**: 미국장 급등 섹터와 텔레그램 속보 테마가 일치하는지 집중 매칭해줘.\n"
-        f"2. **수급 주도주**: 데이터 3의 쌍끌이 수급 유입 주도주를 강조해줘.\n"
-        f"3. **원픽 테마**: 오늘 수급이 가장 강하게 붙을 원픽 테마와 핵심 종목을 단도직입적으로 요약해줘."
+        f"1. **수급 주도주**: 데이터 2의 쌍끌이 수급 유입 주도주를 강조해줘.\n"
+        f"2. **원픽 테마**: 오늘 수급이 가장 강하게 붙을 원픽 테마와 핵심 종목을 단도직입적으로 요약해줘."
     )
 
     try:
@@ -1632,51 +1530,6 @@ async def before_daily_morning_report():
 # ★ 2026-07-25: 오후 2시 30분 생쇼 관심종목 루프 제거 — MBN이 생쇼
 #   뉴스 코너(news_service_id=10020) 자체를 폐지해서(게시글 0건, 사이트
 #   뉴스탭에서도 카테고리 소실 확인됨) 소스가 영구 중단됨.
-
-# 3. 매 시간 30분 텔레그램 속보 루프
-@tasks.loop(minutes=1)
-async def hourly_telegram_event_report():
-    global LAST_TELEGRAM_ID
-    kst_now = datetime.datetime.now(KST)
-    
-    if kst_now.minute != 30:
-        return
-
-    print(f"\n🚀 [디버그] {kst_now.strftime('%H:%M')} 텔레그램 루프 출발! 채널 접속 중...")
-
-    try:
-        channel = await client.fetch_channel(REPORT_CHANNEL_ID)
-    except Exception as e:
-        print(f"❌ [디버그 에러] 텔레그램 채널 접속 실패: {e}")
-        return
-
-    raw_context = fetch_recent_telegram_events()
-    if not raw_context.strip():
-        print(f"💤 [디버그] 새로운 텔레그램 속보가 없어서 브리핑을 건너뜁니다! (중복 방지)")
-        return
-
-
-
-
-
-    prompt = (
-        f"너는 1시간 동안 발생한 텔레그램 주식/시황 속보를 정밀 요약하는 참모 리나야.\n"
-        f"🚨 [초특급 핵심 규칙]: 수집된 개별 뉴스 '하나당' 반드시 딱 아래의 '3줄 포맷'을 적용해!\n\n"
-        f"📌 테마/이슈명 (가산점: +00점)\n"
-        f"  - 첫 번째 핵심 속보 내용 요약\n"
-        f"  - 두 번째 관련 핵심 종목/섹터 압축\n\n"
-        f"[최신 속보 데이터]:\n{raw_context}"
-    )
-    try:
-        reply_text = await asyncio.to_thread(_call_llm, prompt, max_tokens=1500, system=SYSTEM_PROMPT)
-        if reply_text:
-            await send_safe_message(channel, f"🚨 **[대장! 지난 텔레그램 주도 테마 요약이야]** 🚨\n\n{reply_text}")
-            print(f"🎉 [디버그] 텔레그램 리포트 전송 완벽 성공!")
-    except Exception as e: print(f"❌ 텔레그램 리포트 전송 에러: {e}")
-
-@hourly_telegram_event_report.before_loop
-async def before_hourly_telegram_event_report():
-    await client.wait_until_ready()
 
 # 4. 07시 00분 아침 뉴스 루프
 @tasks.loop(minutes=1)
@@ -1811,50 +1664,6 @@ async def daily_master_report():
 async def before_daily_master_report():
     await client.wait_until_ready()
 
-@tasks.loop(minutes=1)
-async def daily_tele_swing_report():
-    kst_now = datetime.datetime.now(KST)
-    if kst_now.hour != 7 or kst_now.minute != 50:
-        return
-    if not _is_trading_day():
-        print(f"🎌 [텔레스윙] 주말/휴장일 — 스킵")
-        return
-    print(f"\n📡 [{kst_now.strftime('%H:%M')}] 텔레스윙 리포트 가동!")
-    try:
-        channel = await client.fetch_channel(REPORT_CHANNEL_ID)
-        from tele_swing_analyzer import get_tele_swing_report
-        report = await asyncio.to_thread(get_tele_swing_report, 3)
-        await send_safe_message(channel, f"📡 **[대장! 07:50 텔레스윙 리포트야]** 📡\n\n{report}")
-        print("✅ 07:50 텔레스윙 전송 완료!")
-    except Exception as e:
-        print(f"❌ 텔레스윙 오류: {e}")
-
-@daily_tele_swing_report.before_loop
-async def before_daily_tele_swing_report():
-    await client.wait_until_ready()
-
-@tasks.loop(minutes=1)
-async def daily_tele_swing_afternoon():
-    kst_now = datetime.datetime.now(KST)
-    if kst_now.hour != 14 or kst_now.minute != 40:
-        return
-    if not _is_trading_day():
-        print(f"🎌 [텔레스윙PM] 주말/휴장일 — 스킵")
-        return
-    print(f"\n📡 [{kst_now.strftime('%H:%M')}] 텔레스윙 오후 재기동!")
-    try:
-        channel = await client.fetch_channel(REPORT_CHANNEL_ID)
-        from tele_swing_analyzer import get_tele_swing_report
-        report = await asyncio.to_thread(get_tele_swing_report, 3, True)
-        await send_safe_message(channel, f"📡 **[대장! 14:40 텔레스윙 업데이트]** 📡\n\n{report}")
-        print("✅ 14:40 텔레스윙 전송 완료!")
-    except Exception as e:
-        print(f"❌ 텔레스윙 오후 오류: {e}")
-
-@daily_tele_swing_afternoon.before_loop
-async def before_daily_tele_swing_afternoon():
-    await client.wait_until_ready()
-
 # ===================================================
 # 🛡️ API 에러 감시 + 자동 재시작 (1분 주기)
 # ===================================================
@@ -1908,7 +1717,6 @@ RESTART_COOLDOWN_SECONDS = 300         # 재시작 후 5분간 재감지 무시
 _BOT_LOG_FILE = {
     "sbot":     "/home/free4tak/k-bot/stock_bot/logs/sbot.log",
     "sector":   "/home/free4tak/k-bot/stock_bot/logs/sector_monitor.log",
-    "telegram": "/home/free4tak/k-bot/stock_bot/logs/telegram.log",
 }
 # ★ 2026-07-02: 고정 바이트 tail(_LOG_TAIL_BYTES) 방식은 로그가 적게 쌓이는
 #   구간(장외 대기 등)에서 8000바이트가 10~20분치까지 덮어버려, 이미 지나간
@@ -2022,69 +1830,6 @@ async def api_error_watchdog():
 async def before_api_error_watchdog():
     await client.wait_until_ready()
 
-
-# ==========================================
-# [텔레그램 모니터 세션만료 watchdog]
-# ★ 2026-09-14: 대장 요청 — "갸도 로그체크해서 키키나 리나에서 경고
-#   해야겠어" (mbngold 채널 추가 작업 중, 모니터가 9/12부터 세션만료로
-#   죽어있었는데 아무도 몰랐던 것 발견). 위 api_error_watchdog과 달리
-#   자동재시작(sudo systemctl restart)을 시도하지 않는다 — 이 크래시는
-#   대화형 전화번호/인증코드 입력이 필요한데 systemd 서비스라 터미널이
-#   없어서 즉시 EOFError로 다시 죽음(이미 30초 간격으로 무한 재시작
-#   중이라 재시작 자체는 의미 없음). 대신 감지되면 대장에게 터미널에서
-#   직접 재인증하라는 안내만 보낸다.
-# ==========================================
-TELEGRAM_CRASH_PATTERNS = [
-    "EOFError: EOF when reading a line",
-    "Please enter your phone",
-]
-TELEGRAM_CRASH_STREAK_THRESHOLD = 2      # 연속 2분 감지되면 알림
-TELEGRAM_ALERT_COOLDOWN_SECONDS = 3600   # 재인증 전까지 1시간에 한 번만 알림(스팸 방지)
-
-_telegram_crash_streak = 0
-_telegram_last_alert_at = None
-
-
-@tasks.loop(minutes=1)
-async def telegram_watchdog():
-    global _telegram_crash_streak, _telegram_last_alert_at
-    now = datetime.datetime.now(KST)
-
-    try:
-        channel = await client.fetch_channel(REPORT_CHANNEL_ID)
-    except Exception as e:
-        print(f"❌ [watchdog] 채널 접속 실패: {e}")
-        return
-
-    log_text = await asyncio.to_thread(_fetch_recent_log, "telegram")
-    has_crash = any(p in log_text for p in TELEGRAM_CRASH_PATTERNS)
-
-    if has_crash:
-        _telegram_crash_streak += 1
-        print(f"⚠️ [watchdog] 텔레그램 모니터 세션만료 감지 "
-              f"({_telegram_crash_streak}/{TELEGRAM_CRASH_STREAK_THRESHOLD})")
-    else:
-        _telegram_crash_streak = 0
-
-    if _telegram_crash_streak >= TELEGRAM_CRASH_STREAK_THRESHOLD:
-        if (_telegram_last_alert_at is None or
-                (now - _telegram_last_alert_at).total_seconds() >= TELEGRAM_ALERT_COOLDOWN_SECONDS):
-            await send_safe_message(
-                channel,
-                "🚨 **[watchdog] 텔레그램 모니터 세션 만료**\n"
-                "자동재시작으론 안 풀려(대화형 인증 필요) — 터미널에서 직접 재인증해줘:\n"
-                "```\ncd /home/free4tak/k-bot/stock_bot\n"
-                "./venv/bin/python3 intelligence/telegram_monitor.py\n```\n"
-                "전화번호/인증코드 입력하고 '메시지 대기 중' 뜨면 Ctrl+C로 멈춘 뒤 "
-                "`sudo systemctl restart yeongam9-telegram`으로 서비스 재시작해줘."
-            )
-            _telegram_last_alert_at = now
-
-
-@telegram_watchdog.before_loop
-async def before_telegram_watchdog():
-    await client.wait_until_ready()
-
 # ==========================================
 # [메인 디스코드 코어 핸들러]
 # ==========================================
@@ -2127,23 +1872,6 @@ async def on_ready():
         print("✅ [시스템] 7시 30분 융합 브리핑 스케줄러 가동 성공!")
     except Exception as e: print(f"⚠️ [에러] 7시 30분 스케줄러: {e}")
 
-    # ★ 2026-07-01: hourly_telegram_event_report 비활성화
-    #   텔레그램 메시지는 이미 1분마다 DB에 수집/저장 중이므로
-    #   매 시간 30분마다 자동으로 디스코드에 요약을 보낼 필요 없음.
-    #   같은 내용이 12:30/13:30/14:30에 반복 전송되고, 14:30엔
-    #   생쇼 브리핑과 겹쳐서 지저분해지는 문제가 있었음.
-    #   필요할 때 !텔레요약 명령어로 조회하는 방식으로 대체.
-    # try:
-    #     hourly_telegram_event_report.start()
-    #     print("✅ [시스템] 텔레그램 1분 감시 스케줄러 가동 성공!")
-    # except Exception as e: print(f"⚠️ [에러] 텔레그램 스케줄러: {e}")
-
-    try:
-        if not daily_tele_swing_report.is_running():
-            daily_tele_swing_report.start()
-        print("✅ [시스템] 07:50 텔레스윙 스케줄러 가동 성공!")
-    except Exception as e: print(f"⚠️ [에러] 텔레스윙 스케줄러: {e}")
-
     try:
         if not daily_strategy_report.is_running():
             daily_strategy_report.start()
@@ -2173,22 +1901,10 @@ async def on_ready():
     except Exception as e: print(f"⚠️ [에러] 쏠림 브리핑 스케줄러: {e}")
 
     try:
-        if not daily_tele_swing_afternoon.is_running():
-            daily_tele_swing_afternoon.start()
-        print("✅ [시스템] 14:40 텔레스윙 오후 스케줄러 가동 성공!")
-    except Exception as e: print(f"⚠️ [에러] 텔레스윙 오후 스케줄러: {e}")
-
-    try:
         if not api_error_watchdog.is_running():
             api_error_watchdog.start()
         print("✅ [시스템] API 에러 watchdog (1분 주기, sbot/sbo2/sector) 가동 성공!")
     except Exception as e: print(f"⚠️ [에러] API watchdog 스케줄러: {e}")
-
-    try:
-        if not telegram_watchdog.is_running():
-            telegram_watchdog.start()
-        print("✅ [시스템] 텔레그램 모니터 watchdog (1분 주기, 세션만료 감지) 가동 성공!")
-    except Exception as e: print(f"⚠️ [에러] 텔레그램 watchdog 스케줄러: {e}")
 
     try:
         if not manual_watch_trailing_loop.is_running():
@@ -2347,14 +2063,6 @@ async def on_message(message):
                 + ("" if stats["sample_size_ok"] else " (표본 20건 미만, 참고만)")
             )
             await send_safe_message(message.channel, "\n".join(lines))
-        return
-
-    # ── !텔레스윙 ──────────────────────────────────────────────
-    if message.content.startswith("!텔레스윙"):
-        async with message.channel.typing():
-            from tele_swing_analyzer import get_tele_swing_report
-            report = await asyncio.to_thread(get_tele_swing_report, 3)
-            await send_safe_message(message.channel, report)
         return
 
     # ── !상태 (sbo2 현재 보유종목) ─────────────────────────────
@@ -2575,9 +2283,7 @@ async def on_message(message):
             context_data = await web_search_hybrid(user_input)
             
             if context_data and "실패" not in context_data and "텅 비어" not in context_data:
-                if any(k in user_input for k in ["텔레", "속보"]):
-                    지시문 = "제공된 텔레그램 속보를 각 뉴스당 '5줄 코드블록 포맷'으로 엄격하게 요약해."
-                elif any(k in user_input for k in ["뉴스", "mbn", "아침"]):
+                if any(k in user_input for k in ["뉴스", "속보", "mbn", "아침"]):
                     지시문 = "수집된 실제 데이터(기사 내용)만을 바탕으로 다정하게 요약 보고해줘. 절대 지어내지 마."
                 else:
                     지시문 = "수집된 실제 데이터를 바탕으로 대장에게 친절하게 요약해서 알려줘."

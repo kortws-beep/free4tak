@@ -20,9 +20,9 @@ day_trade_scout.py — 수동 단타 리서치 스카우트
 당일 단타 후보가 잡히게 함.
 
 [근거 데이터]
-  - stock_event_bonus 테이블(telegram_monitor.py가 이미 쌓아둔 텔레그램/
-    공시 기반 종목별 가산점+사유) — 신규 조회 로직 안 만들고 재사용.
   - KIS API로 현재가/등락률/거래량 조회.
+  - 2026-10-03: 텔레그램 계정 보안사고로 텔레그램 모니터 전면 폐지 —
+    텔레그램/공시 가산점 근거는 더 이상 제공하지 않음.
   - 위 데이터를 Claude(소넷5)에게 넘겨 "오늘 매수 후보 Top N + 이유" 요약.
 
 [전송]
@@ -70,7 +70,6 @@ for _ep in [os.path.join(_here, ".env"), os.path.join(_base, ".env")]:
 
 from kiwoom_api import KiwoomAPI
 from kis_api import KisAPI
-from telegram_monitor import get_stock_event_bonus
 from sector_monitor import detect_baton_touch, DB_PATH as SECTOR_DB_PATH
 
 CONDITION_KEYWORDS = ["단타000", "장개장직후", "5본봉", "주도주"]
@@ -84,8 +83,6 @@ MAX_CANDIDATES_TO_LLM = 25   # 프롬프트 비대화 방지 — 조회순 상�
 #   추격매수 리스크가 커서 제외해야 함. AI 지시만으로는 놓칠 수 있어
 #   코드에서 확정적으로 필터링(프롬프트 지시가 아니라 후보 자체를 제거).
 MAX_CHANGE_RATE_PCT = 15.0
-TELEGRAM_DB_PATH = os.path.join(_here, "telegram_events.db")
-TELEGRAM_LOOKBACK_HOURS = 6
 STATE_FILE = os.path.join(_here, "day_trade_scout_state.json")
 # ★ 2026-09-29: 단타봇(daybot) 3순위 fallback 후보소스용 — 기존 Discord/
 #   Claude요약 경로는 그대로 두고, enriched 후보를 기계가 읽을 수 있는
@@ -245,36 +242,8 @@ def _get_sector_name(stock_name: str, limit: int = 2) -> str:
         return ""
 
 
-def _search_telegram_mentions(stock_name: str) -> str:
-    """
-    ★ 2026-09-09: get_stock_event_bonus()는 telegram_monitor.py가 이미
-    가공해둔 stock_event_bonus 테이블만 보는데, 이 테이블은 sbot/nbot용
-    테마 매칭 기준이라 여기 후보(단타 검색식)와는 안 걸리는 경우가
-    많음(대장 지적 — "텔레그램/공시 근거 없음"이 계속 뜸). 원본
-    telegram_events에서 종목명으로 직접 LIKE 검색해서 보강.
-    """
-    try:
-        conn = sqlite3.connect(TELEGRAM_DB_PATH, timeout=5)
-        conn.execute("PRAGMA query_only=ON")
-        cutoff = (datetime.datetime.now() -
-                  datetime.timedelta(hours=TELEGRAM_LOOKBACK_HOURS)).strftime("%Y-%m-%d %H:%M:%S")
-        rows = conn.execute("""
-            SELECT message FROM telegram_events
-            WHERE message LIKE ? AND created_at >= ?
-            ORDER BY created_at DESC LIMIT 2
-        """, (f"%{stock_name}%", cutoff)).fetchall()
-        conn.close()
-        if not rows:
-            return ""
-        snippets = [r[0][:60].replace("\n", " ") for r in rows]
-        return " / ".join(snippets)
-    except Exception as e:
-        print(f"⚠️ 텔레그램 검색 오류({stock_name}): {e}")
-        return ""
-
-
 def _enrich(candidates: list, kis: KisAPI) -> list:
-    """각 후보에 현재가/등락률/거래량 + 텔레그램·공시 가산점 붙이기.
+    """각 후보에 현재가/등락률/거래량 + 섹터 붙이기.
     ★ 2026-09-09: 등락률 MAX_CHANGE_RATE_PCT(15%) 초과 종목은 추격매수
     리스크가 커서(대장 지적) 여기서 확정적으로 제외 — AI 프롬프트
     지시만으로는 놓칠 수 있어 코드 필터로 강제."""
@@ -290,14 +259,10 @@ def _enrich(candidates: list, kis: KisAPI) -> list:
                 continue
         except (TypeError, ValueError):
             pass
-        bonus, reason = get_stock_event_bonus(code, bot_type="sbot")
-        if not reason:
-            reason = _search_telegram_mentions(name)
         sector = _get_sector_name(name)
         enriched.append({
             "code": code, "name": name, "tags": tags, "sector": sector,
             "price": price, "chg": chg, "vol": vol,
-            "bonus": bonus, "reason": reason,
         })
     return enriched
 
@@ -330,22 +295,20 @@ def _build_prompt(enriched: list) -> str:
     for e in enriched[:MAX_CANDIDATES_TO_LLM]:
         tag_str = ",".join(e["tags"]) if e["tags"] else "?"
         sector_str = f" [섹터:{e['sector']}]" if e["sector"] else ""
-        tag = f" | 텔레그램/공시: {e['reason']}" if e["reason"] else ""
         lines.append(
             f"- {e['name']}({e['code']}) [출처:{tag_str}]{sector_str} "
-            f"현재가:{e['price']}원 등락률:{e['chg']}% 거래량:{e['vol']}{tag}"
+            f"현재가:{e['price']}원 등락률:{e['chg']}% 거래량:{e['vol']}"
         )
     candidate_text = "\n".join(lines) if lines else "(조건검색 후보 없음)"
 
     return (
         "너는 대한민국 주식 단타 트레이더를 보좌하는 리서치 참모야.\n"
         "아래는 오늘 장 시작 35분 후, 4개 단타 계열 조건검색식에 걸린 종목 목록과 "
-        "각 종목의 현재가/등락률/거래량, 소속 섹터(테마), 그리고 최근 텔레그램/공시 "
-        "동향(있는 경우)이야.\n\n"
+        "각 종목의 현재가/등락률/거래량, 소속 섹터(테마)야.\n\n"
         f"[오늘의 조건검색 후보]\n{candidate_text}\n\n"
         "🚨 [작성 지침]\n"
         "1. 이 중 오늘 단타(수일 내 매도 목표)로 매수할 만한 종목을 최대 5개까지 골라줘.\n"
-        "2. 텔레그램/공시 근거가 있는 종목을 우선하되, 없어도 등락률·거래량이 뚜렷하면 포함해.\n"
+        "2. 등락률·거래량이 뚜렷한 종목을 우선 포함해.\n"
         "3. 출처에 '대장주'가 포함된 종목은 방금 급가속이 감지된 테마의 거래대금 "
         "1위 종목이야 — 다른 조건 없이도 우선적으로 포함시켜서 검토해줘.\n"
         "4. 각 종목명 뒤에 괄호로 출처를 표시해줘 — 위 후보 목록의 [출처:...] 값을 "

@@ -4,7 +4,7 @@ swing_master.py
 대장 전용 S/B 등급 통합 마스터 리포트
 
 2개 엔진 교집합:
- 1번 — 촉매 확인  (미장 급등 섹터 OR 텔레그램 핫 키워드)
+ 1번 — 촉매 확인  (미장 급등 섹터 OR 테마 급등)
  2번 — 상승추세  (HH/HL 파동 + RSI 눌림 + 60일선 우상향)
 
 ★ 2026-09-12: VCP 스윙 엔진 완전 제거 — sbo2 실거래(08-15)/백테스터에
@@ -31,7 +31,6 @@ import yfinance as yf
 BASE_DIR         = os.path.dirname(os.path.abspath(__file__))
 DB_PATH          = os.path.join(BASE_DIR, "kr_theme_finance.db")
 DB_PATH_MAPPING  = os.path.join(BASE_DIR, "us_kr_mapping.db")
-DB_PATH_TELEGRAM = os.path.join(os.path.dirname(BASE_DIR), "intelligence", "telegram_events.db")
 # sector_monitor DB — 여러 경로 중 존재하는 것 사용
 _sector_candidates = [
     os.path.join(BASE_DIR, "..", "intelligence", "sector_monitor.db"),
@@ -60,7 +59,7 @@ def _get_catalyst_stocks() -> set:
     """
     us_kr_mapping.db에서 미장 티커를 동적으로 불러와 급등(+3% 이상) 스캔
     → 한국 수혜 종목명 set 반환
-    + 텔레그램 최근 50건 언급 종목 추가
+    + sector_monitor 실시간 급등 테마 종목 추가
 
     ★ 2026-06-29 캐시 추가: swing_master.get_master_report()(07:20 브리핑)와
     sbo2.get_candidates()(후보 갱신)가 각자 독립적으로 이 함수를 호출해서
@@ -99,7 +98,7 @@ def _get_catalyst_stocks() -> set:
 
 def _get_catalyst_stocks_fresh() -> set:
     """
-    실제 yfinance/텔레그램 스캔 수행 (캐시 미사용 — _get_catalyst_stocks()의
+    실제 yfinance/sector_monitor 스캔 수행 (캐시 미사용 — _get_catalyst_stocks()의
     내부 구현. 강제로 새로 스캔하고 싶을 때는 이 함수를 직접 호출 가능)
     """
     hot_kr = set()
@@ -133,29 +132,6 @@ def _get_catalyst_stocks_fresh() -> set:
                 pass
 
         map_conn.close()
-
-    # ── 2. 텔레그램 스캔 ─────────────────────────────────────────
-    if os.path.exists(DB_PATH_TELEGRAM):
-        try:
-            tele_conn   = sqlite3.connect(DB_PATH_TELEGRAM)
-            tele_cursor = tele_conn.cursor()
-            tele_cursor.execute(
-                "SELECT message FROM telegram_events ORDER BY id DESC LIMIT 50")
-            combined = " ".join(r[0] for r in tele_cursor.fetchall() if r[0])
-            tele_conn.close()
-
-            # DB의 전 종목명과 매칭
-            fin_conn   = sqlite3.connect(DB_PATH)
-            fin_cursor = fin_conn.cursor()
-            fin_cursor.execute(
-                "SELECT DISTINCT stock_name FROM kr_stock_daily_data")
-            for (sname,) in fin_cursor.fetchall():
-                pure = re.sub(r'\s*(KOSPI|KOSDAQ)\s*\d{6}$', '', sname).strip()
-                if pure and pure in combined:
-                    hot_kr.add(pure)
-            fin_conn.close()
-        except Exception:
-            pass
 
     # ★ 2026-07-07: 고정 왓치리스트 강제 주입 제거 (사용자 결정) —
     #   왓치리스트 151개가 미장/텔레그램/섹터 상황과 무관하게 항상

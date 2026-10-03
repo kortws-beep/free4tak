@@ -41,9 +41,9 @@ import sys as _sys
 import os as _os
 _BASE = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 # ★ 2026-09-29: sbot×sbo2 통합 — core/candidate_pool.py가 lina_bot의
-#   swing_master/trend_analyzer/tele_swing_analyzer/kr_theme_finance.db를
-#   재사용하므로 lina_bot 추가(intelligence/youtube_stock_monitor.py가
-#   이미 쓰던 것과 동일 패턴).
+#   swing_master/trend_analyzer/kr_theme_finance.db를 재사용하므로
+#   lina_bot 추가(intelligence/youtube_stock_monitor.py가 이미 쓰던
+#   것과 동일 패턴).
 for _d in ["core", "intelligence", "interface", "bots", "lina_bot", ""]:
     _p = _os.path.join(_BASE, _d)
     if _p not in _sys.path:
@@ -81,12 +81,6 @@ try:
 except ImportError:
     _sync_positions = None
     print("⚠️ account_sync 없음 → DB 정합성 체크 비활성")
-try:
-    from telegram_monitor import get_stock_event_bonus as _get_disclosure_bonus
-except ImportError:
-    def _get_disclosure_bonus(code, bot_type="sbot"): return 0, ""
-    print("⚠️ telegram_monitor 없음 → 공시 가산점 비활성")
-
 load_dotenv('/home/free4tak/k-bot/stock_bot/.env')
 try:
     from master_db import (
@@ -1045,11 +1039,6 @@ class SBot:
             if sw_bonus > 0:
                 score = min(100, score + sw_bonus)
                 reason = f"{reason} | {sw_reason}"
-            # ★ 공시 이벤트 가산점 (KIND 채널 실시간)
-            disc_bonus, disc_reason = _get_disclosure_bonus(code, bot_type="sbot")
-            if disc_bonus != 0:
-                score = max(0, min(100, score + disc_bonus))
-                reason = f"{reason} | {disc_reason}"
             print(f"   🧠 {code} | 룰:{rule_score}→AI:{score}점 | {reason}")
             data["ai_reason"] = reason
             self.score_cache[code] = (score, data)
@@ -1062,11 +1051,6 @@ class SBot:
             if sw_bonus > 0:
                 score = min(100, score + sw_bonus)
                 bonus = f"{bonus} | {sw_reason}" if bonus else sw_reason
-            # ★ 공시 이벤트 가산점 (KIND 채널 실시간)
-            disc_bonus, disc_reason = _get_disclosure_bonus(code, bot_type="sbot")
-            if disc_bonus != 0:
-                score = max(0, min(100, score + disc_bonus))
-                bonus = f"{bonus} | {disc_reason}" if bonus else disc_reason
             data["ai_reason"] = f"룰점수({rule_score})" + (f" | {bonus}" if bonus else "")
             self.score_cache[code] = (score, data)
 

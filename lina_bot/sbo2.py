@@ -731,17 +731,14 @@ def _get_mbn_news_names() -> set:
 
 
 def _calc_overlap_boost(name: str, code: str, curr_price: float,
-                        tele_scores: dict,
                         catalyst_names: set, news_names: set) -> tuple:
     """
-    ★ 2026-07-18 추가, 2026-07-25 생쇼 소스 폐지로 4개로 축소 —
-    4개 소스(텔레그램/한경컨센서스/MBN뉴스/촉매) 겹침 점수 가산.
+    ★ 2026-07-18 추가, 2026-07-25 생쇼 소스 폐지, 2026-10-03 텔레그램
+    소스 폐지로 3개로 축소 — 한경컨센서스/MBN뉴스/촉매 겹침 점수 가산.
     반환: (가산점, 겹친소스 라벨 리스트)
     """
     boost = 0
     reasons = []
-    if tele_scores.get(name, 0) >= 30:
-        boost += 10; reasons.append("텔레그램")
     if name in catalyst_names:
         boost += 10; reasons.append("촉매")
     if name in news_names:
@@ -890,15 +887,9 @@ def get_candidates(api=None) -> list:
     catalyst_set = _get_catalyst_stocks()
     trend_data   = get_trend_data(top_n=20)
 
-    # ★ 2026-07-18 추가 — 겹침점수 보정용 소스 (텔레그램/MBN뉴스, catalyst_set은
-    #   위에서 이미 조회, 한경컨센서스는 종목별 실시간 조회라
-    #   _calc_overlap_boost 안에서 호출)
-    try:
-        from tele_swing_analyzer import _get_tele_stocks
-        tele_scores = _get_tele_stocks()
-    except Exception as e:
-        print(f"⚠️ [sbo2] 텔레그램 조회 오류: {e}")
-        tele_scores = {}
+    # ★ 2026-07-18 추가, 2026-10-03 텔레그램 소스 폐지 — 겹침점수 보정용
+    #   소스(MBN뉴스, catalyst_set은 위에서 이미 조회, 한경컨센서스는
+    #   종목별 실시간 조회라 _calc_overlap_boost 안에서 호출)
     news_names = _get_mbn_news_names()
 
     trend_names  = {d["name"] for d in trend_data}
@@ -1049,14 +1040,14 @@ def get_candidates(api=None) -> list:
     #   충돌)까지 빚고 있어서 완전 제거(대장 결정 — 교집합 처리와 함께).
 
     # ── 겹침 점수 보정 (전체 슬롯 공통) ────────────────────────
-    # ★ 2026-07-18 추가, 2026-07-25 생쇼 소스 폐지로 4개로 축소:
-    #   텔레그램/한경컨센서스/MBN뉴스/촉매 중 겹치는 소스가 있으면
-    #   점수 가산 — 슬롯 내 우선순위(상위 N개 캡)에 반영되도록 재정렬은
-    #   각 슬롯에서 이미 끝난 뒤 점수만 보정.
+    # ★ 2026-07-18 추가, 2026-07-25 생쇼 소스 폐지, 2026-10-03 텔레그램
+    #   소스 폐지로 3개로 축소: 한경컨센서스/MBN뉴스/촉매 중 겹치는
+    #   소스가 있으면 점수 가산 — 슬롯 내 우선순위(상위 N개 캡)에
+    #   반영되도록 재정렬은 각 슬롯에서 이미 끝난 뒤 점수만 보정.
     for c in candidates:
         code = get_stock_code(c["name"])
         boost, reasons = _calc_overlap_boost(
-            c["name"], code, c["curr"], tele_scores, catalyst_set, news_names)
+            c["name"], code, c["curr"], catalyst_set, news_names)
         if boost:
             c["score"] += boost
             c["themes"] = list(c.get("themes", [])) + [f"겹침:{'/'.join(reasons)}"]
