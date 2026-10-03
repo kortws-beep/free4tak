@@ -128,6 +128,13 @@ STOP_LOSS_PCT    = -3.5               # 손절 -3~4% 중간값
 #   판단(원 손절선은 그 시점부터 현재가보다 한참 아래라 실질적으로
 #   트레일링이 항상 더 타이트해서 자연스럽게 대체됨).
 TRAILING_STOP_PCT = 2.0                # 고점 대비 이만큼 밀리면 매도("여유있게")
+# ★ 2026-10-03 대장 지정 — 고점이 2.5~4.5% 구간일 때 2.0% 트레일링을
+#   그대로 쓰면 2.5%에서 꺾이는 경우 수수료 공제 후 거의 본전(+0.27%)이
+#   되는 문제가 있어, 이 구간만 트레일링폭을 좁혀(1.5%) 최소 수익을
+#   확보하고, 4.5%를 넘는 급등주는 기존(2.0%)대로 여유를 준다.
+TRAILING_STOP_PCT_TIGHT  = 1.5          # 고점 변동률 2.5~4.5% 구간 전용(타이트)
+TRAILING_STOP_WIDEN_PCT  = 4.5          # 고점 변동률이 이 초과면 TRAILING_STOP_PCT(2.0%) 적용
+MIN_LOCKED_PROFIT_PCT    = 1.0          # 트레일링 매도가의 최소 보장 수익률(세전, 하한선)
 
 # ★ 2026-09-29 대장 지정 — 한투 애프터마켓 개편(09-14, 20시까지 정규장과
 #   동일 실시간매칭) 반영해 포지션 감시/청산 시간대를 08:00(프리장)~19:50까지 확장.
@@ -368,9 +375,15 @@ class DayBot:
         """★ 2026-09-29 밤 대장 지정 — 급등주는 오르면 10%+ 가는 경우가
         많아 +2.5% 찍었다고 바로 전량매도하지 않고 트레일링모드로
         전환한다. 트레일링 진입 전까지는 기존처럼 고정 손절(-3.5%)만
-        체크, 진입 후엔 고점(peak_price) 대비 TRAILING_STOP_PCT(2%)
-        하락시에만 매도 — 원 손절선은 진입 시점부터 현재가보다 한참
-        아래라 트레일링이 항상 먼저 걸리므로 별도 분기 불필요.
+        체크, 진입 후엔 고점(peak_price) 대비 트레일링 하락시에만 매도
+        — 원 손절선은 진입 시점부터 현재가보다 한참 아래라 트레일링이
+        항상 먼저 걸리므로 별도 분기 불필요.
+        ★ 2026-10-03 대장 지정 — 고점 변동률 2.5~4.5% 구간은
+        TRAILING_STOP_PCT_TIGHT(1.5%)로 좁혀서 수수료 공제 후에도
+        최소 수익을 확보(2.5%에서 바로 꺾이면 기존 2.0% 트레일링으론
+        거의 본전이었음), 4.5% 초과 급등주는 기존 TRAILING_STOP_PCT
+        (2.0%)로 여유를 준다. MIN_LOCKED_PROFIT_PCT(1.0%)는 혹시
+        모를 경우를 대비한 최종 하한선.
         ★ 2026-10-02 대장 지정 — 당일 EOD 강제청산 폐지, 대신 트레일링
         미진입 상태로 HOLD_DAYS_LIMIT(3일) 지나면 손익 무관 강제청산
         (손실 종목을 매일 억지로 끊다 조금씩 손실이 쌓이던 패턴 방지).
@@ -386,17 +399,22 @@ class DayBot:
             if pos.get("peak_price") is not None:
                 if current > pos["peak_price"]:
                     pos["peak_price"] = current
-                trail_stop = pos["peak_price"] * (1 - TRAILING_STOP_PCT / 100)
+                peak_rate  = (pos["peak_price"] - entry) / entry * 100
+                trail_pct  = (TRAILING_STOP_PCT if peak_rate > TRAILING_STOP_WIDEN_PCT
+                              else TRAILING_STOP_PCT_TIGHT)
+                trail_stop = pos["peak_price"] * (1 - trail_pct / 100)
+                floor_price = entry * (1 + MIN_LOCKED_PROFIT_PCT / 100)
+                trail_stop  = max(trail_stop, floor_price)
                 if current <= trail_stop:
                     self._do_sell(code, pos["qty"],
                                   f"트레일링청산(고점{pos['peak_price']:,.0f}대비"
-                                  f"-{TRAILING_STOP_PCT:.1f}%, 총{rate:+.2f}%)", current)
+                                  f"-{trail_pct:.1f}%, 총{rate:+.2f}%)", current)
                 continue
 
             if rate >= TAKE_PROFIT_PCT:
                 pos["peak_price"] = current
                 print(f"📈 [daybot] {code} +{rate:.2f}% 도달 — 트레일링 모드 전환 "
-                      f"(고점:{current:,.0f}, -{TRAILING_STOP_PCT:.1f}% 밀리면 매도)")
+                      f"(고점:{current:,.0f}, -{TRAILING_STOP_PCT_TIGHT:.1f}% 밀리면 매도)")
                 continue
             if rate <= STOP_LOSS_PCT:
                 self._do_sell(code, pos["qty"], f"손절({rate:.2f}%)", current)
