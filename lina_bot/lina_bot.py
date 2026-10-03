@@ -96,6 +96,15 @@ SCOPES = ['https://www.googleapis.com/auth/calendar']
 #   차트보고 손절 여부까지 판단하는 수동종목이라 daybot보다 여유를 둠).
 MANUAL_WATCH_TAKE_PROFIT_PCT  = 3.0
 MANUAL_WATCH_TRAILING_STOP_PCT = 2.5
+# ★ 2026-10-03 대장 지정(daybot 트레일링 2단 티어링과 동일 아이디어) —
+#   고정 2.5% 트레일링만 쓰면 +3.0%에 겨우 턱걸이 후 바로 밀릴 때
+#   +0.5%(수수료 공제 후 +0.27%)에서 알림이 나가 사실상 본전치기였음.
+#   +3.0~5.0% 구간은 1.5%로 타이트하게 잡아 확정 수익을 더 챙기고,
+#   +5.0% 초과 급등은 기존 2.5%로 여유를 준다. 매도는 절대 자동 실행
+#   안 하므로(알림만) daybot과 달리 백테스트 검증 없이 바로 적용.
+MANUAL_WATCH_TRAILING_STOP_PCT_TIGHT = 1.5
+MANUAL_WATCH_TRAILING_STOP_WIDEN_PCT = 5.0
+MANUAL_WATCH_MIN_LOCKED_PROFIT_PCT   = 1.0
 MANUAL_WATCH_STATE_FILE = os.path.join(base_dir, "manual_watch_state.json")
 
 # ★ 2026-10-03 대장 지정 — 실거래 3건(하이젠알앤엠/스피어/한빛레이저)을
@@ -150,7 +159,8 @@ async def _register_manual_watch(channel, code: str, buy_price: float = None,
                 channel,
                 f"✅ {name}({code}) 등록 완료 — 평단가 {buy_price:,.0f}원\n"
                 f"   +{MANUAL_WATCH_TAKE_PROFIT_PCT}% 찍으면 트레일링 추적 시작, "
-                f"고점대비 -{MANUAL_WATCH_TRAILING_STOP_PCT}% 밀리면 알려줄게(계속 감시).\n"
+                f"고점대비 -{MANUAL_WATCH_TRAILING_STOP_PCT_TIGHT}%(고점+{MANUAL_WATCH_TRAILING_STOP_WIDEN_PCT}% "
+                f"초과시 -{MANUAL_WATCH_TRAILING_STOP_PCT}%) 밀리면 알려줄게(계속 감시).\n"
                 f"   현재 등록: {len(watches)}종목(`등록현황`으로 확인) — 해제는 `!리나등록해제 {code}` 또는 `해제 {name}`"
             )
         except Exception as e:
@@ -1248,12 +1258,18 @@ async def manual_watch_trailing_loop():
             if price > w["peak_price"]:
                 w["peak_price"] = price
                 changed = True
-            trail_stop = w["peak_price"] * (1 - MANUAL_WATCH_TRAILING_STOP_PCT / 100)
+            peak_rate = (w["peak_price"] - entry) / entry * 100
+            trail_pct = (MANUAL_WATCH_TRAILING_STOP_PCT
+                         if peak_rate > MANUAL_WATCH_TRAILING_STOP_WIDEN_PCT
+                         else MANUAL_WATCH_TRAILING_STOP_PCT_TIGHT)
+            trail_stop = w["peak_price"] * (1 - trail_pct / 100)
+            floor_price = entry * (1 + MANUAL_WATCH_MIN_LOCKED_PROFIT_PCT / 100)
+            trail_stop = max(trail_stop, floor_price)
             if price <= trail_stop and w["peak_price"] > w.get("last_alert_peak", 0):
                 await send_safe_message(
                     channel,
                     f"🔔 **[리나등록] {w.get('name', code)}({code}) 매도 신호**\n"
-                    f"   고점 {w['peak_price']:,.0f}원 대비 -{MANUAL_WATCH_TRAILING_STOP_PCT}% "
+                    f"   고점 {w['peak_price']:,.0f}원 대비 -{trail_pct}% "
                     f"({price:,.0f}원, 총 {net_rate:+.2f}%) — 키움에서 매도 판단해줘.\n"
                     f"   (계속 감시할게 — 신고점 찍고 또 밀리면 다시 알려줄게. "
                     f"그만 지켜봐도 되면 `!리나등록해제 {code}`)"
@@ -1268,7 +1284,7 @@ async def manual_watch_trailing_loop():
             await send_safe_message(
                 channel,
                 f"📈 [리나등록] {w.get('name', code)}({code}) +{net_rate:.2f}% 도달 — "
-                f"트레일링 추적 시작(고점 {price:,.0f}원, -{MANUAL_WATCH_TRAILING_STOP_PCT}% 밀리면 알려줄게)"
+                f"트레일링 추적 시작(고점 {price:,.0f}원, -{MANUAL_WATCH_TRAILING_STOP_PCT_TIGHT}% 밀리면 알려줄게)"
             )
 
     if changed:
