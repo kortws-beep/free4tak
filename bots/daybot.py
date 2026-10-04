@@ -241,6 +241,11 @@ SPIKE_RETRACE_MAX_PCT = 1.05     # 현재가가 스파이크 이전 5일 평균 
 SPIKE_MIN_DAY_RETURN_PCT = 7.0   # ★ 2026-10-05 대장 공유 코드에서 추가 — 스파이크일 전일종가
                                  #   대비 등락률이 이 미만이면 "거래대금만 터지고 주가는 그대로"인
                                  #   가짜 매집으로 간주(기준3)
+# ★ 2026-10-05 대장 지정 — "3개월수급 당일주도주"는 장 초반 수급쏠림을
+#   보는 패턴이라, 10시 이후에 뒤늦게 올라타는 건 가짜(단순 눌림목
+#   되돌림이나 뒷북 추격)일 가능성이 크다는 판단 — 이 소스만 매수를
+#   10시까지로 제한한다(다른 3개 소스는 BUY_END_TIME까지 그대로).
+COND_3MONTH_LEADER_BUY_CUTOFF_TIME = "1000"
 
 # ★ 2026-10-02 대장 지적 — 동국산업이 실제로는 단타000+090930타점 둘 다에
 #   뜬 진짜 겹침종목이었는데, 기존엔 _scan_conditions()가 매 스캔(240초)
@@ -720,13 +725,15 @@ class DayBot:
     def _rank_candidates(self, codes: list, code_multi_tag_map: dict):
         """★ 2026-10-03 대장 재지정 — 4개 소스(주도주검색식3/단타000/
         3개월수급 당일주도주/섹터로테이션) 기준으로 전면 재설계:
-        1순위 겹침(4개 소스 중 2개 이상 동시충족) → 2순위 주도주 단독
-        → 3순위 섹터 단독 → 4순위(마지막) 단타000/3개월수급 당일주도주 단독
-        → scout fallback(최후, 후보고갈 방지용).
-        ★ 10-02엔 단타000/090930타점(2026-10-05부터 "3개월수급
-        당일주도주"로 교체) 단독 히트를 아예 매수 안 했는데, 이번에
-        "마지막 순위"로 재활성화 — 완전 배제가 아니라 우선순위 최하단으로
-        내림(섹터를 4번째 소스로 추가해 겹침 풀이 넓어진 것도 감안).
+        1순위 겹침(4개 소스 중 2개 이상 동시충족) → 2순위 주도주/3개월
+        수급 당일주도주 단독(★ 2026-10-05: 3개월수급도 주도주와 동급으로
+        승격 — _check_spike_quality()와 10시 매수마감으로 품질 통제함)
+        → 3순위 섹터 단독 → 4순위(마지막) 단타000 단독 → scout fallback
+        (최후, 후보고갈 방지용).
+        ★ 10-02엔 단타000/090930타점 단독 히트를 아예 매수 안 했는데,
+        이번에 "마지막 순위"로 재활성화 — 완전 배제가 아니라 우선순위
+        최하단으로 내림(섹터를 4번째 소스로 추가해 겹침 풀이 넓어진 것도
+        감안).
         ★ 겹침 판정은 이번 스캔의 code_multi_tag_map이 아니라
         self._recent_tags(스캔 여러 사이클 누적, OVERLAP_WINDOW_SEC 윈도우)
         사용 — 사이클이 갈려도 겹침을 놓치지 않게(10-02 동국산업 사례).
@@ -745,12 +752,21 @@ class DayBot:
             elif tags == {"주도주검색식3"}:
                 tier2.append(code)
                 source_label[code] = "tier2_주도주"
+            elif tags == {COND_3MONTH_LEADER}:
+                # ★ 2026-10-05 대장 지정 — "3개월수급 당일주도주" 단독
+                #   히트를 주도주검색식3과 동급(tier2)으로 승격. 매집/
+                #   설거지 2차 필터(_check_spike_quality)+10시 매수마감
+                #   (COND_3MONTH_LEADER_BUY_CUTOFF_TIME)으로 품질을 이미
+                #   따로 통제하므로 단타000/090930타점급 최하위에 둘
+                #   이유가 없다는 판단.
+                tier2.append(code)
+                source_label[code] = "tier2_3개월수급"
             elif tags == {"섹터"}:
                 tier3.append(code)
                 source_label[code] = "tier3_섹터"
-            elif tags == {"단타000"} or tags == {COND_3MONTH_LEADER}:
+            elif tags == {"단타000"}:
                 tier4.append(code)
-                source_label[code] = "tier4_단타3개월수급"
+                source_label[code] = "tier4_단타000"
 
         tier5 = []
         for code in self._load_scout_tier3_picks():
@@ -911,11 +927,17 @@ class DayBot:
                                            skip_reason="등락률범위밖", raw_market_data=mdata)
                     continue
             # ★ 2026-10-05 대장 지정 — "3개월수급 당일주도주" 태그가 붙은
-            #   후보만 매집/설거지 2차 필터(_check_spike_quality) 적용.
-            #   다른 소스(주도주검색식3/단타000/섹터) 단독 후보는 "과거
-            #   거래대금 스파이크" 개념 자체가 없어 해당 없음.
+            #   후보만 (1) 10시 이후 매수 금지 + (2) 매집/설거지 2차 필터
+            #   (_check_spike_quality) 적용. 다른 소스(주도주검색식3/
+            #   단타000/섹터) 단독 후보는 "과거 거래대금 스파이크" 개념
+            #   자체가 없어 해당 없음.
             code_tags = set(self._recent_tags.get(code, {}).keys()) or set(code_multi_tag_map.get(code, []))
             if COND_3MONTH_LEADER in code_tags:
+                if now_hhmm() >= COND_3MONTH_LEADER_BUY_CUTOFF_TIME:
+                    print(f"⏭️ [daybot] {code} 패스 — 3개월수급 10시 매수마감 경과")
+                    self.db.log_candidate(code, self._name(code), tier, price, chg,
+                                           skip_reason="3개월수급10시마감경과", raw_market_data=mdata)
+                    continue
                 ok_spike, spike_reason = self._check_spike_quality(code, price)
                 if not ok_spike:
                     print(f"⏭️ [daybot] {code} 패스 — {spike_reason}")
