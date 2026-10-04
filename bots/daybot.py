@@ -227,6 +227,21 @@ CONDITION_KEYWORDS = ["주도주검색식3", "단타000", "3개월수급 당일�
 COND_3MONTH_LEADER = "3개월수급 당일주도주"
 # ★ "5본봉거래대금단타"는 대장이 수동단타에서 안 쓰던 검색식이라 제외
 
+# ★ 2026-10-05 대장 지정 — "3개월수급 당일주도주"는 거래대금만 보기
+#   때문에 세력의 "조용한 매집"과 "한탕 치고 빠진 설거지"를 구분 못 함
+#   (대장 지적). 키움 조건검색식 문법은 "특정 날짜를 찾아 그 날짜의
+#   다른 값을 참조"하는 2단계 로직을 지원 안 해서(범위 내 집계만 가능)
+#   조건식 자체엔 못 넣고, 여기서 _check_spike_quality()로 보강한다.
+SPIKE_LOOKBACK_DAYS   = 60       # 스파이크(최대거래대금일) 탐색 범위 — 조건식 B의 60봉과 동일
+SPIKE_MIN_VALUE_WON   = 200_000_000_000  # 2000억 — 조건식 B와 동일 기준
+# ★ 2026-10-05 대장 공유 코드 참고 — 65.0%로 조정(원래 2/3=66.7%였으나
+#   우리기술투자 실측값 65.2%가 딱 걸쳐서, 대장이 짠 기준값 65.0%로 맞춤).
+SPIKE_CLOSE_POS_MIN   = 0.65     # 스파이크일 종가가 당일 변동폭 상위 65% 안에 있어야 함(기준1)
+SPIKE_RETRACE_MAX_PCT = 1.05     # 현재가가 스파이크 이전 5일 평균 종가의 105% 이하로 돌아오면 탈락(기준2)
+SPIKE_MIN_DAY_RETURN_PCT = 7.0   # ★ 2026-10-05 대장 공유 코드에서 추가 — 스파이크일 전일종가
+                                 #   대비 등락률이 이 미만이면 "거래대금만 터지고 주가는 그대로"인
+                                 #   가짜 매집으로 간주(기준3)
+
 # ★ 2026-10-02 대장 지적 — 동국산업이 실제로는 단타000+090930타점 둘 다에
 #   뜬 진짜 겹침종목이었는데, 기존엔 _scan_conditions()가 매 스캔(240초)
 #   마다 code_multi_tag_map을 새로 빈 dict로 만들어서 "이번 한 번의 스캔
@@ -777,6 +792,64 @@ class DayBot:
             print(f"⚠️ [daybot] 섹터로테이션 체크 오류: {e}")
             return set()
 
+    def _check_spike_quality(self, code: str, current_price: float) -> tuple:
+        """★ 2026-10-05 — "3개월수급 당일주도주"(COND_3MONTH_LEADER) 후보
+        전용 2차 필터. 조건식은 거래대금만 보므로, 최근 SPIKE_LOOKBACK_DAYS
+        내 최대거래대금일(스파이크)을 찾아 세 가지를 확인한다:
+        기준1(캔들 모양) — 스파이크일 종가가 당일 변동폭 상위 65% 안에
+        있어야 함(위꼬리 길게 달고 밀린 "설거지"면 탈락).
+        기준2(눌림목 건전성) — 현재가가 스파이크 이전 수준으로 거의
+        되돌아왔으면 탈락("세력이 이미 털고 나간" 정황).
+        기준3(당일 상승률) — 스파이크일 전일종가 대비 등락률이
+        SPIKE_MIN_DAY_RETURN_PCT 미만이면 탈락("거래대금만 터지고 주가는
+        그대로"인 매물소화 실패 의심 — 대장 공유 코드 아이디어 반영).
+        ★ daily는 get_daily_ohlc() 계약대로 "최신→과거" 순서가 보장돼야
+        기준3의 "전일종가"(daily[spike_idx+1])가 맞게 나온다.
+        데이터 부족/조회 실패시엔 통과시킨다(섹터로테이션과 동일 원칙 —
+        보조 필터가 핵심 매수로직을 막으면 안 됨).
+        반환: (통과여부, 사유)"""
+        try:
+            daily = self.api.get_daily_ohlc(code, days=SPIKE_LOOKBACK_DAYS + 30)
+        except Exception as e:
+            return True, f"일봉조회오류(통과): {e}"
+        if len(daily) < 30:
+            return True, "일봉데이터부족(통과)"
+
+        # index 0 = 오늘(아직 형성중일 수 있어 스파이크 탐색에서 제외)
+        window = daily[1:1 + SPIKE_LOOKBACK_DAYS]
+        if len(window) < 10:
+            return True, "스파이크 탐색기간 부족(통과)"
+
+        spike = max(window, key=lambda r: r["close"] * r["volume"])
+        spike_value = spike["close"] * spike["volume"]
+        if spike_value < SPIKE_MIN_VALUE_WON:
+            return True, "스파이크기준미달(조건식에서 이미 필터됨, 통과)"
+
+        spike_idx = daily.index(spike)
+
+        candle_range = spike["high"] - spike["low"]
+        close_pos = ((spike["close"] - spike["low"]) / candle_range
+                     if candle_range > 0 else 1.0)
+        if close_pos < SPIKE_CLOSE_POS_MIN:
+            return False, f"스파이크일 종가위치{close_pos:.0%}(설거지의심)"
+
+        if spike_idx + 1 < len(daily):
+            prev_close = daily[spike_idx + 1]["close"]
+            day_return = ((spike["close"] - prev_close) / prev_close * 100
+                          if prev_close > 0 else 0)
+            if day_return < SPIKE_MIN_DAY_RETURN_PCT:
+                return False, f"스파이크일 상승률{day_return:.1f}%(대금 대비 미달)"
+
+        pre_spike_bars = daily[spike_idx + 1: spike_idx + 6]
+        if len(pre_spike_bars) < 3:
+            return True, "스파이크이전데이터부족(통과)"
+        pre_spike_baseline = sum(r["close"] for r in pre_spike_bars) / len(pre_spike_bars)
+        if current_price <= pre_spike_baseline * SPIKE_RETRACE_MAX_PCT:
+            return False, (f"현재가{current_price:,.0f}가 스파이크이전수준"
+                            f"{pre_spike_baseline:,.0f}근처로복귀(설거지의심)")
+
+        return True, "매집패턴확인"
+
     def _run_candidate_scan_and_maybe_buy(self):
         codes, code_multi_tag_map = self._scan_conditions()
         if not codes:
@@ -836,6 +909,18 @@ class DayBot:
                           f"가 0~{LATE_MAX_CHANGE_PCT}% 범위 밖")
                     self.db.log_candidate(code, self._name(code), tier, price, chg,
                                            skip_reason="등락률범위밖", raw_market_data=mdata)
+                    continue
+            # ★ 2026-10-05 대장 지정 — "3개월수급 당일주도주" 태그가 붙은
+            #   후보만 매집/설거지 2차 필터(_check_spike_quality) 적용.
+            #   다른 소스(주도주검색식3/단타000/섹터) 단독 후보는 "과거
+            #   거래대금 스파이크" 개념 자체가 없어 해당 없음.
+            code_tags = set(self._recent_tags.get(code, {}).keys()) or set(code_multi_tag_map.get(code, []))
+            if COND_3MONTH_LEADER in code_tags:
+                ok_spike, spike_reason = self._check_spike_quality(code, price)
+                if not ok_spike:
+                    print(f"⏭️ [daybot] {code} 패스 — {spike_reason}")
+                    self.db.log_candidate(code, self._name(code), tier, price, chg,
+                                           skip_reason=spike_reason, raw_market_data=mdata)
                     continue
             # ★ 2026-09-29 대장 지정 — 매도잔량이 매수잔량의 3배 이상
             #   ("눌린 스프링", core/kis_api.py:get_hoga() 자체 표현)일
