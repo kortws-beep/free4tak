@@ -74,6 +74,14 @@ def _is_trading_day() -> bool:
             _open = None
         if _open is None:
             print("⚠️ [리나] 휴장일 판단 실패 — 다음 호출 재시도")
+            # ★ 2026-10-06 — 캐시를 안 건드리면 날짜가 안 바뀌어서 "어제
+            #   (혹은 그 전 마지막 성공 시점)" 값이 그대로 남는데, 어제가
+            #   휴장일이었으면 오늘도 휴장으로 오판해 리포트/트레일링
+            #   감시가 통째로 꺼질 수 있었음(형제 Opus 리뷰로 발견).
+            #   판단 자체가 불가능한 상태라 "닫혔다"는 근거도 없으므로
+            #   보수적으로 "열려있다"로 간주 — 다음 호출에서 재시도되어
+            #   금방 정확한 값으로 갱신됨(캐시는 안 건드리므로 안전).
+            return True
         else:
             _TRADING_DAY_CACHE["is_open"] = _open
             _TRADING_DAY_CACHE["date"]    = today
@@ -125,6 +133,25 @@ def _load_manual_watches() -> dict:
 def _save_manual_watches(watches: dict):
     from common_utils import write_state
     write_state(MANUAL_WATCH_STATE_FILE, watches)
+
+
+def _save_manual_watch_updates(watches: dict, changed_codes: set):
+    """★ 2026-10-06 — manual_watch_trailing_loop는 루프 시작 시점의 watches
+    스냅샷을 1분 내내 들고 있다가(여러 종목 순회+await) 끝에 통째로
+    저장하는데, 그 사이 !리나등록/!리나등록해제가 같은 파일을 건드리면
+    옛날 스냅샷으로 덮어써버려 방금 해제한 종목이 되살아나거나 새
+    등록이 사라지는 경합이 있었음(대장 지적, 형제 Opus 리뷰로 발견).
+    저장 직전에 최신 상태를 다시 읽어(락 보호) 이번 루프에서 실제로
+    바뀐 종목(changed_codes)만 병합 — 그 사이 해제된 종목은 latest에
+    이미 없으니 되살리지 않고, 그 사이 새로 등록된 종목은 건드리지
+    않아 그대로 보존된다."""
+    from common_utils import _state_lock, _read_state_raw, _write_state_raw
+    with _state_lock(MANUAL_WATCH_STATE_FILE):
+        latest = _read_state_raw(MANUAL_WATCH_STATE_FILE, {})
+        for code in changed_codes:
+            if code in latest:
+                latest[code] = watches[code]
+        _write_state_raw(MANUAL_WATCH_STATE_FILE, latest)
 
 
 async def _register_manual_watch(channel, code: str, buy_price: float = None,
@@ -215,6 +242,20 @@ MAX_MEMORY = 10
 # 🛡️ 안전 전송기
 # ===================================================
 async def send_safe_message(target, text, reply_to=None):
+    """★ 2026-10-06 — 이 함수 자체는 디스코드 API 예외(429 레이트리밋/
+    5xx 등)를 절대 밖으로 흘려보내지 않는다(형제 Opus 리뷰로 발견).
+    이전엔 여기서 터진 예외가 호출부(특히 @tasks.loop로 도는
+    manual_watch_trailing_loop 등)까지 그대로 올라가, discord.py의
+    tasks.loop가 처리 안 된 예외 시 루프를 영구 정지시켜버리는 문제가
+    있었음 — 전송 실패 한 번으로 매도 알림 전체가 재시작 전까지
+    조용히 꺼지는 사고로 이어질 수 있었음."""
+    try:
+        await _send_safe_message_impl(target, text, reply_to)
+    except Exception as e:
+        print(f"⚠️ [send_safe_message] 전송 실패(무시하고 계속 진행): {e}")
+
+
+async def _send_safe_message_impl(target, text, reply_to=None):
     # ★ 2026-06-29 수정: 기존엔 "한 줄(line)이 1900자를 넘지 않는다"는
     #   가정 하에서만 안전하게 분할됐음. AI 응답에 줄바꿈 없는 긴 문단이
     #   하나라도 있으면 그 줄이 그대로 청크에 들어가 1900자를 훌쩍
@@ -368,13 +409,21 @@ def add_google_calendar_event(summary, target_date):
             
         creds = Credentials.from_authorized_user_file(token_path, SCOPES)
         service = build('calendar', 'v3', credentials=creds)
-        
+
+        # ★ 2026-10-06 — 구글 캘린더 종일(all-day) 일정은 end.date가
+        #   "배타적"(해당 날짜는 포함 안 됨)이어야 해서, 하루짜리 일정도
+        #   end는 시작일+1일로 줘야 함. start==end로 주면 빈 시간범위라
+        #   API가 거부하거나 깨진 일정이 생길 수 있었음(형제 Opus 리뷰로
+        #   발견 — !일정추가가 계속 실패하던 원인으로 추정).
+        start_dt = datetime.datetime.strptime(target_date, "%Y-%m-%d")
+        end_date = (start_dt + datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+
         event_body = {
             'summary': summary,
             'start': {'date': target_date, 'timeZone': 'Asia/Seoul'},
-            'end': {'date': target_date, 'timeZone': 'Asia/Seoul'},
+            'end': {'date': end_date, 'timeZone': 'Asia/Seoul'},
         }
-        
+
         service.events().insert(calendarId='primary', body=event_body).execute()
         return f"✅ '{target_date}'에 [{summary}] 일정 추가 완료!"
     except Exception as e:
@@ -396,7 +445,14 @@ def get_weather_kma_pure() -> str:
         data = {item["category"]: item["obsrValue"] for item in items}
         pty = {"0": "없음", "1": "비", "2": "비/눈", "3": "눈", "4": "소나기"}.get(data.get("PTY", "0"), "없음")
         return f"{'주룩주룩 비소식' if pty != '없음' else '맑고 쾌청함'} / 현재기온: {data.get('T1H', '?')}°C / 습도: {data.get('REH', '?')}%"
-    except Exception as e: return f"기상청 수신 지연 중 ({e})"
+    except Exception as e:
+        # ★ 2026-10-06 — requests 예외 메시지엔 요청 URL 전체(authKey
+        #   쿼리파라미터 포함)가 그대로 들어가는 경우가 있어, 이걸 그대로
+        #   반환하면 LLM 프롬프트에 먹혀 디스코드 응답으로까지 API 키가
+        #   노출될 위험이 있었음(형제 Opus 리뷰로 발견). 원인 종류만
+        #   남기고 상세 메시지는 서버 로그에만 출력.
+        print(f"⚠️ [날씨] 기상청 조회 오류: {e}")
+        return f"기상청 수신 지연 중 ({type(e).__name__})"
 
 async def fetch_mbngold_async(service_id="10001", limit=5):
     """MBN골드 로그인 후 뉴스 크롤링 (새 URL 구조)"""
@@ -1236,59 +1292,73 @@ async def manual_watch_trailing_loop():
         print(f"⚠️ [리나등록 추적] 초기화 오류: {e}")
         return
 
-    changed = False
+    changed_codes = set()
     for code, w in list(watches.items()):
+        # ★ 2026-10-06 — 종목 하나 처리 중 생기는 예외(디스코드 전송
+        #   오류/필드 누락 등)가 전체를 덮지 않도록 격리. discord.py의
+        #   tasks.loop는 처리 안 된 예외가 새면 루프 자체를 영구 정지
+        #   시키는데(형제 Opus 리뷰로 발견), 그러면 재시작 전까지 매도
+        #   알림이 조용히 전부 꺼져버림 — 종목 단위로 try를 걸어 한
+        #   종목의 문제가 다른 종목 감시/다음 루프를 막지 않게 한다.
         try:
-            mdata = await asyncio.to_thread(api.get_market_data, code)
-            price = float((mdata or {}).get("stck_prpr", 0) or 0)
-        except Exception as e:
-            print(f"⚠️ [리나등록 추적] {code} 시세조회 오류: {e}")
-            continue
-        if price <= 0:
-            continue
+            try:
+                mdata = await asyncio.to_thread(api.get_market_data, code)
+                price = float((mdata or {}).get("stck_prpr", 0) or 0)
+            except Exception as e:
+                print(f"⚠️ [리나등록 추적] {code} 시세조회 오류: {e}")
+                continue
+            if price <= 0:
+                continue
 
-        entry = w["entry_price"]
-        # ★ rate(가격기준)는 트레일링 발동/정지 "판단"에만 사용 — 차트가
-        #   보여주는 실제 가격움직임 기준이어야 함. 알림 문구에 보여줄
-        #   때만 net_rate(수수료+세금 차감한 체감 수익률)로 바꿔치기.
-        rate = (price - entry) / entry * 100
-        net_rate = rate - MANUAL_WATCH_FEE_DRAG_PCT
+            entry = w["entry_price"]
+            # ★ rate(가격기준)는 트레일링 발동/정지 "판단"에만 사용 — 차트가
+            #   보여주는 실제 가격움직임 기준이어야 함. 알림 문구에 보여줄
+            #   때만 net_rate(수수료+세금 차감한 체감 수익률)로 바꿔치기.
+            rate = (price - entry) / entry * 100
+            net_rate = rate - MANUAL_WATCH_FEE_DRAG_PCT
 
-        if w.get("peak_price") is not None:
-            if price > w["peak_price"]:
+            if w.get("peak_price") is not None:
+                if price > w["peak_price"]:
+                    w["peak_price"] = price
+                    changed_codes.add(code)
+                peak_rate = (w["peak_price"] - entry) / entry * 100
+                trail_pct = (MANUAL_WATCH_TRAILING_STOP_PCT
+                             if peak_rate > MANUAL_WATCH_TRAILING_STOP_WIDEN_PCT
+                             else MANUAL_WATCH_TRAILING_STOP_PCT_TIGHT)
+                trail_stop = w["peak_price"] * (1 - trail_pct / 100)
+                floor_price = entry * (1 + MANUAL_WATCH_MIN_LOCKED_PROFIT_PCT / 100)
+                trail_stop = max(trail_stop, floor_price)
+                if price <= trail_stop and w["peak_price"] > w.get("last_alert_peak", 0):
+                    await send_safe_message(
+                        channel,
+                        f"🔔 **[리나등록] {w.get('name', code)}({code}) 매도 신호**\n"
+                        f"   고점 {w['peak_price']:,.0f}원 대비 -{trail_pct}% "
+                        f"({price:,.0f}원, 총 {net_rate:+.2f}%) — 키움에서 매도 판단해줘.\n"
+                        f"   (계속 감시할게 — 신고점 찍고 또 밀리면 다시 알려줄게. "
+                        f"그만 지켜봐도 되면 `!리나등록해제 {code}`)"
+                    )
+                    w["last_alert_peak"] = w["peak_price"]
+                    changed_codes.add(code)
+                continue
+
+            if rate >= MANUAL_WATCH_TAKE_PROFIT_PCT:
                 w["peak_price"] = price
-                changed = True
-            peak_rate = (w["peak_price"] - entry) / entry * 100
-            trail_pct = (MANUAL_WATCH_TRAILING_STOP_PCT
-                         if peak_rate > MANUAL_WATCH_TRAILING_STOP_WIDEN_PCT
-                         else MANUAL_WATCH_TRAILING_STOP_PCT_TIGHT)
-            trail_stop = w["peak_price"] * (1 - trail_pct / 100)
-            floor_price = entry * (1 + MANUAL_WATCH_MIN_LOCKED_PROFIT_PCT / 100)
-            trail_stop = max(trail_stop, floor_price)
-            if price <= trail_stop and w["peak_price"] > w.get("last_alert_peak", 0):
+                changed_codes.add(code)
                 await send_safe_message(
                     channel,
-                    f"🔔 **[리나등록] {w.get('name', code)}({code}) 매도 신호**\n"
-                    f"   고점 {w['peak_price']:,.0f}원 대비 -{trail_pct}% "
-                    f"({price:,.0f}원, 총 {net_rate:+.2f}%) — 키움에서 매도 판단해줘.\n"
-                    f"   (계속 감시할게 — 신고점 찍고 또 밀리면 다시 알려줄게. "
-                    f"그만 지켜봐도 되면 `!리나등록해제 {code}`)"
+                    f"📈 [리나등록] {w.get('name', code)}({code}) +{net_rate:.2f}% 도달 — "
+                    f"트레일링 추적 시작(고점 {price:,.0f}원, -{MANUAL_WATCH_TRAILING_STOP_PCT_TIGHT}% 밀리면 알려줄게)"
                 )
-                w["last_alert_peak"] = w["peak_price"]
-                changed = True
+        except Exception as e:
+            print(f"⚠️ [리나등록 추적] {code} 처리 중 예외(건너뜀): {e}")
             continue
 
-        if rate >= MANUAL_WATCH_TAKE_PROFIT_PCT:
-            w["peak_price"] = price
-            changed = True
-            await send_safe_message(
-                channel,
-                f"📈 [리나등록] {w.get('name', code)}({code}) +{net_rate:.2f}% 도달 — "
-                f"트레일링 추적 시작(고점 {price:,.0f}원, -{MANUAL_WATCH_TRAILING_STOP_PCT_TIGHT}% 밀리면 알려줄게)"
-            )
-
-    if changed:
-        _save_manual_watches(watches)
+    if changed_codes:
+        # ★ 2026-10-06 — write_state(전체덮어쓰기) 대신 변경된 종목만
+        #   락 보호 병합 저장(위 _save_manual_watch_updates 참고) — 루프가
+        #   1분간 들고 있던 옛날 스냅샷으로 그 사이의 등록/해제를
+        #   덮어쓰는 경합을 막는다.
+        _save_manual_watch_updates(watches, changed_codes)
 
 
 @tasks.loop(minutes=1)
@@ -2181,10 +2251,16 @@ async def on_message(message):
             return
         sell_price = None
         if len(parts) >= 3:
+            # ★ 2026-10-06 — "71,500"처럼 쉼표 들어간 가격을 float()에
+            #   그대로 넣으면 ValueError가 나서 매도가 자체가 조용히
+            #   무시되고(수익률 계산 없이 그냥 해제됨) 사용자는 자기가
+            #   입력한 가격이 반영이 안 됐는지도 모르는 상태였음(형제
+            #   Opus 리뷰로 발견). 쉼표 제거 후 재시도, 그래도 실패하면
+            #   안내 메시지로 알림.
             try:
-                sell_price = float(parts[2])
+                sell_price = float(parts[2].replace(",", ""))
             except ValueError:
-                pass
+                await send_safe_message(message.channel, f"⚠️ 매도가 '{parts[2]}' 인식 실패 — 숫자만 입력해줘(평단가 없이 해제 처리할게).")
         await _deregister_manual_watch(message.channel, code, sell_price)
         return
 
@@ -2202,10 +2278,11 @@ async def on_message(message):
         buy_price = None
         name_override = None
         if len(parts) >= 3:
+            # ★ 2026-10-06 — 매도가와 동일한 쉼표 파싱 버그(위 해제 참고).
             try:
-                buy_price = float(parts[2])
+                buy_price = float(parts[2].replace(",", ""))
             except ValueError:
-                pass
+                await send_safe_message(message.channel, f"⚠️ 평단가 '{parts[2]}' 인식 실패 — 숫자만 입력해줘(현재가로 등록할게).")
         if len(parts) >= 4:
             name_override = parts[3].strip()
         await _register_manual_watch(message.channel, code, buy_price, name_override)
@@ -2285,15 +2362,23 @@ async def on_message(message):
     if not user_input: return
 
     is_dm = isinstance(message.channel, discord.DMChannel)
-    is_called = is_dm or ("리na" in message.content or "리나" in message.content) or client.user.mentioned_in(message)
+    is_called = is_dm or ("리나" in message.content) or client.user.mentioned_in(message)
     if not is_called: return
 
     async with message.channel.typing():
-        if any(kw in user_input for kw in ["원", "지출", "샀어", "보냈어"]) and any(c.isdigit() for c in user_input):
-            num = re.findall(r'\d+', user_input)[0]
-            item = re.sub(r'\d+', '', user_input.replace("리나야", "").replace("원", "").replace("샀어", "")).strip() or "기타"
+        # ★ 2026-10-06 — "원" 포함 여부로만 판단하면 "병원"/"원래" 같은
+        #   무관한 단어에도 걸렸고, 금액은 "첫 번째 숫자 덩어리"를 그대로
+        #   써서 "10월 5일 커피 4500원"이 10원으로, "4,500원"이 쉼표 때문에
+        #   4원으로 기록되는 등 가계부가 엉뚱하게 꼬이는 버그가 있었음
+        #   (형제 Opus 리뷰로 발견). "숫자(쉼표 허용)+원"이 실제로 붙어있는
+        #   패턴만 금액으로 인정하도록 교체.
+        _amount_match = re.search(r'(\d[\d,]*)\s*원', user_input)
+        if _amount_match and any(kw in user_input for kw in ["원", "지출", "샀어", "보냈어"]):
+            num  = int(_amount_match.group(1).replace(",", ""))
+            item = re.sub(r'\d[\d,]*\s*원', '',
+                           user_input.replace("리나야", "").replace("샀어", "")).strip() or "기타"
             r_type = "입금" if "입금" in user_input else "출금"
-            context_data = f"[시스템 가계부]: {add_finance_record(r_type, item, int(num))}"
+            context_data = f"[시스템 가계부]: {add_finance_record(r_type, item, num)}"
             prompt = f"{context_data}\n\n질문: {user_input}\n친절하게 답해줘."
         else:
             context_data = await web_search_hybrid(user_input)
