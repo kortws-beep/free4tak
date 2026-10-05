@@ -318,7 +318,13 @@ class SwingStrategy:
         # ----------------------------------------------------------
         if stage == 0 and current <= stop_price and not tracker.get("hold", False):
             print(f"🛑 손절 {code} | 현재:{current:,.0f} ≤ 손절:{stop_price:,.0f} ({rate:+.2%})")
-            on_sell(code, qty, f"손절({rate:+.2%})", current)
+            # ★ 2026-10-06: 매도 성공 여부를 안 보고 tracker를 지우고 손절카운트를
+            #   올리던 버그 — 실패하면 다음 루프마다 같은 손절이 재시도되며
+            #   카운트만 쌓여 일일 손절한도(→매수정지)에 엉뚱하게 걸렸음.
+            #   목표1 50%매도(09-04 수정)와 같은 원칙: 성공했을 때만 상태 변경.
+            if not on_sell(code, qty, f"손절({rate:+.2%})", current):
+                print(f"⚠️ 손절 매도 실패 {code} — tracker 유지, 다음 루프 재시도")
+                return None
             on_loss()
             peak_tracker.pop(code, None)
             return "손절"
@@ -336,14 +342,21 @@ class SwingStrategy:
             if current <= trail_stop:
                 print(f"🔻 트레일링 {code} | 고점:{peak_price:,.0f} → "
                       f"트레일:{trail_stop:,.0f} | 현재:{current:,.0f} ({rate:+.2%})")
-                on_sell(code, qty, f"트레일링({rate:+.2%})", current)
+                # ★ 2026-10-06: 실패 시 tracker를 지우면 다음 루프에 stage0으로
+                #   새로 만들어져 올려둔 손절/고점이 날아가고(보호선이 매수가-ATR×2로
+                #   후퇴) +8%에서 50%익절이 또 발동했음 — 성공했을 때만 정리.
+                if not on_sell(code, qty, f"트레일링({rate:+.2%})", current):
+                    print(f"⚠️ 트레일링 매도 실패 {code} — tracker 유지, 다음 루프 재시도")
+                    return None
                 peak_tracker.pop(code, None)
                 return "트레일링"
         elif stage >= 1:
             # ATR 없을 때 폴백 트레일링
             trail_rate = tracker["peak_rate"] - FALLBACK_TRAIL
             if rate <= trail_rate:
-                on_sell(code, qty, f"트레일링({rate:+.2%})", current)
+                if not on_sell(code, qty, f"트레일링({rate:+.2%})", current):
+                    print(f"⚠️ 트레일링 매도 실패 {code} — tracker 유지, 다음 루프 재시도")
+                    return None
                 peak_tracker.pop(code, None)
                 return "트레일링"
 

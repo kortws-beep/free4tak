@@ -210,6 +210,30 @@ class DayTradeDB:
         except Exception as e:
             print(f"⚠️ 단타 매수취소 정리 오류 {code}: {e}")
 
+    def update_open_buy(self, code: str, qty: int, buy_price: float = None):
+        """★ 2026-10-06: 미체결 취소 후 일부만 체결된 매수의 수량(및 실제
+        평단)을 보정한다 — void_buy()로 통째로 지우면 실제로 산 부분체결분이
+        장부에서 사라졌음(daybot.py:_reconcile_cancelled_buys() 참고)."""
+        try:
+            conn = _connect()
+            if buy_price:
+                conn.execute("""
+                    UPDATE trades SET qty=?, buy_price=? WHERE id = (
+                        SELECT id FROM trades WHERE code=? AND sell_price IS NULL
+                        ORDER BY id DESC LIMIT 1
+                    )
+                """, (qty, buy_price, code))
+            else:
+                conn.execute("""
+                    UPDATE trades SET qty=? WHERE id = (
+                        SELECT id FROM trades WHERE code=? AND sell_price IS NULL
+                        ORDER BY id DESC LIMIT 1
+                    )
+                """, (qty, code))
+            conn.commit(); conn.close()
+        except Exception as e:
+            print(f"⚠️ 단타 매수수량 보정 오류 {code}: {e}")
+
     def get_today_realized(self, today: str = None) -> int:
         if not today:
             today = datetime.datetime.now().strftime("%Y-%m-%d")

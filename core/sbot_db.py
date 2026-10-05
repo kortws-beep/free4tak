@@ -96,6 +96,33 @@ class SwingDB:
         except Exception as e:
             print(f"⚠️ 스윙 매수 저장 오류 {code}: {e}")
 
+    def add_to_open_buy(self, code: str, buy_price: float, qty: int) -> bool:
+        """★ 2026-10-06: 2차매수(물타기)를 기존 미청산 행에 합친다(평단 재계산
+        + 수량 합산). 기존엔 save_buy()로 행을 하나 더 만들었는데, save_sell()은
+        "가장 최근 미청산 행" 하나만 닫아서 — 50%익절 수량을 작은 2차매수
+        행과 비교해 전량매도로 처리하고, 1차매수 행은 영원히 미청산으로
+        남아 승률/켈리 통계가 틀어졌음. 미청산 행이 없으면 False(호출부가
+        save_buy로 폴백)."""
+        try:
+            conn = _connect()
+            row  = conn.execute("""
+                SELECT id, buy_price, qty FROM trades
+                WHERE code=? AND sell_price IS NULL
+                ORDER BY id DESC LIMIT 1
+            """, (code,)).fetchone()
+            if not row:
+                conn.close(); return False
+            trade_id, old_price, old_qty = row
+            new_qty = (old_qty or 0) + qty
+            new_avg = ((old_price or 0) * (old_qty or 0) + buy_price * qty) / new_qty if new_qty else buy_price
+            conn.execute("UPDATE trades SET buy_price=?, qty=? WHERE id=?",
+                         (round(new_avg, 2), new_qty, trade_id))
+            conn.commit(); conn.close()
+            return True
+        except Exception as e:
+            print(f"⚠️ 스윙 2차매수 합산 오류 {code}: {e}")
+            return False
+
     def save_sell(self, code: str, sell_price: float, sell_reason: str,
                   sold_qty: int = 0, stage_reached: int = 0):
         """전량/부분 매도 자동 처리"""
