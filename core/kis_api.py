@@ -390,7 +390,12 @@ class KisAPI:
             res    = _get(url, headers=headers, params=params, timeout=5).json()
             output = res.get("output", [])
             if not output:
-                print("⚠️ 휴장일 체크 응답 없음 — 판단불가(다음 루프 재시도)")
+                # ★ 2026-10-05 — 토큰 만료 등 인증 오류도 output이 없는
+                #   형태로 오는 경우가 있어(sector_monitor.py 토큰 미갱신
+                #   사고로 발견), rt_cd/msg1을 같이 찍어 원인 구분이
+                #   되게 함.
+                print(f"⚠️ 휴장일 체크 응답 없음 — 판단불가(다음 루프 재시도) "
+                      f"[rt_cd={res.get('rt_cd')}, msg1={res.get('msg1')}]")
                 return None
             is_open = output[0].get("bzdy_yn", "Y") == "Y"
             if not is_open:

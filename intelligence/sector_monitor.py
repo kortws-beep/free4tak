@@ -416,6 +416,15 @@ def main():
             now_wday = datetime.datetime.now().weekday()
             today    = datetime.date.today().isoformat()
 
+            # ★ 2026-10-05 — sector_monitor.py에 토큰 갱신 호출이 아예
+            #   없었음(sbot/daybot은 매 루프 refresh_token_if_needed()를
+            #   continue 게이트보다 먼저 부르는데 이 모듈만 빠져있었음).
+            #   장시간 내내 떠있는 프로세스라(재시작 없이 며칠째) 토큰이
+            #   24시간 지나 만료되면 is_market_open() 등 모든 KIS 호출이
+            #   조용히 실패하기 시작함 — 09-07 새벽 sbot/sbo2 사고와
+            #   동일한 버그 클래스. continue 게이트보다 먼저 호출.
+            api.refresh_token_if_needed()
+
             # 주말 스킵
             if now_wday >= 5:
                 print("😴 주말 — 대기 중")
