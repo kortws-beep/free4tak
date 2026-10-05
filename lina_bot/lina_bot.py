@@ -357,10 +357,14 @@ def get_kr_stocks_by_ticker(us_ticker):
     return [{"kr_name": r[0], "reason": r[1], "is_static": r[2]} for r in rows]
 
 def add_finance_record(r_type, item, amount):
+    # ★ 2026-10-06 — naive datetime.now()는 서버 시스템 타임존에 암묵적으로
+    #   의존하는데, 이 파일 다른 곳은 전부 KST를 명시적으로 쓰고 있어서
+    #   서버 TZ가 바뀌면 조용히 날짜가 틀어질 수 있었음(형제 Opus 리뷰로
+    #   발견) — 다른 곳과 통일해 KST 명시.
     conn = sqlite3.connect(DB_PATH_FINANCE)
     cursor = conn.cursor()
-    cursor.execute("INSERT INTO finance_ledger (date, type, item, amount) VALUES (?, ?, ?, ?)", 
-                   (datetime.datetime.now().strftime("%Y-%m-%d"), r_type, item, amount))
+    cursor.execute("INSERT INTO finance_ledger (date, type, item, amount) VALUES (?, ?, ?, ?)",
+                   (datetime.datetime.now(KST).strftime("%Y-%m-%d"), r_type, item, amount))
     conn.commit()
     conn.close()
     return f"장부에 [{r_type}] {item} {amount:,}원 기록 완료!"
@@ -368,7 +372,7 @@ def add_finance_record(r_type, item, amount):
 def get_monthly_report():
     conn = sqlite3.connect(DB_PATH_FINANCE)
     cursor = conn.cursor()
-    cursor.execute("SELECT type, amount FROM finance_ledger WHERE date LIKE ?", (f"{datetime.datetime.now().strftime('%Y-%m')}%",))
+    cursor.execute("SELECT type, amount FROM finance_ledger WHERE date LIKE ?", (f"{datetime.datetime.now(KST).strftime('%Y-%m')}%",))
     rows = cursor.fetchall()
     conn.close()
     if not rows: return "이번 달 장부가 비어있어."
@@ -948,7 +952,9 @@ def _map_themes_to_candidates(themes: list, exclude_names: set = None) -> list:
 
     from swing_analyzer import get_swing_data
     from trend_analyzer import get_trend_data
-    from sbo2 import get_stock_code
+    # ★ 2026-10-06 — 파일 상단에서 이미 candidate_pool.get_stock_code를
+    #   쓰는데 여기만 sbo2(실거래 봇 모듈 전체)에서 다시 import하고
+    #   있었음(형제 Opus 리뷰로 발견) — 불필요한 모듈 재사용, 통일.
 
     swing_data  = get_swing_data(top_n=30)
     trend_data  = get_trend_data(top_n=30)
@@ -1129,7 +1135,9 @@ def _check_light_chart_health(stock_name: str, conn: sqlite3.Connection, api=Non
         week52_high = max(closes[:252]) if len(closes) >= 252 else max(closes)
         if curr > ma200 and curr >= week52_high * 0.8:
             try:
-                from sbo2 import get_stock_code
+                # ★ 2026-10-06 — 상단에서 이미 candidate_pool.get_stock_code를
+                #   쓰는데 여기만 sbo2에서 다시 import하고 있었음(형제
+                #   Opus 리뷰로 발견) — 통일.
                 code = get_stock_code(stock_name)
                 mdata = api.get_market_data(code) if code else None
                 if mdata:
