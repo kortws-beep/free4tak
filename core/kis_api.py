@@ -959,7 +959,7 @@ class KisAPI:
     # ============================================================
     # 일봉 OHLC (ATR 계산용)
     # ============================================================
-    def get_daily_ohlc(self, code: str, days: int = 20) -> list:
+    def get_daily_ohlc(self, code: str, days: int = 20, end_date: str = None) -> list:
         """
         일봉 OHLC 데이터 조회 (ATR 변동성 계산용).
 
@@ -975,10 +975,14 @@ class KisAPI:
                    "authorization": f"Bearer {self.token}",
                    "appKey": self.appkey, "appSecret": self.secret,
                    "tr_id": "FHKST03010100"}
-        end_date   = datetime.datetime.now().strftime("%Y%m%d")
+        # ★ 2026-10-06: end_date("YYYYMMDD")를 주면 그 날짜까지의 과거 구간 조회
+        #   (API가 한 번에 최대 100봉이라 그 이전 구간 추가수집용). 기본은 오늘.
+        _end_dt    = (datetime.datetime.strptime(end_date, "%Y%m%d") if end_date
+                      else datetime.datetime.now())
+        end_date   = _end_dt.strftime("%Y%m%d")
         # ATR period=14 + 여유분 → 30일 정도 가져옴
         fetch_days = max(days + 15, 30)
-        start_date = (datetime.datetime.now()
+        start_date = (_end_dt
                       - datetime.timedelta(days=fetch_days * 2)).strftime("%Y%m%d")
         params = {"fid_cond_mrkt_div_code": "J", "fid_input_iscd": code,
                   "fid_input_date_1": start_date, "fid_input_date_2": end_date,

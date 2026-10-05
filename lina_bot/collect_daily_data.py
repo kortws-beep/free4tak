@@ -104,7 +104,8 @@ def upsert_daily_data(rows: list[dict]) -> int:
 
 
 # ── 핵심 수집 함수 ─────────────────────────────────────────────
-def collect_stock(api: KisAPI, stock_name: str, code: str, days: int) -> int:
+def collect_stock(api: KisAPI, stock_name: str, code: str, days: int,
+                  end_date: str = None) -> int:
     """
     단일 종목 수집.
     - 주가/거래량 : get_daily_ohlc(days)
@@ -113,7 +114,7 @@ def collect_stock(api: KisAPI, stock_name: str, code: str, days: int) -> int:
     반환: 저장된 행 수
     """
     # ── 1. 일봉 OHLC (종가/거래량) ──────────────────────────────
-    ohlc = api.get_daily_ohlc(code, days=days)
+    ohlc = api.get_daily_ohlc(code, days=days, end_date=end_date)
     if not ohlc:
         # 디버그: 원본 응답 확인
         import requests as _req, datetime as _dt
@@ -184,12 +185,19 @@ def collect_stock(api: KisAPI, stock_name: str, code: str, days: int) -> int:
             f"AND date NOT IN ({','.join('?' * len(dates))})",
             [stock_name, min(dates), max(dates), *dates],
         )
+        # 최신 봉 이후~오늘 전 사이의 행도 가짜(휴장일에 옛 코드가 전 거래일 데이터를
+        # 그날 날짜로 저장한 것 — 2026-10-05 대체공휴일 실사례). 최신구간 수집일 때만.
+        if not end_date:
+            conn.execute(
+                "DELETE FROM kr_stock_daily_data WHERE stock_name=? AND date > ? AND date < ?",
+                (stock_name, max(dates), today_str),
+            )
         conn.commit(); conn.close()
     return upsert_daily_data(rows)
 
 
 # ── 전체 수집 ──────────────────────────────────────────────────
-def collect_all(days: int = 30, delay: float = 0.5) -> None:
+def collect_all(days: int = 30, delay: float = 0.5, end_date: str = None) -> None:
     """
     kr_theme_stocks의 모든 종목을 수집합니다.
 
@@ -233,7 +241,7 @@ def collect_all(days: int = 30, delay: float = 0.5) -> None:
         print(f"  📈 {name} ({code}) 수집 중...")
 
         try:
-            saved = collect_stock(api, name, code, days)
+            saved = collect_stock(api, name, code, days, end_date=end_date)
             total += saved
             print(f"      ✅ {saved}일치 저장")
         except Exception as e:
@@ -265,8 +273,23 @@ def collect_one(raw_name: str, days: int = 30) -> None:
 if __name__ == "__main__":
     # ★ 2026-10-06: `python collect_daily_data.py 100` 처럼 일수를 주면 그만큼
     #   다시 받아 덮어씀 — 날짜계산 버그로 밀려 저장된 과거 데이터 1회 교정용.
-    _days = int(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1].isdigit() else 1
-    collect_all(days=_days, delay=0.3)
+    # `python collect_daily_data.py backfill` — 실제 거래대금이 있는 가장 오래된
+    #   날짜 이전 100봉을 추가 수집(API 1회 최대 100봉이라 3개월수급 E조건의
+    #   119거래일을 채우려면 필요). 여러 번 돌리면 그만큼 더 과거로 내려간다.
+    if len(sys.argv) > 1 and sys.argv[1] == "backfill":
+        _c = sqlite3.connect(DB_PATH)
+        _oldest = _c.execute("SELECT MIN(date) FROM kr_stock_daily_data "
+                             "WHERE trade_value IS NOT NULL").fetchone()[0]
+        _c.close()
+        if not _oldest:
+            print("❌ trade_value가 있는 행이 없음 — 먼저 `python collect_daily_data.py 100` 실행")
+            sys.exit(1)
+        _end = (datetime.strptime(_oldest, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y%m%d")
+        print(f"⏪ 과거 구간 추가수집: {_end} 이전 100봉")
+        collect_all(days=100, delay=0.3, end_date=_end)
+    else:
+        _days = int(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1].isdigit() else 1
+        collect_all(days=_days, delay=0.3)
 
     # 단일 테스트:
     # collect_one("삼성SDI KOSPI 006400", days=10)
