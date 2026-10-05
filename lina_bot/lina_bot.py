@@ -2321,6 +2321,10 @@ async def on_message(message):
                 if near:
                     lines.append("\n**근접 후보 (탈락 조건)**")
                     lines += [f"   {r['name']}({r['code']}) {r['chg']:+.1f}% — {', '.join(r['fails'])}" for r in near]
+                fakes = universe.get("fakes", [])
+                if fakes:
+                    lines.append("\n**가짜 거르기로 제외 (B·E는 통과)**")
+                    lines += [f"   ✂️ {n} — {why}" for n, why in fakes[:8]]
                 await send_safe_message(message.channel, "\n".join(lines))
             except Exception as e:
                 await send_safe_message(message.channel, f"❌ 3개월수급 조회 오류: {e}")

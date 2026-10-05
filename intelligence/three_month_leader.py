@@ -27,6 +27,14 @@ three_month_leader.py — "3개월수급 당일주도주" 키움 조건식의 �
   B(0~59봉) = 오늘 거래대금 + DB index 0~58
   E(60~119봉) = DB index 59~118  → DB에 최소 119거래일 필요
 
+가짜 거르기(키움 조건식 밖, daybot _check_spike_quality와 같은 기준):
+  B 구간(60봉) 최대 거래대금일 = 스파이크. 조건식은 거래대금만 보므로
+  "대금만 터지고 밀린" 설거지를 따로 거른다.
+  기준1 스파이크일 종가가 당일 고저폭의 65% 이상 위치 (윗꼬리 길면 탈락)
+  기준3 스파이크일 전일 대비 상승률 7% 이상
+  기준2 현재가 > 스파이크 직전 5일 평균 종가 × 1.05 (되돌아왔으면 탈락) — 장중 판단
+  고가/저가·직전 데이터가 없으면 통과(보조 필터가 본 조건을 막지 않게).
+
 거래대금: DB의 trade_value(실제 거래대금, 2026-10-06부터 수집)를 쓰고,
   비어 있는 과거 행은 종가×거래량 근사치로 대신한다(경계값 근처는 키움과
   다를 수 있음 — 수집이 쌓이면 자연히 해소).
@@ -54,6 +62,12 @@ MA_LEN            = 120
 I_MIN, I_MAX      = 100.0, 140.0      # %
 A_MIN, A_MAX      = 100.0, 1000.0     # %
 
+# ── 가짜 거르기 (daybot SPIKE_* 와 동일 값) ──
+SPIKE_LOOKBACK      = 60      # DB index 0~59 (오늘 제외 직전 60봉)
+SPIKE_CLOSE_POS_MIN = 0.65    # 기준1
+SPIKE_MIN_RETURN    = 7.0     # 기준3 (%)
+SPIKE_RETRACE_MAX   = 1.05    # 기준2
+
 NEED_ROWS = E_OFFSET + E_WINDOW - 1   # 119 — DB index 0~118
 
 
@@ -74,6 +88,28 @@ def _name_code_map(conn) -> dict:
         name = re.sub(r"\s*KOS(?:PI|DAQ)\s*[0-9A-Z]{6}$", "", raw).strip()
         out.setdefault(name, m.group(1))
     return out
+
+
+def _spike_quality(rows, vals):
+    """B 구간 최대 거래대금일의 모양 검사(기준1·3) + 기준2용 직전 5일 평균.
+    rows: 최신→과거 (date, close, volume, trade_value, high, low).
+    반환: (실패사유 or None, 스파이크 index, 직전5일 평균종가 or None)"""
+    window = vals[:SPIKE_LOOKBACK]
+    idx = max(range(len(window)), key=lambda i: window[i][0])
+    _, close, _, _, high, low = rows[idx]
+    if high and low and high > low and close:
+        pos = (close - low) / (high - low)
+        if pos < SPIKE_CLOSE_POS_MIN:
+            return f"가짜:종가위치{pos:.0%}", idx, None
+    if idx + 1 < len(rows):
+        prev = rows[idx + 1][1]
+        if prev and close:
+            ret = (close - prev) / prev * 100
+            if ret < SPIKE_MIN_RETURN:
+                return f"가짜:상승률{ret:.1f}%", idx, None
+    pre = [r[1] for r in rows[idx + 1: idx + 6] if r[1]]
+    base = sum(pre) / len(pre) if len(pre) >= 3 else None
+    return None, idx, base
 
 
 def build_universe(db_path: str = THEME_DB, today: str = None) -> dict:
@@ -99,16 +135,18 @@ def build_universe(db_path: str = THEME_DB, today: str = None) -> dict:
         if latest:
             since = (datetime.date.fromisoformat(latest)
                      - datetime.timedelta(days=NEED_ROWS * 2 + 30)).isoformat()
-            for name, d, c, v, tv in conn.execute("""
-                SELECT stock_name, date, close_price, volume, trade_value
+            for name, d, c, v, tv, hi, lo in conn.execute("""
+                SELECT stock_name, date, close_price, volume, trade_value, high_price, low_price
                 FROM kr_stock_daily_data WHERE date >= ? AND date < ?
                 ORDER BY stock_name, date DESC
             """, (since, today)):
-                by_name.setdefault(name, []).append((d, c, v, tv))
+                by_name.setdefault(name, []).append((d, c, v, tv, hi, lo))
             dates = [since, latest]
         items, scanned = [], 0
         # ★ 후보 0개일 때 원인을 바로 알 수 있게 탈락 사유를 센다
-        skip = {"일봉없음": 0, "기록부족(119일 미만)": 0, "최신일 누락": 0, "E탈락": 0, "B탈락": 0}
+        skip = {"일봉없음": 0, "기록부족(119일 미만)": 0, "최신일 누락": 0, "E탈락": 0, "B탈락": 0,
+                "가짜(설거지)": 0}
+        fakes = []   # [(종목명, 사유)] — 키움 결과와 대조용
         for name, code in name_code.items():
             rows = by_name.get(name, [])[:NEED_ROWS]
             if not rows:
@@ -118,7 +156,7 @@ def build_universe(db_path: str = THEME_DB, today: str = None) -> dict:
             if rows[0][0] != latest:
                 skip["최신일 누락"] += 1; continue
             scanned += 1
-            vals = [_value(c, v, tv) for _, c, v, tv in rows]
+            vals = [_value(c, v, tv) for _, c, v, tv, _, _ in rows]
 
             # E: DB index 59~118 전부 0 ~ 300억 (60회 이상)
             e_vals = vals[E_OFFSET - 1:E_OFFSET - 1 + E_WINDOW]
@@ -129,7 +167,11 @@ def build_universe(db_path: str = THEME_DB, today: str = None) -> dict:
             b_hits  = [(rows[i][0], val) for i, (val, _) in enumerate(b_vals) if val >= B_MIN_VALUE]
             if not b_hits:
                 skip["B탈락"] += 1; continue
-            closes = [c for _, c, _, _ in rows]
+            fake, s_idx, pre_base = _spike_quality(rows, vals)
+            if fake:
+                skip["가짜(설거지)"] += 1
+                fakes.append((name, f"{fake} (스파이크 {rows[s_idx][0]})")); continue
+            closes = [r[1] for r in rows]
             items.append({
                 "name":         name,
                 "code":         code,
@@ -140,9 +182,10 @@ def build_universe(db_path: str = THEME_DB, today: str = None) -> dict:
                 "b_spike_date": max(b_hits, key=lambda x: x[1])[0],
                 "b_spike_value": max(v for _, v in b_hits),
                 "approx_value": any(a for _, a in vals),   # 근사 거래대금이 섞였는지
+                "pre_spike_base": pre_base,                # 기준2: 현재가가 이 ×1.05 이하면 탈락
             })
         return {"date": today, "latest_db_date": latest, "scanned": scanned, "items": items,
-                "skip": skip, "window_from": dates[0] if dates else None}
+                "skip": skip, "fakes": fakes, "window_from": dates[0] if dates else None}
     finally:
         conn.close()
 
@@ -176,6 +219,8 @@ def check_candidates(api, universe: dict, with_strength: bool = True) -> list:
         if value < G_MIN_VALUE:                         fails.append(f"G거래대금{value/1e8:.0f}억")
         if vol_ratio < F_MIN_VOL_RATIO:                 fails.append(f"F거래량{vol_ratio:.0f}%")
         if not (I_MIN <= disparity <= I_MAX):           fails.append(f"I이격도{disparity:.0f}%")
+        base = it.get("pre_spike_base")
+        if base and price <= base * SPIKE_RETRACE_MAX:  fails.append(f"가짜:되돌림(스파이크전 {base:,.0f})")
 
         strength = None
         if not fails and with_strength:
@@ -212,5 +257,9 @@ if __name__ == "__main__":
     print(f"   조회 구간: {u['window_from']} ~ {u['latest_db_date']} (종목별 최근 {NEED_ROWS}거래일 사용)")
     print("   탈락 사유: " + ", ".join(f"{k} {v}" for k, v in u["skip"].items()))
     for it in u["items"]:
+        base = it.get("pre_spike_base")
         print(f"  {it['name']}({it['code']}) 스파이크 {it['b_spike_date']} "
-              f"{it['b_spike_value']/1e8:,.0f}억{' (근사)' if it['approx_value'] else ''}")
+              f"{it['b_spike_value']/1e8:,.0f}억{' (근사)' if it['approx_value'] else ''}"
+              + (f" | 되돌림선 {base * SPIKE_RETRACE_MAX:,.0f}원" if base else ""))
+    for name, why in u.get("fakes", []):
+        print(f"  ✂️ {name} — {why}")
