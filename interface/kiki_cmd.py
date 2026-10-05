@@ -19,6 +19,7 @@ for _ep in [os.path.join(_here, ".env"), os.path.join(_base, ".env")]:
         break
 
 import discord
+from anthropic import Anthropic   # ★ 2026-10-06: _translate_to_korean()이 import 없이 쓰고 있었음
 from common_utils import (
     now_kst, today_str, now_hms, now_hhmm, fmt_won, safe_float, safe_int,
     extract_claude_text,
@@ -76,7 +77,9 @@ RESTART_SERVICES = {
     "sbot":      "yeongam9-sbot",
     "cbot":      "yeongam9-cbot",
     "daybot":    "yeongam9-daybot",
-    "telegram":  "yeongam9-telegram",
+    # ★ 2026-10-06: "telegram" 제거 — 10-03 계정탈취 사고로 코드를 걷어냈는데
+    #   유닛 파일은 남아있어서(대장 수동삭제 대기), !전체재시작이 꺼둔
+    #   서비스를 매번 다시 기동시키려 했음.
     "sector":    "yeongam9-sector",
     # ★ 2026-10-01: 대장 지적 — !전체재시작 때 리나가 안 켜지고 있었음.
     #   이 dict에 아예 없어서 cmd_restart_all()이 건드릴 생각조차 안
@@ -104,7 +107,9 @@ async def wait_cmd_result(bot_name: str, max_attempts: int = 20,
         if result:
             update_state(bot_name, cmd_result=None)
             return result
-    return "⏱️ 응답 시간 초과"
+    # ★ 2026-10-06: 타임아웃 문자열을 돌려주면 호출부가 전부 "✅ 결과: ⏱️ 응답
+    #   시간 초과"로 찍었음(빈 문자열일 때만 "응답 없음" 분기를 탐) — 빈 값 반환.
+    return ""
 from kiki_data import (
     get_recent_performance, get_open_positions_from_db,
     get_coin_performance,
@@ -124,14 +129,22 @@ DEFAULT_MODEL = "claude-sonnet-5"
 
 # DB 경로 상수
 _base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-TRADE_HIST_DB = os.path.join(_base, "trade_history.db")
-SBOT_HIST_DB  = os.path.join(_base, "sbot_trade_history.db")
-CBOT_HIST_DB  = os.path.join(_base, "cbot_trade_history.db")
+# ★ 2026-10-06: TRADE_HIST_DB(trade_history.db)는 폐기된 nbot의 DB라
+#   !분석오늘/!분석이번주가 몇 달째 "매매 없음"만 보여줬음 — 현역 봇 DB로 교체.
+SBOT_HIST_DB   = os.path.join(_base, "sbot_trade_history.db")
+CBOT_HIST_DB   = os.path.join(_base, "cbot_trade_history.db")
+DAYBOT_HIST_DB = os.path.join(_base, "daybot_trade_history.db")
+ANALYSIS_DBS   = {"daybot": DAYBOT_HIST_DB, "sbot": SBOT_HIST_DB}
+# !분석 종목코드 — sbot의 AI 채점 캐시(core/sbot_analyzer.py와 같은 후보 경로/테이블)
+AI_CACHE_DB_CANDIDATES = [
+    os.path.join(_base, "bots", "sbot_ai_cache.db"),
+    os.path.join(_base, "sbot_ai_cache.db"),
+]
 BOT_STATE_DIR = _base
 
 async def cmd_status(ctx, bot_name: str = "sbot"):
     state     = read_state(bot_name)
-    status    = state.get("last_status", {})
+    status    = state.get("last_status") or {}
     pos_rows  = get_open_positions_from_db(bot_name)
     now       = now_kst().strftime("%H:%M:%S")
     paused    = "⏸️ 일시중단" if state.get("paused") else "▶️ 실행중"
@@ -161,6 +174,18 @@ async def cmd_status(ctx, bot_name: str = "sbot"):
             lines.append(f"🏭 활성 업종: {' | '.join(active)}")
 
     pos_detail = status.get("positions_detail", {})
+    # ★ 2026-10-06: daybot은 last_status를 안 쓰고 positions를 최상위에 저장함 —
+    #   DB 미청산행(체결확인 전/유령행 포함)보다 봇이 실제 추적중인 걸 보여준다.
+    if bot_name == "daybot" and not pos_detail and state.get("positions"):
+        names = state.get("code_name_map", {}) or {}
+        lines.append("\n**📦 보유종목 (daybot 추적중)**")
+        for code, p in state["positions"].items():
+            src  = DAYBOT_SOURCE_DISPLAY.get(p.get("buy_tag", ""), p.get("buy_tag", ""))
+            peak = f" | 트레일링 고점:{int(p['peak_price']):,}" if p.get("peak_price") else ""
+            lines.append(f"  {code}({names.get(code, code)}) | 매수가:{int(p.get('entry_price', 0)):,}원 | "
+                         f"{p.get('qty', 0)}주 | 출처:{src}{peak}")
+        await send_long(ctx, "\n".join(lines))
+        return
     if pos_detail:
         lines.append("\n**📦 보유종목**")
         for code, info in pos_detail.items():
@@ -199,17 +224,21 @@ async def cmd_score(ctx, score: int):
 
 async def cmd_sell(ctx, code: str, bot_name: str = "sbot"):
     """단타/스윙 매도 명령. 종목명으로 검색 가능."""
-    if not code.isdigit():
+    if not (len(code) == 6 and code.isalnum() and any(ch.isdigit() for ch in code)):
         # 종목명 → 코드 변환
         state         = read_state(bot_name)
-        code_name_map = state.get("last_status", {}).get("code_name_map", {})
+        code_name_map = dict((state.get("last_status") or {}).get("code_name_map", {}))
+        # ★ 2026-10-06: daybot은 code_name_map을 최상위에 저장 — 보유종목 이름부터 매칭
+        if bot_name == "daybot":
+            held = state.get("positions", {}) or {}
+            code_name_map = {c: n for c, n in (state.get("code_name_map", {}) or {}).items() if c in held}
         found = next((c for c, name in code_name_map.items()
                       if code in name or name in code), None)
         if found:
             await ctx.send(f"🔍 종목명 '{code}' → 코드 **{found}** 로 변환")
             code = found
         else:
-            db = SBOT_HIST_DB
+            db = DAYBOT_HIST_DB if bot_name == "daybot" else SBOT_HIST_DB
             try:
                 conn = _ro_connect(db)
                 row  = conn.execute(
@@ -230,7 +259,9 @@ async def cmd_sell(ctx, code: str, bot_name: str = "sbot"):
 
     # ★ 실계좌 보유 확인 (state → KIS API 순서로)
     state      = read_state(bot_name)
-    pos_detail = state.get("last_status", {}).get("positions_detail", {})
+    pos_detail = dict((state.get("last_status") or {}).get("positions_detail", {}))
+    if bot_name == "daybot":
+        pos_detail.update(state.get("positions", {}) or {})
     
     if code not in pos_detail:
         # state에 없으면 KIS API 실계좌 직접 조회
@@ -269,14 +300,34 @@ async def cmd_sell(ctx, code: str, bot_name: str = "sbot"):
         await ctx.send("⚠️ 응답 없음 — 봇 실행 중인지 확인하세요")
 
 
+async def cmd_sell_auto(ctx, target: str):
+    """★ 2026-10-06: "!매도 종목" — daybot→sbot 순으로 보유 중인 봇을 찾아
+    그 봇에 매도 명령을 보낸다(자연어 "XXX 팔아"의 기본 경로)."""
+    for bot_name in ("daybot", "sbot"):
+        code = _find_held_code(bot_name, target)
+        if code:
+            await ctx.send(f"🔍 '{target}' → **{bot_name}** 보유 {code}")
+            await cmd_sell(ctx, code, bot_name)
+            return
+    await ctx.send(f"❌ '{target}' — daybot/sbot 어디에도 보유 중이 아니에요 "
+                   f"(코인은 !c매도, 스윙2는 !sbo2매도)")
+
+
 def _find_held_code(bot_name: str, target: str) -> str:
     """target(종목명/코드/코인티커)이 bot_name 봇의 보유종목이면 코드를
     반환, 아니면 빈 문자열. sbot/sbo2/cbot은 상태파일 스키마가 달라서
     각자 처리."""
     state = read_state(bot_name)
+    if bot_name == "daybot":
+        positions = state.get("positions", {}) or {}
+        names     = state.get("code_name_map", {}) or {}
+        if target in positions:
+            return target
+        return next((c for c in positions
+                     if target in names.get(c, "") or (names.get(c) and names[c] in target)), "")
     if bot_name == "sbot":
-        pos_detail    = state.get("last_status", {}).get("positions_detail", {})
-        code_name_map = state.get("last_status", {}).get("code_name_map", {})
+        pos_detail    = (state.get("last_status") or {}).get("positions_detail", {})
+        code_name_map = (state.get("last_status") or {}).get("code_name_map", {})
         if target in pos_detail:
             return target
         found = next((c for c, name in code_name_map.items()
@@ -329,9 +380,15 @@ async def cmd_hold(ctx, target: str, hold_val: bool = True):
 async def cmd_analyze(ctx, code: str):
     await ctx.send(f"🔍 {code} 분석 중...")
     try:
-        conn = _ro_connect(AI_CACHE_DB)
+        # ★ 2026-10-06: AI_CACHE_DB가 정의돼있지 않아 매번 NameError였고, 테이블명도
+        #   실제(sbot_analyzer의 ai_cache)와 달랐음.
+        db = next((p for p in AI_CACHE_DB_CANDIDATES if os.path.exists(p)), None)
+        if not db:
+            await ctx.send("ℹ️ sbot AI 캐시 DB가 아직 없어요")
+            return
+        conn = _ro_connect(db)
         row  = conn.execute(
-            "SELECT score, reason, analyzed_at FROM ai_analysis WHERE code = ?",
+            "SELECT score, reason, analyzed_at FROM ai_cache WHERE code = ?",
             (code,),
         ).fetchone()
         conn.close()
@@ -391,7 +448,8 @@ async def cmd_performance(ctx):
     sbo2_p = realized_all.get("sbo2", 0)
     sbot_p = realized_all.get("sbot", 0)
     cbot_p = realized_all.get("cbot", 0)
-    total  = sbo2_p + sbot_p + cbot_p
+    day_p  = realized_all.get("daybot", 0)   # ★ 2026-10-06: 단타봇 손익이 합계에서 빠져있었음
+    total  = sbo2_p + sbot_p + cbot_p + day_p
 
     # ★ KDA 스타일 대시보드
     # 최근 매매 이력
@@ -426,10 +484,11 @@ async def cmd_performance(ctx):
     msg += f"💹 **Avg Win** : {avg_win:+.2f}% | **Avg Loss** : {avg_loss:+.2f}%\n"
     msg += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
     msg += "💰 **TODAY P&L**\n"
+    if day_p:  msg += f"  ⚡ 단타봇: **{day_p:+,}원**\n"
     if sbot_p: msg += f"  📊 스윙봇: **{sbot_p:+,}원**\n"
     if sbo2_p: msg += f"  📊 스윙봇2: **{sbo2_p:+,}원**\n"
     if cbot_p: msg += f"  🪙 코인봇: **{cbot_p:+,}원**\n"
-    if not (sbo2_p or sbot_p or cbot_p):
+    if not (sbo2_p or sbot_p or cbot_p or day_p):
         msg += "  오늘 실현 매매 없음\n"
     msg += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
     msg += f"{total_emoji} **합계: {total:+,}원**\n"
@@ -456,17 +515,23 @@ async def cmd_analyze_today(ctx):
     """오늘 매매 AI 분석 — 패턴/원인 파악"""
     await ctx.send("🔍 오늘 매매 분석 중...")
     try:
-        import sqlite3
-        conn  = sqlite3.connect(TRADE_HIST_DB, timeout=5)
         today = now_kst().strftime("%Y-%m-%d")
-        rows  = conn.execute("""
-            SELECT code, buy_price, sell_price, profit_rate,
-                   sell_reason, buy_time, sell_time, ai_score
-            FROM trades
-            WHERE sell_price IS NOT NULL AND sell_time >= ?
-            ORDER BY sell_time
-        """, (today,)).fetchall()
-        conn.close()
+        rows  = []
+        for _bot, _db in ANALYSIS_DBS.items():
+            if not os.path.exists(_db):
+                continue
+            conn = _ro_connect(_db)
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(trades)")}
+            tag  = "ai_score" if "ai_score" in cols else ("buy_tag" if "buy_tag" in cols else "''")
+            for r in conn.execute(f"""
+                SELECT code, buy_price, sell_price, profit_rate,
+                       sell_reason, buy_time, sell_time, {tag}
+                FROM trades
+                WHERE sell_price IS NOT NULL AND sell_time >= ? AND profit_rate IS NOT NULL
+                ORDER BY sell_time
+            """, (today,)).fetchall():
+                rows.append((f"[{_bot}]{r[0]}",) + tuple(r[1:]))
+            conn.close()
 
         if not rows:
             await ctx.send("🦊 키키: 오늘 완료된 매매가 없어요!")
@@ -474,13 +539,13 @@ async def cmd_analyze_today(ctx):
 
         # AI에게 분석 요청
         trades_str = "\n".join([
-            f"  {r[0]}: {r[3]:+.1f}% ({r[4]}) AI:{r[7]}점"
+            f"  {r[0]}: {r[3]:+.1f}% ({r[4]}) 근거:{r[7]}"
             for r in rows
         ])
         wins   = [r for r in rows if r[3] >= 0]
         losses = [r for r in rows if r[3] < 0]
 
-        prompt = f"""오늘({today}) 단타봇 매매 결과:
+        prompt = f"""오늘({today}) 주식봇(daybot 단타 / sbot 스윙) 매매 결과:
 {trades_str}
 
 총 {len(rows)}건 | 익절:{len(wins)} | 손절:{len(losses)}
@@ -515,7 +580,8 @@ async def cmd_analyze_period(ctx, days: int = 7):
     try:
         from performance import PerformanceAnalyzer
         import os
-        pa     = PerformanceAnalyzer(TRADE_HIST_DB)
+        _db    = DAYBOT_HIST_DB if os.path.exists(DAYBOT_HIST_DB) else SBOT_HIST_DB
+        pa     = PerformanceAnalyzer(_db)
         report = pa.full_report(days=days)
         b      = report.get("basic", {})
         r      = report.get("risk", {})
@@ -642,8 +708,11 @@ async def cmd_restart_all(ctx):
         if name == "sbo2":
             continue
         try:
-            ret = _sp.run(["sudo", "systemctl", "restart", svc],
-                          capture_output=True, timeout=15)
+            # ★ 2026-10-06: 동기 subprocess가 디스코드 이벤트루프를 서비스당
+            #   최대 15초씩 막았음(전체재시작이면 1분+ 하트비트 정지) — 스레드로.
+            ret = await _ac.get_event_loop().run_in_executor(
+                None, lambda svc=svc: _sp.run(["sudo", "systemctl", "restart", svc],
+                                              capture_output=True, timeout=15))
             if ret.returncode == 0:
                 results.append(f"✅ {name}")
             else:
@@ -671,8 +740,9 @@ async def cmd_restart(ctx, bot_name: str):
 
     await ctx.send(f"🔄 {bot_name} 재시작 중...")
     try:
-        ret = _sp.run(["sudo", "systemctl", "restart", svc],
-                      capture_output=True, timeout=15)
+        ret = await asyncio.get_event_loop().run_in_executor(
+            None, lambda: _sp.run(["sudo", "systemctl", "restart", svc],
+                                  capture_output=True, timeout=15))
         if ret.returncode == 0:
             await ctx.send(f"✅ {bot_name} 재시작 완료!")
         else:
@@ -1411,7 +1481,8 @@ async def cmd_help(ctx):
 **📊 sbo2**   `!sbo2상태` `!sbo2매도 코드` `!sbo2정지` `!sbo2시작` `!sbo2재시작`
 **⚡ daybot**  `!daybot상태` `!daybot매도 코드` `!daybot정지` `!daybot시작` `!daybot재시작`
 **🪙 코인봇** `!c상태` `!c정지` `!c시작` `!c재시작` `!c매도 BTC` `!c전체매도` `!c성과`
-**📡 텔레그램/섹터** `!t재시작`  `!섹터재시작`
+**📡 섹터모니터** `!섹터재시작`
+**🔎 공통 매도** `!매도 종목명/코드` — daybot/sbot 중 보유한 봇 자동판별
 
 **📊 성과/분석**
   `!성과`          — 오늘 손익

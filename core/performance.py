@@ -589,6 +589,8 @@ class MultiPerformanceAnalyzer:
         # ★ 2026-08-30: sbo2가 통째로 빠져 있었음 — 현재 가장 활발히
         #   거래하는 봇인데도 !성과상세에 집계가 안 되고 있었음.
         "sbo2": "lina_bot/sbo2_trades.db",
+        # ★ 2026-10-06: daybot(현역 단타봇)이 빠져있어 !성과상세에 안 나왔음
+        "daybot": "daybot_trade_history.db",
     }
     # ★ 봇마다 실제 거래이력 테이블명이 다름(대부분 "trades", sbo2만
     #   "sbo2_trades"). 기본값은 "trades".
@@ -599,6 +601,7 @@ class MultiPerformanceAnalyzer:
         "sbot": "📊 스윙봇",
         "cbot": "🪙 코인봇",
         "sbo2": "📊 스윙봇2",
+        "daybot": "⚡ 단타봇",
     }
 
     def summary(self, days: int = 30) -> str:

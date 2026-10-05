@@ -100,6 +100,7 @@ from kiki_data import (
     get_recent_performance, get_open_positions_from_db,
     get_coin_performance,
     get_today_realized_all,
+    get_active_bots, _ro_connect,
 )
 from kiki_cmd import (
     cmd_status, cmd_score, cmd_sell, cmd_analyze,
@@ -115,6 +116,8 @@ from kiki_cmd import (
     cmd_news,
     cmd_risk, cmd_risk_pause, cmd_risk_resume,
     cmd_event,
+    cmd_sell_auto,
+    _fetch_kiwoom_watchlist_ws, _sync_watchlist_to_state,
 )
 # ※ cmd_briefing, cmd_evening_briefing → kiki_briefing에서 import
 from kiki_briefing import (
@@ -126,9 +129,10 @@ from kiki_briefing import (
 )
 import kiki_briefing as _kb
 import kiki_cmd as _kc
+# ★ 2026-10-06: kiki_monitor.status_listener는 아래 이 파일의 같은 이름 함수가
+#   덮어써서 실행된 적이 없음(헷갈리지 않게 import에서 제외).
 from kiki_monitor import (
     init_monitor,
-    status_listener,
     proactive_danger_watcher,
     proactive_watch_monitor,
     proactive_insight_provider,
@@ -144,6 +148,14 @@ load_dotenv()
 # ============================================================
 BOT_TOKEN  = os.getenv("DISCORD_BOT_TOKEN")
 CHANNEL_ID = int(os.getenv("DISCORD_CHANNEL_ID", "0"))
+# ★ 2026-10-06: 명령 권한 — 기존엔 채널 ID만 확인해서 그 채널에 글을 쓸 수
+#   있는 누구나 매도/정지/전체재시작/리스크중단을 실행할 수 있었음.
+#   .env에 KIKI_ALLOWED_USER_IDS=디스코드유저ID(쉼표구분)를 넣으면 그 사람만
+#   명령/자연어 제어 가능. 비어있으면 기존처럼 채널 전원 허용(+기동 시 경고).
+ALLOWED_USER_IDS = {
+    int(x) for x in os.getenv("KIKI_ALLOWED_USER_IDS", "").replace(" ", "").split(",")
+    if x.isdigit()
+}
 
 # DB 파일
 SBOT_HIST_DB   = "sbot_trade_history.db"
@@ -184,158 +196,22 @@ def now_kst_dt():
 # ============================================================
 # 상태 파일 헬퍼 (★ atomic write 적용)
 # ============================================================
-def read_state(bot: str = "sbot") -> dict:
-    """봇 상태 파일 읽기 (없으면 기본값)"""
-    fname = BOT_STATE_FILES.get(bot)
-    if not fname:
-        return {}
-    return _read_state_atomic(fname, default={
-        "paused":      False,
-        "score_enter": 70,
-        "pending_cmd": None,
-        "cmd_result":  None,
-        "last_status": None,
-    })
-def write_state(bot: str = "sbot", state: dict = None):
-    """봇 상태 파일 쓰기 (★ atomic — 중간에 죽어도 안 깨짐)"""
-    if state is None: state = {}
-    fname = BOT_STATE_FILES.get(bot)
-    if not fname:
-        return
-    _write_state_atomic(fname, state)
-def update_state(bot: str = "sbot", **kwargs):
-    """봇 상태 부분 업데이트"""
-    fname = BOT_STATE_FILES.get(bot)
-    if not fname:
-        return
-    _update_state_atomic(fname, **kwargs)
-def get_active_bots() -> list:
-    """현재 실행 중인(상태파일이 있는) 봇 목록"""
-    active = []
-    for name, fname in BOT_STATE_FILES.items():
-        if os.path.exists(fname):
-            state = read_state(name)
-            last  = state.get("last_update", "")
-            active.append((name, last))
-    return active
+# ★ 2026-10-06: 상태파일 경로를 kiki_briefing/kiki_cmd와 통일(절대경로).
+#   여기 사본은 상대경로+기본값 "last_status": None 이라, 상태파일이 없을 때
+#   state.get("last_status", {}).get(...)가 None.get으로 죽었음.
+from kiki_briefing import read_state, write_state, update_state
 
 
 # ============================================================
-# DB 조회 헬퍼 (★ WAL 호환 — read-only 모드)
+# DB 조회 헬퍼 — kiki_data.py 것을 그대로 사용
 # ============================================================
-def _ro_connect(db_file: str) -> sqlite3.Connection:
-    """읽기 전용 SQLite 연결 (WAL 모드 봇이 쓰는 동안 안전하게 읽기)"""
-    conn = sqlite3.connect(db_file, timeout=10)
-    conn.execute("PRAGMA query_only = ON")
-    return conn
-
-def get_recent_performance(limit: int = 20, db: str = None) -> list:
-    """최근 매매 성과 (단타/스윙)"""
-    db = db or TRADE_HIST_DB
-    try:
-        conn = _ro_connect(db)
-        rows = conn.execute("""
-            SELECT profit_rate, sell_reason, ai_score, code,
-                   buy_price, sell_price, buy_time, sell_time
-            FROM trades WHERE sell_price IS NOT NULL
-            ORDER BY id DESC LIMIT ?
-        """, (limit,)).fetchall()
-        conn.close()
-        return rows
-    except Exception:
-        return []
-
-def get_open_positions_from_db(bot: str = "sbot") -> list:
-    """DB의 미청산 매수 건"""
-    db = SBO2_HIST_DB if bot == "sbo2" else SBOT_HIST_DB
-    table = "sbo2_trades" if bot == "sbo2" else "trades"
-    score_col = "score" if bot == "sbo2" else "ai_score"
-    try:
-        conn = _ro_connect(db)
-        rows = conn.execute(f"""
-            SELECT code, buy_price, qty, {score_col}, buy_time
-            FROM {table} WHERE sell_price IS NULL
-            ORDER BY buy_time DESC
-        """).fetchall()
-        conn.close()
-        return rows
-    except Exception:
-        return []
-
-def get_coin_performance(limit: int = 20) -> list:
-    """코인봇 매매 성과"""
-    try:
-        conn = _ro_connect(CBOT_HIST_DB)
-        rows = conn.execute("""
-            SELECT profit_rate, sell_reason, ai_score, market,
-                   buy_price, sell_price, buy_time, sell_time
-            FROM trades WHERE sell_price IS NOT NULL
-            ORDER BY id DESC LIMIT ?
-        """, (limit,)).fetchall()
-        conn.close()
-        return rows
-    except Exception:
-        return []
-
-def get_ebot_performance(limit: int = 20) -> list:
-    """★ 신규: 종가봇 매매 성과"""
-    try:
-        conn = _ro_connect(EBOT_HIST_DB)
-        rows = conn.execute("""
-            SELECT profit_rate, sell_reason, code, stock_name,
-                   buy_price, sell_price, buy_time, sell_time
-            FROM trades WHERE sell_price IS NOT NULL
-            ORDER BY id DESC LIMIT ?
-        """, (limit,)).fetchall()
-        conn.close()
-        return rows
-    except Exception:
-        return []
-
-def get_today_realized_all() -> dict:
-    """★ 신규: 모든 봇의 오늘 실현손익 합계"""
-    today  = today_str()
-    result = {"sbot": 0, "sbo2": 0, "cbot": 0}
-    db_map = {
-        "sbot": (SBOT_HIST_DB, "trades"),
-        "sbo2": (SBO2_HIST_DB, "sbo2_trades"),
-        "cbot": (CBOT_HIST_DB, "trades"),
-    }
-    for bot_name, (db, table) in db_map.items():
-        if not os.path.exists(db):
-            continue
-        try:
-            conn = _ro_connect(db)
-            if bot_name == "cbot":
-                # cbot은 profit_krw 컬럼 사용
-                rows = conn.execute(f"""
-                    SELECT profit_krw FROM {table}
-                    WHERE sell_price IS NOT NULL AND sell_time >= ?
-                """, (today,)).fetchall()
-                result[bot_name] = sum(int(r[0] or 0) for r in rows)
-            else:
-                rows = conn.execute(f"""
-                    SELECT buy_price, sell_price, qty FROM {table}
-                    WHERE sell_price IS NOT NULL AND sell_time >= ?
-                """, (today,)).fetchall()
-                result[bot_name] = sum(
-                    int((sp - bp) * qty) for bp, sp, qty in rows
-                    if sp is not None and bp is not None
-                )
-            conn.close()
-        except Exception:
-            pass
-    # ★ 미실현 손익 추가 (보유 중인 포지션)
-    for bot_name in ["sbot", "sbo2"]:
-        try:
-            st = read_state(bot_name)
-            unrealized = st.get("last_status", {}).get("total_profit", 0)
-            if unrealized:
-                result[bot_name] = result.get(bot_name, 0) + int(unrealized)
-        except Exception:
-            pass
-    return result
-
+# ★ 2026-10-06: 여기 있던 get_recent_performance/get_open_positions_from_db/
+#   get_coin_performance/get_ebot_performance/get_today_realized_all 사본이
+#   위에서 kiki_data로부터 import한 같은 이름을 덮어쓰고 있었음. 사본은
+#   정의되지 않은 TRADE_HIST_DB/EBOT_HIST_DB를 참조해서, 능동알림의
+#   승률 체크(proactive_watch_monitor)가 30분마다 NameError로 통째로
+#   건너뛰어지고 있었음. "오늘 실현손익"에 미실현손익까지 섞여 있던
+#   것도 이 사본 쪽 문제 — 사본을 지우고 kiki_data 버전으로 통일.
 
 # ============================================================
 # AI 비서 클래스 (키키 캐릭터 — 검증된 구조 그대로)
@@ -642,22 +518,13 @@ class AIAssistant:
 
         # ── ★ 풍부한 봇 컨텍스트 수집 ───────────────────────
         active_sectors = current_state.get("active_sectors", [])
-        sector_info    = f", '.join(active_sectors)" if active_sectors else "없음"
-
-        # 단타봇 보유종목
-        nbot_positions = current_state.get("positions", {})
-        nbot_pos_str   = ""
-        if nbot_positions:
-            pos_lines = []
-            for code, pos in list(nbot_positions.items())[:5]:
-                rate = pos.get("rate", 0)
-                e    = "📈" if rate >= 0 else "📉"
-                pos_lines.append(f"  {e} {code}: {rate:+.1f}%")
-            nbot_pos_str = "\n보유종목:\n" + "\n".join(pos_lines)
+        # ★ 2026-10-06: f-string 따옴표가 어긋나 업종명 대신 ", '.join(active_sectors)"
+        #   라는 글자 그대로가 AI 컨텍스트에 들어가고 있었음
+        sector_info    = ", ".join(active_sectors) if active_sectors else "없음"
 
         # 코인봇
         cbot_state  = read_state("cbot")
-        cbot_status = cbot_state.get("last_status", {})
+        cbot_status = cbot_state.get("last_status") or {}
         cbot_positions = cbot_state.get("positions", {})
         cbot_pos_str = ""
         if cbot_positions:
@@ -670,7 +537,7 @@ class AIAssistant:
 
         # 스윙봇
         sbot_state  = read_state("sbot")
-        sbot_status = sbot_state.get("last_status", {})
+        sbot_status = sbot_state.get("last_status") or {}
 
         # 종가봇
         ebot_state  = {}
@@ -681,10 +548,16 @@ class AIAssistant:
         pnl_str   = f"{total_pnl:+,}원" if total_pnl != 0 else "0원"
 
         # ★ f-string 밖에서 미리 계산 (unhashable 오류 방지)
-        nbot_status   = current_state.get("last_status", {})
-        nbot_paused   = "🔴일시중단" if current_state.get("paused") else "🟢실행중"
-        nbot_score    = current_state.get("score_enter", 55)
-        nbot_pos_cnt  = nbot_status.get("positions", 0)
+        # ★ 2026-10-06: current_state는 sbot 상태인데 "단타봇"으로 표시돼
+        #   AI가 sbot을 단타봇으로 알고 있었음 — 단타봇은 daybot 상태로 표시.
+        day_state     = read_state("daybot")
+        day_positions = day_state.get("positions", {}) or {}
+        day_names     = day_state.get("code_name_map", {}) or {}
+        nbot_paused   = "🔴일시중단" if day_state.get("paused") else "🟢실행중"
+        nbot_score    = sbot_state.get("score_enter", 55)
+        nbot_pos_cnt  = len(day_positions)
+        nbot_pos_str  = ("\n보유종목: " + ", ".join(
+            f"{day_names.get(c, c)}({c})" for c in list(day_positions)[:5])) if day_positions else ""
         sbot_paused   = "🔴일시중단" if sbot_state.get("paused") else "🟢실행중"
         sbot_pos_cnt  = sbot_status.get("positions", 0)
         cbot_paused   = "🔴일시중단" if cbot_state.get("paused") else "🟢실행중"
@@ -694,8 +567,8 @@ class AIAssistant:
 지금: {now}
 
 ━━━ 📊 봇 현황 ━━━
-📈 단타봇: {nbot_paused} | 점수기준:{nbot_score}점 | 포지션:{nbot_pos_cnt}개{nbot_pos_str}
-📊 스윙봇: {sbot_paused} | 포지션:{sbot_pos_cnt}개
+📈 단타봇(daybot): {nbot_paused} | 포지션:{nbot_pos_cnt}개{nbot_pos_str}
+📊 스윙봇(sbot): {sbot_paused} | 점수기준:{nbot_score}점 | 포지션:{sbot_pos_cnt}개
 🪙 코인봇: {cbot_paused} | KRW:{cbot_krw:,}원{cbot_pos_str}
 💰 오늘 실현손익: {pnl_str}
 🏭 활성업종: {sector_info}
@@ -706,7 +579,7 @@ class AIAssistant:
 
 [상태 확인]
 "어때/상태/현황/지금" → CMD:!전체상태
-"단타 어때" → CMD:!상태
+"단타 어때/단타봇/데이봇" → CMD:!daybot상태
 "스윙 어때" → CMD:!s상태
 "코인 어때/코봇" → CMD:!c상태
 
@@ -721,11 +594,12 @@ class AIAssistant:
 "이번주 패턴/분석" → CMD:!분석이번주
 
 [매도]
-"XXX 팔아/매도/청산" (단타종목) → CMD:!매도 종목코드
+"XXX 팔아/매도/청산" (주식, 봇 모르면) → CMD:!매도 종목명  (daybot/sbot 보유 쪽 자동판별)
 "XXX 팔아/매도/청산" (스윙종목) → CMD:!s매도 종목코드
+"XXX 팔아/매도/청산" (단타종목) → CMD:!daybot매도 종목코드
 "BTC/비트/이더/코인 팔아" → CMD:!c매도 코인명
 예: "MINA 팔아줘" → CMD:!c매도 KRW-MINA
-예: "삼성전자 팔아" → CMD:!매도 005930
+예: "삼성전자 팔아" → CMD:!매도 삼성전자
 "코인봇 전체매도/코인 다 팔아/코인봇 청산" → CMD:!c전체매도
 
 [홀드 — 손절체크만 제외, 재시작해도 유지]
@@ -734,18 +608,18 @@ class AIAssistant:
 "XXX 홀드해제/손절 다시 걸어줘/XXX 풀어줘" → CMD:!r 종목명
 
 [시작/정지]
-"단타 멈춰/정지/세워" → CMD:!정지
-"단타 다시/시작/켜줘" → CMD:!시작
+"단타 멈춰/정지/세워" → CMD:!daybot정지
+"단타 다시/시작/켜줘" → CMD:!daybot시작
 "코인봇 멈춰" → CMD:!c정지
 "코인봇 시작" → CMD:!c시작
 "스윙 멈춰" → CMD:!s정지
+"스윙 다시/시작" → CMD:!s시작
 
 [재시작] (systemd 서비스 자체를 완전히 새로 켬 — 시작/정지와 다름)
 "스윙/스윙봇 재시작해줘/다시 켜줘(정지 안 된 상태에서)" → CMD:!s재시작
 "sbo2/스윙2 재시작해줘" → CMD:!sbo2재시작
 "daybot/단타봇 재시작해줘" → CMD:!daybot재시작
 "코인봇/cbot 재시작해줘" → CMD:!c재시작
-"텔레그램/텔레 재시작해줘" → CMD:!t재시작
 "섹터/섹터모니터 재시작해줘" → CMD:!섹터재시작
 "전체 다 재시작해줘" → CMD:!전체재시작
 
@@ -895,12 +769,27 @@ async def execute_command(ctx, cmd: str):
         else:
             await ctx.send("❌ 사용법: !점수기준 70")
 
+    # ★ 2026-10-06: "!분석오늘"/"!분석이번주"가 바로 아래 startswith("!분석")에
+    #   먼저 걸려 "사용법: !분석 005930"만 나오고 실행된 적이 없었음 — 앞으로 이동.
+    elif cmd == "!분석오늘":
+        await cmd_analyze_today(ctx)
+    elif cmd == "!분석이번주":
+        await cmd_analyze_period(ctx, days=7)
     elif cmd.startswith("!분석"):
         parts = cmd.split()
         if len(parts) == 2:
             await cmd_analyze(ctx, parts[1])
         else:
             await ctx.send("❌ 사용법: !분석 005930")
+    # ★ 2026-10-06: "!매도 종목"은 도움말/자연어 매핑엔 있는데 라우터에
+    #   없어서 "명령어를 모르겠어요"로 끝났음 — 보유 중인 봇(daybot→sbot)을
+    #   찾아 그쪽으로 보낸다.
+    elif cmd.startswith("!매도"):
+        parts = cmd.split(maxsplit=1)
+        if len(parts) == 2:
+            await cmd_sell_auto(ctx, parts[1].strip())
+        else:
+            await ctx.send("❌ 사용법: !매도 종목명/코드 (daybot/sbot 자동판별)")
     elif cmd == "!정지":
         await cmd_pause(ctx, True, "sbot")
     elif cmd == "!시작":
@@ -984,9 +873,12 @@ async def execute_command(ctx, cmd: str):
     elif cmd == "!c성과":
         await cmd_cbot_performance(ctx)
 
-    # ── 텔레그램 모니터 / 섹터 모니터 (재시작만 지원) ─────────
+    # ── 섹터 모니터 (재시작만 지원) ─────────────────────────
+    # ★ 2026-10-06: 텔레그램 재시작 명령 제거 — 계정탈취 사고(10-03)로 코드를
+    #   걷어냈는데 systemd 유닛은 남아있어, 이 명령/전체재시작이 꺼둔 서비스를
+    #   다시 기동시키려 했음.
     elif cmd in ("!t재시작", "!텔레재시작", "!텔레그램재시작"):
-        await cmd_restart(ctx, "telegram")
+        await ctx.send("⛔ 텔레그램 모니터는 보안사고(10-03)로 폐기됐어요 — 재시작하지 않아요.")
     elif cmd in ("!섹터재시작", "!sector재시작"):
         await cmd_restart(ctx, "sector")
 
@@ -1053,17 +945,6 @@ async def execute_command(ctx, cmd: str):
         parts = cmd.split()
         days  = int(parts[1]) if len(parts) == 2 and parts[1].isdigit() else 30
         await cmd_performance_detail(ctx, days=days)
-    elif cmd == "!분석오늘":
-        await cmd_analyze_today(ctx)
-    elif cmd == "!분석이번주":
-        await cmd_analyze_period(ctx, days=7)
-    elif cmd.startswith("!분석 ") and len(cmd.split()) == 2:
-        # !분석 005930 (종목 분석)
-        code = cmd.split()[1]
-        if code.isdigit():
-            await cmd_analyze(ctx, code)
-        else:
-            await cmd_analyze_period(ctx, days=7)
     else:
         # ★ 알 수 없는 명령어도 AI에게 자연어로 처리
         await ctx.send(f"🦊 키키: `{cmd}` 명령어를 모르겠어요. 자연어로 말해주세요!")
@@ -1081,6 +962,8 @@ async def execute_command(ctx, cmd: str):
 @bot.event
 async def on_ready():
     print(f"✅ AI 비서 봇 온라인: {bot.user}")
+    if not ALLOWED_USER_IDS:
+        print("⚠️ KIKI_ALLOWED_USER_IDS 미설정 — 채널의 누구나 매도/정지/재시작 가능")
     # ★ kiki_briefing에 전역 변수 주입
     import kiki_briefing as _kb
     _kb.ai           = ai
@@ -1098,7 +981,9 @@ async def on_ready():
     _kc.BOT_STATE_FILES = BOT_STATE_FILES
     _kc.CHANNEL_ID     = CHANNEL_ID
     _kc.send_long      = send_long
-    _kc.wait_cmd_result = wait_cmd_result
+    # ★ 2026-10-06: kiki_cmd 자체의 wait_cmd_result(100초)를 여기 60초 사본으로
+    #   덮어써서, sbot(60초 루프) 매도 결과가 "응답 없음"으로 잘못 보이던
+    #   09-03 수정이 실제로는 무효였음 — 주입하지 않는다.
     _kc.execute_command = execute_command
     _kc.DEFAULT_MODEL  = DEFAULT_MODEL
     asyncio.ensure_future(status_listener())
@@ -1147,6 +1032,10 @@ async def on_message(message):
         return
     if CHANNEL_ID and message.channel.id != CHANNEL_ID:
         return
+    if message.author.bot:
+        return
+    if ALLOWED_USER_IDS and message.author.id not in ALLOWED_USER_IDS:
+        return
 
     msg_content = message.content.strip()
     ctx         = await bot.get_context(message)
@@ -1192,11 +1081,16 @@ async def on_message(message):
                     #   바로 실행되고 있었음 — 다른 봇들과 동일하게 추가.
                     # ★ "!h "(공백 포함)로 매칭 — "!hts관심"처럼 무해한 명령까지
                     #   확인절차에 걸리지 않게 구분.
+                    # ★ 2026-10-06: 재시작/리스크중단/점수기준도 확인 대상에 추가 —
+                    #   자연어 오해석 한 번으로 전 봇이 재시작되거나 매수가 멈췄음.
                     danger_cmds = ["!매도","!s매도","!sbo2매도","!c매도","!c전체매도",
                                    "!daybot매도",
                                    "!정지","!s정지","!sbo2정지","!c정지","!e정지",
                                    "!daybot정지",
-                                   "!h ","!r "]
+                                   "!h ","!r ",
+                                   "!재시작","!s재시작","!sbo2재시작","!c재시작",
+                                   "!daybot재시작","!섹터재시작","!전체재시작",
+                                   "!리스크중단","!점수기준"]
                     is_danger   = any(cmd.startswith(d) for d in danger_cmds)
                     if is_danger:
                         _pending_confirm[user_id] = (cmd, time.time())
@@ -1404,19 +1298,9 @@ async def status_listener():
             if not ch:
                 continue
 
-            # 스윙봇
-            state  = read_state("sbot")
-            status = state.get("last_status")
-            if status:
-                profit = status.get("total_profit", 0)
-                if (last_stock_profit is not None
-                        and abs(profit - last_stock_profit) > 5000):
-                    diff = profit - last_stock_profit
-                    await ch.send(
-                        f"💹 [단타] 손익 변동: {last_stock_profit:+,}원 → "
-                        f"{profit:+,}원 ({diff:+,}원)"
-                    )
-                last_stock_profit = profit
+            # ★ 2026-10-06: 여기 같은 sbot 손익을 "[단타]" 라벨로 한 번 더
+            #   알리던 블록이 있어(nbot 폐기 때 sbot으로 바꿔치기된 잔재) 스윙
+            #   손익 변동이 [단타]/[스윙] 두 번씩 중복으로 나갔음 — 제거.
 
             # 스윙봇
             sstate  = read_state("sbot")

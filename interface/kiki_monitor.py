@@ -474,7 +474,8 @@ async def proactive_watch_monitor():
                 if _can_alert(key, ttl_minutes=180):
                     watches.append({
                         "type": "low_winrate",
-                        "data": f"단타봇 최근 10건 승률 {win_rate_n:.1f}%",
+                        # ★ 2026-10-06: _get_recent_perf는 sbot DB를 읽음(nbot 폐기 잔재 라벨)
+                        "data": f"스윙봇(sbot) 최근 10건 승률 {win_rate_n:.1f}%",
                     })
 
             # ── 3. 코인봇 극단 공포 ─────────────────────────
