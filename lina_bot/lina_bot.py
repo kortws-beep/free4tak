@@ -89,6 +89,11 @@ def _is_trading_day() -> bool:
 
 # 🚨 리포트 전송할 디스코드 채널 ID 및 DB 경로
 REPORT_CHANNEL_ID = 1508487747508240525
+# ★ 2026-10-06 — on_message()가 message.author == client.user(봇 자기
+#   자신)만 걸러내고 있어서, 서버 멤버나 봇에게 DM 보낸 누구나 !상태
+#   (계좌 잔고/보유종목 노출)/!리나등록/!일정추가 등을 쓸 수 있었음
+#   (형제 Opus 리뷰로 발견). 대장 본인 디스코드 user ID만 허용.
+OWNER_DISCORD_ID = 1485623383197487237
 DB_PATH_CONCENTRATION = os.path.join(os.path.dirname(base_dir), "intelligence", "market_concentration.db")
 DB_PATH_FINANCE = os.path.join(base_dir, 'finance.db')
 DB_PATH_MAPPING = os.path.join(base_dir, 'us_kr_mapping.db')  # 💡 신규 맵핑 DB 경로
@@ -2001,6 +2006,10 @@ async def on_ready():
 @client.event
 async def on_message(message):
     if message.author == client.user: return
+    # ★ 2026-10-06 — 대장 전용 봇. 계좌 조회/가계부/캘린더/종목등록 등
+    #   전부 민감한 명령이라 대장 본인이 아니면 아예 반응하지 않음
+    #   (형제 Opus 리뷰로 발견된 권한체크 누락 수정).
+    if message.author.id != OWNER_DISCORD_ID: return
 
     # 💡 [신규] 대장의 수동 맵핑 추가 명령어 (!맵핑)
     if message.content.startswith("!맵핑 "):
