@@ -214,6 +214,19 @@ MIN_ANALYSIS_CASH  = 500_000
 MANUAL_SELL_CHECK_INTERVAL_SEC = 120
 BUY_SYNC_GUARD_SEC = 90
 
+# ★ 2026-10-06 — "주문 접수 ≠ 체결" 대응. 매도주문이 접수되면 일단
+#   메모리 포지션에서는 빼되(같은 신호로 매5초 중복매도 방지), 장부(DB/
+#   master_db) 반영은 이 시간 뒤 실계좌 잔고로 체결을 확인한 다음에 한다.
+#   잔고에 그대로 남아있으면(애프터장 지정가 미체결 등) 다시 감시 대상으로
+#   되살리고 critical 알림. 미체결 매수 취소 후의 부분체결 확인도 같은 창을 씀.
+SELL_VERIFY_SEC            = 90
+# ★ 2026-10-06 — 주말/휴장 대기를 300초로 자면 워치독 기준(300초 무갱신)과
+#   딱 맞물려 가끔 재시작당함 — 하트비트가 기준보다 충분히 자주 찍히게.
+HOLIDAY_SLEEP_SEC          = 60
+RECONCILE_MIN_INTERVAL_SEC = 30    # 검증 대기건이 있을 때 잔고 재조회 최소 간격
+SELL_FAIL_RETRY_SEC        = 60    # 매도 거부 후 같은 종목 재시도 대기(5초마다 주문 폭주 방지)
+EMPTY_BALANCE_TRUST_AFTER  = 3     # 보유중인데 잔고가 {}로 오면 API오류로 보고, 연속 N회째부터만 믿음
+
 # ★ 2026-10-01 대장 지적 — "장개장직후 종목찾기"가 아니라 "090930타점
 #   시가이탈 오전중저가이탈"이 맞는 검색식이었음(실제 수동단타에서 쓰던
 #   조건). use_keywords는 부분일치라 조건식 이름 전체를 안 써도 되지만,
@@ -286,6 +299,12 @@ class DayBot:
         self.sold_today: dict    = {}   # {code: sell_hms} — 당일 재매수 방지
         self._sold_today_date    = ""
         self._pending_orders: dict = {}  # {code: (orgno, odno, qty, placed_ts)}
+        # ★ 2026-10-06 — 체결 확인 대기열(SELL_VERIFY_SEC 참고). 둘 다
+        #   {code: {"ts", "pos", ...}} 형태로 상태파일에 같이 저장(재시작해도 이어서 확인).
+        self._sell_verify: dict     = {}   # 매도주문 접수 → 체결 확인 대기
+        self._cancel_reconcile: dict = {}  # 미체결매수 취소 → 부분체결 확인 대기
+        self._sell_fail: dict       = {}   # {code: {"count", "until"}} 매도거부 재시도 백오프
+        self._empty_balance_streak  = 0
 
         self._is_holiday      = False
         self._holiday_checked = ""
@@ -340,6 +359,9 @@ class DayBot:
         with self._positions_lock:
             positions_snapshot = dict(self.positions)   # 얕은 복사 — json 직렬화 중
                                                           # 스캔스레드가 키 추가/삭제해도 안전
+            # ★ 2026-10-06 — code_name_map도 스캔스레드가 갱신하므로 같이 복사
+            #   (직렬화 중 "dictionary changed size during iteration" 방지)
+            name_map_snapshot = dict(self.code_name_map)
         # ★ 2026-10-03 — write_state()(전체덮어쓰기)를 쓰고 있었던 버그:
         #   매 루프(5초)마다 여기서 positions/sold_today 등 5개 키만 있는
         #   dict로 상태파일 전체를 갈아치워서, 키키가 그 사이에 써놓은
@@ -350,7 +372,9 @@ class DayBot:
             positions=positions_snapshot,
             sold_today=self.sold_today,
             sold_today_date=self._sold_today_date,
-            code_name_map=self.code_name_map,
+            code_name_map=name_map_snapshot,
+            sell_verify=self._sell_verify,
+            cancel_reconcile=self._cancel_reconcile,
             last_update=now_hms(),
         )
 
@@ -364,6 +388,10 @@ class DayBot:
         self.sold_today      = saved.get("sold_today", {})
         self._sold_today_date = saved.get("sold_today_date", today_str())
         self.code_name_map.update(saved.get("code_name_map", {}))
+        # ★ 2026-10-06 — 재시작 직전에 걸려있던 체결확인 대기건 복구.
+        #   ts가 이미 지났으므로 첫 잔고대조 때 바로 처리된다.
+        self._sell_verify      = saved.get("sell_verify", {}) or {}
+        self._cancel_reconcile = saved.get("cancel_reconcile", {}) or {}
 
         if self._sold_today_date != today_str():
             self.sold_today = {}
@@ -422,10 +450,15 @@ class DayBot:
             return
 
         qty = self.positions[sell_code]["qty"]
-        self._do_sell(sell_code, qty, "즉시매도(AI비서)", price)
-        update_state(BOT_STATE_FILE,
-                     cmd_result=f"✅ [DAYBOT] {sell_code} 즉시매도 명령 전달 완료",
-                     pending_cmd=None)
+        # ★ 2026-10-06 — _do_sell() 결과를 안 보고 항상 "완료"라고 답하던
+        #   문제 수정(장외/주말엔 주문 자체가 거부되는데도 완료로 보였음).
+        if self._do_sell(sell_code, qty, "즉시매도(AI비서)", price):
+            result = (f"✅ [DAYBOT] {sell_code} 매도주문 접수 — "
+                      f"{SELL_VERIFY_SEC}초 뒤 잔고로 체결 재확인")
+        else:
+            result = (f"❌ [DAYBOT] {sell_code} 매도주문 실패 — "
+                      f"장 운영시간/주문가능수량 확인 필요")
+        update_state(BOT_STATE_FILE, cmd_result=result, pending_cmd=None)
 
     # ============================================================
     # 가격 조회 (실시간 우선, REST 폴백)
@@ -521,8 +554,8 @@ class DayBot:
                 "buy_ts": time.time(),  # ★ 수동매도 오탐 방지 가드용(아래 _check_manual_sells)
                 "held_trading_days": 0,  # ★ 보유기한청산용 — 실제 영업일만 셈(아래 일일초기화 참고)
             }
+            self.code_name_map[code] = name
         self._pending_orders[code] = (orgno, odno, qty, time.time())
-        self.code_name_map[code] = name
         self._ws.subscribe_price(code)
 
         self.db.save_buy(code, price, qty, stock_name=name, buy_tag=source_tier)
@@ -535,14 +568,36 @@ class DayBot:
         print(f"🚀 [daybot] 매수 {code}({name}) | {qty}주 @{price:,.0f}원 | [{source_tier}]")
         return True
 
-    def _do_sell(self, code: str, qty: int, reason: str, price: float):
+    def _do_sell(self, code: str, qty: int, reason: str, price: float) -> bool:
+        """매도주문 접수까지만 처리하고 bool 반환.
+        ★ 2026-10-06 — 기존엔 api.sell()의 True(=접수)를 체결로 간주해
+        바로 포지션을 지우고 DB에 매도를 기록했음. 애프터장 지정가가 안
+        잡히면 주식은 계좌에 남았는데 감시만 끊기는 구조라, 이제 장부 반영은
+        _verify_sells()가 SELL_VERIFY_SEC 뒤 실계좌로 체결을 확인한 다음에 한다."""
         name = self._name(code)
-        ok = self.api.sell(code, qty)
-        if not ok:
-            print(f"⚠️ [daybot] 매도 실패 {code} — 다음 루프 재시도")
-            return
+        fail = self._sell_fail.get(code)
+        if fail and time.time() < fail["until"]:
+            return False
 
-        pos = self.positions.get(code, {})
+        # 프리장(시간외단일가 62)은 가격이 필수라 현재가를 넘기고, 정규장은
+        # 시장가, 애프터장은 kis_api가 현재가-3호가로 체결보장가를 합성(price=0).
+        order_price = int(price) if now_hhmm() < "0900" else 0
+        ok = self.api.sell(code, qty, price=order_price)
+        if not ok:
+            count = (fail or {}).get("count", 0) + 1
+            self._sell_fail[code] = {"count": count, "until": time.time() + SELL_FAIL_RETRY_SEC}
+            print(f"⚠️ [daybot] 매도 실패 {code} ({count}회째) — {SELL_FAIL_RETRY_SEC}초 뒤 재시도")
+            # ★ 손절이 막혀있는데 아무도 모르는 상황 방지 — 첫 실패와 이후
+            #   10회마다 critical 알림(매5초 스팸은 위 백오프로 차단).
+            if count == 1 or count % 10 == 0:
+                self._notify(f"🚨 [daybot] 매도 실패 {code}({name}) {count}회째 | {reason}\n"
+                             f"   {SELL_FAIL_RETRY_SEC}초마다 재시도 중 — 계속되면 HTS로 직접 확인해줘",
+                             critical=True)
+            return False
+        self._sell_fail.pop(code, None)
+
+        with self._positions_lock:
+            pos = self.positions.pop(code, {})
         entry_price = pos.get("entry_price", price)
         # ★ 2026-10-02 대장 지정 — sbot/sbo2/cbot과 동일 정책(09-21 통일)으로
         #   맞춤: 손실/본절(수익 없음)로 판 종목만 당일 재매수 금지, 소규모
@@ -551,17 +606,10 @@ class DayBot:
         #   실제 손익 부호로 판단(sbot.py와 동일 이유).
         is_loss = price <= entry_price
 
-        self.db.save_sell(code, price, reason)
-        if _master_record:
-            _master_record(bot_type="daybot", code=code, stock_name=name,
-                            buy_price=entry_price,
-                            sell_price=price, qty=qty, sell_reason=reason,
-                            buy_tag=pos.get("buy_tag", ""))
-        if _master_remove:
-            _master_remove("daybot", code)
-
-        with self._positions_lock:
-            self.positions.pop(code, None)
+        self._sell_verify[code] = {
+            "ts": time.time(), "pos": pos, "qty": qty,
+            "price": price, "reason": reason,
+        }
         self._pending_orders.pop(code, None)
         if is_loss:
             self.sold_today[code] = now_hms()
@@ -570,6 +618,38 @@ class DayBot:
         emoji = "💔" if is_loss else "💰"
         self._notify(f"{emoji} [daybot] 매도 {code}({name}) | {reason} @{price:,.0f}원")
         print(f"{emoji} [daybot] 매도 {code}({name}) | {reason} @{price:,.0f}원")
+        return True
+
+    def _record_sell(self, code: str, v: dict, sold_qty: int, remain_qty: int):
+        """체결이 확인된 매도분을 DB/master_db에 반영(_verify_sells 전용)."""
+        name = self._name(code)
+        pos  = v.get("pos", {})
+        entry_price = pos.get("entry_price", v["price"])
+        self.db.save_sell(code, v["price"], v["reason"],
+                          sold_qty=0 if remain_qty <= 0 else sold_qty)
+        if _master_record:
+            _master_record(bot_type="daybot", code=code, stock_name=name,
+                            buy_price=entry_price,
+                            sell_price=v["price"], qty=sold_qty, sell_reason=v["reason"],
+                            buy_tag=pos.get("buy_tag", ""))
+        if _master_remove and remain_qty <= 0:
+            _master_remove("daybot", code)
+
+    def _readopt(self, code: str, pos: dict, qty: int, why: str):
+        """체결 안 된 수량을 다시 감시 대상으로 되살린다."""
+        pos = dict(pos)
+        pos["qty"] = qty
+        with self._positions_lock:
+            self.positions[code] = pos
+        self._ws.subscribe_price(code)
+        if _master_upsert:
+            _master_upsert(bot_type="daybot", code=code, stock_name=self._name(code),
+                            entry_price=pos.get("entry_price", 0),
+                            current_price=pos.get("entry_price", 0), qty=qty,
+                            buy_time=pos.get("buy_time", ""), buy_tag=pos.get("buy_tag", ""))
+        msg = f"⚠️ [daybot] {code}({self._name(code)}) {why} — {qty}주 다시 감시 시작"
+        self._notify(msg, critical=True)
+        print(msg)
 
     def _check_pending_orders(self):
         """미체결 주문이 PENDING_ORDER_TIMEOUT_SEC 이상 지나면 취소 시도.
@@ -587,41 +667,138 @@ class DayBot:
                 continue
             ok = self.api.cancel_order(orgno, odno, code, qty)
             if ok:
-                print(f"🚫 [daybot] 미체결 취소: {code}")
+                print(f"🚫 [daybot] 미체결 취소: {code} — {SELL_VERIFY_SEC}초 뒤 부분체결 확인")
+                # ★ 2026-10-06 — 취소 "성공"은 남은 수량을 취소했다는 뜻일 뿐,
+                #   그 전에 일부가 체결됐을 수 있음(QTY_ALL_ORD_YN=Y). 기존엔
+                #   여기서 바로 포지션/DB를 통째로 지워서 부분체결분이 감시
+                #   없이 계좌에 남았음. 이제 _reconcile_cancelled_buys()가
+                #   실계좌 잔고로 체결수량을 확인한 뒤 되살리거나(void_buy 대신
+                #   수량 보정) 정말 0주면 그때 정리한다(0035S0 유령거래 정리
+                #   취지는 그대로 유지).
                 with self._positions_lock:
-                    self.positions.pop(code, None)
-                self._ws.unsubscribe_price(code)
-                # ★ 2026-09-30: 취소된 매수는 실제 거래가 아니므로 DB/
-                #   master_db 기록도 같이 정리(0035S0 유령거래 실사례)
-                self.db.void_buy(code)
-                if _master_remove:
-                    _master_remove("daybot", code)
+                    pos = self.positions.pop(code, None)
+                if pos is not None:
+                    self._cancel_reconcile[code] = {"ts": time.time(), "pos": pos}
             else:
                 real_qty = self._ws.positions.get(code, {}).get("qty")
                 if real_qty and code in self.positions:
                     self.positions[code]["qty"] = real_qty
             self._pending_orders.pop(code, None)
 
-    def _check_manual_sells(self):
+    # ============================================================
+    # 실계좌 잔고 대조 (수동매도 감지 + 매도체결 확인 + 취소후 부분체결)
+    # ============================================================
+    def _verify_due_items(self) -> list:
+        now_ts = time.time()
+        return [code for code, v in list(self._sell_verify.items()) + list(self._cancel_reconcile.items())
+                if now_ts - v.get("ts", 0) >= SELL_VERIFY_SEC]
+
+    def _reconcile_due(self) -> bool:
+        since = time.time() - self._last_manual_check_ts
+        if since >= MANUAL_SELL_CHECK_INTERVAL_SEC:
+            return bool(self.positions or self._sell_verify or self._cancel_reconcile)
+        return since >= RECONCILE_MIN_INTERVAL_SEC and bool(self._verify_due_items())
+
+    def _reconcile_with_account(self):
+        """MANUAL_SELL_CHECK_INTERVAL_SEC 주기(검증 대기건이 만기되면 더
+        빨리)로 실계좌 잔고를 한 번 조회해 세 가지를 같이 처리한다."""
+        # 체결 확인이 걸린 경우만 60초 캐시를 무시(그 외엔 기존처럼 캐시 허용)
+        real_pos = self.api.get_current_positions(force=bool(self._verify_due_items()))
+        if real_pos is None:
+            return  # API 실패 — 다음 체크에서 재시도, 기존 상태 유지
+
+        # ★ sbot과 동일한 {} 방어 — 한투가 오류 시 빈 dict를 주는 경우가 있어,
+        #   추적중인 게 있는데 {}면 바로 믿지 않는다(이 계좌엔 대원전선이
+        #   상주해서 진짜 0종목일 가능성도 낮음). 연속 N회면 그때는 신뢰.
+        tracking = self.positions or self._sell_verify or self._cancel_reconcile
+        if real_pos == {} and tracking:
+            self._empty_balance_streak += 1
+            if self._empty_balance_streak < EMPTY_BALANCE_TRUST_AFTER:
+                print(f"⚠️ [daybot] 잔고조회 빈값 {self._empty_balance_streak}회 — API오류로 보고 이번 대조 스킵")
+                return
+        else:
+            self._empty_balance_streak = 0
+
+        self._check_manual_sells(real_pos)
+        self._verify_sells(real_pos)
+        self._reconcile_cancelled_buys(real_pos)
+
+    def _verify_sells(self, real_pos: dict):
+        now_ts = time.time()
+        for code, v in list(self._sell_verify.items()):
+            if now_ts - v.get("ts", 0) < SELL_VERIFY_SEC:
+                continue
+            self._sell_verify.pop(code, None)
+            ordered = int(v.get("qty", 0))
+            remain  = int(real_pos.get(code, {}).get("qty", 0))
+            if code in self.positions:
+                # 그 사이 같은 종목을 새로 산 경우 — 잔고로는 구분이 안 되니 전량체결로 본다
+                remain = 0
+            if remain <= 0:
+                self._record_sell(code, v, sold_qty=ordered, remain_qty=0)
+            elif remain < ordered:
+                self._record_sell(code, v, sold_qty=ordered - remain, remain_qty=remain)
+                self._readopt(code, v.get("pos", {}), remain,
+                              f"매도주문 일부만 체결({ordered - remain}/{ordered}주)")
+            else:
+                self._readopt(code, v.get("pos", {}), remain,
+                              f"매도주문({v.get('reason', '')}) 후에도 잔고에 그대로 남아있음(미체결)")
+
+    def _reconcile_cancelled_buys(self, real_pos: dict):
+        now_ts = time.time()
+        for code, v in list(self._cancel_reconcile.items()):
+            if now_ts - v.get("ts", 0) < SELL_VERIFY_SEC:
+                continue
+            self._cancel_reconcile.pop(code, None)
+            filled = int(real_pos.get(code, {}).get("qty", 0))
+            if filled > 0 and code not in self.positions:
+                pos = dict(v.get("pos", {}))
+                avg = float(real_pos[code].get("entry_price", 0) or 0)
+                if avg > 0:
+                    pos["entry_price"] = avg
+                self.db.update_open_buy(code, qty=filled, buy_price=pos.get("entry_price"))
+                self._readopt(code, pos, filled, "미체결 취소 전에 일부 체결돼 있었음")
+            else:
+                # ★ 2026-09-30: 취소된 매수는 실제 거래가 아니므로 DB/
+                #   master_db 기록도 같이 정리(0035S0 유령거래 실사례)
+                self._ws.unsubscribe_price(code)
+                self.db.void_buy(code)
+                if _master_remove:
+                    _master_remove("daybot", code)
+
+    def _check_manual_sells(self, real_pos: dict):
         """★ 2026-10-01 대장 지정 — 대장이 HTS/MTS로 daybot 보유종목을
         직접 매도할 계획이라 sbot의 수동매도 감지 패턴을 이식(bots/sbot.py
         참고). daybot이 추적 중인 포지션이 실계좌에서 사라졌으면 수동매도로
         간주 — DB/master_db 정리 + 재매수 허용(sold_today 등록 안 함).
-        60초 주기로만 호출(매루프 5초마다 하면 REST 낭비)."""
+        ★ 2026-10-06 — 일부만 판 경우(잔고 수량 < 추적 수량)도 수량을 맞춤.
+        안 그러면 손절 때 원래 수량으로 주문이 나가 "주문가능수량 초과"로
+        계속 거부됐음."""
         if not self.positions:
             return
-        real_pos = self.api.get_current_positions()
-        if real_pos is None:
-            return  # API 실패 — 다음 체크에서 재시도, 기존 상태 유지
 
         now_ts = time.time()
         manual_sold = []
         for code in list(self.positions.keys()):
-            if code in real_pos:
-                continue
             buy_ts = self.positions[code].get("buy_ts", 0)
             if now_ts - buy_ts < BUY_SYNC_GUARD_SEC:
                 continue  # 매수직후 — 실계좌 반영 지연일 수 있어 스킵
+            if code in real_pos:
+                real_qty = int(real_pos[code].get("qty", 0))
+                old_qty  = int(self.positions[code].get("qty", 0))
+                if 0 < real_qty < old_qty:
+                    mdata = self.api.get_market_data(code) or {}
+                    try:
+                        sell_price = float(mdata.get("stck_prpr", 0) or 0)
+                    except (TypeError, ValueError):
+                        sell_price = 0.0
+                    sell_price = sell_price or self.positions[code].get("entry_price", 0)
+                    self.db.save_sell(code, sell_price, "수동일부매도", sold_qty=old_qty - real_qty)
+                    with self._positions_lock:
+                        if code in self.positions:
+                            self.positions[code]["qty"] = real_qty
+                    print(f"🔍 [daybot] 수동 일부매도 감지: {code} {old_qty}→{real_qty}주")
+                continue
             manual_sold.append(code)
         if not manual_sold:
             return
@@ -691,7 +868,8 @@ class DayBot:
             codes = []
         finally:
             loop.close()
-        self.code_name_map.update(code_name_map)
+        with self._positions_lock:
+            self.code_name_map.update(code_name_map)
 
         now_ts = time.time()
         for code, tags in code_multi_tag_map.items():
@@ -717,8 +895,9 @@ class DayBot:
             updated = datetime.datetime.fromisoformat(data["updated_at"])
             if (datetime.datetime.now() - updated).total_seconds() > SCOUT_STALE_SEC:
                 return []
-            for c in data.get("candidates", []):
-                self.code_name_map.setdefault(c["code"], c["name"])
+            with self._positions_lock:
+                for c in data.get("candidates", []):
+                    self.code_name_map.setdefault(c["code"], c["name"])
             return [c["code"] for c in data.get("candidates", [])]
         except Exception:
             return []
@@ -897,6 +1076,10 @@ class DayBot:
                 break
             if code in self.positions or code in self.sold_today:
                 continue
+            # ★ 2026-10-06 — 매도/취소 체결확인 대기중인 종목은 잔고로 구분이
+            #   안 되므로 확인 끝날 때까지 재매수 보류
+            if code in self._sell_verify or code in self._cancel_reconcile:
+                continue
             if code in held_elsewhere:
                 continue
             # ★ 2026-09-30/10-01 대장 지정 — 주도주검색식3은 거래대금 등
@@ -1000,7 +1183,7 @@ class DayBot:
                 if is_weekend():
                     if not self._ws_paused:
                         self._ws.stop(); self._ws_paused = True
-                    time.sleep(300); continue
+                    time.sleep(HOLIDAY_SLEEP_SEC); continue
 
                 # 4) 휴장일 (None-safe — 판단불가면 캐시 안 하고 다음 루프 재시도)
                 if self._holiday_checked != today:
@@ -1011,7 +1194,7 @@ class DayBot:
                 if self._is_holiday:
                     if not self._ws_paused:
                         self._ws.stop(); self._ws_paused = True
-                    time.sleep(300); continue
+                    time.sleep(HOLIDAY_SLEEP_SEC); continue
 
                 # ★ 웹소켓 재개는 아래 6)번(세션시간 체크) 통과 시점에서만
                 #   한다 — 여기서 바로 재개하면 "주말/휴장은 아니지만 아직
@@ -1056,8 +1239,10 @@ class DayBot:
 
                 # 7-1) 수동매도 감지(60초 주기) — 대장이 HTS/MTS로 직접
                 #      매도할 계획이라 daybot이 좀비 포지션을 안 만들게
-                if time.time() - self._last_manual_check_ts >= MANUAL_SELL_CHECK_INTERVAL_SEC:
-                    self._check_manual_sells()
+                #      ★ 2026-10-06 — 매도체결 확인/취소후 부분체결 확인도
+                #      같은 잔고조회로 처리(만기된 확인건이 있으면 더 일찍 돈다)
+                if self._reconcile_due():
+                    self._reconcile_with_account()
                     self._last_manual_check_ts = time.time()
 
                 # 8) 포지션 실시간감시 (손절/트레일링/보유기한청산 전부 포함)

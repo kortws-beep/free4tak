@@ -215,10 +215,13 @@ class KisAPI:
         except Exception as e:
             print(f"❌ 주문가능금액 조회 오류: {e}"); return 0
 
-    def get_current_positions(self) -> dict:
+    def get_current_positions(self, force: bool = False) -> dict:
         # ★ 30초 캐시 (API 호출 횟수 제한 대응)
+        # ★ 2026-10-06: force=True면 캐시 무시 — 주문 직후 체결여부를
+        #   실계좌로 대조해야 하는 경로(daybot 미체결취소/매도검증)용.
         _now = time.time()
-        if hasattr(self, '_pos_cache') and self._pos_cache and _now - self._pos_cache_ts < 60:
+        if (not force and hasattr(self, '_pos_cache') and self._pos_cache
+                and _now - self._pos_cache_ts < 60):
             return self._pos_cache
         url = f"{self.base_url}/uapi/domestic-stock/v1/trading/inquire-balance"
         headers = {"authorization": f"Bearer {self.token}",
@@ -258,8 +261,12 @@ class KisAPI:
                     if qty <= 0: continue
                     code = item.get("pdno")
                     name = item.get("prdt_name", "")
-                    # ETF 필터 (코드 6자리 숫자 아니면 제외)
-                    if not code.isdigit() or any(s in name for s in _etf_skip):
+                    # ETF 필터 (코드 6자리 영숫자 아니면 제외)
+                    # ★ 2026-10-06: isdigit() → 6자리 영숫자 — KRX 신규상장
+                    #   종목은 0035S0처럼 영문이 섞인 코드를 쓰는데, 숫자만
+                    #   허용하던 기존 필터가 이걸 잔고에서 빼버려서 daybot이
+                    #   방금 산 종목을 "수동매도"로 오판해 감시를 끊고 있었음.
+                    if not (len(code) == 6 and code.isalnum()) or any(s in name for s in _etf_skip):
                         print(f'⚠️ 포지션 제외 (ETF/기타): {code} {name}')
                         continue
                     avg  = float(item.get("pchs_avg_pric", 0))

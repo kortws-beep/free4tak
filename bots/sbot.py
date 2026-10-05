@@ -261,6 +261,14 @@ POOL_SIZE        = 100
 # ★ 2026-09-03: 매수 직후 한투 잔고 정산지연 동안 수동매도 오판 방지
 #   (sbo2의 BUY_SYNC_GUARD_SEC와 동일 값/의도)
 BUY_SYNC_GUARD_SEC = 90
+# ★ 2026-10-06: 매도 직후 잔고에 남아 보이는 종목을 "정산지연 잔재"로 보고
+#   재입양을 막는 시간(기존엔 당일 내내 막아서, 실제로 안 팔린 손절 종목이
+#   손절선 없이 하루를 보냈음). 이 시간이 지나도 잔고에 있으면 미체결로 보고
+#   이전 peak_tracker 그대로 다시 감시 + critical 알림.
+SELL_SYNC_GUARD_SEC = 300
+# ★ 2026-10-06: 휴장/장외 대기를 300초로 자면 하트비트 워치독 기준(300초
+#   무갱신)과 맞물려 가끔 재시작당함 — 기준보다 충분히 짧게.
+IDLE_SLEEP_SEC = 60
 
 REG_MARKET_START = "0900"
 REG_MARKET_END   = "1530"
@@ -369,6 +377,7 @@ class SBot:
         #   실전으로 겪은 것과 같은 버그 클래스). sbo2의 _buy_sync_guard
         #   패턴을 이식.
         self._buy_sync_guard = {}   # {code: 매수시각(epoch)}
+        self._recent_sells   = {}   # {code: {"ts", "tracker", "reason"}} — SELL_SYNC_GUARD_SEC 참고
         self.api_fail_count = 0    # ★ API 연속 실패 카운터
 
         # ── 메모리 캐시 ─────────────────────────────────
@@ -455,6 +464,9 @@ class SBot:
             print(f"⚠️ 시장지수 조회 실패 — 기존 유지: {self.market_status}")
             return
         self.market_rate = kospi
+        # ★ 2026-10-06: stop모드 반등판정(케이스1/2/3)이 self.kosdaq_rate를 읽는데
+        #   설정하는 곳이 없어 항상 0.0 → 폭락장에도 늘 "코스닥선방"으로 판정됐음
+        self.kosdaq_rate = idx.get("kosdaq", 0.0)
 
         if   kospi <= MARKET_STOP_THRESH: status = "stop"
         elif kospi <= MARKET_WEAK_THRESH: status = "weak"
@@ -520,16 +532,18 @@ class SBot:
     # 매수 / 매도 (★ 핵심 개선)
     # ============================================================
     def _do_buy(self, code: str, price: float, amount: int,
-                is_second: bool = False):
+                is_second: bool = False) -> bool:
         """
-        매수 주문 실행.
+        매수 주문 실행. 주문 접수 여부를 bool로 반환(★ 2026-10-06 — 호출부가
+        성공 여부를 몰라 실패해도 "매수 완료"를 보고/주문가능금액 차감을 못 했음).
         ★ 개선: 매수 직후 self.positions 즉시 반영 → 다음 매도 체크에서 누락 방지.
         """
         ok, orgno, odno, qty = self.api.buy(code, price, amount, self.code_name_map)
         if not ok or qty <= 0:
-            return
-        # ★ 미체결 주문 등록
-        self._pending_orders[code] = (orgno or "", odno or "", qty)
+            return False
+        # ★ 미체결 주문 등록 — ★ 2026-10-06: 2차매수 여부도 같이 기억(미체결
+        #   취소 시 1차분까지 통째로 지우던 버그 방지, 아래 취소 루프 참고)
+        self._pending_orders[code] = (orgno or "", odno or "", qty, is_second)
         # ★ 2026-09-03: 매수직후 동기화 보호 시작 — 아래 BUY_SYNC_GUARD_SEC 참고
         self._buy_sync_guard[code] = time.time()
 
@@ -566,16 +580,19 @@ class SBot:
         #   save_buy() 안에서 buy_tag로 자동 폴백(명시 전달 불필요).
         _atr_rate_for_db = self._get_atr_rate(code)
         _atr_val_for_db  = round(price * _atr_rate_for_db, 2) if _atr_rate_for_db else 0.0
-        self.db.save_buy(
-            code      = code,
-            buy_price = price,
-            qty       = qty,
-            ai_score  = ctx.get("ai_score", 0),
-            ai_reason = ctx.get("ai_reason", ""),
-            stock_name= self._name(code),
-            buy_tag   = self.code_tag_map.get(code, "unknown"),  # ★ 검색식명/슬롯출처
-            atr_val_at_entry = _atr_val_for_db,
-        )
+        # ★ 2026-10-06: 2차매수는 기존 미청산 행에 합산(sbot_db.add_to_open_buy 참고)
+        merged = is_second and self.db.add_to_open_buy(code, price, qty)
+        if not merged:
+            self.db.save_buy(
+                code      = code,
+                buy_price = price,
+                qty       = qty,
+                ai_score  = ctx.get("ai_score", 0),
+                ai_reason = ctx.get("ai_reason", ""),
+                stock_name= self._name(code),
+                buy_tag   = self.code_tag_map.get(code, "unknown"),  # ★ 검색식명/슬롯출처
+                atr_val_at_entry = _atr_val_for_db,
+            )
 
         # ★ master_positions 등록
         # ★ 2026-07-06: 2차매수(is_second=True) 시 entry_price/qty에 이번
@@ -602,6 +619,7 @@ class SBot:
                 )
             except Exception as _e:
                 print(f'⚠️ master_positions upsert 오류: {_e}')
+        return True
 
     def _do_sell(self, code: str, qty: int, reason: str, sell_price: float) -> bool:
         """
@@ -616,7 +634,11 @@ class SBot:
         if qty <= 0:
             return False
 
-        ok = self.api.sell(code, qty, price=int(sell_price))
+        # ★ 2026-10-06: 애프터장(15:30~)은 kis_api가 price=0일 때 현재가-3호가로
+        #   체결보장가를 합성하는데, 여기서 현재가를 그대로 넘겨 "현재가 지정가"가
+        #   돼 손절/트레일링 주문이 잘 안 잡혔음. 프리장(62)은 가격 필수라 유지.
+        order_price = 0 if now_hhmm() >= REG_MARKET_END else int(sell_price)
+        ok = self.api.sell(code, qty, price=order_price)
         if not ok:
             return False
 
@@ -676,6 +698,13 @@ class SBot:
 
         # ★ 핵심: 전량 매도일 때만 컨텍스트 정리
         if is_full_sell:
+            # ★ 2026-10-06: 접수≠체결 — SELL_SYNC_GUARD_SEC 뒤에도 잔고에 남아
+            #   있으면 이 tracker로 다시 감시(메인루프 잔고동기화 참고)
+            self._recent_sells[code] = {
+                "ts": time.time(),
+                "tracker": dict(self.peak_tracker.get(code, {})),
+                "reason": reason,
+            }
             self.buy_context.pop(code, None)
             self.positions.pop(code, None)
             # ★ master_positions 삭제
@@ -812,13 +841,19 @@ class SBot:
             if sell_code in self.positions:
                 mdata   = self.api.get_market_data(sell_code)
                 s_price = safe_float(mdata.get("stck_prpr", 0)) if mdata else 0
-                self._do_sell(
+                # ★ 2026-10-06: 결과를 안 보고 항상 "완료"라고 답하던 문제 수정
+                #   (이 명령은 주말/장외에도 처리돼 주문 거부가 흔함)
+                ok = self._do_sell(
                     sell_code,
                     self.positions[sell_code]["qty"],
                     "즉시매도(AI비서)",
                     s_price,
                 )
-                _write_cmd_result(f"✅ [SWING] {sell_code} 즉시매도 완료")
+                if ok:
+                    self.peak_tracker.pop(sell_code, None)
+                    _write_cmd_result(f"✅ [SWING] {sell_code} 매도주문 접수 (잔고로 체결 재확인)")
+                else:
+                    _write_cmd_result(f"❌ [SWING] {sell_code} 매도주문 실패 — 장 운영시간/주문가능수량 확인 필요")
             else:
                 _write_cmd_result(f"⚠️ {sell_code} 보유 중이 아님")
 
@@ -841,7 +876,9 @@ class SBot:
                 "ai_score": 0, "ai_reason": "수동매수",
                 "stock_name": self._name(buy_code),
             }
-            self._do_buy(buy_code, cur, int(cur * buy_qty * 1.01))
+            if not self._do_buy(buy_code, cur, int(cur * buy_qty * 1.01)):
+                _write_cmd_result(f"❌ [SWING] {buy_code} 매수주문 실패 — 장 운영시간/주문가능금액 확인 필요")
+                return
             # ★ 공통 헬퍼로 통일 — stop_price/target1/atr_val/buy_date 등
             #   필수 필드 누락 방지 (과거엔 일부만 채워 다음 매도체크에서
             #   KeyError 발생 → 그 이후 보유종목 매도체크 전체가 스킵되는 버그)
@@ -849,7 +886,7 @@ class SBot:
             self.peak_tracker[buy_code] = self._make_peak_tracker_entry(
                 entry_price=cur, atr_rate=_atr_rate,
             )
-            _write_cmd_result(f"✅ [SWING] {buy_code} {buy_qty}주 매수 완료")
+            _write_cmd_result(f"✅ [SWING] {buy_code} {buy_qty}주 매수주문 접수")
 
         elif cmd_type == "hold":
             # ★ 2026-08-30 신설 — 사용자 요청: 특정 종목 손절체크만 제외
@@ -1354,6 +1391,17 @@ class SBot:
                           f"{FLAT_BUY_MIN_RATIO:.0%} 미만")
                     continue
 
+            # ★ 2026-10-06: 후보의 curr는 아침 분석(score_cache)이나 하루1회
+            #   후보풀 갱신 때 가격이라 오후엔 크게 어긋남 — 그 가격+1호가
+            #   지정가는 안 잡혀 취소→sold_today로 그날 재매수까지 막혔음.
+            #   실제 주문 직전 현재가로 다시 조회.
+            _fresh = self.api.get_market_data(code)
+            _fresh_px = safe_float(_fresh.get("stck_prpr", 0)) if _fresh else 0
+            if _fresh_px <= 0:
+                print(f"⏭️ [SWING] {code} 패스 — 주문 직전 현재가 조회 실패")
+                continue
+            cand = dict(cand, curr=_fresh_px)
+
             # ★ 1주도 못 사면 패스
             if buy_amount < cand["curr"]:
                 print(f"⏭️ [SWING] {code} 패스 — 예산({buy_amount:,}원) < 주가({cand['curr']:,.0f}원)")
@@ -1392,7 +1440,11 @@ class SBot:
             if code in sbo2_pos:
                 print(f"⛔ {code} sbo2 보유 중 — sbot 매수 제외")
                 continue
-            self._do_buy(code, cand["curr"], buy_amount)
+            if not self._do_buy(code, cand["curr"], buy_amount):
+                continue
+            # ★ 2026-10-06: 한 루프에서 여러 종목을 살 때 주문가능금액을 안 줄여서
+            #   FLAT_BUY_MIN_RATIO(스크랩매수 방지) 체크가 두 번째부터 무력화됐음
+            psbl_cash = max(0, psbl_cash - buy_amount)
 
             # ★ peak_tracker 즉시 초기화 (v3 — ATR 추세추종)
             # ★ 공통 헬퍼로 통일 — 기존엔 buy_date 필드가 빠져 있어서
@@ -1695,7 +1747,7 @@ class SBot:
                     if self._ws and not self._ws_paused:
                         self._ws.stop(); self._ws_paused = True
                     print(f"🎌 [{now}] 휴장일 — 대기 중...")
-                    time.sleep(300); continue
+                    time.sleep(IDLE_SLEEP_SEC); continue
 
                 # ── 시간대별 동작 ─────────────────────────
                 is_reg      = REG_MARKET_START <= now_t <= REG_MARKET_END
@@ -1712,7 +1764,7 @@ class SBot:
                     if self._ws and not self._ws_paused:
                         self._ws.stop(); self._ws_paused = True
                     print(f"😴 [{now}] 장외 대기 (20시 이후)...")
-                    time.sleep(300); continue
+                    time.sleep(IDLE_SLEEP_SEC); continue
 
                 if self._ws and self._ws_paused:
                     self._ws.start(); self._ws_paused = False
@@ -1891,13 +1943,35 @@ class SBot:
                     #   더 그대로 노출돼 있었음). 아직 self.positions에 없던
                     #   (=진짜 신규가 아니라 정산지연 잔재로 보이는) 코드만
                     #   골라서 제외.
+                    # ★ 2026-10-06: 위 보호를 SELL_SYNC_GUARD_SEC 안으로 한정 —
+                    #   기존엔 sold_today면 당일 내내 재입양을 막아서, 매도주문이
+                    #   접수만 되고 안 잡힌 종목(애프터장 지정가 등)이나 미체결
+                    #   취소 전에 일부 체결된 매수분이 손절선 없이 하루를 보냈음.
+                    #   보호시간이 지나도 잔고에 있으면 진짜 보유로 보고 다시
+                    #   감시(매도했던 종목이면 그때의 peak_tracker로 복원 + 알림).
                     _resurrect_risk = {
                         c for c in new_pos
-                        if c not in self.positions and c in self.sold_today
+                        if c not in self.positions and c in self._recent_sells
+                        and _now_ts - self._recent_sells[c]["ts"] < SELL_SYNC_GUARD_SEC
                     }
                     for _c in _resurrect_risk:
-                        print(f"   ⏭️ {self._name(_c)}({_c}) 오늘 이미 매도 — "
-                              f"정산 지연으로 보이는 잔고, 재입양 스킵")
+                        print(f"   ⏭️ {self._name(_c)}({_c}) 방금 매도 — "
+                              f"정산 지연으로 보이는 잔고, 재입양 보류")
+                    for _c in new_pos:
+                        if _c in self.positions or _c in _resurrect_risk:
+                            continue
+                        _rs = self._recent_sells.pop(_c, None)
+                        if _rs:
+                            if _rs.get("tracker"):
+                                self.peak_tracker[_c] = _rs["tracker"]
+                            self._notify(
+                                f"⚠️ {self._name(_c)}({_c}) 매도주문({_rs.get('reason', '')}) 후 "
+                                f"{SELL_SYNC_GUARD_SEC}초가 지나도 잔고에 남아있음(미체결) — 다시 감시",
+                                critical=True,
+                            )
+                    for _c in [c for c, v in self._recent_sells.items()
+                               if _now_ts - v["ts"] >= SELL_SYNC_GUARD_SEC]:
+                        self._recent_sells.pop(_c, None)   # 체결 확인됨(잔고에서 사라짐)
                     _filtered_new_pos = {
                         c: p for c, p in new_pos.items() if c not in _resurrect_risk
                     }
@@ -1972,6 +2046,49 @@ class SBot:
                         if self._kospi_low == 0.0 or self.market_rate < self._kospi_low:
                             self._kospi_low = self.market_rate
 
+                # ★ 미체결 주문 취소 (1루프 이상 경과)
+                # ★ 2026-09-03: 기존 "1) 체결완료 종목 pending에서 먼저
+                #   제거" 단계가 _do_buy()/_check_megacap_dip_buy()가 체결
+                #   확인 전에 이미 self.positions를 채워놓는 것과 겹쳐서,
+                #   이 취소로직 자체가 실행될 기회가 없었음(재점검 리포트로
+                #   발견 — sbo2와 완전히 동일한 버그). 그 단계를 삭제하고,
+                #   cancel_order() 성공/실패로 실제 체결여부를 판단하도록
+                #   수정 — 성공(=진짜 미체결이었음)했을 때만 포지션/
+                #   buy_context/peak_tracker 정리 + sold_today 등록,
+                #   실패(=이미 체결된 것으로 보임)면 그대로 정상 포지션으로
+                #   둔다(잘못 정리하면 트레일링 진행 이력이 날아감).
+                # ★ 2026-10-06: 시장 stop모드의 continue보다 앞으로 이동 — 기존엔
+                #   stop모드 동안 미체결 주문이 하나도 취소되지 않았음.
+                for _code, (_orgno, _odno, _qty, *_rest) in list(self._pending_orders.items()):
+                    _is_second = bool(_rest and _rest[0])
+                    if _odno and _is_second:
+                        # ★ 2026-10-06: 2차매수(물타기) 미체결은 그 주문만 취소 —
+                        #   기존엔 1차매수분까지 포지션/tracker를 통째로 지우고
+                        #   sold_today로 막아서 보유 종목 전체가 감시에서 빠졌음.
+                        #   수량은 다음 루프 잔고동기화가 실계좌 기준으로 맞춘다.
+                        if self.api.cancel_order(_orgno, _odno, _code, _qty):
+                            print(f"🚫 [SWING] 2차매수 미체결 취소: {_code}({self._name(_code)}) — 기존 보유분은 유지")
+                    elif _odno:
+                        print(f"🚫 [SWING] 미체결 취소: {_code}({self._name(_code)}) odno:{_odno}")
+                        ok = self.api.cancel_order(_orgno, _odno, _code, _qty)
+                        if ok:
+                            self._notify(
+                                f"🚫 [SWING] 미체결 취소\n"
+                                f"종목: {_code}({self._name(_code)})\n"
+                                f"사유: 1루프 내 미체결 → 자금 반환"
+                            )
+                            # ★ 재매수 방지 — sold_today 등록 (진짜 미체결이었을 때만)
+                            self.sold_today[_code] = now_hms()
+                            # ★ 잔재 정리 (진짜 미체결이었을 때만)
+                            self.buy_context.pop(_code, None)
+                            self.peak_tracker.pop(_code, None)
+                            self.positions.pop(_code, None)
+                            self._buy_sync_guard.pop(_code, None)
+                        else:
+                            print(f"   ℹ️ {_code}({self._name(_code)}) 취소 실패 — "
+                                  f"이미 체결된 것으로 보여 정상 포지션으로 유지")
+                    self._pending_orders.pop(_code, None)
+
                 # ── 시장 stop ─────────────────────────────
                 if self.market_status == "stop":
                     print(f"🚨 [SWING] 시장 중단 모드 | 코스피:{self.market_rate:+.2f}%")
@@ -2021,38 +2138,6 @@ class SBot:
                     else:
                         self._save_status(cash, total_profit, score_enter, now, pos_mkt_cache)
                         time.sleep(LOOP_SLEEP); continue
-                # ★ 미체결 주문 취소 (1루프 이상 경과)
-                # ★ 2026-09-03: 기존 "1) 체결완료 종목 pending에서 먼저
-                #   제거" 단계가 _do_buy()/_check_megacap_dip_buy()가 체결
-                #   확인 전에 이미 self.positions를 채워놓는 것과 겹쳐서,
-                #   이 취소로직 자체가 실행될 기회가 없었음(재점검 리포트로
-                #   발견 — sbo2와 완전히 동일한 버그). 그 단계를 삭제하고,
-                #   cancel_order() 성공/실패로 실제 체결여부를 판단하도록
-                #   수정 — 성공(=진짜 미체결이었음)했을 때만 포지션/
-                #   buy_context/peak_tracker 정리 + sold_today 등록,
-                #   실패(=이미 체결된 것으로 보임)면 그대로 정상 포지션으로
-                #   둔다(잘못 정리하면 트레일링 진행 이력이 날아감).
-                for _code, (_orgno, _odno, _qty) in list(self._pending_orders.items()):
-                    if _odno:
-                        print(f"🚫 [SWING] 미체결 취소: {_code}({self._name(_code)}) odno:{_odno}")
-                        ok = self.api.cancel_order(_orgno, _odno, _code, _qty)
-                        if ok:
-                            self._notify(
-                                f"🚫 [SWING] 미체결 취소\n"
-                                f"종목: {_code}({self._name(_code)})\n"
-                                f"사유: 1루프 내 미체결 → 자금 반환"
-                            )
-                            # ★ 재매수 방지 — sold_today 등록 (진짜 미체결이었을 때만)
-                            self.sold_today[_code] = now_hms()
-                            # ★ 잔재 정리 (진짜 미체결이었을 때만)
-                            self.buy_context.pop(_code, None)
-                            self.peak_tracker.pop(_code, None)
-                            self.positions.pop(_code, None)
-                            self._buy_sync_guard.pop(_code, None)
-                        else:
-                            print(f"   ℹ️ {_code}({self._name(_code)}) 취소 실패 — "
-                                  f"이미 체결된 것으로 보여 정상 포지션으로 유지")
-                    self._pending_orders.pop(_code, None)
 
                 # ── 일시중단 ──────────────────────────────
                 if self._is_paused:

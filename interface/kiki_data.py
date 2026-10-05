@@ -25,6 +25,10 @@ for _ep in [os.path.join(_here, ".env"), os.path.join(_base, ".env")]:
 
 from common_utils import now_kst, today_str, now_hms, fmt_won, safe_float, safe_int, read_state, write_state, update_state
 from common_utils import read_state as _read_state_atomic
+# ★ 2026-10-06: 아래 write_state/update_state가 이 두 이름을 import 없이 써서
+#   호출되면 NameError였음
+from common_utils import write_state as _write_state_atomic
+from common_utils import update_state as _update_state_atomic
 
 # DB 경로 상수
 _base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -151,10 +155,12 @@ def get_coin_performance(limit: int = 20) -> list:
 
 
 def get_today_realized_all() -> dict:
-    """오늘 실현손익 — 봇별 합산"""
+    """오늘 실현손익 — 봇별 합산.
+    ★ 2026-10-06: daybot이 빠져있어 !성과 합계/키키 컨텍스트에 단타 손익이
+    전혀 안 잡혔음 — 추가(daybot DB도 trades/buy_price/sell_price/qty/sell_time)."""
     import sqlite3, datetime
     today  = datetime.date.today().strftime("%Y-%m-%d")
-    result = {"sbot": 0, "sbo2": 0, "cbot": 0}
+    result = {"sbot": 0, "sbo2": 0, "cbot": 0, "daybot": 0}
     dbs    = {
         "sbot": (os.path.join(_base, "sbot_trade_history.db"), "trades",
                  "buy_price", "sell_price", "qty", "sell_time"),
@@ -162,6 +168,8 @@ def get_today_realized_all() -> dict:
                  "buy_price", "sell_price", "qty", "sell_time"),
         "cbot": (os.path.join(_base, "cbot_trade_history.db"), "trades",
                  "buy_price", "sell_price", "qty", "sell_time"),
+        "daybot": (DAYBOT_HIST_DB, "trades",
+                   "buy_price", "sell_price", "qty", "sell_time"),
     }
     for bot, (db_path, table, buy_col, sell_col, qty_col, time_col) in dbs.items():
         if not os.path.exists(db_path):
@@ -176,7 +184,7 @@ def get_today_realized_all() -> dict:
                   AND date({time_col}) = ?
             """, (today,)).fetchall()
             conn.close()
-            result[bot] = sum((r[1]-r[0])*r[2] for r in rows)
+            result[bot] = int(sum((r[1]-r[0])*r[2] for r in rows))
         except Exception:
             pass
     return result
