@@ -987,47 +987,6 @@ class SBot:
             return None, 0
 
     # ============================================================
-    # 미너비니 방식 AI 추천
-    # ============================================================
-    def _get_minervini_pick(self, exclude_codes: set) -> str:
-        """
-        미너비니 방식으로 AI에게 1종목 추천 요청.
-        조건: 200일선 위 + 52주 신고가 근처 + 실적 성장 + 겹치지 않는 종목
-        """
-        try:
-            exclude_list = ", ".join(exclude_codes) if exclude_codes else "없음"
-            prompt = (
-                "당신은 마크 미너비니 스타일의 한국 주식 스윙 트레이더입니다.\n"
-                "아래 조건을 모두 만족하는 한국 주식 1종목만 추천하세요.\n\n"
-                "[선정 조건]\n"
-                "1) 200일 이동평균선 위에서 거래 중 (장기 상승 추세)\n"
-                "2) 52주 신고가 대비 -10% 이내 (신고가 근처)\n"
-                "3) 최근 분기 매출 또는 EPS YoY +20% 이상 (실적 성장)\n"
-                "4) VCP/컵앤핸들/박스권 등 숨고르기 후 돌파 직전 패턴\n"
-                "5) 반도체/2차전지/AI/바이오 등 강세 테마 소속 우선\n\n"
-                f"[제외 종목] {exclude_list}\n\n"
-                "반드시 아래 JSON으로만 답변:\n"
-                '{"code": "종목코드6자리", "reason": "선정이유30자이내"}'
-            )
-            import anthropic as _ant
-            client = _ant.Anthropic()
-            msg = client.messages.create(
-                model="claude-haiku-4-5-20251001",
-                max_tokens=100,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            import json as _json
-            result = _json.loads(extract_claude_text(msg))
-            code = result.get("code", "").strip()
-            reason = result.get("reason", "")
-            if code and len(code) == 6 and code.isdigit():
-                print(f"   🏆 미너비니 AI 추천: {code} | {reason}")
-                return code
-        except Exception as e:
-            print(f"⚠️ 미너비니 AI 오류: {e}")
-        return ""
-
-    # ============================================================
     # 분석 + 매수 실행
     # ============================================================
     def _run_analysis(self, codes: list, now_t: str, score_enter: int,
@@ -1123,28 +1082,11 @@ class SBot:
             print(f"  {ct} {code}({self._name(code)}){tag} | "
                   f"{score}점 | {d.get('ai_reason','')}")
 
-        # 6) ★ 미너비니 방식 AI 추천 1종목 추가 (슬롯 여유 있을 때만)
-        try:
-            익절중 = sum(
-                1 for c in self.positions
-                if self.peak_tracker.get(c, {}).get("stage", 0) >= 1
-            )
-            보너스 = 익절중 if psbl_cash >= BONUS_SLOT_MIN_CASH else 0
-            avail = MAX_POSITIONS - len(self.positions) + 보너스
-            existing_codes = set(c for c, _, _ in top10)
-            existing_codes.update(self.positions.keys())
-
-            if avail > len([c for c, _, _ in top10 if c not in self.positions]):
-                miner_code = self._get_minervini_pick(existing_codes)
-                if miner_code and miner_code not in existing_codes:
-                    miner_data = self.api.get_market_data(miner_code)
-                    if miner_data:
-                        miner_data["ai_reason"] = "미너비니(200일선+52주신고가+실적)"
-                        miner_data["buy_tag"]   = "minervini"
-                        top10.append((miner_code, score_enter + 5, miner_data))
-                        print(f"  🏆 미너비니 추천: {miner_code}({self._name(miner_code)})")
-        except Exception as e:
-            print(f"⚠️ 미너비니 추천 오류: {e}")
+        # ★ 2026-10-06 — 미너비니 AI추천(실시간 데이터 검증 없이 AI
+        #   기억에만 의존해 1종목 추천하던 기능) 완전 제거(대장 결정 —
+        #   검증 안 된 추천으로 실거래 들어가는 환각 위험 > Haiku 비용
+        #   절감 정도로는 못 바꿀 리스크). 기존 6)번 블록+_get_minervini_pick
+        #   메서드 삭제.
 
         # 7) ★ 2026-09-29: 여기서 직접 매수실행하지 않고, 키움/new 통합
         #   후보(BUY_SCORE_ENTER 사전게이트 통과분만)를 정규화된 dict로
