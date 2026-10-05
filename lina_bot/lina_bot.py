@@ -1374,11 +1374,18 @@ async def manual_watch_trailing_loop():
                 trail_stop = w["peak_price"] * (1 - trail_pct / 100)
                 floor_price = entry * (1 + MANUAL_WATCH_MIN_LOCKED_PROFIT_PCT / 100)
                 trail_stop = max(trail_stop, floor_price)
+                # ★ 2026-10-06 — floor_price가 trail_pct 계산값보다 높아서
+                #   실제 매도선이 된 경우에도 메시지엔 그냥 trail_pct(1.5/
+                #   2.0%)를 그대로 찍어서, 실제 발동 지점(예: 평단+1%
+                #   바닥선)과 안 맞는 숫자가 표시되던 문제(형제 Opus
+                #   리뷰로 발견) — 고점 대비 실제 하락률을 역산해서 표시.
+                actual_drop_pct = ((w["peak_price"] - trail_stop) / w["peak_price"] * 100
+                                   if w["peak_price"] > 0 else trail_pct)
                 if price <= trail_stop and w["peak_price"] > w.get("last_alert_peak", 0):
                     await send_safe_message(
                         channel,
                         f"🔔 **[리나등록] {w.get('name', code)}({code}) 매도 신호**\n"
-                        f"   고점 {w['peak_price']:,.0f}원 대비 -{trail_pct}% "
+                        f"   고점 {w['peak_price']:,.0f}원 대비 -{actual_drop_pct:.1f}% "
                         f"({price:,.0f}원, 총 {net_rate:+.2f}%) — 키움에서 매도 판단해줘.\n"
                         f"   (계속 감시할게 — 신고점 찍고 또 밀리면 다시 알려줄게. "
                         f"그만 지켜봐도 되면 `!리나등록해제 {code}`)"
@@ -1599,17 +1606,25 @@ def _build_morning_market_context_sync():
 # ===================================================
 async def web_search_hybrid(query):
     # 1. 특정 종목에 대해 테마를 물어보는 경우 (예: "필옵틱스 테마 뭐야?")
-    if "테마" in query or "뭐야" in query:
-        conn = sqlite3.connect(DB_PATH_THEME_FINANCE)
-        cursor = conn.cursor()
-        
-        cursor.execute("SELECT theme_name FROM kr_theme_stocks WHERE stock_name LIKE ?", ('%' + query.replace("테마", "").replace("뭐야", "").strip() + '%',))
-        results = cursor.fetchall()
-        conn.close()
-        
-        if results:
-            themes = [r[0] for r in set(results)]
-            return f"🔍 **[테마 탐색기]** 대장! 찾았어! \n{', '.join(themes)} 테마에 묶여있는 종목이야!"
+    # ★ 2026-10-06 — "뭐야"만으로도 이 분기가 걸려서 "오늘 날씨 뭐야?"
+    #   같은 무관한 질문도 종목테마 DB를 조회했고, 검색어가 "테마"/"뭐야"
+    #   제거 후 빈 문자열이 되면(예: 질문이 "뭐야" 하나뿐일 때) LIKE '%%'
+    #   가 되어 테이블 전체 테마가 쏟아지는 버그가 있었음(형제 Opus
+    #   리뷰로 발견). "테마"가 실제로 포함된 경우만 + 검색어가 비지
+    #   않을 때만 조회하도록 교체.
+    if "테마" in query:
+        search_term = query.replace("테마", "").replace("뭐야", "").strip()
+        if search_term:
+            conn = sqlite3.connect(DB_PATH_THEME_FINANCE)
+            cursor = conn.cursor()
+
+            cursor.execute("SELECT theme_name FROM kr_theme_stocks WHERE stock_name LIKE ?", ('%' + search_term + '%',))
+            results = cursor.fetchall()
+            conn.close()
+
+            if results:
+                themes = [r[0] for r in set(results)]
+                return f"🔍 **[테마 탐색기]** 대장! 찾았어! \n{', '.join(themes)} 테마에 묶여있는 종목이야!"
 
     # 2. 기존 기능들 그대로 유지
     # ★ 2026-10-06 — fetch_calendar_events()/get_weather_kma_pure()는
@@ -2084,7 +2099,11 @@ def _fetch_sbo2_status_sync(api, positions: dict):
     total_pnl = 0
     for code, pos in positions.items():
         mdata = api.get_market_data(code)
-        curr  = float(mdata.get("stck_prpr", 0)) if mdata else pos.get("entry_price", 0)
+        # ★ 2026-10-06 — stck_prpr가 빈 문자열("")로 오는 경우 float("")가
+        #   ValueError를 던져서 !상태 전체가 실패하던 버그(형제 Opus
+        #   리뷰로 발견) — "or 0"으로 falsy 값을 먼저 걸러냄(이 파일
+        #   다른 곳에서 이미 쓰는 패턴과 통일).
+        curr  = float(mdata.get("stck_prpr", 0) or 0) if mdata else pos.get("entry_price", 0)
         entry = pos.get("entry_price", 0)
         qty   = pos.get("qty", 0)
         rate  = (curr - entry) / entry * 100 if entry > 0 else 0
@@ -2424,6 +2443,12 @@ async def on_message(message):
                 lines.append(f"{'봇':<8} {'거래':>5} {'승률':>7} {'평균':>7} {'총손익':>12}")
                 lines.append("-" * 45)
                 for bot, cnt, wins, avg, total in rows:
+                    # ★ 2026-10-06 — profit_rate/profit_krw가 전부 NULL인
+                    #   bot_type이 있으면 SUM()이 NULL을 반환해서 total이
+                    #   None이 되고, 밑의 "total > 0" 비교에서 TypeError가
+                    #   나 명령 전체가 실패하던 버그(형제 Opus 리뷰로 발견).
+                    avg   = avg or 0
+                    total = total or 0
                     win_rate = wins / cnt * 100 if cnt > 0 else 0
                     emoji = "✅" if total > 0 else "❌"
                     lines.append(
@@ -2487,9 +2512,15 @@ async def on_message(message):
 
                 prompt = f"[파이썬 실시간 수집 데이터]:\n{context_data}\n\n[사용자 질문]: {user_input}\n\n[지시문]: {지시문}"
             else:
-                chat_memory.setdefault(message.channel.id, [{"role": "system", "content": SYSTEM_PROMPT}])
-                chat_memory[message.channel.id].append({"role": "user", "content": user_input})
-                prompt = user_input 
+                # ★ 2026-10-06 — append만 하고 자르는 코드가 없어서
+                #   채널마다 대화기록이 무한히 쌓이던 메모리 누수(형제
+                #   Opus 리뷰로 발견) — MAX_MEMORY를 실제로 적용해 상한선
+                #   을 둠(system 메시지는 유지, 나머지는 최근 N개만).
+                history = chat_memory.setdefault(message.channel.id, [{"role": "system", "content": SYSTEM_PROMPT}])
+                history.append({"role": "user", "content": user_input})
+                if len(history) > MAX_MEMORY + 1:
+                    chat_memory[message.channel.id] = [history[0]] + history[-MAX_MEMORY:]
+                prompt = user_input
 
         try:
             reply_text = await asyncio.to_thread(_call_llm, prompt, max_tokens=1500, system=SYSTEM_PROMPT)
