@@ -324,6 +324,21 @@ class KisAPI:
         except Exception as e:
             print(f"⚠️ 시세 조회 오류 {code}: {e}"); return None
 
+    def get_execution_strength(self, code: str) -> Optional[float]:
+        """당일 체결강도(%) — 주식현재가 체결(FHKST01010300)의 tday_rltv.
+        ★ 2026-10-06 신규(3개월수급 당일주도주 A조건용). 실패 시 None."""
+        url = f"{self.base_url}/uapi/domestic-stock/v1/quotations/inquire-ccnl"
+        headers = {"authorization": f"Bearer {self.token}",
+                   "appkey": self.appkey, "appsecret": self.secret,
+                   "tr_id": "FHKST01010300"}
+        params  = {"FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": code}
+        try:
+            out = _get(url, headers=headers, params=params, timeout=10).json().get("output") or []
+            val = out[0].get("tday_rltv") if out else None
+            return float(val) if val not in (None, "") else None
+        except Exception as e:
+            print(f"⚠️ 체결강도 조회 오류 {code}: {e}"); return None
+
     def get_hoga(self, code: str) -> dict:
         """
         주식현재가 호가/예상체결 조회 (FHKST01010200)

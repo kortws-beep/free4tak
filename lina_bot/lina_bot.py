@@ -1484,6 +1484,62 @@ async def daily_momentum_checkin():
         print(f"❌ AI 모멘텀 체크인 에러: {e}")
 
 
+# ══════════════════════════════════════════════════════════════
+# 3개월수급 당일주도주 — 키움 조건식의 파이썬 구현 (2026-10-06, 관찰 전용)
+# ══════════════════════════════════════════════════════════════
+# ★ 키움 API 없이 일봉 DB(B·E) + 한투 현재가(F·G·H·I) + 체결강도(A)로
+#   같은 조건을 계산(intelligence/three_month_leader.py 참고). daybot과 같은
+#   10시 매수마감 기준이라 09:00~10:00에만 3분마다 확인하고, 새로 걸린 종목만
+#   알린다. 매매는 하지 않음 — 며칠간 키움 결과와 나란히 비교하는 용도.
+_TML_STATE = {"date": "", "alerted": set()}
+_tml_api = None
+
+
+def _tml_scan_sync(with_strength: bool = True):
+    global _tml_api
+    import three_month_leader as tml
+    if _tml_api is None:
+        from kis_api import KisAPI
+        _tml_api = KisAPI()
+    universe = tml.build_universe()
+    return universe, tml.check_candidates(_tml_api, universe, with_strength=with_strength)
+
+
+@tasks.loop(minutes=3)
+async def three_month_leader_watch():
+    kst_now = datetime.datetime.now(KST)
+    if not ("0900" <= kst_now.strftime("%H%M") < "1000"):
+        return
+    if not _is_trading_day():
+        return
+    try:
+        today = kst_now.strftime("%Y-%m-%d")
+        if _TML_STATE["date"] != today:
+            _TML_STATE.update(date=today, alerted=set())
+        universe, results = await asyncio.to_thread(_tml_scan_sync)
+        hits = [r for r in results if r["passed"] and r["code"] not in _TML_STATE["alerted"]]
+        print(f"🧪 [3개월수급] 후보 {len(universe['items'])}개 → 통과 {sum(r['passed'] for r in results)}개 (신규 {len(hits)})")
+        if not hits:
+            return
+        import three_month_leader as tml
+        channel = await client.fetch_channel(REPORT_CHANNEL_ID)
+        await send_safe_message(
+            channel,
+            f"🧪 **[3개월수급 당일주도주 — 파이썬판, 관찰 전용]** {kst_now.strftime('%H:%M')}\n"
+            + "\n".join(tml.format_hit(r) for r in hits)
+            + "\n   (키움 조건검색 결과와 같은지 비교해줘 — 매매는 안 해)"
+        )
+        for r in hits:
+            _TML_STATE["alerted"].add(r["code"])
+    except Exception as e:
+        print(f"⚠️ [3개월수급] 스캔 오류: {e}")
+
+
+@three_month_leader_watch.before_loop
+async def before_three_month_leader_watch():
+    await client.wait_until_ready()
+
+
 _KIWOOM_POOL_SCAN_TIMES = {(9, 30), (12, 30), (15, 0)}
 _kiwoom_pool_scan_state = {"date": "", "done": set(), "retry_at": None, "retry_label": None}
 
@@ -2099,6 +2155,12 @@ async def on_ready():
         print("✅ [시스템] 리나등록 수동매수 트레일링 추적 (1분 주기) 가동 성공!")
     except Exception as e: print(f"⚠️ [에러] 리나등록 추적 스케줄러: {e}")
 
+    try:
+        if not three_month_leader_watch.is_running():
+            three_month_leader_watch.start()
+        print("✅ [시스템] 3개월수급 당일주도주 파이썬판 (09:00~10:00, 3분 주기) 가동 성공! (관찰 전용)")
+    except Exception as e: print(f"⚠️ [에러] 3개월수급 스케줄러: {e}")
+
 def _fetch_sbo2_status_sync(api, positions: dict):
     """!상태 — 보유종목 기준 주문가능금액+시세 조회 (동기, to_thread로 실행)."""
     psbl = 0
@@ -2242,6 +2304,26 @@ async def on_message(message):
                     "💤 쏠림 지수 스냅샷이 없거나 15분 이상 오래됐어 (장 시작 "
                     "직후이거나 cron 미실행일 수 있음)."
                 )
+        return
+
+    # ── !3개월수급 (파이썬판 조건검색 수동 확인, 2026-10-06) ──────────
+    #   시간 제한 없이 즉시 실행 — 장외엔 마지막 시세 기준이라 참고용.
+    if message.content.startswith("!3개월수급"):
+        async with message.channel.typing():
+            try:
+                import three_month_leader as tml
+                universe, results = await asyncio.to_thread(_tml_scan_sync)
+                lines = [f"🧪 **3개월수급 당일주도주 (파이썬판)** — 일봉기준 {universe['latest_db_date']}",
+                         f"   B·E 통과 후보 {len(universe['items'])}개 / 검사 {universe['scanned']}종목"]
+                passed = [r for r in results if r["passed"]]
+                lines += [tml.format_hit(r) for r in passed] or ["   지금 전 조건 통과 종목 없음"]
+                near = [r for r in results if not r["passed"]][:8]
+                if near:
+                    lines.append("\n**근접 후보 (탈락 조건)**")
+                    lines += [f"   {r['name']}({r['code']}) {r['chg']:+.1f}% — {', '.join(r['fails'])}" for r in near]
+                await send_safe_message(message.channel, "\n".join(lines))
+            except Exception as e:
+                await send_safe_message(message.channel, f"❌ 3개월수급 조회 오류: {e}")
         return
 
     # ── !모멘텀 (AI 모멘텀 스캐너 픽 이력 + 적중률 확인용, 2026-07-09) ──
