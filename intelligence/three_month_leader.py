@@ -103,22 +103,28 @@ def build_universe(db_path: str = THEME_DB, today: str = None) -> dict:
             """, (dates[-1], dates[0])):
                 by_name.setdefault(name, []).append((d, c, v, tv))
         items, scanned = [], 0
+        # ★ 후보 0개일 때 원인을 바로 알 수 있게 탈락 사유를 센다
+        skip = {"일봉없음": 0, "기록부족(119일 미만)": 0, "최신일 누락": 0, "E탈락": 0, "B탈락": 0}
         for name, code in name_code.items():
             rows = by_name.get(name, [])[:NEED_ROWS]
-            if len(rows) < NEED_ROWS or rows[0][0] != latest:
-                continue
+            if not rows:
+                skip["일봉없음"] += 1; continue
+            if len(rows) < NEED_ROWS:
+                skip["기록부족(119일 미만)"] += 1; continue
+            if rows[0][0] != latest:
+                skip["최신일 누락"] += 1; continue
             scanned += 1
             vals = [_value(c, v, tv) for _, c, v, tv in rows]
 
             # E: DB index 59~118 전부 0 ~ 300억 (60회 이상)
             e_vals = vals[E_OFFSET - 1:E_OFFSET - 1 + E_WINDOW]
             if sum(1 for val, _ in e_vals if 0 <= val <= E_MAX_VALUE) < E_MIN_COUNT:
-                continue
+                skip["E탈락"] += 1; continue
             # B: DB index 0~58 중 2,000억 이상 1회 이상(오늘분은 장중에 추가 판단)
             b_vals  = vals[:B_LOOKBACK - 1]
             b_hits  = [(rows[i][0], val) for i, (val, _) in enumerate(b_vals) if val >= B_MIN_VALUE]
             if not b_hits:
-                continue
+                skip["B탈락"] += 1; continue
             closes = [c for _, c, _, _ in rows]
             items.append({
                 "name":         name,
@@ -131,7 +137,9 @@ def build_universe(db_path: str = THEME_DB, today: str = None) -> dict:
                 "b_spike_value": max(v for _, v in b_hits),
                 "approx_value": any(a for _, a in vals),   # 근사 거래대금이 섞였는지
             })
-        return {"date": today, "latest_db_date": latest, "scanned": scanned, "items": items}
+        return {"date": today, "latest_db_date": latest, "scanned": scanned, "items": items,
+                "skip": skip, "window_days": len(dates),
+                "window_from": dates[-1] if dates else None}
     finally:
         conn.close()
 
@@ -198,6 +206,8 @@ if __name__ == "__main__":
     # 장 밖에서도 후보(B·E 통과) 목록은 확인 가능: python three_month_leader.py
     u = build_universe()
     print(f"기준 {u['date']} | DB 최신 {u['latest_db_date']} | 검사 {u['scanned']}종목 → 후보 {len(u['items'])}개")
+    print(f"   일봉 창: {u['window_from']} ~ {u['latest_db_date']} ({u['window_days']}거래일, 필요 {NEED_ROWS})")
+    print("   탈락 사유: " + ", ".join(f"{k} {v}" for k, v in u["skip"].items()))
     for it in u["items"]:
         print(f"  {it['name']}({it['code']}) 스파이크 {it['b_spike_date']} "
               f"{it['b_spike_value']/1e8:,.0f}억{' (근사)' if it['approx_value'] else ''}")
