@@ -90,18 +90,22 @@ def build_universe(db_path: str = THEME_DB, today: str = None) -> dict:
             "SELECT MAX(date) FROM kr_stock_daily_data WHERE date < ?", (today,)
         ).fetchone()[0]
         # 종목마다 쿼리하면 (stock_name 인덱스가 없어) 테이블을 종목 수만큼 훑음 —
-        # 필요한 기간(최근 119거래일)을 한 번에 읽어 파이썬에서 묶는다.
-        dates = [r[0] for r in conn.execute(
-            "SELECT DISTINCT date FROM kr_stock_daily_data WHERE date < ? "
-            "ORDER BY date DESC LIMIT ?", (today, NEED_ROWS))]
+        # 넉넉한 달력 구간을 한 번에 읽고, 종목별로 "자기 기록의 최근 119행"을 쓴다.
+        # ★ 2026-10-06: 처음엔 전 종목 합친 DISTINCT 날짜 119개로 창을 잡았는데,
+        #   재수집 안 된 일부 종목에 남은 공휴일 가짜행 날짜까지 거래일로 세는 바람에
+        #   창이 실제 115거래일로 좁아져 정상 종목이 전부 "기록부족"이 됐음.
         by_name: dict = {}
-        if dates:
+        dates = []
+        if latest:
+            since = (datetime.date.fromisoformat(latest)
+                     - datetime.timedelta(days=NEED_ROWS * 2 + 30)).isoformat()
             for name, d, c, v, tv in conn.execute("""
                 SELECT stock_name, date, close_price, volume, trade_value
-                FROM kr_stock_daily_data WHERE date BETWEEN ? AND ?
+                FROM kr_stock_daily_data WHERE date >= ? AND date < ?
                 ORDER BY stock_name, date DESC
-            """, (dates[-1], dates[0])):
+            """, (since, today)):
                 by_name.setdefault(name, []).append((d, c, v, tv))
+            dates = [since, latest]
         items, scanned = [], 0
         # ★ 후보 0개일 때 원인을 바로 알 수 있게 탈락 사유를 센다
         skip = {"일봉없음": 0, "기록부족(119일 미만)": 0, "최신일 누락": 0, "E탈락": 0, "B탈락": 0}
@@ -138,8 +142,7 @@ def build_universe(db_path: str = THEME_DB, today: str = None) -> dict:
                 "approx_value": any(a for _, a in vals),   # 근사 거래대금이 섞였는지
             })
         return {"date": today, "latest_db_date": latest, "scanned": scanned, "items": items,
-                "skip": skip, "window_days": len(dates),
-                "window_from": dates[-1] if dates else None}
+                "skip": skip, "window_from": dates[0] if dates else None}
     finally:
         conn.close()
 
@@ -206,7 +209,7 @@ if __name__ == "__main__":
     # 장 밖에서도 후보(B·E 통과) 목록은 확인 가능: python three_month_leader.py
     u = build_universe()
     print(f"기준 {u['date']} | DB 최신 {u['latest_db_date']} | 검사 {u['scanned']}종목 → 후보 {len(u['items'])}개")
-    print(f"   일봉 창: {u['window_from']} ~ {u['latest_db_date']} ({u['window_days']}거래일, 필요 {NEED_ROWS})")
+    print(f"   조회 구간: {u['window_from']} ~ {u['latest_db_date']} (종목별 최근 {NEED_ROWS}거래일 사용)")
     print("   탈락 사유: " + ", ".join(f"{k} {v}" for k, v in u["skip"].items()))
     for it in u["items"]:
         print(f"  {it['name']}({it['code']}) 스파이크 {it['b_spike_date']} "

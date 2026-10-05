@@ -33,6 +33,10 @@ def build_db():
         con.execute("INSERT INTO kr_stock_daily_data VALUES (?,?,?,?,?)", (day, "좋은종목", 10000, 1_000_000, good))
         con.execute("INSERT INTO kr_stock_daily_data VALUES (?,?,?,?,?)", (day, "시끄러운종목", 10000, 1_000_000, noisy))
         con.execute("INSERT INTO kr_stock_daily_data VALUES (?,?,?,?,?)", (day, "스파이크없음", 10000, 1_000_000, None))
+    # 재수집 안 된 다른 종목에 남은 공휴일 가짜행(전 종목 DISTINCT 날짜를 늘리는 원인)
+    for k in range(1, 6):
+        con.execute("INSERT INTO kr_stock_daily_data VALUES (?,?,?,?,?)",
+                    ((TODAY - datetime.timedelta(days=7 * k + 2)).isoformat(), "유령종목", 1, 1, None))  # 토요일
     con.commit(); con.close()
     return db
 
