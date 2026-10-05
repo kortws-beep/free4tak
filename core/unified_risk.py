@@ -2,7 +2,7 @@
 unified_risk.py — 영암9 통합 리스크 매니저
 ================================================================
 [역할]
-  - 세 봇(nbot/sbot/cbot) 합산 손실 한도 관리
+  - 세 봇(daybot/sbot/cbot) 합산 손실 한도 관리
   - 리스크 레벨 자동 산출 (normal / warning / danger)
   - 전봇 긴급중단 플래그 관리
   - 각 봇 루프에서 주기적으로 호출
@@ -155,7 +155,7 @@ def _notify_risk(state: dict):
         msg = (
             f"⚠️ 리스크 경고\n"
             f"당일 손실: {loss:,.0f}원 / 한도: {limit:,.0f}원 ({ratio:.0f}%)\n"
-            f"nbot: {state.get('nbot_loss_krw',0):,.0f}원 | "
+            f"daybot: {state.get('daybot_loss_krw',0):,.0f}원 | "
             f"sbot: {state.get('sbot_loss_krw',0):,.0f}원 | "
             f"cbot: {state.get('cbot_loss_krw',0):,.0f}원"
         )
@@ -225,7 +225,7 @@ if __name__ == "__main__":
 한도       : {s.get('daily_loss_limit',0):,.0f}원
 여유       : {s.get('loss_remain',0):,.0f}원
 ━━━━━━━━━━━━━━━━━━━━━━━
-nbot 손실  : {s.get('nbot_loss_krw',0):,.0f}원
+daybot 손실: {s.get('daybot_loss_krw',0):,.0f}원
 sbot 손실  : {s.get('sbot_loss_krw',0):,.0f}원
 cbot 손실  : {s.get('cbot_loss_krw',0):,.0f}원
 ━━━━━━━━━━━━━━━━━━━━━━━

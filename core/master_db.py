@@ -118,6 +118,11 @@ def init_db(db_path: str = MASTER_DB):
             updated_at      TEXT    DEFAULT ''
         )
     """)
+    # ★ 2026-10-06: daybot 손실 컬럼 추가(기존 DB 안전 마이그레이션)
+    try:
+        conn.execute("ALTER TABLE master_risk ADD COLUMN daybot_loss_krw REAL DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass
     # 초기 레코드 (없으면 삽입)
     conn.execute("""
         INSERT OR IGNORE INTO master_risk (id, date)
@@ -324,7 +329,6 @@ def sync_positions_from_state(db_path: str = MASTER_DB):
         from common_utils import read_state
 
         bot_state_map = {
-            "nbot": ("bot_state.json",  "positions_detail"),
             "sbot": ("sbot_state.json", "positions_detail"),
             "cbot": ("cbot_state.json", "positions_detail"),
         }
@@ -379,8 +383,10 @@ def update_risk(db_path: str = MASTER_DB) -> dict:
             GROUP BY bot_type
         """, (today,)).fetchall()
 
-        loss_map   = {"nbot": 0, "sbot": 0, "cbot": 0}
-        profit_map = {"nbot": 0, "sbot": 0, "cbot": 0}
+        # ★ 2026-10-06: 폐기된 nbot 대신 daybot 집계 — 그동안 daybot 손실이
+        #   통합 손실한도에 아예 안 들어갔음
+        loss_map   = {"daybot": 0, "sbot": 0, "cbot": 0}
+        profit_map = {"daybot": 0, "sbot": 0, "cbot": 0}
         for bot, loss, profit in rows:
             if bot in loss_map:
                 loss_map[bot]   = abs(loss or 0)
@@ -396,6 +402,15 @@ def update_risk(db_path: str = MASTER_DB) -> dict:
         limit     = row[0] if row else 50000
         paused    = row[1] if row else 0
 
+        # 날짜 바뀌면 긴급중단 해제 (자정 리셋)
+        # ★ 2026-10-06: 리스크 레벨 산출보다 먼저 — 기존엔 해제 전 값으로 레벨을
+        #   계산해 손실이 없어도 "danger"로 저장됐음
+        existing = conn.execute(
+            "SELECT date FROM master_risk WHERE id=1"
+        ).fetchone()
+        if existing and existing[0] != today:
+            paused = 0
+
         # 리스크 레벨 산출
         if paused:
             risk_level = "danger"
@@ -406,17 +421,12 @@ def update_risk(db_path: str = MASTER_DB) -> dict:
         else:
             risk_level = "normal"
 
-        # 날짜 바뀌면 손실 초기화 (자정 리셋)
-        existing = conn.execute(
-            "SELECT date FROM master_risk WHERE id=1"
-        ).fetchone()
-        if existing and existing[0] != today:
-            paused = 0  # 날짜 바뀌면 긴급중단 해제
+
 
         conn.execute("""
             UPDATE master_risk SET
                 date             = ?,
-                nbot_loss_krw    = ?,
+                daybot_loss_krw  = ?,
                 sbot_loss_krw    = ?,
                 cbot_loss_krw    = ?,
                 total_loss_krw   = ?,
@@ -427,7 +437,7 @@ def update_risk(db_path: str = MASTER_DB) -> dict:
             WHERE id = 1
         """, (
             today,
-            loss_map["nbot"], loss_map["sbot"], loss_map["cbot"],
+            loss_map["daybot"], loss_map["sbot"], loss_map["cbot"],
             total_loss, total_profit,
             risk_level, paused,
             datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -438,7 +448,7 @@ def update_risk(db_path: str = MASTER_DB) -> dict:
             "date":            today,
             "total_loss_krw":  total_loss,
             "total_profit_krw": total_profit,
-            "nbot_loss_krw":   loss_map["nbot"],
+            "daybot_loss_krw": loss_map["daybot"],
             "sbot_loss_krw":   loss_map["sbot"],
             "cbot_loss_krw":   loss_map["cbot"],
             "risk_level":      risk_level,
@@ -459,7 +469,7 @@ def get_risk_state(db_path: str = MASTER_DB) -> dict:
         conn.execute("PRAGMA query_only=ON")
         row = conn.execute("""
             SELECT date, total_loss_krw, total_profit_krw,
-                   nbot_loss_krw, sbot_loss_krw, cbot_loss_krw,
+                   daybot_loss_krw, sbot_loss_krw, cbot_loss_krw,
                    risk_level, paused_all, daily_loss_limit
             FROM master_risk WHERE id=1
         """).fetchone()
@@ -470,7 +480,7 @@ def get_risk_state(db_path: str = MASTER_DB) -> dict:
             "date":             row[0],
             "total_loss_krw":   row[1],
             "total_profit_krw": row[2],
-            "nbot_loss_krw":    row[3],
+            "daybot_loss_krw":  row[3],
             "sbot_loss_krw":    row[4],
             "cbot_loss_krw":    row[5],
             "risk_level":       row[6],
@@ -482,6 +492,14 @@ def get_risk_state(db_path: str = MASTER_DB) -> dict:
         return {}
 
 
+def is_paused_all(db_path: str = MASTER_DB) -> bool:
+    """★ 2026-10-06: 매매봇 루프용 — 키키 !리스크중단/대시보드의 전봇 긴급중단이
+    "오늘" 켜져 있는지. 날짜가 지난 플래그는 무시(update_risk의 자정 해제와 동일
+    의미). 조회 실패 시 False(긴급중단 확인 실패로 매매 전체를 막지는 않음)."""
+    st = get_risk_state(db_path)
+    return bool(st.get("paused_all")) and st.get("date") == datetime.date.today().strftime("%Y-%m-%d")
+
+
 def set_pause_all(paused: bool, db_path: str = MASTER_DB) -> bool:
     """
     전봇 긴급중단 ON/OFF.
@@ -491,15 +509,20 @@ def set_pause_all(paused: bool, db_path: str = MASTER_DB) -> bool:
     try:
         conn = sqlite3.connect(db_path, timeout=10)
         conn.execute("PRAGMA journal_mode=WAL")
+        # ★ 2026-10-06: date도 오늘로 기록 — is_paused_all()이 "오늘 켠 중단"만
+        #   유효로 보기 때문(자정 자동해제는 update_risk가 불릴 때만 일어나서,
+        #   대시보드를 안 열면 어제 중단이 다음 날까지 남았음)
         conn.execute("""
             UPDATE master_risk SET
                 paused_all = ?,
                 risk_level = ?,
+                date       = ?,
                 updated_at = ?
             WHERE id = 1
         """, (
             1 if paused else 0,
             "danger" if paused else "normal",
+            datetime.date.today().strftime("%Y-%m-%d"),
             datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         ))
         conn.commit()

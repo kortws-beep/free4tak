@@ -129,9 +129,9 @@ HTML = """<!DOCTYPE html>
 <!-- 합산 손익 -->
 <div class="grid-3 section" id="summary-cards">
   <div class="card">
-    <div class="card-title">nbot 손익</div>
-    <div class="card-value" id="nbot-pnl">—</div>
-    <div class="card-sub" id="nbot-trade">—</div>
+    <div class="card-title">daybot 손익</div>
+    <div class="card-value" id="daybot-pnl">—</div>
+    <div class="card-sub" id="daybot-trade">—</div>
   </div>
   <div class="card">
     <div class="card-title">sbot 손익</div>
@@ -244,7 +244,7 @@ async function fetchData() {
 function updateSummary(data) {
   let total = 0;
   let totalTrades = 0, totalWins = 0;
-  ['nbot','sbot','cbot'].forEach(bot => {
+  ['daybot','sbot','cbot'].forEach(bot => {
     const d = data[bot] || {};
     const pnl = d.pnl || 0;
     total += pnl;
@@ -272,7 +272,7 @@ function updatePositions(data) {
     return;
   }
   tbody.innerHTML = data.map(p => {
-    const badge = {nbot:'badge-n',sbot:'badge-s',cbot:'badge-c'}[p.bot_type]||'badge-n';
+    const badge = {daybot:'badge-n',sbot:'badge-s',cbot:'badge-c'}[p.bot_type]||'badge-n';
     const pr = p.profit_rate || 0;
     const cls = pr >= 0 ? 'green' : 'red';
     return `<tr>

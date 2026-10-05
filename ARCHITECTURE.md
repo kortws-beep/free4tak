@@ -38,8 +38,10 @@ core/
 │                        → sbot, sbo2, cbot, dashboard 공유
 ├── account_sync.py      기동 시 실계좌↔DB 정합성 체크
 │                        → sbot, cbot 공유 (sbo2는 미사용, 자체 로직으로 매 루프 동기화)
-└── unified_risk.py      전봇 합산 손실한도/긴급중단 — dashboard 전용, 매매봇 자체 루프에선 미사용
-                          (각 봇은 daily_loss_count 등 자체 손실카운터를 따로 둠)
+└── unified_risk.py      전봇 합산 손실한도/긴급중단 — dashboard 화면/조작용
+                          (2026-10-06~ 긴급중단 플래그는 sbot/daybot/cbot이 루프마다
+                          master_db.is_paused_all()로 확인 — 신규매수만 멈춤, 손실집계는
+                          daybot/sbot/cbot 합산. 각 봇의 자체 손실카운터는 별도로 유지)
 
 interface/
 ├── notifier.py          디스코드 알림(재시도 강화) → sbot, cbot 공유 (sbo2는 자체 웹훅함수 사용)

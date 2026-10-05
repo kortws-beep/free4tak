@@ -1493,20 +1493,10 @@ class SBot:
             # ★ 2026-07-06: 기간(보유일수) 기반 강제청산 로직 제거 — 최근 장세에서
             #   ATR 손절/트레일링/목표가로 이미 충분히 관리되는 포지션을 보유일수만
             #   초과했다는 이유로 손실 구간에서 강제로 털어버리는 부작용이 반복돼
-            #   ATR 기반 판단으로만 가기로 함 (사용자 결정). buy_tag/is_miner는
-            #   아래 200일선 이탈 청산에서 계속 쓰이므로 유지.
-            buy_tag   = self.buy_context.get(code, {}).get("buy_tag", "")
-            is_miner  = (buy_tag == "minervini")
-            # ★ 미너비니 종목: 200일선 이탈 시 즉시 청산
-            if is_miner and ma20 > 0:
-                cur_price = float(mdata.get("stck_prpr", 0))
-                ma60 = float(mdata.get("ma60", 0) or 0)
-                if ma60 > 0 and cur_price < ma60 * 0.97:
-                    entry = pos["entry_price"]
-                    rate  = (cur_price - entry) / entry if entry else 0
-                    self._do_sell(code, pos["qty"],
-                                  f"미너비니200일이탈({rate:+.2%})", cur_price)
-                    print(f"📉 {code} 200일선 이탈 → 미너비니 청산 ({rate:+.2%})")
+            #   ATR 기반 판단으로만 가기로 함 (사용자 결정).
+            # ★ 2026-10-06: 미너비니 200일선 이탈 청산 블록 제거 — 미너비니 추천
+            #   자체가 폐기됐고(buy_tag="minervini"가 더는 안 생김) 원래도 buy_tag를
+            #   저장하지 않아 한 번도 실행된 적 없는 코드였음.
 
     # ============================================================
     # 메인 루프
@@ -1716,6 +1706,17 @@ class SBot:
 
                 st              = _read_state()
                 self._is_paused = st.get("paused", False)
+                # ★ 2026-10-06: 키키 !리스크중단(전봇 긴급중단)을 sbot은 확인 안 해서
+                #   "전봇 중단"이라고 답해도 계속 매수했음 — 신규매수만 멈추고
+                #   보유종목 매도체크는 일시중단 분기에서 그대로 계속된다.
+                if not self._is_paused:
+                    try:
+                        from master_db import is_paused_all as _is_paused_all
+                        if _is_paused_all():
+                            self._is_paused = True
+                            print("🚨 [SWING] 통합 리스크 긴급중단 — 매수 중단(매도체크는 계속)")
+                    except Exception:
+                        pass
 
                 # ── 일일 초기화 ──────────────────────────
                 if today != self._sold_today_date:

@@ -693,7 +693,7 @@ async def cmd_all_status(ctx):
 
 
 async def cmd_restart_all(ctx):
-    """전체 봇 재시작 (kiki 제외) — sbot/cbot/telegram/sector.
+    """전체 봇 재시작 (kiki 제외) — RESTART_SERVICES 목록 기준.
     ★ 2026-09-29: sbot×sbo2 통합(대장 결정)으로 sbo2 의도적 정지 —
     전체재시작에 sbo2가 끼어있으면 되살아나버리므로 여기서만 제외
     (개별 !sbo2재시작/!sbo2정지/!sbo2시작 명령 자체는 전환 기간 중
@@ -1144,54 +1144,6 @@ async def cmd_total_performance(ctx, days: int = 30):
 
 
 
-async def cmd_event(ctx):
-    """텔레그램 빅 이벤트 현황 조회"""
-    try:
-        import sqlite3, os
-        db = os.path.join('/home/free4tak/k-bot/stock_bot/intelligence', 'telegram_events.db')
-        if not os.path.exists(db):
-            await ctx.send("⚠️ 텔레그램 이벤트 DB 없음")
-            return
-
-        conn = sqlite3.connect(db, timeout=3)
-
-        # 활성 이벤트 보너스
-        bonus_rows = conn.execute("""
-            SELECT theme, bonus_score, reason, expires_at
-            FROM event_bonus
-            WHERE expires_at > datetime('now','localtime')
-            ORDER BY bonus_score DESC
-        """).fetchall()
-
-        # 최근 이벤트 5건
-        recent_rows = conn.execute("""
-            SELECT channel, keywords, themes, score, created_at
-            FROM telegram_events
-            ORDER BY id DESC LIMIT 5
-        """).fetchall()
-        conn.close()
-
-        msg = "🚨 **텔레그램 빅 이벤트 현황**\n━━━━━━━━━━━━━━━━━━━━\n"
-
-        if bonus_rows:
-            msg += "**🔥 활성 가산점 (2시간 유효)**\n"
-            for theme, score, reason, exp in bonus_rows:
-                msg += f"  +{score}점 | {theme} | {reason[:30]}\n"
-        else:
-            msg += "활성 이벤트 없음\n"
-
-        msg += "\n**📰 최근 감지 이벤트**\n"
-        if recent_rows:
-            for ch, kw, th, sc, ts in recent_rows:
-                msg += f"  [{ts[11:16]}] {ch} | {kw} | +{sc}점\n"
-        else:
-            msg += "최근 이벤트 없음\n"
-
-        await ctx.send(msg)
-    except Exception as e:
-        await ctx.send(f"❌ 오류: {e}")
-
-
 async def cmd_risk(ctx):
     """통합 리스크 상태 조회"""
     try:
@@ -1222,7 +1174,7 @@ async def cmd_risk(ctx):
             f"당일 수익: {profit:,.0f}원\n"
             f"순손익:   {profit-loss:+,.0f}원\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"sbo2: {state.get('sbo2_loss_krw',0):,.0f}원\n"
+            f"daybot: {state.get('daybot_loss_krw',0):,.0f}원\n"
             f"sbot: {state.get('sbot_loss_krw',0):,.0f}원\n"
             f"cbot: {state.get('cbot_loss_krw',0):,.0f}원\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
@@ -1494,7 +1446,7 @@ async def cmd_help(ctx):
 
 **🌐 공통**
   `!전체상태`  `!전체재시작`  `!브리핑`  `!저녁브리핑`
-  `!테마`  `!뉴스`  `!이벤트`
+  `!테마`  `!뉴스`
   `!관심 [코드]`  `!관심HTS`
   `!리스크`  `!리스크중단`  `!리스크재개`
   `!h 종목명/코드` — 홀드(손절체크만 제외, sbot/sbo2/cbot 자동판별, 재시작해도 유지)

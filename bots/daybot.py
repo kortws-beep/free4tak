@@ -1205,6 +1205,15 @@ class DayBot:
                 # 4-1) 키키 !daybot정지/!daybot시작 반영 — sbot과 동일 패턴:
                 #      정지돼도 보유종목 매도체크는 계속 돌고, 신규매수(9번)만 멈춘다.
                 self._is_paused = _read_state().get("paused", False)
+                # ★ 2026-10-06: 전봇 긴급중단(키키 !리스크중단)도 반영 — 기존엔 cbot만
+                #   확인했음. 신규매수(9번)만 멈추고 매도감시는 계속.
+                if not self._is_paused:
+                    try:
+                        from master_db import is_paused_all as _is_paused_all
+                        if _is_paused_all():
+                            self._is_paused = True
+                    except Exception:
+                        pass
 
                 # 5) 일일 초기화 — 새 날이면 당일 관련 플래그 리셋.
                 #    ★ 이 지점에 도달했다는 것 자체가 "오늘은 주말도 휴장일도

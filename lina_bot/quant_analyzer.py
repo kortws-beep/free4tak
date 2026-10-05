@@ -5,7 +5,6 @@ import yfinance as yf
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH_THEME_FINANCE = os.path.join(BASE_DIR, "kr_theme_finance.db")
-DB_PATH_TELEGRAM = r"C:\lina_bot\intelligence\telegram_events.db"
 DB_PATH_MAPPING = os.path.join(BASE_DIR, "us_kr_mapping.db")
 
 # 💡 대장의 ETF + 개별주 확장 감시 리스트 (2번+1번 아이디어 융합)
@@ -62,15 +61,10 @@ def get_hybrid_top_picks():
         except Exception:
             pass
 
-    # ── 텔레그램 속보 데이터 확보 (Stage 3 및 크로스체크용) ──
-    try:
-        tele_conn = sqlite3.connect(DB_PATH_TELEGRAM)
-        tele_cursor = tele_conn.cursor()
-        tele_cursor.execute("SELECT message FROM telegram_events ORDER BY id DESC LIMIT 50")
-        combined_text = " ".join([msg[0] for msg in tele_cursor.fetchall() if msg[0]])
-        tele_conn.close()
-    except Exception:
-        combined_text = ""
+    # ★ 2026-10-06: 텔레그램 속보 언급수 크로스체크 제거 — DB 경로가 윈도우
+    #   경로(C:\\lina_bot\\...)라 서버에선 항상 실패해 빈 문자열이었고, 텔레그램도
+    #   10-03에 폐기됨. 아래 mentions 계산은 그대로 두되 항상 0(기존과 동일 결과).
+    combined_text = ""
 
     report_heading = ""
     final_picks = []

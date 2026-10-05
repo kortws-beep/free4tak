@@ -115,7 +115,6 @@ from kiki_cmd import (
     cmd_total_performance,
     cmd_news,
     cmd_risk, cmd_risk_pause, cmd_risk_resume,
-    cmd_event,
     cmd_sell_auto,
     _fetch_kiwoom_watchlist_ws, _sync_watchlist_to_state,
 )
@@ -539,9 +538,6 @@ class AIAssistant:
         sbot_state  = read_state("sbot")
         sbot_status = sbot_state.get("last_status") or {}
 
-        # 종가봇
-        ebot_state  = {}
-
         # 오늘 실현손익
         today_pnl = get_today_realized_all()
         total_pnl = sum(today_pnl.values())
@@ -885,7 +881,8 @@ async def execute_command(ctx, cmd: str):
 
     # ── 업종/테마 ───────────────────────────────────────────
     elif cmd == "!이벤트":
-        await cmd_event(ctx)
+        # ★ 2026-10-06: 텔레그램 이벤트 DB 기반 명령 — 텔레그램 폐기로 제거
+        await ctx.send("⛔ !이벤트는 텔레그램 폐기(10-03)로 없어졌어요.")
     elif cmd == "!리스크":
         await cmd_risk(ctx)
     elif cmd == "!리스크중단":

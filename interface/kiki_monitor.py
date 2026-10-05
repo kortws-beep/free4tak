@@ -58,7 +58,6 @@ _send_long         = None    # callable: (ch, msg) → None
 _default_model     = "claude-haiku-4-5-20251001"
 
 # DB 경로 (kiki.py와 동일)
-TRADE_HIST_DB = "trade_history.db"
 
 # 알림 중복 방지 캐시
 _alert_cache: dict = {}
@@ -129,7 +128,8 @@ def _gather_bot_context() -> dict:
         "today_realized": _get_today_realized(),
         "bots":           {},
     }
-    for bot_name in ("nbot", "sbot", "cbot"):
+    # ★ 2026-10-06: 폐기된 nbot 대신 sbot에 시장상태 정보를 붙임
+    for bot_name in ("sbot", "cbot"):
         state  = _read_state(bot_name)
         status = state.get("last_status", {})
         if status:
@@ -139,7 +139,7 @@ def _gather_bot_context() -> dict:
                 "total_profit": status.get("total_profit", 0),
                 "daily_loss":   status.get("daily_loss", 0),
             }
-            if bot_name == "nbot":
+            if bot_name == "sbot":
                 ctx["bots"][bot_name]["market_status"] = status.get("market_status", "normal")
                 ctx["bots"][bot_name]["kospi_rate"]    = status.get("market_rate", 0)
                 ctx["bots"][bot_name]["score_enter"]   = state.get("score_enter", 55)
@@ -218,143 +218,9 @@ async def _ai_proactive_message(
 # 백그라운드 태스크
 # ============================================================
 
-async def status_listener():
-    """10초마다 손익 변동 감지 — 단타/스윙/코인"""
-    last_stock_profit = None
-    last_swing_profit = None
-    last_coin_profit  = None
-    # ★ 헬스체크: 마지막 정상 확인 시각
-    last_seen    = {"nbot": None, "sbot": None, "cbot": None}
-    alerted      = {"nbot": False, "sbot": False, "cbot": False}
-    restarted    = {"nbot": False, "sbot": False, "cbot": False}
-    restart_time = {"nbot": 0.0,  "sbot": 0.0,  "cbot": 0.0}
-    BOT_LABELS   = {"nbot": "📈 단타봇", "sbot": "📊 스윙봇", "cbot": "🪙 코인봇"}
-    BOT_SERVICES = {"nbot": "yeongam9-nbot", "sbot": "yeongam9-sbot", "cbot": "yeongam9-cbot"}
-
-    def _is_market_hours():
-        n = now_kst()
-        return n.weekday() < 5 and 8 <= n.hour < 16
-
-    async def _auto_restart(bot_name: str, label: str, ch):
-        """봇 자동 재시작 — 10분 이상 무응답 시"""
-        import asyncio, time as _time
-        # 재시작 후 5분 이내 재시작 방지
-        if _time.time() - restart_time[bot_name] < 300:
-            return
-        restart_time[bot_name] = _time.time()
-        restarted[bot_name] = True
-        await ch.send(f"🔄 {label} 자동 재시작 시도 중...")
-        try:
-            svc = BOT_SERVICES[bot_name]
-            ret = await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: __import__('subprocess').run(
-                    ['sudo', 'systemctl', 'restart', svc],
-                    capture_output=True, timeout=30
-                )
-            )
-            if ret.returncode == 0:
-                await ch.send(f"✅ {label} 재시작 완료! 30초 후 상태 확인할게요.")
-                await asyncio.sleep(30)
-                # 재시작 후 상태 확인
-                st2 = _read_state(bot_name)
-                if st2.get("last_update"):
-                    await ch.send(f"✅ {label} 정상 복구!")
-                    alerted[bot_name] = False
-                    restarted[bot_name] = False
-                else:
-                    await ch.send(f"❌ {label} 재시작 후에도 응답 없음! 수동 확인 필요")
-            else:
-                err = ret.stderr.decode()[:100]
-                await ch.send(f"❌ {label} 재시작 실패: {err}")
-        except Exception as e:
-            await ch.send(f"❌ {label} 재시작 오류: {e}")
-
-
-    while True:
-        await asyncio.sleep(10)
-        try:
-            ch = _bot.get_channel(_channel_id)
-            if not ch:
-                continue
-
-            # ── 헬스체크 ────────────────────────────────────
-            for bot_name, label in BOT_LABELS.items():
-                if bot_name != "cbot" and not _is_market_hours():
-                    alerted[bot_name] = False
-                    continue
-                st = _read_state(bot_name)
-                last_upd = st.get("last_update", "")
-                if last_upd:
-                    try:
-                        now_t = now_kst()
-                        upd_t = now_t.replace(
-                            hour=int(last_upd[:2]),
-                            minute=int(last_upd[3:5]),
-                            second=int(last_upd[6:8]),
-                        )
-                        diff_sec = (now_t - upd_t).total_seconds()
-                        if diff_sec > 600:  # 10분 이상 → 자동 재시작
-                            await _auto_restart(bot_name, label, ch)
-                        elif diff_sec > 300:  # 5분 이상 → 알림만
-                            if not alerted[bot_name]:
-                                alerted[bot_name] = True
-                                await ch.send(
-                                    "🚨 **" + label + " 응답없음!** "
-                                    + "(마지막:" + last_upd + ", "
-                                    + str(int(diff_sec//60)) + "분경과) "
-                                    + "10분 경과시 자동재시작"
-                                )
-                        else:
-                            alerted[bot_name] = False
-                            restarted[bot_name] = False
-                    except Exception:
-                        pass
-
-            # 단타봇
-            state  = _read_state("nbot")
-            status = state.get("last_status")
-            if status:
-                profit = status.get("total_profit", 0)
-                if (last_stock_profit is not None
-                        and abs(profit - last_stock_profit) > 5000):
-                    diff = profit - last_stock_profit
-                    await ch.send(
-                        f"💹 [단타] 손익 변동: {last_stock_profit:+,}원 → "
-                        f"{profit:+,}원 ({diff:+,}원)"
-                    )
-                last_stock_profit = profit
-
-            # 스윙봇
-            sstate  = _read_state("sbot")
-            sstatus = sstate.get("last_status")
-            if sstatus:
-                sprofit = sstatus.get("total_profit", 0)
-                if (last_swing_profit is not None
-                        and abs(sprofit - last_swing_profit) > 10000):
-                    diff = sprofit - last_swing_profit
-                    await ch.send(
-                        f"💹 [스윙] 손익 변동: {last_swing_profit:+,}원 → "
-                        f"{sprofit:+,}원 ({diff:+,}원)"
-                    )
-                last_swing_profit = sprofit
-
-            # 코인봇
-            cstate  = _read_state("cbot")
-            cstatus = cstate.get("last_status")
-            if cstatus:
-                cprofit = cstatus.get("total_profit", 0)
-                if (last_coin_profit is not None
-                        and abs(cprofit - last_coin_profit) > 3000):
-                    diff = cprofit - last_coin_profit
-                    await ch.send(
-                        f"🪙 [코인] 손익 변동: {last_coin_profit:+,}원 → "
-                        f"{cprofit:+,}원 ({diff:+,}원)"
-                    )
-                last_coin_profit = cprofit
-
-        except Exception:
-            pass
+# ★ 2026-10-06: 여기 있던 status_listener(헬스체크+자동재시작 포함)는 kiki.py의
+#   같은 이름 함수에 가려져 한 번도 실행된 적이 없어 제거(봇별 하트비트
+#   워치독이 재시작을 담당). 손익변동 알림은 kiki.py의 status_listener가 담당.
 
 
 # ─────────────────────────────────────────────────────────────
@@ -372,14 +238,14 @@ async def proactive_danger_watcher():
             ctx     = _gather_bot_context()
             dangers = []
 
-            # ── 1. 단타봇 연속 손절 ────────────────────────
-            nbot = ctx["bots"].get("nbot", {})
-            if nbot.get("daily_loss", 0) >= 2:
-                key = f"nbot_loss_{today_str()}_{nbot['daily_loss']}"
+            # ── 1. 스윙봇 연속 손절 ────────────────────────
+            sbot = ctx["bots"].get("sbot", {})
+            if sbot.get("daily_loss", 0) >= 2:
+                key = f"sbot_loss_{today_str()}_{sbot['daily_loss']}"
                 if _can_alert(key, ttl_minutes=120):
                     dangers.append({
-                        "type": "nbot_consecutive_loss",
-                        "data": f"단타봇 당일 손절 {nbot['daily_loss']}회",
+                        "type": "sbot_consecutive_loss",
+                        "data": f"스윙봇 당일 손절 {sbot['daily_loss']}회",
                     })
 
             # ── 2. 코인봇 BTC 급락 ─────────────────────────
@@ -470,7 +336,7 @@ async def proactive_watch_monitor():
             else:
                 win_rate_n = 100
             if win_rate_n < 35:
-                key = f"low_winrate_nbot_{today_str()}"
+                key = f"low_winrate_sbot_{today_str()}"
                 if _can_alert(key, ttl_minutes=180):
                     watches.append({
                         "type": "low_winrate",
@@ -489,17 +355,7 @@ async def proactive_watch_monitor():
                         "data": f"공포탐욕 {fg} (극단공포)",
                     })
 
-            # ── 4. 정오 이후 매수 0건 ──────────────────────
-            now_h = now_kst().hour
-            if 12 <= now_h <= 14:
-                nbot = ctx["bots"].get("nbot", {})
-                if nbot.get("positions", 0) == 0 and not nbot.get("paused"):
-                    key = f"no_buy_today_{today_str()}"
-                    if _can_alert(key, ttl_minutes=240):
-                        watches.append({
-                            "type": "no_buy",
-                            "data": "단타봇 오늘 매수 0건 (점심 이후)",
-                        })
+            # ★ 2026-10-06: "4. 정오 이후 매수 0건"(폐기된 nbot 기준) 제거
 
             if watches:
                 msg = await _ai_proactive_message(
@@ -552,8 +408,8 @@ async def proactive_insight_provider():
                 last_total_profit[bot_name] = cur
 
             # ── 2. 강세 업종 변화 ──────────────────────────
-            nbot_state = _read_state("nbot")
-            sectors    = nbot_state.get("active_sectors", [])
+            # ★ 2026-10-06: nbot 상태파일(폐기) 대신 sbot 상태 기준
+            sectors    = _read_state("sbot").get("active_sectors", [])
             if sectors:
                 key = f"sectors_{','.join(sectors)}_{today_str()}"
                 if _can_alert(key, ttl_minutes=180):
