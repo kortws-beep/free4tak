@@ -289,6 +289,7 @@ class DayBot:
 
         self._is_holiday      = False
         self._holiday_checked = ""
+        self._ws_paused       = False   # ★ 2026-10-06 — 주말/휴장일엔 웹소켓도 같이 쉼(아래 run() 참고)
         self._last_scan_ts    = 0.0
         self._last_manual_check_ts = 0.0
         self._is_paused       = False
@@ -990,7 +991,15 @@ class DayBot:
                 self._handle_pending_command(_read_state())
 
                 # 3) 주말
+                # ★ 2026-10-06 대장 지적 — 주말/휴장일에도 웹소켓(H0STCNI0/
+                #   H0STCNT0)은 __init__에서 한 번 start()된 채 메인루프와
+                #   무관하게 계속 돌아서, KIS 서버가 휴장일엔 연결을 끊어
+                #   버리니 "연결종료→5초후재연결" 스팸이 계속 찍히고 있었음.
+                #   메인루프가 쉬는 동안 웹소켓도 같이 멈췄다가, 정상 개장일로
+                #   돌아오면 다시 start()한다.
                 if is_weekend():
+                    if not self._ws_paused:
+                        self._ws.stop(); self._ws_paused = True
                     time.sleep(300); continue
 
                 # 4) 휴장일 (None-safe — 판단불가면 캐시 안 하고 다음 루프 재시도)
@@ -1000,7 +1009,15 @@ class DayBot:
                         self._is_holiday = not _open
                         self._holiday_checked = today
                 if self._is_holiday:
+                    if not self._ws_paused:
+                        self._ws.stop(); self._ws_paused = True
                     time.sleep(300); continue
+
+                # ★ 웹소켓 재개는 아래 6)번(세션시간 체크) 통과 시점에서만
+                #   한다 — 여기서 바로 재개하면 "주말/휴장은 아니지만 아직
+                #   세션 시작 전(예: 새벽 3시)"인 구간에서 재개→6)번 게이트
+                #   에 바로 걸려 재정지, 매 루프 start/stop이 반복되는
+                #   낭비가 생김.
 
                 # 4-1) 키키 !daybot정지/!daybot시작 반영 — sbot과 동일 패턴:
                 #      정지돼도 보유종목 매도체크는 계속 돌고, 신규매수(9번)만 멈춘다.
@@ -1023,8 +1040,16 @@ class DayBot:
                 # 6) 세션 외 시간 (19:50~다음날 08:00) — EOD 강제청산 없이
                 #    그냥 장외엔 감시를 쉰다(최대 3일 보유 허용이므로 매일
                 #    밤 억지로 정리할 필요가 없어짐, 2026-10-02 대장 지정).
+                #    ★ 2026-10-06 — 이 시간대도 웹소켓 같이 멈춤(위 주말/
+                #    휴장일과 동일 이유 — KIS가 장외에 연결을 끊어서 계속
+                #    재연결 스팸이 찍힘).
                 if not (SESSION_START <= now_t <= SESSION_END):
+                    if not self._ws_paused:
+                        self._ws.stop(); self._ws_paused = True
                     time.sleep(60); continue
+
+                if self._ws_paused:
+                    self._ws.start(); self._ws_paused = False
 
                 # 7) 미체결 주문 정리
                 self._check_pending_orders()
