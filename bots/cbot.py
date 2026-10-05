@@ -775,6 +775,15 @@ class CBot:
             #   무관하게 항상 복구하고, 만료 여부는 _is_rebuy_blocked()가
             #   타임스탬프로 알아서 판단(오래된 항목은 자동으로 무해).
             self.sold_today = state.get("sold_today", {})
+            # ★ 2026-10-06 — 쿨다운이 끝났거나 값이 None(익절매도/구버전 매수표식)인
+            #   키는 정리. sold_today가 자정에도 안 비워지는 구조라 이런 키가
+            #   영구히 남아, 그 코인은 수동매도 감지(`not in self.sold_today`)에서
+            #   평생 빠지고 있었음.
+            _now = time.time()
+            self.sold_today = {
+                m: ts for m, ts in self.sold_today.items()
+                if isinstance(ts, (int, float)) and _now - ts < REBUY_COOLDOWN_SEC
+            }
             if self.sold_today:
                 print(f"♻️ 매도이력 복구: {list(self.sold_today.keys())}")
 
@@ -795,9 +804,14 @@ class CBot:
             if saved_pos:
                 # 실제 잔고와 교차 검증
                 balances = self.get_balances()
+                # ★ 2026-10-06 — 잔고조회 실패(None)면 `coin in None`에서 TypeError가
+                #   나 peak_tracker(stage/고점) 복구가 통째로 날아갔음. 실패 시엔
+                #   저장된 상태를 그대로 믿고 복구 — 첫 루프의 잔고동기화가 바로잡는다.
+                if balances is None:
+                    print("⚠️ 재시작 시 잔고조회 실패 — 저장된 포지션 그대로 복구")
                 for market, pos in saved_pos.items():
                     coin = market.replace("KRW-", "")
-                    if coin in balances and balances[coin]["balance"] > 0.00001:
+                    if balances is None or (coin in balances and balances[coin]["balance"] > 0.00001):
                         self.positions[market]    = pos
                         self.peak_tracker[market] = saved_peak.get(market, {
                             "peak_rate": 0.0, "stage": 0,
@@ -1844,6 +1858,10 @@ class CBot:
                 # ★ 매수 직후 self.positions 즉시 반영
                 # 정확한 수량은 다음 루프에서 갱신되지만, 즉시 매도 체크 누락 방지
                 if not is_second:
+                    # ★ 2026-10-06 — 예전 매도 때 남은 키도 지움: 매수가 허용됐다는
+                    #   건 쿨다운이 이미 끝났다는 뜻이라 안전하고, 남겨두면 이번에
+                    #   산 코인을 수동으로 팔아도 감지가 안 됨(아래 주석 참고).
+                    self.sold_today.pop(market, None)
                     # ★ 2026-10-06 — 여기서 sold_today[market]=None을 등록하던
                     #   코드 제거(대장 지적, 리포트로 발견). _is_rebuy_blocked()
                     #   는 숫자(timestamp)가 아니면 어차피 "차단 안 됨"으로
@@ -1936,6 +1954,11 @@ class CBot:
                 #   직후~다음 포지션동기화 전)에 이 봇매도를 "수동매도"로
                 #   오탐해 중복 기록/알림을 낼 수 있어 반드시 등록 필요.
                 self.sold_today[market] = time.time() if profit_krw <= 0 else None
+                # ★ 2026-10-06 — 전량매도면 메모리 포지션도 바로 제거. 잔고조회
+                #   실패 루프에선 다음 동기화가 없어서, 남겨두면 같은 코인을
+                #   다시 손절/매도 시도했음.
+                if is_full_sell:
+                    self.positions.pop(market, None)
                 if _master_remove:
                     try:
                         _master_remove('cbot', market)
@@ -2430,7 +2453,18 @@ class CBot:
                     # ★ 2026-10-06 — 잔고조회 실패(None)시 기존 self.positions
                     #   그대로 유지, 이번 루프의 포지션동기화/수동매도감지만
                     #   건너뜀(일시적 API 오류를 "전량 수동매도"로 오탐 방지)
-                    print("⚠️ 잔고조회 실패 — 이번 루프 포지션동기화 스킵")
+                    # ★ 2026-10-06 — 동기화만 건너뛰고 손절/급락 체크는 계속한다
+                    #   (기존엔 continue로 매도체크까지 통째로 건너뛰어, 업비트 잔고
+                    #   API 장애 동안 손절이 멈췄음). 현재가는 시세 API로 따로 갱신.
+                    print("⚠️ 잔고조회 실패 — 포지션동기화 스킵, 기존 포지션으로 매도체크만")
+                    if self.positions:
+                        _px = self.get_current_price(list(self.positions.keys()))
+                        for _m, _p in self.positions.items():
+                            if _px.get(_m):
+                                _p["current"] = _px[_m]
+                        for market, pos in list(self.positions.items()):
+                            self._check_sell(market, pos)
+                        self._save_positions()
                     time.sleep(LOOP_SLEEP); continue
                 # ★ 수동매도 감지
                 # ★ 2026-08-15: 감지만 되고 DB에 전혀 기록되지 않던 문제 수정

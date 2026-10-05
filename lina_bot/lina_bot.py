@@ -1669,7 +1669,13 @@ async def daily_morning_report():
         return
 
     # STEP 1+2: 미장 스캔 + 수급 크롤러(둘 다 블로킹이라 스레드로 위임)
-    us_movers_summary, crawler_finance_context = await asyncio.to_thread(_build_morning_market_context_sync)
+    # ★ 2026-10-06 — try 밖이라 수급 크롤러가 한 번 예외를 내면 tasks.loop가
+    #   영구 정지(재시작 전까지 07:30 브리핑이 다시 안 옴) — 실패해도 빈 값으로 진행.
+    try:
+        us_movers_summary, crawler_finance_context = await asyncio.to_thread(_build_morning_market_context_sync)
+    except Exception as e:
+        print(f"⚠️ 장전 브리핑 데이터 수집 오류: {e}")
+        us_movers_summary, crawler_finance_context = "", "수급 데이터 수집 실패"
 
     # STEP 3: AI 융합 브리핑 (미장 + 수급)
     prompt = (
