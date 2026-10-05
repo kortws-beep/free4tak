@@ -379,6 +379,7 @@ class SBot:
         self._sold_today_date  = today_str()
         self._holiday_checked  = ""
         self._is_holiday       = False
+        self._ws_paused        = False  # ★ 2026-10-06 — 주말/휴장일/장외엔 웹소켓도 같이 쉼(daybot과 동일 패턴)
         self._is_paused        = False
 
         # ── 시장 상태 ─────────────────────────────────────
@@ -1662,7 +1663,16 @@ class SBot:
                 self._handle_pending_command(_read_state())
 
                 # ── 주말 ─────────────────────────────────
+                # ★ 2026-10-06 대장 지정 — daybot에서 먼저 발견/수정한 것과
+                #   동일 패턴 적용: self._ws가 __init__에서 한 번 start()된
+                #   뒤 메인루프의 주말/휴장/장외 판단과 무관하게 계속
+                #   재연결을 시도해서(KIS가 장외엔 연결을 끊음), 불필요한
+                #   "연결종료→재연결" 로그가 찍히고 있었음(실측: sbot도
+                #   가끔씩 끊겼다 재연결됨). 메인루프가 쉬는 동안 웹소켓도
+                #   같이 멈췄다가 정상 세션시간 복귀하면 재개한다.
                 if is_weekend():
+                    if self._ws and not self._ws_paused:
+                        self._ws.stop(); self._ws_paused = True
                     print(f"😴 [{now}] 주말 — 장 없음")
                     time.sleep(SLEEP_INTERVAL); continue
 
@@ -1682,6 +1692,8 @@ class SBot:
                         if self._is_holiday:
                             self._notify(f"🎌 오늘은 휴장일 — 봇 대기")
                 if self._is_holiday:
+                    if self._ws and not self._ws_paused:
+                        self._ws.stop(); self._ws_paused = True
                     print(f"🎌 [{now}] 휴장일 — 대기 중...")
                     time.sleep(300); continue
 
@@ -1691,8 +1703,19 @@ class SBot:
                 is_buy_ok   = BUY_START_TIME <= now_t <= BUY_END_TIME
 
                 if not is_sell_ok:
+                    # ★ 2026-10-06 — 웹소켓 재개는 여기(장외 게이트 통과
+                    #   시점)에서만 한다. 휴장 게이트 직후에 바로 재개하면
+                    #   "휴장은 아니지만 아직 장외(20시 이후)"인 구간에서
+                    #   재개→이 게이트에 바로 걸려 재정지, 매 루프
+                    #   start/stop이 반복되는 낭비가 생김(daybot에서 먼저
+                    #   확인된 패턴).
+                    if self._ws and not self._ws_paused:
+                        self._ws.stop(); self._ws_paused = True
                     print(f"😴 [{now}] 장외 대기 (20시 이후)...")
                     time.sleep(300); continue
+
+                if self._ws and self._ws_paused:
+                    self._ws.start(); self._ws_paused = False
 
                 print(f"\n📈 [SWING] {'정규장' if is_reg else ('매수/매도' if is_buy_ok else '장전/후 매도체크')} [{now}]")
 
