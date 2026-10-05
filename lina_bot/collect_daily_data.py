@@ -21,6 +21,7 @@ load_dotenv(find_dotenv(), override=True)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH  = os.path.join(BASE_DIR, "kr_theme_finance.db")
+CLOSE_HHMM = "1540"   # 이 시각 전 수집이면 오늘 봉(형성 중)은 저장 안 함
 _PROJECT_ROOT = os.path.dirname(BASE_DIR)
 for _p in (os.path.join(_PROJECT_ROOT, "core"), os.path.join(_PROJECT_ROOT, "interface"), os.path.join(_PROJECT_ROOT, "bots"), _PROJECT_ROOT):
     if _p not in sys.path:
@@ -114,7 +115,16 @@ def collect_stock(api: KisAPI, stock_name: str, code: str, days: int,
     반환: 저장된 행 수
     """
     # ── 1. 일봉 OHLC (종가/거래량) ──────────────────────────────
-    ohlc = api.get_daily_ohlc(code, days=days, end_date=end_date)
+    # ★ 2026-10-06: 최신구간 수집은 최소 6봉을 받는다(API 1회 호출로 동일) —
+    #   1봉만 받으면 정리 범위가 그 하루뿐이라 직전 휴장일 가짜행이 안 지워졌음.
+    fetch = days if end_date else max(days, 6)
+    ohlc = api.get_daily_ohlc(code, days=fetch, end_date=end_date)
+    # ★ 2026-10-06: 장 마감 전 수집이면 오늘 봉은 형성 중(장전엔 거래량 0,
+    #   예상가)이라 저장하지 않는다 — 저장되면 다음날 1일 수집이 덮어쓰지 못해
+    #   그날 실제 종가가 영영 빠졌음(10-06 08시대 수집 실사례).
+    now = datetime.today()
+    if not end_date and now.strftime("%H%M") < CLOSE_HHMM:
+        ohlc = [c for c in ohlc if c.get("date") != now.strftime("%Y-%m-%d")]
     if not ohlc:
         # 디버그: 원본 응답 확인
         import requests as _req, datetime as _dt
@@ -185,12 +195,13 @@ def collect_stock(api: KisAPI, stock_name: str, code: str, days: int,
             f"AND date NOT IN ({','.join('?' * len(dates))})",
             [stock_name, min(dates), max(dates), *dates],
         )
-        # 최신 봉 이후~오늘 전 사이의 행도 가짜(휴장일에 옛 코드가 전 거래일 데이터를
-        # 그날 날짜로 저장한 것 — 2026-10-05 대체공휴일 실사례). 최신구간 수집일 때만.
+        # 최신 봉 이후의 행도 가짜(휴장일에 옛 코드가 전 거래일 데이터를 그날 날짜로
+        # 저장한 것 — 2026-10-05 대체공휴일 실사례 / 장 마감 전에 저장된 오늘 봉).
+        # 최신구간 수집일 때만.
         if not end_date:
             conn.execute(
-                "DELETE FROM kr_stock_daily_data WHERE stock_name=? AND date > ? AND date < ?",
-                (stock_name, max(dates), today_str),
+                "DELETE FROM kr_stock_daily_data WHERE stock_name=? AND date > ?",
+                (stock_name, max(dates)),
             )
         conn.commit(); conn.close()
     return upsert_daily_data(rows)
