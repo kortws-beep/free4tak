@@ -74,6 +74,14 @@ def _is_trading_day() -> bool:
             _open = None
         if _open is None:
             print("⚠️ [리나] 휴장일 판단 실패 — 다음 호출 재시도")
+            # ★ 2026-10-06 — 캐시를 안 건드리면 날짜가 안 바뀌어서 "어제
+            #   (혹은 그 전 마지막 성공 시점)" 값이 그대로 남는데, 어제가
+            #   휴장일이었으면 오늘도 휴장으로 오판해 리포트/트레일링
+            #   감시가 통째로 꺼질 수 있었음(형제 Opus 리뷰로 발견).
+            #   판단 자체가 불가능한 상태라 "닫혔다"는 근거도 없으므로
+            #   보수적으로 "열려있다"로 간주 — 다음 호출에서 재시도되어
+            #   금방 정확한 값으로 갱신됨(캐시는 안 건드리므로 안전).
+            return True
         else:
             _TRADING_DAY_CACHE["is_open"] = _open
             _TRADING_DAY_CACHE["date"]    = today
@@ -81,6 +89,11 @@ def _is_trading_day() -> bool:
 
 # 🚨 리포트 전송할 디스코드 채널 ID 및 DB 경로
 REPORT_CHANNEL_ID = 1508487747508240525
+# ★ 2026-10-06 — on_message()가 message.author == client.user(봇 자기
+#   자신)만 걸러내고 있어서, 서버 멤버나 봇에게 DM 보낸 누구나 !상태
+#   (계좌 잔고/보유종목 노출)/!리나등록/!일정추가 등을 쓸 수 있었음
+#   (형제 Opus 리뷰로 발견). 대장 본인 디스코드 user ID만 허용.
+OWNER_DISCORD_ID = 1485623383197487237
 DB_PATH_CONCENTRATION = os.path.join(os.path.dirname(base_dir), "intelligence", "market_concentration.db")
 DB_PATH_FINANCE = os.path.join(base_dir, 'finance.db')
 DB_PATH_MAPPING = os.path.join(base_dir, 'us_kr_mapping.db')  # 💡 신규 맵핑 DB 경로
@@ -127,6 +140,25 @@ def _save_manual_watches(watches: dict):
     write_state(MANUAL_WATCH_STATE_FILE, watches)
 
 
+def _save_manual_watch_updates(watches: dict, changed_codes: set):
+    """★ 2026-10-06 — manual_watch_trailing_loop는 루프 시작 시점의 watches
+    스냅샷을 1분 내내 들고 있다가(여러 종목 순회+await) 끝에 통째로
+    저장하는데, 그 사이 !리나등록/!리나등록해제가 같은 파일을 건드리면
+    옛날 스냅샷으로 덮어써버려 방금 해제한 종목이 되살아나거나 새
+    등록이 사라지는 경합이 있었음(대장 지적, 형제 Opus 리뷰로 발견).
+    저장 직전에 최신 상태를 다시 읽어(락 보호) 이번 루프에서 실제로
+    바뀐 종목(changed_codes)만 병합 — 그 사이 해제된 종목은 latest에
+    이미 없으니 되살리지 않고, 그 사이 새로 등록된 종목은 건드리지
+    않아 그대로 보존된다."""
+    from common_utils import _state_lock, _read_state_raw, _write_state_raw
+    with _state_lock(MANUAL_WATCH_STATE_FILE):
+        latest = _read_state_raw(MANUAL_WATCH_STATE_FILE, {})
+        for code in changed_codes:
+            if code in latest:
+                latest[code] = watches[code]
+        _write_state_raw(MANUAL_WATCH_STATE_FILE, latest)
+
+
 async def _register_manual_watch(channel, code: str, buy_price: float = None,
                                   name_override: str = None):
     """!리나등록/자연어("등록 종목명 [평단가]") 공용 등록 로직.
@@ -141,7 +173,9 @@ async def _register_manual_watch(channel, code: str, buy_price: float = None,
             from kis_api import KisAPI
             api = KisAPI()
             if buy_price is None:
-                mdata = api.get_market_data(code) or {}
+                # ★ 2026-10-06 — 동기 KIS 호출을 await 없이 직접 불러
+                #   이벤트루프를 블로킹하던 부분(형제 Opus 리뷰로 발견).
+                mdata = await asyncio.to_thread(api.get_market_data, code) or {}
                 buy_price = float(mdata.get("stck_prpr", 0) or 0)
             if buy_price <= 0:
                 await send_safe_message(channel, f"❌ {code} 현재가 조회 실패 — 평단가를 직접 입력해줘.")
@@ -215,6 +249,20 @@ MAX_MEMORY = 10
 # 🛡️ 안전 전송기
 # ===================================================
 async def send_safe_message(target, text, reply_to=None):
+    """★ 2026-10-06 — 이 함수 자체는 디스코드 API 예외(429 레이트리밋/
+    5xx 등)를 절대 밖으로 흘려보내지 않는다(형제 Opus 리뷰로 발견).
+    이전엔 여기서 터진 예외가 호출부(특히 @tasks.loop로 도는
+    manual_watch_trailing_loop 등)까지 그대로 올라가, discord.py의
+    tasks.loop가 처리 안 된 예외 시 루프를 영구 정지시켜버리는 문제가
+    있었음 — 전송 실패 한 번으로 매도 알림 전체가 재시작 전까지
+    조용히 꺼지는 사고로 이어질 수 있었음."""
+    try:
+        await _send_safe_message_impl(target, text, reply_to)
+    except Exception as e:
+        print(f"⚠️ [send_safe_message] 전송 실패(무시하고 계속 진행): {e}")
+
+
+async def _send_safe_message_impl(target, text, reply_to=None):
     # ★ 2026-06-29 수정: 기존엔 "한 줄(line)이 1900자를 넘지 않는다"는
     #   가정 하에서만 안전하게 분할됐음. AI 응답에 줄바꿈 없는 긴 문단이
     #   하나라도 있으면 그 줄이 그대로 청크에 들어가 1900자를 훌쩍
@@ -309,10 +357,14 @@ def get_kr_stocks_by_ticker(us_ticker):
     return [{"kr_name": r[0], "reason": r[1], "is_static": r[2]} for r in rows]
 
 def add_finance_record(r_type, item, amount):
+    # ★ 2026-10-06 — naive datetime.now()는 서버 시스템 타임존에 암묵적으로
+    #   의존하는데, 이 파일 다른 곳은 전부 KST를 명시적으로 쓰고 있어서
+    #   서버 TZ가 바뀌면 조용히 날짜가 틀어질 수 있었음(형제 Opus 리뷰로
+    #   발견) — 다른 곳과 통일해 KST 명시.
     conn = sqlite3.connect(DB_PATH_FINANCE)
     cursor = conn.cursor()
-    cursor.execute("INSERT INTO finance_ledger (date, type, item, amount) VALUES (?, ?, ?, ?)", 
-                   (datetime.datetime.now().strftime("%Y-%m-%d"), r_type, item, amount))
+    cursor.execute("INSERT INTO finance_ledger (date, type, item, amount) VALUES (?, ?, ?, ?)",
+                   (datetime.datetime.now(KST).strftime("%Y-%m-%d"), r_type, item, amount))
     conn.commit()
     conn.close()
     return f"장부에 [{r_type}] {item} {amount:,}원 기록 완료!"
@@ -320,7 +372,7 @@ def add_finance_record(r_type, item, amount):
 def get_monthly_report():
     conn = sqlite3.connect(DB_PATH_FINANCE)
     cursor = conn.cursor()
-    cursor.execute("SELECT type, amount FROM finance_ledger WHERE date LIKE ?", (f"{datetime.datetime.now().strftime('%Y-%m')}%",))
+    cursor.execute("SELECT type, amount FROM finance_ledger WHERE date LIKE ?", (f"{datetime.datetime.now(KST).strftime('%Y-%m')}%",))
     rows = cursor.fetchall()
     conn.close()
     if not rows: return "이번 달 장부가 비어있어."
@@ -368,13 +420,21 @@ def add_google_calendar_event(summary, target_date):
             
         creds = Credentials.from_authorized_user_file(token_path, SCOPES)
         service = build('calendar', 'v3', credentials=creds)
-        
+
+        # ★ 2026-10-06 — 구글 캘린더 종일(all-day) 일정은 end.date가
+        #   "배타적"(해당 날짜는 포함 안 됨)이어야 해서, 하루짜리 일정도
+        #   end는 시작일+1일로 줘야 함. start==end로 주면 빈 시간범위라
+        #   API가 거부하거나 깨진 일정이 생길 수 있었음(형제 Opus 리뷰로
+        #   발견 — !일정추가가 계속 실패하던 원인으로 추정).
+        start_dt = datetime.datetime.strptime(target_date, "%Y-%m-%d")
+        end_date = (start_dt + datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+
         event_body = {
             'summary': summary,
             'start': {'date': target_date, 'timeZone': 'Asia/Seoul'},
-            'end': {'date': target_date, 'timeZone': 'Asia/Seoul'},
+            'end': {'date': end_date, 'timeZone': 'Asia/Seoul'},
         }
-        
+
         service.events().insert(calendarId='primary', body=event_body).execute()
         return f"✅ '{target_date}'에 [{summary}] 일정 추가 완료!"
     except Exception as e:
@@ -396,9 +456,26 @@ def get_weather_kma_pure() -> str:
         data = {item["category"]: item["obsrValue"] for item in items}
         pty = {"0": "없음", "1": "비", "2": "비/눈", "3": "눈", "4": "소나기"}.get(data.get("PTY", "0"), "없음")
         return f"{'주룩주룩 비소식' if pty != '없음' else '맑고 쾌청함'} / 현재기온: {data.get('T1H', '?')}°C / 습도: {data.get('REH', '?')}%"
-    except Exception as e: return f"기상청 수신 지연 중 ({e})"
+    except Exception as e:
+        # ★ 2026-10-06 — requests 예외 메시지엔 요청 URL 전체(authKey
+        #   쿼리파라미터 포함)가 그대로 들어가는 경우가 있어, 이걸 그대로
+        #   반환하면 LLM 프롬프트에 먹혀 디스코드 응답으로까지 API 키가
+        #   노출될 위험이 있었음(형제 Opus 리뷰로 발견). 원인 종류만
+        #   남기고 상세 메시지는 서버 로그에만 출력.
+        print(f"⚠️ [날씨] 기상청 조회 오류: {e}")
+        return f"기상청 수신 지연 중 ({type(e).__name__})"
 
 async def fetch_mbngold_async(service_id="10001", limit=5):
+    """★ 2026-10-06 — 내부 로그인/목록조회/본문조회가 전부 동기 requests
+    호출이라(여러 개 순차 GET, 타임아웃 합치면 수십 초) async def인데
+    실제로는 이벤트루프를 그 시간만큼 블로킹하고 있었음(형제 Opus
+    리뷰로 발견) — 블로킹되는 동안 heartbeat/다른 스케줄러의 정각체크/
+    디스코드 게이트웨이 핑이 전부 밀림. asyncio.to_thread로 별도
+    스레드에 위임."""
+    return await asyncio.to_thread(_fetch_mbngold_sync, service_id, limit)
+
+
+def _fetch_mbngold_sync(service_id="10001", limit=5):
     """MBN골드 로그인 후 뉴스 크롤링 (새 URL 구조)"""
     import requests as _req
     from dotenv import load_dotenv as _load
@@ -482,6 +559,23 @@ async def fetch_mbngold_async(service_id="10001", limit=5):
     return "텅 비어 있어. (MBN골드 사이트 지연 또는 오늘자 업데이트 없음)"
 
 
+def _fetch_mbn_strategy_page_sync(sess, headers, base_url):
+    """로그인+전략 목록페이지 조회 (동기 — to_thread로 실행). 실패시 None."""
+    try:
+        sess.post(f"{base_url}/mg/mypage/login_action.php", headers=headers, data={
+            "mode": "login", "rURL": f"{base_url}/mg/news/",
+            "mID":  os.getenv("MBNGOLD_ID", ""),
+            "mPWD": os.getenv("MBNGOLD_PW", ""),
+        }, timeout=10)
+    except Exception as e:
+        print(f"❌ MBN골드 전략 로그인 에러: {e}"); return None
+    try:
+        res = sess.get(f"{base_url}/mg/strategy/", headers=headers, timeout=10)
+        return res.content.decode("utf-8", errors="ignore")
+    except Exception as e:
+        print(f"❌ MBN골드 전략 페이지 에러: {e}"); return None
+
+
 async def fetch_mbn_strategy(cutoff_hour: int = 8, cutoff_minute: int = 50) -> str:
     """
     MBN골드 투자전략 페이지(/mg/strategy/)에서 당일 올라온 전략/시황 글을 수집.
@@ -496,20 +590,14 @@ async def fetch_mbn_strategy(cutoff_hour: int = 8, cutoff_minute: int = 50) -> s
     base_url = "https://www.mbngold.com"
     headers  = {"User-Agent": "Mozilla/5.0", "Referer": f"{base_url}/mg/mypage/login.php"}
     sess     = _req.Session()
-    try:
-        sess.post(f"{base_url}/mg/mypage/login_action.php", headers=headers, data={
-            "mode": "login", "rURL": f"{base_url}/mg/news/",
-            "mID":  os.getenv("MBNGOLD_ID", ""),
-            "mPWD": os.getenv("MBNGOLD_PW", ""),
-        }, timeout=10)
-    except Exception as e:
-        print(f"❌ MBN골드 전략 로그인 에러: {e}"); return ""
 
-    try:
-        res  = sess.get(f"{base_url}/mg/strategy/", headers=headers, timeout=10)
-        soup = _BS(res.content.decode("utf-8", errors="ignore"), "html.parser")
-    except Exception as e:
-        print(f"❌ MBN골드 전략 페이지 에러: {e}"); return ""
+    # ★ 2026-10-06 — 로그인+목록페이지 조회가 동기 requests 호출이라
+    #   이벤트루프를 블로킹하고 있었음(형제 Opus 리뷰로 발견 — 본문
+    #   요약 부분은 이미 to_thread로 분리돼있었는데 이 앞부분만 빠짐).
+    page_html = await asyncio.to_thread(_fetch_mbn_strategy_page_sync, sess, headers, base_url)
+    if page_html is None:
+        return ""
+    soup = _BS(page_html, "html.parser")
 
     today     = datetime.datetime.now(KST).strftime("%Y-%m-%d")
     start_hm  = "07:30"
@@ -536,7 +624,11 @@ async def fetch_mbn_strategy(cutoff_hour: int = 8, cutoff_minute: int = 50) -> s
         title = parts[-1] if parts else ""
 
         a_tag = card.find("a", href=True)
-        link  = f"{base_url}/mg/strategy/{a_tag['href']}" if a_tag else ""
+        # ★ 2026-10-06 — href가 "/"로 시작하는 절대경로나 전체 URL이면
+        #   단순 f-string 접합은 깨진 링크(이중 슬래시 등)를 만듦(형제
+        #   Opus 리뷰로 발견) — urljoin으로 교체(상단에 이미 import돼
+        #   있었는데 실제로 안 쓰이고 있었음).
+        link = urllib.parse.urljoin(f"{base_url}/mg/strategy/", a_tag['href']) if a_tag else ""
         items.append({"time": hm, "manager": manager, "title": title, "link": link})
 
     if not items: return ""
@@ -860,7 +952,9 @@ def _map_themes_to_candidates(themes: list, exclude_names: set = None) -> list:
 
     from swing_analyzer import get_swing_data
     from trend_analyzer import get_trend_data
-    from sbo2 import get_stock_code
+    # ★ 2026-10-06 — 파일 상단에서 이미 candidate_pool.get_stock_code를
+    #   쓰는데 여기만 sbo2(실거래 봇 모듈 전체)에서 다시 import하고
+    #   있었음(형제 Opus 리뷰로 발견) — 불필요한 모듈 재사용, 통일.
 
     swing_data  = get_swing_data(top_n=30)
     trend_data  = get_trend_data(top_n=30)
@@ -1035,15 +1129,25 @@ def _check_light_chart_health(stock_name: str, conn: sqlite3.Connection, api=Non
         pattern = "박스돌파임박"
 
     # (C) 거래량 서지 — A/B 둘 다 실패했을 때만 시도
+    live_price = None   # ★ 2026-10-06 — C 패턴에서 실제 조회된 라이브 현재가(있으면)
     if not pattern and api and len(closes) >= 200 and len(volumes) >= 20:
         ma200 = sum(closes[:200]) / 200
         week52_high = max(closes[:252]) if len(closes) >= 252 else max(closes)
         if curr > ma200 and curr >= week52_high * 0.8:
             try:
-                from sbo2 import get_stock_code
+                # ★ 2026-10-06 — 상단에서 이미 candidate_pool.get_stock_code를
+                #   쓰는데 여기만 sbo2에서 다시 import하고 있었음(형제
+                #   Opus 리뷰로 발견) — 통일.
                 code = get_stock_code(stock_name)
                 mdata = api.get_market_data(code) if code else None
                 if mdata:
+                    # ★ 2026-10-06 — curr(DB 종가, 대개 전일)를 오늘의
+                    #   실시간 시가/고가와 비교하고 있던 버그(형제 Opus
+                    #   리뷰로 발견) — 이미 mdata를 받아왔으니 오늘
+                    #   현재가(stck_prpr)로 비교해야 양봉/윗꼬리 판정이
+                    #   실제 오늘 움직임을 반영함.
+                    live_price = float(mdata.get("stck_prpr", 0) or 0)
+                    ref = live_price if live_price > 0 else curr
                     acml_vol = float(mdata.get("acml_vol", 0) or 0)
                     avg_vol20 = sum(volumes[:20]) / 20
                     day_open = float(mdata.get("stck_oprc", 0) or 0)
@@ -1053,8 +1157,8 @@ def _check_light_chart_health(stock_name: str, conn: sqlite3.Connection, api=Non
                     #   매도가 터져 폭락하는 날에도 "거래량서지"로 오판될 수
                     #   있었음(사용자 지적). 양봉 확인(현재가>시가) + 윗꼬리
                     #   배제(고가 대비 3% 이상 밀리면 가짜돌파로 간주) 추가.
-                    is_bullish   = day_open > 0 and curr > day_open
-                    no_long_wick = day_high <= 0 or (day_high - curr) / curr <= 0.03
+                    is_bullish   = day_open > 0 and ref > day_open
+                    no_long_wick = day_high <= 0 or (day_high - ref) / ref <= 0.03
                     if (avg_vol20 > 0 and acml_vol >= avg_vol20 * 3.0
                             and is_bullish and no_long_wick):
                         pattern = "거래량서지"
@@ -1064,11 +1168,17 @@ def _check_light_chart_health(stock_name: str, conn: sqlite3.Connection, api=Non
     if not pattern:
         return {}
 
+    # ★ 2026-10-06 — A/B는 라이브 시세를 조회하지 않으니 DB 종가(curr)가
+    #   최선의 근사치지만, C(거래량서지)는 이미 조회해둔 오늘 현재가를
+    #   기준가로 써야 함 — 안 그러면 손절/목표가가 전일 종가 기준으로
+    #   계산되는 버그가 그대로 남음(형제 Opus 리뷰로 발견).
+    ref_price = live_price if (pattern == "거래량서지" and live_price) else curr
+
     return {
         "pattern": pattern,
-        "curr_price": curr,
-        "stop_price": round(curr * 0.93, 0),
-        "tgt_price":  round(curr * 1.12, 0),
+        "curr_price": ref_price,
+        "stop_price": round(ref_price * 0.93, 0),
+        "tgt_price":  round(ref_price * 1.12, 0),
     }
 
 
@@ -1236,59 +1346,80 @@ async def manual_watch_trailing_loop():
         print(f"⚠️ [리나등록 추적] 초기화 오류: {e}")
         return
 
-    changed = False
+    changed_codes = set()
     for code, w in list(watches.items()):
+        # ★ 2026-10-06 — 종목 하나 처리 중 생기는 예외(디스코드 전송
+        #   오류/필드 누락 등)가 전체를 덮지 않도록 격리. discord.py의
+        #   tasks.loop는 처리 안 된 예외가 새면 루프 자체를 영구 정지
+        #   시키는데(형제 Opus 리뷰로 발견), 그러면 재시작 전까지 매도
+        #   알림이 조용히 전부 꺼져버림 — 종목 단위로 try를 걸어 한
+        #   종목의 문제가 다른 종목 감시/다음 루프를 막지 않게 한다.
         try:
-            mdata = await asyncio.to_thread(api.get_market_data, code)
-            price = float((mdata or {}).get("stck_prpr", 0) or 0)
-        except Exception as e:
-            print(f"⚠️ [리나등록 추적] {code} 시세조회 오류: {e}")
-            continue
-        if price <= 0:
-            continue
+            try:
+                mdata = await asyncio.to_thread(api.get_market_data, code)
+                price = float((mdata or {}).get("stck_prpr", 0) or 0)
+            except Exception as e:
+                print(f"⚠️ [리나등록 추적] {code} 시세조회 오류: {e}")
+                continue
+            if price <= 0:
+                continue
 
-        entry = w["entry_price"]
-        # ★ rate(가격기준)는 트레일링 발동/정지 "판단"에만 사용 — 차트가
-        #   보여주는 실제 가격움직임 기준이어야 함. 알림 문구에 보여줄
-        #   때만 net_rate(수수료+세금 차감한 체감 수익률)로 바꿔치기.
-        rate = (price - entry) / entry * 100
-        net_rate = rate - MANUAL_WATCH_FEE_DRAG_PCT
+            entry = w["entry_price"]
+            # ★ rate(가격기준)는 트레일링 발동/정지 "판단"에만 사용 — 차트가
+            #   보여주는 실제 가격움직임 기준이어야 함. 알림 문구에 보여줄
+            #   때만 net_rate(수수료+세금 차감한 체감 수익률)로 바꿔치기.
+            rate = (price - entry) / entry * 100
+            net_rate = rate - MANUAL_WATCH_FEE_DRAG_PCT
 
-        if w.get("peak_price") is not None:
-            if price > w["peak_price"]:
+            if w.get("peak_price") is not None:
+                if price > w["peak_price"]:
+                    w["peak_price"] = price
+                    changed_codes.add(code)
+                peak_rate = (w["peak_price"] - entry) / entry * 100
+                trail_pct = (MANUAL_WATCH_TRAILING_STOP_PCT
+                             if peak_rate > MANUAL_WATCH_TRAILING_STOP_WIDEN_PCT
+                             else MANUAL_WATCH_TRAILING_STOP_PCT_TIGHT)
+                trail_stop = w["peak_price"] * (1 - trail_pct / 100)
+                floor_price = entry * (1 + MANUAL_WATCH_MIN_LOCKED_PROFIT_PCT / 100)
+                trail_stop = max(trail_stop, floor_price)
+                # ★ 2026-10-06 — floor_price가 trail_pct 계산값보다 높아서
+                #   실제 매도선이 된 경우에도 메시지엔 그냥 trail_pct(1.5/
+                #   2.0%)를 그대로 찍어서, 실제 발동 지점(예: 평단+1%
+                #   바닥선)과 안 맞는 숫자가 표시되던 문제(형제 Opus
+                #   리뷰로 발견) — 고점 대비 실제 하락률을 역산해서 표시.
+                actual_drop_pct = ((w["peak_price"] - trail_stop) / w["peak_price"] * 100
+                                   if w["peak_price"] > 0 else trail_pct)
+                if price <= trail_stop and w["peak_price"] > w.get("last_alert_peak", 0):
+                    await send_safe_message(
+                        channel,
+                        f"🔔 **[리나등록] {w.get('name', code)}({code}) 매도 신호**\n"
+                        f"   고점 {w['peak_price']:,.0f}원 대비 -{actual_drop_pct:.1f}% "
+                        f"({price:,.0f}원, 총 {net_rate:+.2f}%) — 키움에서 매도 판단해줘.\n"
+                        f"   (계속 감시할게 — 신고점 찍고 또 밀리면 다시 알려줄게. "
+                        f"그만 지켜봐도 되면 `!리나등록해제 {code}`)"
+                    )
+                    w["last_alert_peak"] = w["peak_price"]
+                    changed_codes.add(code)
+                continue
+
+            if rate >= MANUAL_WATCH_TAKE_PROFIT_PCT:
                 w["peak_price"] = price
-                changed = True
-            peak_rate = (w["peak_price"] - entry) / entry * 100
-            trail_pct = (MANUAL_WATCH_TRAILING_STOP_PCT
-                         if peak_rate > MANUAL_WATCH_TRAILING_STOP_WIDEN_PCT
-                         else MANUAL_WATCH_TRAILING_STOP_PCT_TIGHT)
-            trail_stop = w["peak_price"] * (1 - trail_pct / 100)
-            floor_price = entry * (1 + MANUAL_WATCH_MIN_LOCKED_PROFIT_PCT / 100)
-            trail_stop = max(trail_stop, floor_price)
-            if price <= trail_stop and w["peak_price"] > w.get("last_alert_peak", 0):
+                changed_codes.add(code)
                 await send_safe_message(
                     channel,
-                    f"🔔 **[리나등록] {w.get('name', code)}({code}) 매도 신호**\n"
-                    f"   고점 {w['peak_price']:,.0f}원 대비 -{trail_pct}% "
-                    f"({price:,.0f}원, 총 {net_rate:+.2f}%) — 키움에서 매도 판단해줘.\n"
-                    f"   (계속 감시할게 — 신고점 찍고 또 밀리면 다시 알려줄게. "
-                    f"그만 지켜봐도 되면 `!리나등록해제 {code}`)"
+                    f"📈 [리나등록] {w.get('name', code)}({code}) +{net_rate:.2f}% 도달 — "
+                    f"트레일링 추적 시작(고점 {price:,.0f}원, -{MANUAL_WATCH_TRAILING_STOP_PCT_TIGHT}% 밀리면 알려줄게)"
                 )
-                w["last_alert_peak"] = w["peak_price"]
-                changed = True
+        except Exception as e:
+            print(f"⚠️ [리나등록 추적] {code} 처리 중 예외(건너뜀): {e}")
             continue
 
-        if rate >= MANUAL_WATCH_TAKE_PROFIT_PCT:
-            w["peak_price"] = price
-            changed = True
-            await send_safe_message(
-                channel,
-                f"📈 [리나등록] {w.get('name', code)}({code}) +{net_rate:.2f}% 도달 — "
-                f"트레일링 추적 시작(고점 {price:,.0f}원, -{MANUAL_WATCH_TRAILING_STOP_PCT_TIGHT}% 밀리면 알려줄게)"
-            )
-
-    if changed:
-        _save_manual_watches(watches)
+    if changed_codes:
+        # ★ 2026-10-06 — write_state(전체덮어쓰기) 대신 변경된 종목만
+        #   락 보호 병합 저장(위 _save_manual_watch_updates 참고) — 루프가
+        #   1분간 들고 있던 옛날 스냅샷으로 그 사이의 등록/해제를
+        #   덮어쓰는 경합을 막는다.
+        _save_manual_watch_updates(watches, changed_codes)
 
 
 @tasks.loop(minutes=1)
@@ -1452,27 +1583,64 @@ def fetch_top_institutional_and_foreign_picks():
     # 💡 복잡한 로직은 모듈로 다 보냈으니, 여기선 깔끔하게 Call만 때린다!
     return quant_analyzer.get_hybrid_top_picks()
 
+
+def _build_morning_market_context_sync():
+    """07:30 브리핑 STEP1(미장 yfinance 스캔)+STEP2(수급 크롤러, DB 대량
+    스캔) — 둘 다 블로킹 I/O·연산이라 동기로 묶어 to_thread로 실행
+    (형제 Opus 리뷰로 발견 — 이전엔 async def 안에서 await 없이 직접
+    호출돼 몇 초~몇십 초씩 이벤트루프를 막고 있었음)."""
+    us_movers_summary = ""
+    for ticker in US_WATCHLIST:
+        try:
+            stock = yf.Ticker(ticker)
+            hist = stock.history(period="2d")
+            if len(hist) >= 2:
+                prev_close = hist['Close'].iloc[0]
+                last_close = hist['Close'].iloc[1]
+                change_pct = ((last_close - prev_close) / prev_close) * 100
+
+                if change_pct >= 3.0:
+                    mapped_stocks = get_kr_stocks_by_ticker(ticker)
+                    stock_names = [s['kr_name'] for s in mapped_stocks]
+                    us_movers_summary += f"- 🇺🇸 {ticker} ({change_pct:+.2f}%) ➡️ 🇰🇷 고정 수혜주: {', '.join(stock_names) if stock_names else '등록 필요'}\n"
+        except Exception as e:
+            print(f"⚠️ {ticker} 스캔 실패: {e}")
+
+    crawler_finance_context = fetch_top_institutional_and_foreign_picks()
+    return us_movers_summary, crawler_finance_context
+
 # ===================================================
 # 💡 [테마 역추적 기능이 추가된 하이브리드 검색 라우터]
 # ===================================================
 async def web_search_hybrid(query):
     # 1. 특정 종목에 대해 테마를 물어보는 경우 (예: "필옵틱스 테마 뭐야?")
-    if "테마" in query or "뭐야" in query:
-        conn = sqlite3.connect(DB_PATH_THEME_FINANCE)
-        cursor = conn.cursor()
-        
-        cursor.execute("SELECT theme_name FROM kr_theme_stocks WHERE stock_name LIKE ?", ('%' + query.replace("테마", "").replace("뭐야", "").strip() + '%',))
-        results = cursor.fetchall()
-        conn.close()
-        
-        if results:
-            themes = [r[0] for r in set(results)]
-            return f"🔍 **[테마 탐색기]** 대장! 찾았어! \n{', '.join(themes)} 테마에 묶여있는 종목이야!"
+    # ★ 2026-10-06 — "뭐야"만으로도 이 분기가 걸려서 "오늘 날씨 뭐야?"
+    #   같은 무관한 질문도 종목테마 DB를 조회했고, 검색어가 "테마"/"뭐야"
+    #   제거 후 빈 문자열이 되면(예: 질문이 "뭐야" 하나뿐일 때) LIKE '%%'
+    #   가 되어 테이블 전체 테마가 쏟아지는 버그가 있었음(형제 Opus
+    #   리뷰로 발견). "테마"가 실제로 포함된 경우만 + 검색어가 비지
+    #   않을 때만 조회하도록 교체.
+    if "테마" in query:
+        search_term = query.replace("테마", "").replace("뭐야", "").strip()
+        if search_term:
+            conn = sqlite3.connect(DB_PATH_THEME_FINANCE)
+            cursor = conn.cursor()
+
+            cursor.execute("SELECT theme_name FROM kr_theme_stocks WHERE stock_name LIKE ?", ('%' + search_term + '%',))
+            results = cursor.fetchall()
+            conn.close()
+
+            if results:
+                themes = [r[0] for r in set(results)]
+                return f"🔍 **[테마 탐색기]** 대장! 찾았어! \n{', '.join(themes)} 테마에 묶여있는 종목이야!"
 
     # 2. 기존 기능들 그대로 유지
-    if any(kw in query for kw in ["일정", "스케줄", "계획"]) and "추가" not in query: return f"[구글 캘린더 일정 목록]:\n{fetch_calendar_events()}"
+    # ★ 2026-10-06 — fetch_calendar_events()/get_weather_kma_pure()는
+    #   동기 네트워크 호출인데 await 없이 직접 불려서 이벤트루프를
+    #   블로킹하고 있었음(형제 Opus 리뷰로 발견) — to_thread로 위임.
+    if any(kw in query for kw in ["일정", "스케줄", "계획"]) and "추가" not in query: return f"[구글 캘린더 일정 목록]:\n{await asyncio.to_thread(fetch_calendar_events)}"
     if any(kw in query for kw in ["입출금", "출금", "내역", "수입", "지출", "가계부", "장부"]): return get_monthly_report()
-    if any(kw in query for kw in ["날씨", "기온", "온도", "비와", "눈와", "기상"]): return f"[국내 대한민국 기상청]:\n{get_weather_kma_pure()}"
+    if any(kw in query for kw in ["날씨", "기온", "온도", "비와", "눈와", "기상"]): return f"[국내 대한민국 기상청]:\n{await asyncio.to_thread(get_weather_kma_pure)}"
     if any(kw in query for kw in ["뉴스", "속보", "mbn", "모닝", "브리핑"]): return "[MBN골드 뉴스]:\n" + await fetch_mbngold_async("10001", 6)
     return ""
 
@@ -1500,26 +1668,8 @@ async def daily_morning_report():
         print(f"❌ 장전 브리핑 채널 접속 실패: {e}")
         return
 
-    # STEP 1: 간밤의 미국 증시 급등주 스캔 & 고정 DB 맵핑
-    us_movers_summary = ""
-    for ticker in US_WATCHLIST:
-        try:
-            stock = yf.Ticker(ticker)
-            hist = stock.history(period="2d")
-            if len(hist) >= 2:
-                prev_close = hist['Close'].iloc[0]
-                last_close = hist['Close'].iloc[1]
-                change_pct = ((last_close - prev_close) / prev_close) * 100
-                
-                if change_pct >= 3.0:
-                    mapped_stocks = get_kr_stocks_by_ticker(ticker)
-                    stock_names = [s['kr_name'] for s in mapped_stocks]
-                    us_movers_summary += f"- 🇺🇸 {ticker} ({change_pct:+.2f}%) ➡️ 🇰🇷 고정 수혜주: {', '.join(stock_names) if stock_names else '등록 필요'}\n"
-        except Exception as e:
-            print(f"⚠️ {ticker} 스캔 실패: {e}")
-
-    # STEP 2: 크롤러 수급
-    crawler_finance_context = fetch_top_institutional_and_foreign_picks()
+    # STEP 1+2: 미장 스캔 + 수급 크롤러(둘 다 블로킹이라 스레드로 위임)
+    us_movers_summary, crawler_finance_context = await asyncio.to_thread(_build_morning_market_context_sync)
 
     # STEP 3: AI 융합 브리핑 (미장 + 수급)
     prompt = (
@@ -1718,7 +1868,7 @@ _rate_limit_error_streak = {bot: 0 for bot in WATCHDOG_BOTS}
 _last_restart_at = {bot: None for bot in WATCHDOG_BOTS}
 
 TOKEN_ERROR_STREAK_THRESHOLD = 2       # 연속 2분 감지되면 재시작
-RATE_LIMIT_ERROR_STREAK_THRESHOLD = 2  # 연속 2분(루프 30초 기준 약 4회) 감지되면 재시작
+RATE_LIMIT_ERROR_STREAK_THRESHOLD = 2  # 연속 2회(루프 1분 기준 약 2분) 감지되면 재시작 — ★ 2026-10-06 주석이 루프 주기(30초)와 실제(1분) 불일치하던 것 수정(형제 Opus 리뷰로 발견)
 RESTART_COOLDOWN_SECONDS = 300         # 재시작 후 5분간 재감지 무시
 
 
@@ -1741,6 +1891,13 @@ _BOT_LOG_FILE = {
 #   마지막 읽은 오프셋을 기억해 그 이후 새로 추가된 부분만 읽도록 수정 —
 #   이래야 진짜 "최근 1분" 신규 로그만 보게 된다.
 _log_read_offset: dict[str, int] = {}
+# ★ 2026-10-06 — journalctl 조회용 커서(파일형 봇의 _log_read_offset과
+#   동일 원리). "--since 1 minute ago"는 호출마다 "지금 기준 1분 전"으로
+#   새로 계산되는 롤링 윈도우라, 호출 간격이 정확히 60초가 아니면(지연/
+#   지터) 경계 부근 로그 한 줄이 연속 두 번 잡혀 에러 스트릭이 허위로
+#   쌓일 수 있었음(형제 Opus 리뷰로 발견) — 마지막 조회 시각을 기억해
+#   그 이후분만 가져오도록 교체.
+_journal_read_since: dict[str, datetime.datetime] = {}
 
 
 def _fetch_recent_log(bot_name: str) -> str:
@@ -1764,11 +1921,14 @@ def _fetch_recent_log(bot_name: str) -> str:
             print(f"⚠️ [watchdog] {bot_name} 로그 파일 읽기 실패: {e}")
             return ""
     try:
+        now   = datetime.datetime.now()
+        since = _journal_read_since.get(bot_name, now - datetime.timedelta(minutes=1))
         result = subprocess.run(
             ["journalctl", "-u", f"yeongam9-{bot_name}",
-             "--since", "1 minute ago", "--no-pager"],
+             "--since", since.strftime("%Y-%m-%d %H:%M:%S"), "--no-pager"],
             capture_output=True, text=True, timeout=15,
         )
+        _journal_read_since[bot_name] = now
         return result.stdout
     except Exception as e:
         print(f"⚠️ [watchdog] {bot_name} 로그 조회 실패: {e}")
@@ -1825,7 +1985,12 @@ async def api_error_watchdog():
                 f"yeongam9-{bot_name} 재시작을 시도할게!"
             )
             try:
-                ret = subprocess.run(
+                # ★ 2026-10-06 — subprocess.run(timeout=30)을 await 없이
+                #   직접 호출해서 최악의 경우 30초간 전체 이벤트루프(디스코드
+                #   게이트웨이 핑/다른 스케줄러 포함)를 블로킹하고 있었음
+                #   (형제 Opus 리뷰로 발견).
+                ret = await asyncio.to_thread(
+                    subprocess.run,
                     ["sudo", "systemctl", "restart", f"yeongam9-{bot_name}"],
                     capture_output=True, text=True, timeout=30,
                 )
@@ -1928,9 +2093,41 @@ async def on_ready():
         print("✅ [시스템] 리나등록 수동매수 트레일링 추적 (1분 주기) 가동 성공!")
     except Exception as e: print(f"⚠️ [에러] 리나등록 추적 스케줄러: {e}")
 
+def _fetch_sbo2_status_sync(api, positions: dict):
+    """!상태 — 보유종목 기준 주문가능금액+시세 조회 (동기, to_thread로 실행)."""
+    psbl = 0
+    for _code in list(positions.keys()):
+        psbl = api.get_psbl_order_cash(_code)
+        if psbl > 0:
+            break
+    if psbl == 0:
+        psbl = api.get_buyable_cash() if hasattr(api, 'get_buyable_cash') else 0
+
+    rows = []
+    total_pnl = 0
+    for code, pos in positions.items():
+        mdata = api.get_market_data(code)
+        # ★ 2026-10-06 — stck_prpr가 빈 문자열("")로 오는 경우 float("")가
+        #   ValueError를 던져서 !상태 전체가 실패하던 버그(형제 Opus
+        #   리뷰로 발견) — "or 0"으로 falsy 값을 먼저 걸러냄(이 파일
+        #   다른 곳에서 이미 쓰는 패턴과 통일).
+        curr  = float(mdata.get("stck_prpr", 0) or 0) if mdata else pos.get("entry_price", 0)
+        entry = pos.get("entry_price", 0)
+        qty   = pos.get("qty", 0)
+        rate  = (curr - entry) / entry * 100 if entry > 0 else 0
+        pnl   = (curr - entry) * qty
+        total_pnl += pnl
+        rows.append((code, pos, curr, entry, qty, rate, pnl))
+    return psbl, rows, total_pnl
+
+
 @client.event
 async def on_message(message):
     if message.author == client.user: return
+    # ★ 2026-10-06 — 대장 전용 봇. 계좌 조회/가계부/캘린더/종목등록 등
+    #   전부 민감한 명령이라 대장 본인이 아니면 아예 반응하지 않음
+    #   (형제 Opus 리뷰로 발견된 권한체크 누락 수정).
+    if message.author.id != OWNER_DISCORD_ID: return
 
     # 💡 [신규] 대장의 수동 맵핑 추가 명령어 (!맵핑)
     if message.content.startswith("!맵핑 "):
@@ -1991,9 +2188,11 @@ async def on_message(message):
     if message.content.startswith("!추천종목"):
         async with message.channel.typing():
             try:
-                # 41만 건 분석 모듈 호출 (Call)
-                picks_report = quant_analyzer.get_hybrid_top_picks()
-                
+                # 41만 건 분석 모듈 호출 (Call) — ★ 2026-10-06 — await 없이
+                #   직접 호출하면 이 분석(41만 건) 도는 동안 이벤트루프가
+                #   그대로 막힘(형제 Opus 리뷰로 발견) — to_thread로 위임.
+                picks_report = await asyncio.to_thread(quant_analyzer.get_hybrid_top_picks)
+
                 # 결과 출력
                 await send_safe_message(message.channel, picks_report)
                 print("🎯 [명령어] 대장의 요청으로 41만 건 하이브리드 추천종목 송출 완료!")
@@ -2099,28 +2298,16 @@ async def on_message(message):
 
                 from kis_api import KisAPI
                 api = KisAPI()
-                # 보유종목 기준 주문가능금액 조회
-                psbl = 0
-                for _code in list(positions.keys()):
-                    psbl = api.get_psbl_order_cash(_code)
-                    if psbl > 0:
-                        break
-                if psbl == 0:
-                    psbl = api.get_buyable_cash() if hasattr(api, 'get_buyable_cash') else 0
+                # ★ 2026-10-06 — 보유종목 수만큼 KIS 동기호출을 순차로
+                #   돌려서 이벤트루프를 오래 블로킹하던 부분(형제 Opus
+                #   리뷰로 발견) — 루프 전체를 스레드로 위임.
+                psbl, rows, total_pnl = await asyncio.to_thread(_fetch_sbo2_status_sync, api, positions)
 
                 lines = [f"📊 **[sbo2 현재 상태]** [{datetime.datetime.now(KST).strftime('%H:%M:%S')}]"]
                 lines.append(f"   💰 주문가능: {psbl:,}원")
                 lines.append(f"   📦 보유종목: {len(positions)}개")
 
-                total_pnl = 0
-                for code, pos in positions.items():
-                    mdata = api.get_market_data(code)
-                    curr  = float(mdata.get("stck_prpr", 0)) if mdata else pos.get("entry_price", 0)
-                    entry = pos.get("entry_price", 0)
-                    qty   = pos.get("qty", 0)
-                    rate  = (curr - entry) / entry * 100 if entry > 0 else 0
-                    pnl   = (curr - entry) * qty
-                    total_pnl += pnl
+                for code, pos, curr, entry, qty, rate, pnl in rows:
                     emoji = "📈" if rate > 0 else "📉"
                     lines.append(
                         f"   {emoji} {pos.get('name', code)}({code}) [{pos.get('grade','?')}] "
@@ -2156,7 +2343,10 @@ async def on_message(message):
                 for code, w in watches.items():
                     name  = w.get("name", code)
                     entry = w.get("entry_price", 0)
-                    mdata = api.get_market_data(code) or {}
+                    # ★ 2026-10-06 — 동기 KIS 호출을 await 없이 직접 호출해
+                    #   종목 수만큼 이벤트루프를 블로킹하던 부분(형제
+                    #   Opus 리뷰로 발견).
+                    mdata = await asyncio.to_thread(api.get_market_data, code) or {}
                     price = float(mdata.get("stck_prpr", 0) or 0)
                     raw_rate = (price - entry) / entry * 100 if entry else 0
                     net_rate = raw_rate - MANUAL_WATCH_FEE_DRAG_PCT
@@ -2181,10 +2371,16 @@ async def on_message(message):
             return
         sell_price = None
         if len(parts) >= 3:
+            # ★ 2026-10-06 — "71,500"처럼 쉼표 들어간 가격을 float()에
+            #   그대로 넣으면 ValueError가 나서 매도가 자체가 조용히
+            #   무시되고(수익률 계산 없이 그냥 해제됨) 사용자는 자기가
+            #   입력한 가격이 반영이 안 됐는지도 모르는 상태였음(형제
+            #   Opus 리뷰로 발견). 쉼표 제거 후 재시도, 그래도 실패하면
+            #   안내 메시지로 알림.
             try:
-                sell_price = float(parts[2])
+                sell_price = float(parts[2].replace(",", ""))
             except ValueError:
-                pass
+                await send_safe_message(message.channel, f"⚠️ 매도가 '{parts[2]}' 인식 실패 — 숫자만 입력해줘(평단가 없이 해제 처리할게).")
         await _deregister_manual_watch(message.channel, code, sell_price)
         return
 
@@ -2202,10 +2398,11 @@ async def on_message(message):
         buy_price = None
         name_override = None
         if len(parts) >= 3:
+            # ★ 2026-10-06 — 매도가와 동일한 쉼표 파싱 버그(위 해제 참고).
             try:
-                buy_price = float(parts[2])
+                buy_price = float(parts[2].replace(",", ""))
             except ValueError:
-                pass
+                await send_safe_message(message.channel, f"⚠️ 평단가 '{parts[2]}' 인식 실패 — 숫자만 입력해줘(현재가로 등록할게).")
         if len(parts) >= 4:
             name_override = parts[3].strip()
         await _register_manual_watch(message.channel, code, buy_price, name_override)
@@ -2254,6 +2451,12 @@ async def on_message(message):
                 lines.append(f"{'봇':<8} {'거래':>5} {'승률':>7} {'평균':>7} {'총손익':>12}")
                 lines.append("-" * 45)
                 for bot, cnt, wins, avg, total in rows:
+                    # ★ 2026-10-06 — profit_rate/profit_krw가 전부 NULL인
+                    #   bot_type이 있으면 SUM()이 NULL을 반환해서 total이
+                    #   None이 되고, 밑의 "total > 0" 비교에서 TypeError가
+                    #   나 명령 전체가 실패하던 버그(형제 Opus 리뷰로 발견).
+                    avg   = avg or 0
+                    total = total or 0
                     win_rate = wins / cnt * 100 if cnt > 0 else 0
                     emoji = "✅" if total > 0 else "❌"
                     lines.append(
@@ -2274,7 +2477,10 @@ async def on_message(message):
             if not line or line == "!일정추가": continue
             parts = line.replace("!일정추가", "").strip().split(" ", 1)
             if len(parts) == 2:
-                res = add_google_calendar_event(parts[1], parts[0])
+                # ★ 2026-10-06 — 구글 캘린더 API 호출(동기)을 await 없이
+                #   직접 호출하던 부분(형제 Opus 리뷰로 발견) — 여러 줄
+                #   일정을 한 번에 추가하면 줄 수만큼 누적 블로킹됨.
+                res = await asyncio.to_thread(add_google_calendar_event, parts[1], parts[0])
                 result_messages.append(res)
             else:
                 result_messages.append(f"⚠️ 형식 오류: '{line}' (YYYY-MM-DD 내용)")
@@ -2285,15 +2491,23 @@ async def on_message(message):
     if not user_input: return
 
     is_dm = isinstance(message.channel, discord.DMChannel)
-    is_called = is_dm or ("리na" in message.content or "리나" in message.content) or client.user.mentioned_in(message)
+    is_called = is_dm or ("리나" in message.content) or client.user.mentioned_in(message)
     if not is_called: return
 
     async with message.channel.typing():
-        if any(kw in user_input for kw in ["원", "지출", "샀어", "보냈어"]) and any(c.isdigit() for c in user_input):
-            num = re.findall(r'\d+', user_input)[0]
-            item = re.sub(r'\d+', '', user_input.replace("리나야", "").replace("원", "").replace("샀어", "")).strip() or "기타"
+        # ★ 2026-10-06 — "원" 포함 여부로만 판단하면 "병원"/"원래" 같은
+        #   무관한 단어에도 걸렸고, 금액은 "첫 번째 숫자 덩어리"를 그대로
+        #   써서 "10월 5일 커피 4500원"이 10원으로, "4,500원"이 쉼표 때문에
+        #   4원으로 기록되는 등 가계부가 엉뚱하게 꼬이는 버그가 있었음
+        #   (형제 Opus 리뷰로 발견). "숫자(쉼표 허용)+원"이 실제로 붙어있는
+        #   패턴만 금액으로 인정하도록 교체.
+        _amount_match = re.search(r'(\d[\d,]*)\s*원', user_input)
+        if _amount_match and any(kw in user_input for kw in ["원", "지출", "샀어", "보냈어"]):
+            num  = int(_amount_match.group(1).replace(",", ""))
+            item = re.sub(r'\d[\d,]*\s*원', '',
+                           user_input.replace("리나야", "").replace("샀어", "")).strip() or "기타"
             r_type = "입금" if "입금" in user_input else "출금"
-            context_data = f"[시스템 가계부]: {add_finance_record(r_type, item, int(num))}"
+            context_data = f"[시스템 가계부]: {add_finance_record(r_type, item, num)}"
             prompt = f"{context_data}\n\n질문: {user_input}\n친절하게 답해줘."
         else:
             context_data = await web_search_hybrid(user_input)
@@ -2306,9 +2520,15 @@ async def on_message(message):
 
                 prompt = f"[파이썬 실시간 수집 데이터]:\n{context_data}\n\n[사용자 질문]: {user_input}\n\n[지시문]: {지시문}"
             else:
-                chat_memory.setdefault(message.channel.id, [{"role": "system", "content": SYSTEM_PROMPT}])
-                chat_memory[message.channel.id].append({"role": "user", "content": user_input})
-                prompt = user_input 
+                # ★ 2026-10-06 — append만 하고 자르는 코드가 없어서
+                #   채널마다 대화기록이 무한히 쌓이던 메모리 누수(형제
+                #   Opus 리뷰로 발견) — MAX_MEMORY를 실제로 적용해 상한선
+                #   을 둠(system 메시지는 유지, 나머지는 최근 N개만).
+                history = chat_memory.setdefault(message.channel.id, [{"role": "system", "content": SYSTEM_PROMPT}])
+                history.append({"role": "user", "content": user_input})
+                if len(history) > MAX_MEMORY + 1:
+                    chat_memory[message.channel.id] = [history[0]] + history[-MAX_MEMORY:]
+                prompt = user_input
 
         try:
             reply_text = await asyncio.to_thread(_call_llm, prompt, max_tokens=1500, system=SYSTEM_PROMPT)

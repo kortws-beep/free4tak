@@ -83,6 +83,7 @@ import jwt
 import sqlite3
 import hashlib
 from collections import deque
+from typing import Optional
 import pathlib
 import requests
 import datetime
@@ -280,6 +281,10 @@ CRASH_WINDOW_SEC     = 600   # 최근 10분 롤링 윈도우
 CRASH_ATR_MULT       = 1.0   # 주간: 윈도우 고점 대비 ATR×1.0 하락 시 즉시손절
 CRASH_ATR_MULT_NIGHT = 1.4   # 야간: 완화 (기존 -5%/-8% 비율감안, 유동성 낮아 노이즈 큼)
 
+# ★ 2026-10-06 — 웹소켓 가격의 신선도 기준(get_current_price() 참고).
+#   이 시간 넘게 갱신이 없으면 캐시를 믿지 않고 REST로 재조회한다.
+WS_PRICE_STALE_SEC = 60
+
 # AI 캐시 — ★ 4시간 → 가격 변동 5% 시 무효화 추가
 AI_CACHE_HOURS    = 4
 PRICE_DRIFT_THRES = 0.05
@@ -359,6 +364,7 @@ class CBot:
         self.sold_today       = {}
         self._sold_today_date = today_str()
         self._buy_sync_guard  = {}   # {market: 매수시각(epoch)} — 매수직후 동기화 보호
+        self._dust_notified   = {}   # {market: 마지막 더스트알림 시각} — 아래 _check_sell 상단 참고
         self.daily_loss_count = 0
         self.daily_pnl        = 0
         self._is_paused       = False
@@ -381,6 +387,12 @@ class CBot:
         # ── 메모리 캐시 ─────────────────────────────────
         self._candle_cache         = {}
         self._ws_prices            = {}   # ★ WebSocket 실시간 현재가
+        # ★ 2026-10-06 — 가격에 수신시각이 없어서, 웹소켓이 (재연결 실패
+        #   카운터에 안 걸리는 방식으로) 멈추면 마지막 가격을 영원히
+        #   "현재가"로 계속 쓰고 있었음 — 손절/급락감지가 그동안 조용히
+        #   멈춤(대장 지적, 리포트로 발견). get_current_price()가 이
+        #   타임스탬프로 신선도를 판단해 오래됐으면 REST로 재조회한다.
+        self._ws_price_ts          = {}   # {market: 마지막 _ws_prices 갱신 시각}
         self._ws_running           = False # WebSocket 실행 여부(일반 상태 표시용)
         self._ws_markets           = set() # 현재 구독 중인 종목
         self._ws_stop_event        = None  # ★ 세대별 종료 신호(threading.Event) — 아래 참고
@@ -842,8 +854,12 @@ class CBot:
     # ============================================================
     # 업비트 API — 잔고/현재가/포지션
     # ============================================================
-    def get_balances(self) -> dict:
-        """전체 잔고 조회"""
+    def get_balances(self) -> Optional[dict]:
+        """전체 잔고 조회.
+        ★ 2026-10-06 — 실패시 {}(진짜 빈 잔고와 구분 안 됨)를 반환하던 것을
+        None으로 변경(대장 지적, 리포트로 발견) — 호출부(get_current_positions)
+        가 이 신호를 못 받으면, 일시적 API 오류에도 "보유 0종목"으로 오판해
+        self.positions를 통째로 비우고 모든 종목을 "수동매도"로 오탐했음."""
         try:
             res = self.session.get(
                 f"{BASE_URL}/accounts",
@@ -859,17 +875,23 @@ class CBot:
             return result
         except Exception as e:
             print(f"❌ 잔고 조회 오류: {e}")
-            return {}
+            return None
 
     def get_krw_balance(self) -> float:
-        return self.get_balances().get("KRW", {}).get("balance", 0)
+        balances = self.get_balances()
+        return (balances or {}).get("KRW", {}).get("balance", 0)
 
-    def get_current_positions(self) -> dict:
+    def get_current_positions(self) -> Optional[dict]:
         """
         보유 코인 포지션 조회 — ★ 전체 잔고 기준 (coin_pool 무관).
         coin_pool에서 빠진 코인도 보유 중이면 매도 관리됨.
+        ★ 2026-10-06 — get_balances() 실패(None)시 그대로 None 반환 —
+        호출부(run())가 기존 self.positions를 유지하고 이번 루프만
+        건너뛰도록(daybot/sbot의 get_current_positions(None-safe)와 동일 원칙).
         """
         balances = self.get_balances()
+        if balances is None:
+            return None
         held_markets = [
             f"KRW-{cur}" for cur in balances
             if cur != "KRW"
@@ -1354,6 +1376,7 @@ class CBot:
                             price  = float(data.get("trade_price", 0))
                             if market and price > 0:
                                 self._ws_prices[market] = price
+                                self._ws_price_ts[market] = time.time()
                                 self._record_price_history(market, price)
                         except asyncio.TimeoutError:
                             await ws.ping()
@@ -1373,12 +1396,18 @@ class CBot:
                 await asyncio.sleep(backoff)
 
     def get_current_price(self, markets: list) -> dict:
-        """현재가 조회 — WebSocket 우선, 없으면 REST 폴백"""
+        """현재가 조회 — WebSocket 우선(신선할 때만), 없거나 오래됐으면 REST 폴백.
+        ★ 2026-10-06 — 웹소켓이 멈춰도(재연결 실패로 안 잡히는 방식으로)
+        _ws_prices에 마지막 가격이 그대로 남아있어서, 손절/급락감지가
+        그 멈춘 가격으로 계속 판단되고 있었음(대장 지적). WS_PRICE_STALE_SEC
+        넘게 갱신이 없으면 캐시를 믿지 않고 REST로 재조회한다."""
         result = {}
         rest_needed = []
+        now = time.time()
 
         for m in markets:
-            if m in self._ws_prices:
+            ts = self._ws_price_ts.get(m, 0)
+            if m in self._ws_prices and (now - ts) < WS_PRICE_STALE_SEC:
                 result[m] = self._ws_prices[m]
             else:
                 rest_needed.append(m)
@@ -1397,6 +1426,7 @@ class CBot:
                     if market and price > 0:
                         result[market] = price
                         self._ws_prices[market] = price  # 캐시에도 저장
+                        self._ws_price_ts[market] = now   # ★ 2026-10-06 — 갱신시각도 같이 기록
             except Exception as e:
                 print(f"⚠️ 현재가 REST 조회 오류: {e}")
 
@@ -1814,8 +1844,15 @@ class CBot:
                 # ★ 매수 직후 self.positions 즉시 반영
                 # 정확한 수량은 다음 루프에서 갱신되지만, 즉시 매도 체크 누락 방지
                 if not is_second:
-                    # 1차 매수 — sold_today에 등록 (재매수 금지)
-                    self.sold_today[market] = None
+                    # ★ 2026-10-06 — 여기서 sold_today[market]=None을 등록하던
+                    #   코드 제거(대장 지적, 리포트로 발견). _is_rebuy_blocked()
+                    #   는 숫자(timestamp)가 아니면 어차피 "차단 안 됨"으로
+                    #   취급해서 재매수 방지 효과가 전혀 없었고(09-15 롤링
+                    #   쿨다운 재설계 이후 사실상 죽은 코드), sold_today가
+                    #   09-15부터 자정에도 안 비워지는 특성상 — 한 번이라도
+                    #   산 코인은 이 키가 영원히 남아 "수동매도 감지"의
+                    #   `_code not in self.sold_today` 체크가 평생 False가
+                    #   되어, 그 코인은 수동으로 팔아도 감지가 영원히 안 됐음.
                     if _master_upsert:
                         try:
                             # buy_price 대신 현재가 추정 (amount/최소수량)
@@ -1852,9 +1889,13 @@ class CBot:
                 qty = pos_qty
                 print(f"ℹ️ 최소금액 미달 → 전량 매도 전환 {market}")
 
+        # ★ 2026-10-06 — str(qty)는 부동소수점 표현상 소수점 8자리를 넘는
+        #   문자열("0.123456789...")이 나올 수 있어(half_qty=qty/2 등),
+        #   업비트 수량 정밀도(8자리)를 넘겨 주문이 거부될 위험이 있었음
+        #   (대장 지적, 리포트로 발견). 8자리로 고정 포맷.
         params = {
             "market": market, "side": "ask",
-            "volume": str(qty), "ord_type": "market",
+            "volume": f"{qty:.8f}", "ord_type": "market",
         }
         qs   = "&".join(f"{k}={v}" for k, v in params.items())
         hdrs = self._get_headers(qs)
@@ -1917,6 +1958,25 @@ class CBot:
         entry   = pos["entry_price"]
         qty     = pos["qty"]
         if not (entry and current and qty):
+            return
+
+        # ★ 2026-10-06 — 포지션 가치가 업비트 최소주문금액(5천원) 밑이면
+        #   손절/급락 등 모든 매도시도가 거부돼 실패하는데, 각 조건이
+        #   critical 알림을 매도 "시도 전"에 보내서 루프 주기(30초)마다
+        #   똑같은 알림이 반복되고 있었음(대장 지적, 리포트로 발견).
+        #   여기서 먼저 걸러내고 훨씬 드문 간격으로만 한 번 알린다 —
+        #   이 포지션은 슬롯을 계속 차지하지만, 정상 매도가 원천적으로
+        #   안 되는 금액이라 손절/트레일링 로직 자체가 무의미함.
+        if qty * current < MIN_ORDER_AMT:
+            last = self._dust_notified.get(market, 0)
+            if time.time() - last > 3600:
+                self._dust_notified[market] = time.time()
+                self.notify(
+                    f"🪙 {market} 잔고({qty * current:,.0f}원)가 최소주문금액"
+                    f"({MIN_ORDER_AMT:,}원) 미달이라 정상 매도가 안 돼 — "
+                    f"업비트 앱에서 직접 정리하거나 추가매수로 수량을 합쳐줘",
+                    critical=False,
+                )
             return
 
         rate = (current - entry) / entry
@@ -2065,45 +2125,53 @@ class CBot:
         #     50%매도+stage1 승격 (백테스트 검증, 상단 주석 참고)
         if stage == 0 and rate >= STAGE0_PARTIAL_THRESHOLD:
             half_qty = qty if qty * current <= MIN_ORDER_AMT * 2 else qty / 2
+            # ★ 2026-10-06 — self.sell() 성공 여부와 무관하게 stage를 1로
+            #   올리고 손절선을 위로 올리고 있었음(대장 지적, 리포트로
+            #   발견 — sbot에서 09-04에 고친 것과 동일 버그 클래스). 매도가
+            #   거부되면 지분은 그대로인데 손절선만 타이트해지는 꼴이라,
+            #   매도 성공시에만 stage/stop/target을 갱신하도록 수정.
             if half_qty > 0 and (qty - half_qty) * current >= MIN_ORDER_AMT:
                 if self.sell(market, half_qty, f"stage0조기익절50%({rate:+.2%})",
                              sell_price=current, force_all=False):
                     print(f"💰 stage0 조기 50%매도 {market} | {half_qty:.6f}개 @ {current:,.0f}")
-            new_stop   = round(entry + atr_val * ATR_RAISE_MULT, 0)
-            new_target = round(current + atr_val * ATR_TARGET_MULT, 0)
-            tracker["stop_price"]  = new_stop
-            tracker["target_next"] = new_target
-            tracker["stage"]       = 1
-            print(f"🎯 stage0 조기익절 {market} ({rate:+.2%}) | "
-                  f"손절↑:{new_stop:,.0f} | 새목표:{new_target:,.0f}")
-            self.notify(
-                f"🎯 조기익절(목표1 전) {market} ({rate:+.2%}) — 50%매도\n"
-                f"손절↑:{new_stop:,.0f} | 새목표:{new_target:,.0f}",
-                critical=False,
-            )
+                    new_stop   = round(entry + atr_val * ATR_RAISE_MULT, 0)
+                    new_target = round(current + atr_val * ATR_TARGET_MULT, 0)
+                    tracker["stop_price"]  = new_stop
+                    tracker["target_next"] = new_target
+                    tracker["stage"]       = 1
+                    print(f"🎯 stage0 조기익절 {market} ({rate:+.2%}) | "
+                          f"손절↑:{new_stop:,.0f} | 새목표:{new_target:,.0f}")
+                    self.notify(
+                        f"🎯 조기익절(목표1 전) {market} ({rate:+.2%}) — 50%매도\n"
+                        f"손절↑:{new_stop:,.0f} | 새목표:{new_target:,.0f}",
+                        critical=False,
+                    )
             return
 
-        # ④ 목표가 달성 → 손절/목표가 상향 (매도 안 함) ────
+        # ④ 목표가 달성 → 손절/목표가 상향 (stage>=1은 매도 안 함, stage==0만 50%매도) ────
         if target_next > 0 and current >= target_next:
             if stage == 0:
                 # ★ 목표가1 달성 → 50% 매도(수익실현)
+                # ★ 2026-10-06 — ③-1과 동일 버그: self.sell() 실패해도
+                #   stage를 1로 올리고 손절선을 위로 올리고 있었음 — 매도
+                #   성공시에만 상태를 갱신하도록 수정(대장 지적).
                 half_qty = qty if qty * current <= MIN_ORDER_AMT * 2 else qty / 2
                 if half_qty > 0 and (qty - half_qty) * current >= MIN_ORDER_AMT:
                     if self.sell(market, half_qty, f"목표1익절50%({rate:+.2%})",
                                  sell_price=current, force_all=False):
                         print(f"💰 목표1 50%매도 {market} | {half_qty:.6f}개 @ {current:,.0f}")
-                new_stop   = round(entry + atr_val * ATR_RAISE_MULT, 0)
-                new_target = round(current + atr_val * ATR_TARGET_MULT, 0)
-                tracker["stop_price"]  = new_stop
-                tracker["target_next"] = new_target
-                tracker["stage"]       = 1
-                print(f"🎯 목표가1 달성 {market} ({rate:+.2%}) | "
-                      f"손절↑:{new_stop:,.0f} | 새목표:{new_target:,.0f}")
-                self.notify(
-                    f"🎯 목표가1 달성 {market} ({rate:+.2%}) — 50%매도\n"
-                    f"손절↑:{new_stop:,.0f} | 새목표:{new_target:,.0f}",
-                    critical=False,
-                )
+                        new_stop   = round(entry + atr_val * ATR_RAISE_MULT, 0)
+                        new_target = round(current + atr_val * ATR_TARGET_MULT, 0)
+                        tracker["stop_price"]  = new_stop
+                        tracker["target_next"] = new_target
+                        tracker["stage"]       = 1
+                        print(f"🎯 목표가1 달성 {market} ({rate:+.2%}) | "
+                              f"손절↑:{new_stop:,.0f} | 새목표:{new_target:,.0f}")
+                        self.notify(
+                            f"🎯 목표가1 달성 {market} ({rate:+.2%}) — 50%매도\n"
+                            f"손절↑:{new_stop:,.0f} | 새목표:{new_target:,.0f}",
+                            critical=False,
+                        )
             else:
                 new_stop   = target_next
                 new_target = round(current + atr_val * ATR_TARGET_MULT, 0)
@@ -2358,6 +2426,12 @@ class CBot:
 
                 # ── 포지션 / KRW 잔고 ────────────────────────
                 new_pos = self.get_current_positions()
+                if new_pos is None:
+                    # ★ 2026-10-06 — 잔고조회 실패(None)시 기존 self.positions
+                    #   그대로 유지, 이번 루프의 포지션동기화/수동매도감지만
+                    #   건너뜀(일시적 API 오류를 "전량 수동매도"로 오탐 방지)
+                    print("⚠️ 잔고조회 실패 — 이번 루프 포지션동기화 스킵")
+                    time.sleep(LOOP_SLEEP); continue
                 # ★ 수동매도 감지
                 # ★ 2026-08-15: 감지만 되고 DB에 전혀 기록되지 않던 문제 수정
                 #   (사용자 지적 — "모든 거래가 우리 디비에 기록되어야
@@ -2444,11 +2518,18 @@ class CBot:
                 # ── 디스코드 명령 처리 ───────────────────────
                 self._handle_pending_command(bot_state)
 
+                # ★ 2026-10-06 — 아래 세 모드(stop/일시중단/일일손실한도)가
+                #   _check_sell()에서 바뀐 stage/peak_price/stop_price나
+                #   매도 후 peak_tracker.pop() 결과를 _save_positions() 없이
+                #   continue해서, 이 모드가 한동안(특히 BTC stop) 이어지다
+                #   재시작하면 그 변경분이 전부 날아갔음(대장 지적, 리포트로
+                #   발견). 세 곳 다 _write_status() 옆에 추가.
                 # ── BTC stop 모드 ─────────────────────────────
                 if self.market_status == "stop":
                     print("🚨 BTC 중단 — 긴급 손절 체크만")
                     for market, pos in list(self.positions.items()):
                         self._check_sell(market, pos)
+                    self._save_positions()
                     _write_status(self._build_status(krw, total_profit))
                     time.sleep(LOOP_SLEEP); continue
 
@@ -2457,6 +2538,7 @@ class CBot:
                     print("⏸️ 일시중단 — 매도 체크만")
                     for market, pos in list(self.positions.items()):
                         self._check_sell(market, pos)
+                    self._save_positions()
                     _write_status(self._build_status(krw, total_profit))
                     time.sleep(LOOP_SLEEP); continue
 
@@ -2465,6 +2547,7 @@ class CBot:
                     print(f"🚨 일손실 한도 초과: {self.daily_pnl:+,.0f}원")
                     for market, pos in list(self.positions.items()):
                         self._check_sell(market, pos)
+                    self._save_positions()
                     _write_status(self._build_status(krw, total_profit))
                     time.sleep(LOOP_SLEEP); continue
 
