@@ -771,9 +771,10 @@ async def execute_command(ctx, cmd: str):
 
     # ★ 2026-10-06: "!분석오늘"/"!분석이번주"가 바로 아래 startswith("!분석")에
     #   먼저 걸려 "사용법: !분석 005930"만 나오고 실행된 적이 없었음 — 앞으로 이동.
-    elif cmd == "!분석오늘":
+    # ★ 2026-10-06: 순서를 바꿔 쳐도 알아듣게 별칭(!오늘분석/!이번주분석)
+    elif cmd in ("!분석오늘", "!오늘분석"):
         await cmd_analyze_today(ctx)
-    elif cmd == "!분석이번주":
+    elif cmd in ("!분석이번주", "!이번주분석"):
         await cmd_analyze_period(ctx, days=7)
     elif cmd.startswith("!분석"):
         parts = cmd.split()

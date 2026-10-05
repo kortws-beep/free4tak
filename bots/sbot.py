@@ -379,6 +379,7 @@ class SBot:
         self._buy_sync_guard = {}   # {code: 매수시각(epoch)}
         self._recent_sells   = {}   # {code: {"ts", "tracker", "reason"}} — SELL_SYNC_GUARD_SEC 참고
         self.api_fail_count = 0    # ★ API 연속 실패 카운터
+        self._last_psbl_cash = 0   # ★ 2026-10-06: 상태파일 표시용(키키 !상태 "주문가능")
 
         # ── 메모리 캐시 ─────────────────────────────────
         self._tech_cache = {}
@@ -1998,6 +1999,7 @@ class SBot:
                 psbl_cash      = self.api.get_psbl_order_cash("005930")
                 if psbl_cash <= 0:
                     psbl_cash = cash
+                self._last_psbl_cash = psbl_cash
                 _ws_tag = "WS" if _ws_ok else "REST"
                 print(f"\n⏰ {now} | 💵 예수금[{_ws_tag}]: {cash:,} | 💰 주문가능: {psbl_cash:,}")
 
@@ -2207,6 +2209,8 @@ class SBot:
                      score_enter: int, now: str, pos_mkt_cache: dict = None):
         _write_status({
             "cash":          cash,
+            # ★ 2026-10-06: 키키 !상태가 이 키를 읽는데 저장을 안 해서 항상 "주문가능: 0원"
+            "psbl_cash":     self._last_psbl_cash,
             "total_profit":  int(total_profit),
             "positions":     len(self.positions),
             "score_enter":   score_enter,
