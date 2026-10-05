@@ -948,8 +948,11 @@ class KisAPI:
         """
         일봉 OHLC 데이터 조회 (ATR 변동성 계산용).
 
-        반환: [{"high": int, "low": int, "close": int, "open": int, "volume": int}, ...]
+        반환: [{"high": int, "low": int, "close": int, "open": int, "volume": int,
+                "date": "YYYY-MM-DD", "trade_value": int(원)}, ...]
         - 최신 → 과거 순서 (index 0이 가장 최근 일봉)
+        - ★ 2026-10-06: date(실제 거래일)/trade_value(누적 거래대금, 원) 추가 —
+          기존 키는 그대로라 다른 호출부엔 영향 없음.
         - risk_manager.calc_atr_rate()에 그대로 전달 가능
         """
         url = f"{self.base_url}/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice"
@@ -977,6 +980,9 @@ class KisAPI:
                         "close":  int(c.get("stck_clpr",  0) or 0),
                         "open":   int(c.get("stck_oprc",  0) or 0),
                         "volume": int(c.get("acml_vol",   0) or 0),
+                        "date":   (lambda d: f"{d[:4]}-{d[4:6]}-{d[6:]}" if len(d) == 8 else "")(
+                                      str(c.get("stck_bsop_date", "") or "")),
+                        "trade_value": int(c.get("acml_tr_pbmn", 0) or 0),
                     })
                 except Exception:
                     continue

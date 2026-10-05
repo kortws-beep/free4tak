@@ -59,7 +59,9 @@ def ensure_ohlc_columns():
     주고 있었는데 활용을 안 하고 있던 것 — 이제부터 다 저장한다.
     """
     conn = sqlite3.connect(DB_PATH)
-    for col in ("open_price", "high_price", "low_price"):
+    # ★ 2026-10-06: trade_value(실제 거래대금, 원) 추가 — 그동안 거래대금이 필요한
+    #   곳(3개월수급 2000억/300억 판정, daybot 매집필터 등)은 종가×거래량 근사치를 썼음.
+    for col in ("open_price", "high_price", "low_price", "trade_value"):
         try:
             conn.execute(f"ALTER TABLE kr_stock_daily_data ADD COLUMN {col} INTEGER")
         except sqlite3.OperationalError:
@@ -70,7 +72,7 @@ def ensure_ohlc_columns():
 
 # ── DB upsert ──────────────────────────────────────────────────
 def upsert_daily_data(rows: list[dict]) -> int:
-    """rows: [{"date","stock_name","open","high","low","close","volume","foreign_net","inst_net"}, ...]"""
+    """rows: [{"date","stock_name","open","high","low","close","volume","trade_value","foreign_net","inst_net"}, ...]"""
     if not rows:
         return 0
     conn   = sqlite3.connect(DB_PATH)
@@ -79,15 +81,16 @@ def upsert_daily_data(rows: list[dict]) -> int:
         """
         INSERT INTO kr_stock_daily_data
             (date, stock_name, open_price, high_price, low_price, close_price,
-             volume, foreign_net_buy, institution_net_buy)
+             volume, trade_value, foreign_net_buy, institution_net_buy)
         VALUES (:date, :stock_name, :open, :high, :low, :close,
-                :volume, :foreign_net, :inst_net)
+                :volume, :trade_value, :foreign_net, :inst_net)
         ON CONFLICT(date, stock_name) DO UPDATE SET
             open_price          = excluded.open_price,
             high_price          = excluded.high_price,
             low_price           = excluded.low_price,
             close_price         = excluded.close_price,
             volume              = excluded.volume,
+            trade_value         = excluded.trade_value,
             foreign_net_buy     = excluded.foreign_net_buy,
             institution_net_buy = excluded.institution_net_buy,
             updated_at          = CURRENT_TIMESTAMP
@@ -135,29 +138,27 @@ def collect_stock(api: KisAPI, stock_name: str, code: str, days: int) -> int:
     inv_cache = {}
     inv = api.get_investor_trend(code, inv_cache)
 
-    # 수급은 전일 마감 기준 1건 → 어제 날짜로 매핑
-    yesterday = (datetime.today() - timedelta(days=1)).strftime("%Y-%m-%d")
+    # 수급은 전일 마감 기준 1건 → "오늘 이전의 가장 최근 거래일"에 매핑.
+    # ★ 2026-10-06: 기존엔 달력상 어제에 붙여서, 월요일 수집이면 금요일 수급이
+    #   일요일 날짜로 가 버려졌음(일요일엔 일봉 행이 없음).
+    today_str  = datetime.today().strftime("%Y-%m-%d")
+    prev_dates = [c.get("date") for c in ohlc if c.get("date") and c["date"] < today_str]
     inv_map: dict[str, dict] = {}
-    if inv:
-        inv_map[yesterday] = {
+    if inv and prev_dates:
+        inv_map[prev_dates[0]] = {
             "foreign_net": inv.get("foreign_today", 0),
             "inst_net":    inv.get("orgn_today",    0),
         }
 
-    # ── 3. 날짜 계산 (오늘 기준 역산) ───────────────────────────
-    # get_daily_ohlc는 최신→과거 순서로 반환
+    # ── 3. 날짜 = API가 준 실제 거래일 ───────────────────────────
+    # ★ 2026-10-06: 기존엔 "오늘부터 평일을 거꾸로 센 날짜"를 붙여서, 08시대
+    #   수집(최신 봉=전 거래일)이면 어제 데이터가 오늘 날짜로 저장됐고, 평일
+    #   공휴일이 끼면 그만큼 더 밀렸음. 이제 stck_bsop_date를 그대로 쓴다.
     rows = []
-    base = datetime.today()
-    skip = 0   # 주말 보정용 오프셋
-    for i, candle in enumerate(ohlc):
-        # 영업일 기준 역산 (토/일 건너뜀)
-        while True:
-            d = base - timedelta(days=i + skip)
-            if d.weekday() < 5:   # 월~금
-                break
-            skip += 1
-
-        date_str = d.strftime("%Y-%m-%d")
+    for candle in ohlc:
+        date_str = candle.get("date")
+        if not date_str:
+            continue
         inv_day  = inv_map.get(date_str, {})
 
         rows.append({
@@ -168,10 +169,22 @@ def collect_stock(api: KisAPI, stock_name: str, code: str, days: int) -> int:
             "low":         candle.get("low", 0),
             "close":       candle["close"],
             "volume":      candle["volume"],
+            "trade_value": candle.get("trade_value") or None,
             "foreign_net": inv_day.get("foreign_net"),
             "inst_net":    inv_day.get("inst_net"),
         })
 
+    # ★ 2026-10-06: 이번에 받은 구간 안에서 실제 거래일이 아닌 날짜 행 정리 —
+    #   예전 날짜계산 방식이 평일 공휴일 등에 만들어 둔 엉뚱한 행.
+    if rows:
+        dates = [r["date"] for r in rows]
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute(
+            f"DELETE FROM kr_stock_daily_data WHERE stock_name=? AND date BETWEEN ? AND ? "
+            f"AND date NOT IN ({','.join('?' * len(dates))})",
+            [stock_name, min(dates), max(dates), *dates],
+        )
+        conn.commit(); conn.close()
     return upsert_daily_data(rows)
 
 
@@ -250,7 +263,10 @@ def collect_one(raw_name: str, days: int = 30) -> None:
 
 # ── 실행 ───────────────────────────────────────────────────────
 if __name__ == "__main__":
-    collect_all(days=1, delay=0.3)
+    # ★ 2026-10-06: `python collect_daily_data.py 100` 처럼 일수를 주면 그만큼
+    #   다시 받아 덮어씀 — 날짜계산 버그로 밀려 저장된 과거 데이터 1회 교정용.
+    _days = int(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1].isdigit() else 1
+    collect_all(days=_days, delay=0.3)
 
     # 단일 테스트:
     # collect_one("삼성SDI KOSPI 006400", days=10)
