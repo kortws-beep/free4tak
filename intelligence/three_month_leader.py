@@ -91,6 +91,12 @@ def _name_code_map(conn) -> dict:
             continue
         name = re.sub(r"\s*KOS(?:PI|DAQ)\s*[0-9A-Z]{6}$", "", raw).strip()
         out.setdefault(name, m.group(1))
+    # ★ 2026-10-06: 전 상장종목 마스터(update_stock_master.py)도 포함 — 테마에 없는 종목
+    try:
+        for code, name in conn.execute("SELECT code, name FROM kr_stock_master"):
+            out.setdefault(name, code)
+    except sqlite3.OperationalError:
+        pass
     return out
 
 

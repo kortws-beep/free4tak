@@ -208,7 +208,21 @@ def collect_stock(api: KisAPI, stock_name: str, code: str, days: int,
 
 
 # ── 전체 수집 ──────────────────────────────────────────────────
-def collect_all(days: int = 30, delay: float = 0.5, end_date: str = None) -> None:
+def all_raw_names(conn) -> list:
+    """테마 종목 + 전 상장종목 마스터(update_stock_master.py), 코드 기준 중복 제거.
+    ★ 2026-10-06: 테마에 없는 종목·신규 상장 종목이 빠져 있던 문제(대장 지적)."""
+    from update_stock_master import master_names
+    out, seen = [], set()
+    theme = [r[0] for r in conn.execute("SELECT DISTINCT stock_name FROM kr_theme_stocks")]
+    for raw in theme + master_names(conn):
+        m = re.search(r"(\d{6})$", (raw or "").strip())
+        if m and m.group(1) not in seen:
+            seen.add(m.group(1)); out.append(raw)
+    return out
+
+
+def collect_all(days: int = 30, delay: float = 0.5, end_date: str = None,
+                only_new: bool = False) -> None:
     """
     kr_theme_stocks의 모든 종목을 수집합니다.
 
@@ -227,9 +241,11 @@ def collect_all(days: int = 30, delay: float = 0.5, end_date: str = None) -> Non
     api = KisAPI(appkey=appkey, secret=secret)
 
     conn   = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("SELECT DISTINCT stock_name FROM kr_theme_stocks")
-    raw_names = [r[0] for r in cursor.fetchall()]
+    raw_names = all_raw_names(conn)
+    if only_new:
+        # 일봉이 한 줄도 없는 종목만 — 신규 편입 종목 첫 수집용
+        have = {n for (n,) in conn.execute("SELECT DISTINCT stock_name FROM kr_stock_daily_data")}
+        raw_names = [r for r in raw_names if parse_stock(r)[0] not in have]
     conn.close()
 
     if not raw_names:
@@ -253,6 +269,15 @@ def collect_all(days: int = 30, delay: float = 0.5, end_date: str = None) -> Non
 
         try:
             saved = collect_stock(api, name, code, days, end_date=end_date)
+            if only_new and saved:
+                # 3개월수급(119거래일)까지 쓰려면 100봉 한 번으론 부족 → 그 이전 100봉 추가
+                _c = sqlite3.connect(DB_PATH)
+                _old = _c.execute("SELECT MIN(date) FROM kr_stock_daily_data WHERE stock_name=?",
+                                  (name,)).fetchone()[0]
+                _c.close()
+                if _old:
+                    _end = (datetime.strptime(_old, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y%m%d")
+                    saved += collect_stock(api, name, code, days, end_date=_end)
             total += saved
             print(f"      ✅ {saved}일치 저장")
         except Exception as e:
@@ -287,7 +312,11 @@ if __name__ == "__main__":
     # `python collect_daily_data.py backfill` — 실제 거래대금이 있는 가장 오래된
     #   날짜 이전 100봉을 추가 수집(API 1회 최대 100봉이라 3개월수급 E조건의
     #   119거래일을 채우려면 필요). 여러 번 돌리면 그만큼 더 과거로 내려간다.
-    if len(sys.argv) > 1 and sys.argv[1] == "backfill":
+    if len(sys.argv) > 1 and sys.argv[1] == "new":
+        # `python collect_daily_data.py new` — 일봉이 없는 종목(마스터로 새로 들어온
+        #   종목)만 최근 100봉 + 그 이전 100봉 수집
+        collect_all(days=100, delay=0.3, only_new=True)
+    elif len(sys.argv) > 1 and sys.argv[1] == "backfill":
         # `backfill 20260507` 처럼 날짜를 주면 그 날짜까지 100봉(거래대금 빈 구간 메우기)
         if len(sys.argv) > 2 and sys.argv[2].isdigit() and len(sys.argv[2]) == 8:
             _end = sys.argv[2]
