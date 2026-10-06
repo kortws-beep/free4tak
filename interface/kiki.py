@@ -147,6 +147,7 @@ load_dotenv()
 # ============================================================
 BOT_TOKEN  = os.getenv("DISCORD_BOT_TOKEN")
 CHANNEL_ID = int(os.getenv("DISCORD_CHANNEL_ID", "0"))
+LINA_COMMANDS = ("!섹터", "!주도주", "!단타", "!3개월수급")   # 리나 담당 — 키키는 무시
 # ★ 2026-10-06: 명령 권한 — 기존엔 채널 ID만 확인해서 그 채널에 글을 쓸 수
 #   있는 누구나 매도/정지/전체재시작/리스크중단을 실행할 수 있었음.
 #   .env에 KIKI_ALLOWED_USER_IDS=디스코드유저ID(쉼표구분)를 넣으면 그 사람만
@@ -943,6 +944,9 @@ async def execute_command(ctx, cmd: str):
         parts = cmd.split()
         days  = int(parts[1]) if len(parts) == 2 and parts[1].isdigit() else 30
         await cmd_performance_detail(ctx, days=days)
+    elif cmd.startswith(LINA_COMMANDS):
+        # ★ 2026-10-06: 리나 명령(검색식·섹터)은 리나가 답함 — 같은 채널에서 쳐도 키키는 조용히
+        return
     else:
         # ★ 알 수 없는 명령어도 AI에게 자연어로 처리
         await ctx.send(f"🦊 키키: `{cmd}` 명령어를 모르겠어요. 자연어로 말해주세요!")
