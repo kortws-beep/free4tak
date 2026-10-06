@@ -29,6 +29,7 @@ SECTOR_MIN_AVG   = 1.5        # 그 분야 평균 등락률이 이 이상일 때
 LEADER_MOVE_PCT  = 3.0        # 대장·2등주가 이 이상 오르면 "움직이기 시작"(%)
 MIN_GROUP_SIZE   = 2          # 종목 1개짜리 그룹은 순위에서 제외
 MULTI_PAUSE      = 0.15
+HOT_PCT          = 5.0        # 그룹 안 "급등" 종목 기준(%) — 넓은 업종 안의 세부 테마 쏠림 표시용
 
 
 def hts_id() -> str:
@@ -70,6 +71,9 @@ def rank_sectors(groups: dict, quotes: dict) -> list:
             "group": gname, "n": len(mem),
             "avg_chg": sum(m["chg"] for m in mem) / len(mem),
             "up_ratio": sum(m["chg"] > 0 for m in mem) / len(mem) * 100,
+            # ★ 업종 그룹이 넓으면(우주방산통신 31종목) 그 안의 세부 테마(우주)가 터져도
+            #   평균에 묻힘(10-06 실측: 우주 강세인데 8위) — 급등 종목 수를 같이 보여줌
+            "hot": [m for m in mem if m["chg"] >= HOT_PCT],
             "value": sum(m["value"] for m in mem),
             "members": mem,
         })
@@ -122,6 +126,12 @@ def format_ranking(out: dict, top: int = 5) -> str:
         lead = " / ".join(f"{m['name']} {m['chg']:+.1f}%" for m in s["members"][:2])
         lines.append(f"{i}. **{s['group']}** 평균 {s['avg_chg']:+.2f}% · 상승 {s['up_ratio']:.0f}% · "
                      f"대금 {s['value'] / 1e8:,.0f}억 — {lead}")
+    # 순위 밖이어도 급등 종목이 몰린 그룹은 따로 표시
+    hot = sorted((s for s in out["sectors"] if len(s["hot"]) >= 3), key=lambda s: -len(s["hot"]))
+    if hot:
+        lines.append(f"🔥 +{HOT_PCT:.0f}%↑ 몰린 그룹: " + " · ".join(
+            f"{s['group']} {len(s['hot'])}개({', '.join(m['name'] for m in sorted(s['hot'], key=lambda m: -m['chg'])[:3])})"
+            for s in hot[:4]))
     if out["sectors"][top:]:
         weak = out["sectors"][-1]
         lines.append(f"   (최약: {weak['group']} {weak['avg_chg']:+.2f}%)")
