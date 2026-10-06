@@ -72,23 +72,34 @@ _YT_WATCHLIST_CACHE = {"ts": 0.0, "names": set()}
 # 종목코드 조회 (lina_bot/sbo2.py get_stock_code/get_stock_name 이식)
 # ============================================================
 def get_stock_name(code: str) -> str:
-    """코드 → 한글 종목명 조회 (kr_theme_stocks DB)"""
+    """코드 → 한글 종목명 조회 (kr_theme_stocks → kr_stock_master 순서)."""
     try:
         conn = sqlite3.connect(THEME_DB, timeout=5)
         row  = conn.execute("""
             SELECT stock_name FROM kr_theme_stocks
             WHERE stock_name LIKE ? LIMIT 1
         """, (f"%{code}%",)).fetchone()
+        if row:
+            conn.close()
+            return re.sub(r'(KOSPI|KOSDAQ).*|\d{6}', '', row[0]).strip()
+        # ★ 2026-10-06 — 테마DB(주달 크롤링, 4개월 전 스냅샷)에 없는
+        #   신규상장/비테마 종목은 한투 공식 종목마스터(kr_stock_master,
+        #   update_stock_master.py)에서 재조회(대장 지적 — 케이엔알시스템
+        #   199430 사례로 발견).
+        row = conn.execute("""
+            SELECT name FROM kr_stock_master WHERE code = ? LIMIT 1
+        """, (code,)).fetchone()
         conn.close()
         if row:
-            return re.sub(r'(KOSPI|KOSDAQ).*|\d{6}', '', row[0]).strip()
+            return row[0]
     except Exception:
         pass
     return code
 
 
 def get_stock_code(name: str) -> str:
-    """kr_theme_finance.db 에서 종목명으로 코드 조회"""
+    """kr_theme_finance.db 에서 종목명으로 코드 조회
+    (kr_theme_stocks → kr_stock_master 순서)."""
     conn = None
     try:
         conn = sqlite3.connect(THEME_DB, timeout=5)
@@ -112,6 +123,13 @@ def get_stock_code(name: str) -> str:
             m = re.search(r'(\d{6})', row[0])
             if m:
                 return m.group(1)
+        # ★ 2026-10-06 — 위 두 소스(테마DB)에 없으면 한투 공식
+        #   종목마스터에서 정확히 일치하는 이름으로 재조회.
+        row = conn.execute("""
+            SELECT code FROM kr_stock_master WHERE name = ? LIMIT 1
+        """, (name,)).fetchone()
+        if row:
+            return row[0]
     except Exception as e:
         print(f"⚠️ [candidate_pool] 코드 조회 오류 {name}: {e}")
     finally:
