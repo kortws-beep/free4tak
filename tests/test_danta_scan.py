@@ -12,7 +12,7 @@ import danta_scan as D  # noqa: E402
 NOW = datetime.datetime(2026, 10, 6, 10, 30, 0)
 
 
-def q(price, chg, value, volume, ask=900, bid=1000):
+def q(price, chg, value, volume, ask=1000, bid=900):
     return {"name": "", "price": price, "chg": chg, "high": price, "prev_close": price,
             "value": value, "volume": volume, "ask_rsqn": ask, "bid_rsqn": bid}
 
@@ -36,7 +36,7 @@ class API:
     def __init__(self):
         self.quotes = {
             "111111": q(10000, 8.0, 6e9, 1_000_000),           # 시총 2000억, 회전율 5% → 끝까지 검사
-            "222222": q(10000, 5.0, 6e9, 600_000, ask=1500),   # 잔량비 150% → 1단계 탈락
+            "222222": q(10000, 5.0, 6e9, 600_000, bid=1500),   # 잔량비(매수÷매도) 150% → 1단계 탈락
             "333333": q(10000, 5.0, 1e9, 100_000),             # 거래대금 10억 → 사전필터 탈락
             "444444": q(100000, 5.0, 6e9, 60_000),             # 시총 5조 → G 탈락
         }

@@ -1509,6 +1509,22 @@ async def daily_momentum_checkin():
 #   키움 쪽 감시를 12시까지로 늘림 → 여기도 맞춤.
 TML_WATCH_END = "1200"
 _TML_STATE = {"date": "", "alerted": set()}
+
+
+def _alerted_today(table: str, today: str) -> set:
+    """오늘 이미 통과 기록이 있는 종목 = 이미 알린 종목.
+    ★ 2026-10-06: 알림 중복방지가 메모리에만 있어서 bot restart 할 때마다 같은
+      종목(알멕)을 또 알렸음 — 재시작 후 첫 검사 전에 기록 DB에서 복원."""
+    try:
+        import three_month_leader as tml
+        conn = sqlite3.connect(tml.LOG_DB, timeout=10)
+        try:
+            return {c for (c,) in conn.execute(
+                f"SELECT DISTINCT code FROM {table} WHERE date=? AND passed=1", (today,))}
+        finally:
+            conn.close()
+    except Exception:
+        return set()
 _tml_api = None
 
 
@@ -1532,7 +1548,7 @@ async def three_month_leader_watch():
     try:
         today = kst_now.strftime("%Y-%m-%d")
         if _TML_STATE["date"] != today:
-            _TML_STATE.update(date=today, alerted=set())
+            _TML_STATE.update(date=today, alerted=_alerted_today("tml_obs", today))
         universe, results = await asyncio.to_thread(_tml_scan_sync)
         try:   # 체결강도 기준 결정용 기록 (python three_month_leader.py report)
             import three_month_leader as tml
@@ -1591,7 +1607,7 @@ async def leader_scan_watch():
         import leader_scan
         today = kst_now.strftime("%Y-%m-%d")
         if _LEADER_STATE["date"] != today:
-            _LEADER_STATE.update(date=today, alerted=set())
+            _LEADER_STATE.update(date=today, alerted=_alerted_today("leader_obs", today))
         out = await asyncio.to_thread(_leader_scan_sync)
         try:
             await asyncio.to_thread(leader_scan.log_scan, out)
@@ -1652,7 +1668,7 @@ async def danta_scan_watch():
         import danta_scan
         today = kst_now.strftime("%Y-%m-%d")
         if _DANTA_STATE["date"] != today:
-            _DANTA_STATE.update(date=today, alerted=set())
+            _DANTA_STATE.update(date=today, alerted=_alerted_today("danta_obs", today))
         out = await asyncio.to_thread(_danta_scan_sync)
         try:
             await asyncio.to_thread(danta_scan.log_scan, out)
