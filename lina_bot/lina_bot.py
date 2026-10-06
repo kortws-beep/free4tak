@@ -1699,6 +1699,73 @@ async def before_danta_scan_watch():
     await client.wait_until_ready()
 
 
+# ══════════════════════════════════════════════════════════════
+# 한투 관심그룹 섹터 감시 (2026-10-06, 관찰 전용)
+# ══════════════════════════════════════════════════════════════
+# intelligence/sector_watch.py 참고. 대장이 한투에 분야별로 정리한 관심그룹의
+# 강도 순위를 정해진 시각에 한 번씩 올리고(검색식 채널), 강한 분야의 대장주·
+# 2등주가 +3%를 넘으면 알림(NEW ⭐, 검색식 겹침 🔗).
+SECTOR_WATCH_START, SECTOR_WATCH_END = "0900", "1520"
+SECTOR_RANK_TIMES = ("0910", "1000", "1100", "1300", "1430")
+_SECTOR_STATE = {"date": "", "alerted": set(), "posted": set(), "watcher": None, "last": None}
+
+
+def _sector_scan_sync():
+    global _tml_api
+    import sector_watch
+    if _tml_api is None:
+        from kis_api import KisAPI
+        _tml_api = KisAPI()
+    if _SECTOR_STATE["watcher"] is None:
+        _SECTOR_STATE["watcher"] = sector_watch.SectorWatcher(_tml_api)
+    out = _SECTOR_STATE["watcher"].scan()
+    _SECTOR_STATE["last"] = out
+    return out
+
+
+@tasks.loop(minutes=3)
+async def sector_watch_loop():
+    kst_now = datetime.datetime.now(KST)
+    hhmm = kst_now.strftime("%H%M")
+    if not (SECTOR_WATCH_START <= hhmm < SECTOR_WATCH_END):
+        return
+    if not _is_trading_day():
+        return
+    try:
+        import sector_watch
+        import danta_scan
+        today = kst_now.strftime("%Y-%m-%d")
+        if _SECTOR_STATE["date"] != today:
+            _SECTOR_STATE.update(date=today, alerted=sector_watch.alerted_today(today), posted=set())
+        out = await asyncio.to_thread(_sector_scan_sync)
+        if not out["sectors"]:
+            print("⚠️ [섹터] 관심그룹을 못 읽었거나 비어 있음 (KIS_HTS_ID 확인)")
+            return
+        await asyncio.to_thread(sector_watch.log_scan, out)
+        channel = None
+        due = [t for t in SECTOR_RANK_TIMES if t <= hhmm and t not in _SECTOR_STATE["posted"]]
+        if due:
+            _SECTOR_STATE["posted"].update(due)
+            channel = await client.fetch_channel(SCAN_CHANNEL_ID)
+            await send_safe_message(channel, sector_watch.format_ranking(out))
+        hits = sector_watch.leader_moves(out["sectors"], out["new_codes"], _SECTOR_STATE["alerted"])
+        print(f"🗺️ [섹터] 그룹 {out['groups']} · 1위 {out['sectors'][0]['group']} "
+              f"{out['sectors'][0]['avg_chg']:+.2f}% · 대장/2등 신규 {len(hits)}")
+        if hits:
+            channel = channel or await client.fetch_channel(SCAN_CHANNEL_ID)
+            await send_safe_message(channel, "\n".join(
+                sector_watch.format_move(h, danta_scan.overlap_today(h["code"], today)) for h in hits))
+            _SECTOR_STATE["alerted"].update(h["code"] for h in hits)
+            await asyncio.to_thread(sector_watch.save_alerts, hits)
+    except Exception as e:
+        print(f"⚠️ [섹터] 감시 오류: {e}")
+
+
+@sector_watch_loop.before_loop
+async def before_sector_watch_loop():
+    await client.wait_until_ready()
+
+
 _KIWOOM_POOL_SCAN_TIMES = {(9, 30), (12, 30), (15, 0)}
 _kiwoom_pool_scan_state = {"date": "", "done": set(), "retry_at": None, "retry_label": None}
 
@@ -2332,6 +2399,12 @@ async def on_ready():
         print("✅ [시스템] 단타000 파이썬판 (09:00~15:20, 1분 주기) 가동 성공! (관찰 전용)")
     except Exception as e: print(f"⚠️ [에러] 단타000 스케줄러: {e}")
 
+    try:
+        if not sector_watch_loop.is_running():
+            sector_watch_loop.start()
+        print("✅ [시스템] 한투 관심그룹 섹터 감시 (09:00~15:20, 3분 주기) 가동 성공! (관찰 전용)")
+    except Exception as e: print(f"⚠️ [에러] 섹터 감시 스케줄러: {e}")
+
 def _fetch_sbo2_status_sync(api, positions: dict):
     """!상태 — 보유종목 기준 주문가능금액+시세 조회 (동기, to_thread로 실행)."""
     psbl = 0
@@ -2479,6 +2552,24 @@ async def on_message(message):
 
     # ── !3개월수급 (파이썬판 조건검색 수동 확인, 2026-10-06) ──────────
     #   시간 제한 없이 즉시 실행 — 장외엔 마지막 시세 기준이라 참고용.
+    # ── !섹터 / !섹터 우주 — 한투 관심그룹 분야별 강도 (2026-10-06) ──
+    # (!섹터재시작은 키키 명령 — 리나는 무시)
+    if message.content.startswith("!섹터") and not message.content.startswith("!섹터재시작"):
+        async with message.channel.typing():
+            try:
+                import sector_watch
+                keyword = message.content[len("!섹터"):].strip()
+                out = await asyncio.to_thread(_sector_scan_sync)
+                if not out["sectors"]:
+                    await send_safe_message(message.channel, "⚠️ 관심그룹을 못 읽었어 (.env의 KIS_HTS_ID 확인)")
+                elif keyword:
+                    await send_safe_message(message.channel, sector_watch.format_group(out, keyword))
+                else:
+                    await send_safe_message(message.channel, sector_watch.format_ranking(out, top=10))
+            except Exception as e:
+                await send_safe_message(message.channel, f"❌ 섹터 조회 오류: {e}")
+        return
+
     # ── !단타 — 단타000 파이썬판 즉시 조회 (2026-10-06) ──
     #   1분 순매수(E)는 직전 검사와의 차이라, 1분 감시가 돌고 있어야 값이 나온다.
     if message.content.startswith("!단타"):

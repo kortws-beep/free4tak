@@ -289,13 +289,16 @@ class DantaScanner:
                 "results": results}
 
 
-def overlap_today(code: str, date: str, db_path: str = tml.LOG_DB) -> str:
+def overlap_today(code: str, date: str, db_path: str = tml.LOG_DB, exclude: tuple = ()) -> str:
     """같은 날 주도주3/3개월수급 기록과의 겹침 — "주도주 통과" / "주도주 근접" / ""."""
     try:
         conn = sqlite3.connect(db_path, timeout=10)
         try:
             tags = []
-            for table, label in (("leader_obs", "주도주"), ("tml_obs", "3개월수급")):
+            for table, label in (("leader_obs", "주도주"), ("tml_obs", "3개월수급"),
+                                 ("danta_obs", "단타000")):
+                if table in exclude:
+                    continue
                 try:
                     row = conn.execute(f"SELECT MAX(passed) FROM {table} WHERE date=? AND code=?",
                                        (date, code)).fetchone()
@@ -327,7 +330,7 @@ def scan_and_tag(scanner: "DantaScanner", now: datetime.datetime = None) -> dict
     out = scanner.scan(now)
     date = (now or datetime.datetime.now(KST)).strftime("%Y-%m-%d")
     for r in out["results"]:
-        r["overlap"] = overlap_today(r["code"], date)
+        r["overlap"] = overlap_today(r["code"], date, exclude=("danta_obs",))
     return out
 
 
