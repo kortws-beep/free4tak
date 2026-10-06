@@ -17,13 +17,18 @@ def q(price, chg, value, volume, ask=900, bid=1000):
             "value": value, "volume": volume, "ask_rsqn": ask, "bid_rsqn": bid}
 
 
-def rising_bars(n=520, date="20261006"):
-    out, t = [], datetime.datetime(2026, 10, 6, 9, 0)
+def rising_bars(n=520):
+    """정규장(09:00~15:29) 1분봉 n개를 여러 날에 걸쳐 + 날마다 NXT 시간외 봉(무시돼야 함)."""
+    out, t = [], datetime.datetime(2026, 10, 5, 9, 0)
     for i in range(n):
         p = 1000 + (i * 2 if i > n - 15 else (i % 7))   # 횡보하다 마지막에 급등
-        out.append({"date": date, "time": t.strftime("%H%M%S"), "price": p, "high": p + 1,
-                    "low": p - 1, "volume": 10, "acml_value": 0})
+        out.append({"date": t.strftime("%Y%m%d"), "time": t.strftime("%H%M%S"), "price": p,
+                    "high": p + 1, "low": p - 1, "volume": 10, "acml_value": 0})
         t += datetime.timedelta(minutes=1)
+        if t.strftime("%H%M") == "1530":
+            out.append({"date": t.strftime("%Y%m%d"), "time": "194800", "price": 1,
+                        "high": 1, "low": 1, "volume": 1, "acml_value": 0})
+            t = t.replace(hour=9, minute=0) + datetime.timedelta(days=1)
     return out
 
 
