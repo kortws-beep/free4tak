@@ -11,6 +11,18 @@ import types
 import tempfile
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# ★ 2026-10-06: 테스트는 실제 .env를 절대 읽지 않는다. kiki_cmd/kiki_briefing/
+#   kiki_data/collect_daily_data가 import 시 load_dotenv(..., override=True)를
+#   해서, 대장이 .env에 넣은 실제 값(KIKI_ALLOWED_USER_IDS 등)이 테스트가 미리
+#   넣어 둔 os.environ 값을 덮어썼음(test_kiki_routing 2건 실패). 이 파일은
+#   모든 테스트가 맨 먼저 import하므로 여기서 dotenv를 아무것도 안 하는 가짜로
+#   바꿔 둔다 — 테스트에 필요한 환경값은 각 테스트가 os.environ에 직접 넣는다.
+_dotenv = types.ModuleType("dotenv")
+_dotenv.load_dotenv = lambda *a, **k: False
+_dotenv.find_dotenv = lambda *a, **k: ""
+_dotenv.dotenv_values = lambda *a, **k: {}
+sys.modules["dotenv"] = _dotenv
 for _d in ["core", "bots", "interface", "intelligence", "lina_bot", ""]:
     _p = os.path.join(REPO, _d)
     if _p not in sys.path:
