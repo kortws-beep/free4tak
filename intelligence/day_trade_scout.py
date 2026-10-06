@@ -176,7 +176,7 @@ def _get_theme_leader(theme_cd: str, kiwoom: KiwoomAPI, top_n: int = 2) -> list:
 def _notify(msg: str, critical: bool = False):
     try:
         from notifier import Notifier
-        Notifier(name="스카우트").send(f"[스카우트] {msg}", critical=critical)
+        Notifier(name="스카우트", route="scan").send(f"[스카우트] {msg}", critical=critical)
     except Exception as e:
         print(f"⚠️ 알림 전송 오류: {e}")
 

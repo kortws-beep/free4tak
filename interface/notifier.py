@@ -32,7 +32,11 @@ FAILED_LOG = "logs/notify_failed.log"
 class Notifier:
     """디스코드 알림 송신자."""
 
-    def __init__(self, name: str = "bot"):
+    def __init__(self, name: str = "bot", route: str = "kiki"):
+        """route="kiki"(기본): 키키 채널 — 봇 매매/관리 알림.
+        route="scan": 리나 이름으로 '산야'(검색식·참고정보) 채널 —
+          ★ 2026-10-06 대장: "키키는 본연의 봇 관리, 브리핑은 리나, 그 외
+          메시지는 산야로". LINA_SCAN_CHANNEL_ID가 없으면 키키 채널로 보냄."""
         self.name      = name  # 어느 봇이 보내는지 (디버깅용)
         # ★ 2026-08-08: 웹훅+봇채널이 둘 다 설정되어 있으면 알림마다 2번씩
         #   나가는 구조였음(cbot 매수 알림이 4번 중복 발송된 사고로 발견 —
@@ -41,6 +45,9 @@ class Notifier:
         self.webhook   = None
         self.bot_token = os.getenv("DISCORD_BOT_TOKEN")
         self.channel   = os.getenv("DISCORD_CHANNEL_ID")
+        if route == "scan" and os.getenv("LINA_SCAN_CHANNEL_ID") and os.getenv("DISCORD_BOT_TOKEN_N"):
+            self.bot_token = os.getenv("DISCORD_BOT_TOKEN_N")      # 리나 토큰
+            self.channel   = os.getenv("LINA_SCAN_CHANNEL_ID")
         self._last_send = 0  # rate limit 회피용 타임스탬프
 
     def send(self, msg: str, critical: bool = False) -> bool:

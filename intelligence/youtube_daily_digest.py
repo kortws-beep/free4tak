@@ -70,7 +70,7 @@ def main():
            + "\n".join(report_lines))
     try:
         from notifier import Notifier
-        Notifier(name="유튜브스카우트").send(msg)
+        Notifier(name="유튜브스카우트", route="scan").send(msg)
     except Exception as e:
         print(f"⚠️ 알림 전송 오류: {e}")
 
