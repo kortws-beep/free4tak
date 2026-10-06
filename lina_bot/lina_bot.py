@@ -181,6 +181,20 @@ async def _register_manual_watch(channel, code: str, buy_price: float = None,
                 await send_safe_message(channel, f"❌ {code} 현재가 조회 실패 — 평단가를 직접 입력해줘.")
                 return
             name = name_override or get_stock_name(code)
+            # ★ 2026-10-06 — get_stock_name()이 DB에 없는 코드는 입력값을
+            #   그대로 돌려주는 폴백 구조라, 잘못된 코드(앞자리 0 누락
+            #   등)가 조용히 "종목명=코드" 상태로 등록돼버리던 버그
+            #   (대장 지적 — "35530"이 현재가 조회도 안 되는 유령 종목으로
+            #   등록된 채 방치돼 코스텍시스템 추적이 안 됨). 이름 해석이
+            #   코드 그 자체로 되돌아오면(= 미해석) 등록을 막는다.
+            if not name_override and name == code:
+                await send_safe_message(
+                    channel,
+                    f"❌ '{code}' 종목명을 못 찾았어 — 코드가 틀렸을 수 있어"
+                    f"(6자리 맞는지 확인). 그래도 등록하려면 "
+                    f"`!리나등록 {code} {buy_price:,.0f} 종목명` 처럼 종목명을 직접 붙여줘."
+                )
+                return
 
             watches = _load_manual_watches()
             watches[code] = {
@@ -2451,13 +2465,23 @@ async def on_message(message):
                 await send_safe_message(message.channel, f"❌ 등록현황 조회 오류: {e}")
         return
 
-    if message.content.startswith("!리나등록해제") or message.content.startswith("해제 "):
+    # ★ 2026-10-06 — "등록해제 종목명"(공백없는 복합어)이 "!리나등록해제"/
+    #   "해제 "/"등록 " 중 어느 패턴에도 안 걸려서 명령이 아예 안
+    #   먹히고 일반 AI채팅으로 새 — 대장이 실제로 이 표현을 썼다가
+    #   "데이터가 없어서 답변 못 해"만 받고 등록해제가 전혀 안 된 걸
+    #   발견(원익홀딩스/030530 둘 다 재현).
+    if (message.content.startswith("!리나등록해제") or message.content.startswith("해제 ")
+            or message.content.startswith("등록해제")):
         parts = message.content.split()
         if len(parts) < 2:
             await send_safe_message(message.channel, "사용법: `!리나등록해제 종목코드 [매도가]` 또는 `해제 종목명 [매도가]`")
             return
         arg = parts[1].strip()
-        code = arg if arg.isdigit() else get_stock_code(arg)
+        # ★ 2026-10-06 — 종목코드는 항상 6자리인데 앞자리 0이 빠진 5자리
+        #   입력("35530")을 그대로 받아들여 존재하지 않는 코드로
+        #   처리되던 버그(대장 지적). 숫자만이고 6자리 미만이면 0으로
+        #   채움.
+        code = arg.zfill(6) if arg.isdigit() else get_stock_code(arg)
         if not code:
             await send_safe_message(message.channel, f"❌ '{arg}' 종목코드를 못 찾았어.")
             return
@@ -2483,7 +2507,9 @@ async def on_message(message):
                                      "평단가 생략하면 현재가로 등록해(분할매수 완료 후 평단가로 등록 권장).")
             return
         arg = parts[1].strip()
-        code = arg if arg.isdigit() else get_stock_code(arg)
+        # ★ 2026-10-06 — 위 해제 명령과 동일한 5자리 코드(앞자리 0 누락)
+        #   버그 수정.
+        code = arg.zfill(6) if arg.isdigit() else get_stock_code(arg)
         if not code:
             await send_safe_message(message.channel, f"❌ '{arg}' 종목코드를 못 찾았어.")
             return
