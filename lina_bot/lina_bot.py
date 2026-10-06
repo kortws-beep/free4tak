@@ -2466,6 +2466,12 @@ async def on_message(message):
         async with message.channel.typing():
             try:
                 import danta_scan
+                # !단타 종목명 — 그 종목이 왜 안 잡히는지(마지막 1분 감시 결과 기준)
+                keyword = message.content[len("!단타"):].strip()
+                if keyword and _DANTA_STATE["scanner"] is not None:
+                    await send_safe_message(message.channel, "🔎 **단타000 판정**\n" + "\n".join(
+                        "   " + x for x in danta_scan.explain(_DANTA_STATE["scanner"], keyword)))
+                    return
                 out = await asyncio.to_thread(_danta_scan_sync)
                 passed = [r for r in out["results"] if r["passed"]]
                 lines = [f"🧪 **단타000 (파이썬판)** {out['time']} — 풀 {out['pool']} → "
