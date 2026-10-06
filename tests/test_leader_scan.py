@@ -50,7 +50,9 @@ class API:
             "999999": q(11000, 10.0, 11200, 6e10),  # 순위 API로만 들어온 종목, 시총 과대
         }
         self.bar_map = {"000000": 6e9, "000002": 1e9, "999999": 7e9, "000003": 9e9}
-    def get_value_rank(self, blng): return [("999999", "신규급등")] if blng == "3" else []
+    def get_value_rank(self, blng, market="0000"):
+        return [("999999", "신규급등"), ("888888", "KODEX 레버리지")] if blng == "3" else []
+    def get_rise_rank(self, market="0000"): return []
     def get_multi_price(self, codes): return {c: self.quotes[c] for c in codes if c in self.quotes}
     def get_minute_bars(self, code, hhmmss): return bars(self.bar_map.get(code, 0))
     def get_market_data(self, code):

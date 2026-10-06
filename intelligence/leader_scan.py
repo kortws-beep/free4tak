@@ -65,10 +65,18 @@ def build_pool(api, db_path: str = tml.THEME_DB, today: str = None) -> dict:
     finally:
         conn.close()
     pool = {name_code[n]: n for (n,) in rows if n in name_code}
-    for blng in ("3", "1"):
-        for code, name in api.get_value_rank(blng):
-            if len(code) == 6 and code not in pool and not _is_etf(name):
-                pool[code] = name
+    # ★ 2026-10-06: 처음엔 전체시장 거래금액/거래증가율 순위(각 30)만 보탰는데,
+    #   키움엔 뜬 에스투더블유(+17.9%, 거래대금 ~580억)가 풀에서 빠졌음 —
+    #   전날 조용하다 오늘 터진 종목. 시장별(코스피/코스닥)로 나눠 받고
+    #   상승률 순위도 더해 오늘 새로 뜬 종목을 넓게 잡는다(호출 8회).
+    extra = []
+    for market in ("0001", "1001"):
+        for blng in ("3", "1", "0"):
+            extra += api.get_value_rank(blng, market)
+        extra += api.get_rise_rank(market)
+    for code, name in extra:
+        if len(code) == 6 and code not in pool and not _is_etf(name):
+            pool[code] = name
     return pool
 
 
@@ -175,6 +183,8 @@ if __name__ == "__main__":
         print("복수시세:", json.dumps(api.get_multi_price(["005930", "000660"]), ensure_ascii=False))
         print("분봉 3개:", json.dumps(api.get_minute_bars("005930")[:3], ensure_ascii=False))
         print("거래금액순위 5개:", api.get_value_rank("3")[:5])
+        print("코스닥 거래금액순위 5개:", api.get_value_rank("3", "1001")[:5])
+        print("코스닥 상승률순위 5개:", api.get_rise_rank("1001")[:5])
         sys.exit(0)
     pool = build_pool(api)
     out = scan(api, pool)
