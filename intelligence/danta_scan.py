@@ -186,7 +186,8 @@ class DantaScanner:
             if q.get("bid_rsqn"):
                 ratio = q["ask_rsqn"] / q["bid_rsqn"] * 100
                 if ratio > K_ASK_BID_MAX:
-                    diag[code] = (name, f"K잔량비 {ratio:.0f}% > 100%"); continue
+                    diag[code] = (name, f"K잔량비 {ratio:.0f}% > 100% (총매도잔량 "
+                                        f"{q['ask_rsqn']:,.0f} / 총매수잔량 {q['bid_rsqn']:,.0f})"); continue
             else:
                 ratio = None
             stage1.append((code, name, q, ratio))
