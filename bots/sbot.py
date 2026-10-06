@@ -291,11 +291,10 @@ SLEEP_INTERVAL   = 60
 #   끝나는 경우(주문가능금액 부족/고가종목 호가단위 때문에 1주만 사고
 #   끝나는 등, 058610/011070 사례로 발견)가 있어, 정규장 마감 후
 #   애프터마켓 시간대에 한 번 더 확인해서 목표금액까지 보충매수한다.
-#   단, 가격이 그 사이 많이 움직였으면(물타기/추격매수 위험) 건너뛴다
-#   (대장 지정 — "내린가격/비싼가격 매수는 제외").
+#   가격이 매수가보다 오르면(추격매수 위험) 건너뛴다 — "동일가나
+#   이하가격에서만 재매수"(대장 지정).
 EVENING_TOPUP_START       = "1530"   # 정규장 마감 이후부터
 EVENING_TOPUP_MIN_FILL_RATIO  = 0.7  # 목표금액의 70% 미만이면 "미달"로 간주
-EVENING_TOPUP_PRICE_TOLERANCE_PCT = 2.0  # 진입가 대비 ±2% 벗어나면 제외
 
 # 약세장 방어
 MARKET_WEAK_THRESH = -2.0   # -1.5%→-2.0% 완화 (nbot과 통일)
@@ -1342,7 +1341,12 @@ class SBot:
                     db_path="sbot_trade_history.db",     # ★ 켈리: sbot DB 사용
                 )
             else:
-                buy_amount = min(BUY_1ST_AMT_BASE, psbl_cash)
+                # ★ 2026-10-06 대장 지정 — 마지막 슬롯은 다음 슬롯을 위해
+                #   현금을 아낄 이유가 없으니, 목표금액(BUY_1ST_AMT_BASE)
+                #   캡 없이 가용현금 최대까지 매수(스크랩매수 방지 체크는
+                #   그대로 유지).
+                is_last_slot = (slots == 1)
+                buy_amount = psbl_cash if is_last_slot else min(BUY_1ST_AMT_BASE, psbl_cash)
                 # ★ 2026-09-29: 목표 슬롯금액의 FLAT_BUY_MIN_RATIO 미만이면
                 #   스크랩 매수 방지(대장 지적 — 세방 21만원 매수 건)
                 if buy_amount < BUY_1ST_AMT_BASE * FLAT_BUY_MIN_RATIO:
@@ -1430,8 +1434,12 @@ class SBot:
         (target_amount)의 EVENING_TOPUP_MIN_FILL_RATIO 미만만 체결된
         것을, 정규장 마감(15:30) 이후 애프터마켓 시간대에 한 번
         확인해서 나머지를 보충매수한다. 하루 1종목당 1회만(topup_done).
-        가격이 진입가 대비 ±EVENING_TOPUP_PRICE_TOLERANCE_PCT를 벗어나면
-        물타기(하락)/추격매수(상승) 위험으로 보고 건너뛴다."""
+        ★ 2026-10-06 재조정(대장 지정) — "동일가나 이하가격에서만
+        재매수"로 단순화(물타기든 추격매수든 상단은 절대 안 넘고, 하단은
+        제한 없음 — 밑으로 더 내려가도 손절은 별도 로직이 독립적으로
+        돌고 있어 이 함수와 무관). 가격이 진입가보다 높으면 이번 루프는
+        건너뛰고(topup_done 안 찍음) 다음 루프에 다시 확인 — 저녁 동안
+        가격이 내려오면 그때 채운다."""
         if now_t < EVENING_TOPUP_START:
             return
         for code, pos in list(self.positions.items()):
@@ -1460,11 +1468,9 @@ class SBot:
             if current <= 0:
                 continue
 
-            drift_pct = (current - entry) / entry * 100
-            if abs(drift_pct) > EVENING_TOPUP_PRICE_TOLERANCE_PCT:
-                print(f"⏭️ [SWING] {code} 저녁보충매수 패스 — 가격변동 {drift_pct:+.2f}%"
-                      f"(허용범위 ±{EVENING_TOPUP_PRICE_TOLERANCE_PCT}% 밖, 물타기/추격매수 방지)")
-                pos["topup_done"] = True
+            if current > entry:
+                # 대장 지정 — 동일가나 이하만 재매수(추격매수 방지).
+                # 다음 루프에 다시 확인(topup_done 안 찍음).
                 continue
 
             shortfall = min(int(target - filled), psbl_cash)

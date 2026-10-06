@@ -122,6 +122,14 @@ BUY_AMT_PER_SLOT = 1_000_000          # ★ 2026-10-02 대장 지정(150만→10
                                        # 쌓이는 걸 보고 종목당 금액을 낮춰 리스크 축소. 승률
                                        # 50%+ 달성하면 150만으로 재상향 검토(대장 명시).
                                        # 부족하면 kis_api.buy()가 자체적으로 최소1주까지 축소시도.
+# ★ 2026-10-06 대장 지정 — 1차매수가 목표금액(BUY_AMT_PER_SLOT)을 다
+#   못 채우고 끝나는 경우(가용현금 부족/고가종목 호가단위 때문), 가격이
+#   매수가 대비 오르지 않았으면(동일가 또는 이하) 부족분을 재매수해서
+#   최대한 채운다. "비싼 가격에 추격매수"는 하지 않음(물타기/추격 둘다
+#   아닌 "그대로거나 싸면만" 원칙).
+AMOUNT_TOPUP_MIN_FILL_RATIO = 0.7     # 목표금액의 70% 미만이면 "미달"로 간주
+# ★ 2026-10-06 대장 지정 — 마지막 슬롯은 다음 슬롯을 위해 현금을 아낄
+#   이유가 없으니, 목표금액(100만원) 캡 없이 가용현금 최대까지 매수.
 TAKE_PROFIT_PCT  = 2.5                # 익절 +2~3% 중간값
 STOP_LOSS_PCT    = -3.5               # 손절 -3~4% 중간값
 # ★ 2026-09-29 밤 대장 지정 — 급등주 특성상 오르면 10%+ 가는 경우가
@@ -535,11 +543,13 @@ class DayBot:
     # ============================================================
     # 매수/매도 실행
     # ============================================================
-    def _do_buy(self, code: str, name: str, price: float, source_tier: str):
+    def _do_buy(self, code: str, name: str, price: float, source_tier: str,
+                is_last_slot: bool = False) -> bool:
         psbl_cash = self.api.get_psbl_order_cash(code, price)
         if psbl_cash < MIN_ANALYSIS_CASH:
             return False
-        amount = min(BUY_AMT_PER_SLOT, psbl_cash)
+        # ★ 2026-10-06 대장 지정 — 마지막 슬롯은 캡 없이 가용현금 최대까지.
+        amount = psbl_cash if is_last_slot else min(BUY_AMT_PER_SLOT, psbl_cash)
         ok, orgno, odno, qty = self.api.buy(
             code, price, amount, code_name_map=self.code_name_map,
             psbl_cash=psbl_cash,
@@ -555,6 +565,9 @@ class DayBot:
                 "peak_price": None,   # +2.5% 도달 전까지는 None(트레일링 미활성)
                 "buy_ts": time.time(),  # ★ 수동매도 오탐 방지 가드용(아래 _check_manual_sells)
                 "held_trading_days": 0,  # ★ 보유기한청산용 — 실제 영업일만 셈(아래 일일초기화 참고)
+                # ★ 2026-10-06 — 목표금액(amount) 저장. _run_amount_topup()이
+                #   실제 체결금액과 비교해 미달분을 판단하는 데 씀.
+                "target_amount": amount,
             }
             self.code_name_map[code] = name
         self._pending_orders[code] = (orgno, odno, qty, time.time())
@@ -569,6 +582,77 @@ class DayBot:
         self._notify(f"🚀 [daybot] 매수 {code}({name}) | {qty}주 @{price:,.0f}원 | [{source_tier}]")
         print(f"🚀 [daybot] 매수 {code}({name}) | {qty}주 @{price:,.0f}원 | [{source_tier}]")
         return True
+
+    def _run_amount_topup(self):
+        """★ 2026-10-06 대장 지정 — 1차매수가 목표금액(target_amount)의
+        AMOUNT_TOPUP_MIN_FILL_RATIO 미만만 체결된 경우, 가격이 매수가
+        대비 오르지 않았으면(동일가 또는 이하만 — 추격매수 방지) 부족분을
+        재매수해서 최대한 목표금액에 채운다. 종목당 하루 1회만(topup_done)."""
+        for code, pos in list(self.positions.items()):
+            if pos.get("topup_done"):
+                continue
+            if code in self._sell_verify or code in self._cancel_reconcile:
+                continue  # 매도/취소 확인 대기중 — 건드리지 않음
+            target = pos.get("target_amount", 0)
+            if target <= 0:
+                pos["topup_done"] = True
+                continue
+            entry = pos.get("entry_price", 0)
+            qty   = pos.get("qty", 0)
+            if entry <= 0 or qty <= 0:
+                continue
+            filled = entry * qty
+            if filled >= target * AMOUNT_TOPUP_MIN_FILL_RATIO:
+                pos["topup_done"] = True
+                continue
+
+            mdata = self.api.get_market_data(code)
+            try:
+                current = float(mdata.get("stck_prpr", 0) or 0) if mdata else 0
+            except (TypeError, ValueError):
+                current = 0
+            if current <= 0:
+                continue
+            if current > entry:
+                # ★ 대장 지정 — "동일가나 이하"만 재매수. 오르면 추격매수가
+                #   되니 이번 루프는 건너뛰고 다음 루프에 재확인(가격이
+                #   내려오면 그때 보충).
+                continue
+
+            psbl_cash = self.api.get_psbl_order_cash(code, current)
+            if psbl_cash < MIN_ANALYSIS_CASH:
+                continue
+            shortfall = min(int(target - filled), psbl_cash)
+            if shortfall < current:
+                pos["topup_done"] = True
+                continue
+
+            name = self._name(code)
+            print(f"🔁 [daybot] {code}({name}) 부족분 보충매수 — "
+                  f"목표{target:,}원 중 {filled:,.0f}원만 체결 → {shortfall:,}원 보충 시도 "
+                  f"(현재가 {current:,.0f} <= 매수가 {entry:,.0f})")
+            ok, orgno, odno, add_qty = self.api.buy(
+                code, current, shortfall, code_name_map=self.code_name_map,
+                psbl_cash=psbl_cash,
+            )
+            if ok and add_qty > 0:
+                with self._positions_lock:
+                    old_qty = self.positions[code]["qty"]
+                    old_avg = self.positions[code]["entry_price"]
+                    new_qty = old_qty + add_qty
+                    new_avg = (old_avg * old_qty + current * add_qty) / new_qty
+                    self.positions[code]["qty"]         = new_qty
+                    self.positions[code]["entry_price"]  = new_avg
+                    self.positions[code]["topup_done"]   = True
+                self.db.update_open_buy(code, qty=new_qty, buy_price=new_avg)
+                if _master_upsert:
+                    _master_upsert(bot_type="daybot", code=code, stock_name=name,
+                                    entry_price=new_avg, current_price=current, qty=new_qty,
+                                    buy_tag=pos.get("buy_tag", ""))
+                self._notify(f"🔁 [daybot] {code}({name}) 보충매수 {add_qty}주 @{current:,.0f}원 "
+                             f"— 평단 {new_avg:,.0f}원, {new_qty}주")
+            else:
+                pos["topup_done"] = True  # 실패시 이번 포지션은 더 재시도 안 함
 
     def _do_sell(self, code: str, qty: int, reason: str, price: float) -> bool:
         """매도주문 접수까지만 처리하고 bool 반환.
@@ -1146,7 +1230,10 @@ class DayBot:
             self.db.log_candidate(code, self._name(code), tier, price, chg,
                                    ask_bid_ratio=hoga.get("ask_bid_ratio", 0),
                                    bought=True, raw_market_data=mdata, raw_hoga_data=hoga)
-            self._do_buy(code, self._name(code), price, tier)
+            # ★ 2026-10-06 대장 지정 — 이 매수로 effective_max에 도달하면
+            #   (마지막 슬롯) 금액 캡 없이 최대까지 매수.
+            is_last_slot = (len(self.positions) + 1 >= effective_max)
+            self._do_buy(code, self._name(code), price, tier, is_last_slot=is_last_slot)
 
     # ============================================================
     # 메인 루프
@@ -1258,6 +1345,11 @@ class DayBot:
 
                 # 8) 포지션 실시간감시 (손절/트레일링/보유기한청산 전부 포함)
                 self._check_all_positions_for_exit()
+
+                # 8-1) 목표금액 미달분 보충매수(대장 지정, 2026-10-06) —
+                #      매수시간대에만, 정지중이면 스킵(신규매수와 동일 게이트)
+                if not self._is_paused and BUY_START_TIME <= now_t <= BUY_END_TIME:
+                    self._run_amount_topup()
 
                 # 9) 후보스캔(240초 주기, 슬롯 여유+매수시간대일 때만, 정지중이면 스킵)
                 #     ★ 백그라운드 스레드로 실행 — 키움 조건검색이 타임아웃/
