@@ -89,6 +89,9 @@ def _is_trading_day() -> bool:
 
 # 🚨 리포트 전송할 디스코드 채널 ID 및 DB 경로
 REPORT_CHANNEL_ID = 1508487747508240525
+# ★ 2026-10-06 대장: "리나가 보내는 게 너무 많다" — 검색식 관찰 알림(3개월수급·
+#   주도주3·단타000)은 별도 채널로. .env의 LINA_SCAN_CHANNEL_ID가 없으면 기존 채널.
+SCAN_CHANNEL_ID = int(os.getenv("LINA_SCAN_CHANNEL_ID") or REPORT_CHANNEL_ID)
 # ★ 2026-10-06 — on_message()가 message.author == client.user(봇 자기
 #   자신)만 걸러내고 있어서, 서버 멤버나 봇에게 DM 보낸 누구나 !상태
 #   (계좌 잔고/보유종목 노출)/!리나등록/!일정추가 등을 쓸 수 있었음
@@ -1546,7 +1549,7 @@ async def three_month_leader_watch():
         if not hits:
             return
         import three_month_leader as tml
-        channel = await client.fetch_channel(REPORT_CHANNEL_ID)
+        channel = await client.fetch_channel(SCAN_CHANNEL_ID)
         await send_safe_message(
             channel,
             f"🧪 **[3개월수급 당일주도주 — 파이썬판, 관찰 전용]** {kst_now.strftime('%H:%M')}\n"
@@ -1604,7 +1607,7 @@ async def leader_scan_watch():
               f"{sum(r['passed'] for r in out['results'])}개 (신규 {len(hits)})")
         if not hits:
             return
-        channel = await client.fetch_channel(REPORT_CHANNEL_ID)
+        channel = await client.fetch_channel(SCAN_CHANNEL_ID)
         await send_safe_message(
             channel,
             f"🧪 **[주도주검색식3 — 파이썬판, 관찰 전용]** {kst_now.strftime('%H:%M')}\n"
@@ -1665,7 +1668,7 @@ async def danta_scan_watch():
               f"{sum(r['passed'] for r in out['results'])}개 (신규 {len(hits)})")
         if not hits:
             return
-        channel = await client.fetch_channel(REPORT_CHANNEL_ID)
+        channel = await client.fetch_channel(SCAN_CHANNEL_ID)
         await send_safe_message(
             channel,
             f"🧪 **[단타000 — 파이썬판, 관찰 전용]** {kst_now.strftime('%H:%M')}\n"
