@@ -49,6 +49,11 @@ F_TURNOVER_MIN  = 3.0
 G_CAP_MIN_EOK, G_CAP_MAX_EOK = 1000, 9990
 H_BUY_RATIO_MIN = 51.0
 K_ASK_BID_MAX   = 100.0
+# ★ 2026-10-06 실측 3건으로 뒤집음: 키움 "매도매수잔량비"는 총매수잔량 ÷ 총매도잔량
+#   (매도벽이 더 두꺼워야 통과)으로 보인다.
+#   라온시큐어 매도66,451/매수6,708 → 키움 통과 / 알멕 매수쪽 8배 → 키움 없음 /
+#   한선엔지니어링 매수쪽 1.1배 → 키움 없음. 처음(매도÷매수)과 정반대로 맞음.
+K_BID_OVER_ASK  = True
 PRE_VALUE_MIN   = 2_900_000_000   # 1단계 사전필터(F·G에서 따라나오는 최소 거래대금)
 BAR_CACHE_MAX   = 600
 MULTI_PAUSE     = 0.15            # 복수시세 묶음 사이 쉬는 시간(초) — 70묶음 ≈ 15초
@@ -207,8 +212,10 @@ class DantaScanner:
                 diag[code] = (name, "가격 없음/ETF"); continue
             if q["value"] < PRE_VALUE_MIN:
                 diag[code] = (name, f"거래대금 {q['value'] / 1e8:.0f}억 < 29억 (시총·회전율 조건상 불가)"); continue
-            if q.get("bid_rsqn"):
-                ratio = q["ask_rsqn"] / q["bid_rsqn"] * 100
+            num, den = ((q.get("bid_rsqn"), q.get("ask_rsqn")) if K_BID_OVER_ASK
+                        else (q.get("ask_rsqn"), q.get("bid_rsqn")))
+            if den:
+                ratio = num / den * 100
                 if ratio > K_ASK_BID_MAX:
                     diag[code] = (name, f"K잔량비 {ratio:.0f}% > 100% (총매도잔량 "
                                         f"{q['ask_rsqn']:,.0f} / 총매수잔량 {q['bid_rsqn']:,.0f})"); continue
