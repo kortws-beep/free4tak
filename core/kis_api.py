@@ -339,6 +339,98 @@ class KisAPI:
         except Exception as e:
             print(f"⚠️ 체결강도 조회 오류 {code}: {e}"); return None
 
+    def get_multi_price(self, codes: list) -> dict:
+        """관심종목 복수시세(FHKST11300006) — 한 번에 최대 30종목.
+        ★ 2026-10-06 신규(주도주검색식3 파이썬판: 수백 종목 거래대금 순위를
+          적은 호출로 계산). 반환: {code: {"price","chg","high","prev_close",
+          "value","volume","name"}} — 실패한 묶음은 빠진다."""
+        url = f"{self.base_url}/uapi/domestic-stock/v1/quotations/intstock-multprice"
+        headers = {"authorization": f"Bearer {self.token}",
+                   "appkey": self.appkey, "appsecret": self.secret,
+                   "tr_id": "FHKST11300006", "custtype": "P"}
+
+        def num(v):
+            try:
+                return float(v or 0)
+            except (TypeError, ValueError):
+                return 0.0
+        out = {}
+        for i in range(0, len(codes), 30):
+            chunk  = codes[i:i + 30]
+            params = {}
+            for k, c in enumerate(chunk, 1):
+                params[f"FID_COND_MRKT_DIV_CODE_{k}"] = "J"
+                params[f"FID_INPUT_ISCD_{k}"] = c
+            try:
+                res = _get(url, headers=headers, params=params, timeout=10).json()
+                for it in res.get("output") or []:
+                    code = (it.get("inter_shrn_iscd") or "").strip()
+                    if not code:
+                        continue
+                    price = num(it.get("inter2_prpr"))
+                    out[code] = {
+                        "name":       (it.get("inter_kor_isnm") or "").strip(),
+                        "price":      price,
+                        "chg":        num(it.get("prdy_ctrt")),
+                        "high":       num(it.get("inter2_hgpr")),
+                        "prev_close": num(it.get("inter2_prdy_clpr")),
+                        "value":      num(it.get("acml_tr_pbmn")),
+                        "volume":     num(it.get("acml_vol")),
+                    }
+            except Exception as e:
+                print(f"⚠️ 복수시세 조회 오류({len(chunk)}종목): {e}")
+        return out
+
+    def get_minute_bars(self, code: str, hhmmss: str = None) -> list:
+        """당일 1분봉(FHKST03010200) — hhmmss 이전 최대 30개, 최신→과거.
+        ★ 2026-10-06 신규. 반환: [{"time": "HHMMSS", "price", "volume",
+          "acml_value"}] (acml_value = 그 시점 누적 거래대금, 없으면 0)."""
+        url = f"{self.base_url}/uapi/domestic-stock/v1/quotations/inquire-time-itemchartprice"
+        headers = {"authorization": f"Bearer {self.token}",
+                   "appkey": self.appkey, "appsecret": self.secret,
+                   "tr_id": "FHKST03010200", "custtype": "P"}
+        hhmmss = hhmmss or datetime.datetime.now().strftime("%H%M%S")
+        params = {"FID_ETC_CLS_CODE": "", "FID_COND_MRKT_DIV_CODE": "J",
+                  "FID_INPUT_ISCD": code, "FID_INPUT_HOUR_1": hhmmss,
+                  "FID_PW_DATA_INCU_YN": "N"}
+        try:
+            res = _get(url, headers=headers, params=params, timeout=10).json()
+            bars = []
+            for b in res.get("output2") or []:
+                t = str(b.get("stck_cntg_hour") or "")
+                if len(t) != 6:
+                    continue
+                bars.append({"time": t,
+                             "price": float(b.get("stck_prpr") or 0),
+                             "volume": float(b.get("cntg_vol") or 0),
+                             "acml_value": float(b.get("acml_tr_pbmn") or 0)})
+            return bars
+        except Exception as e:
+            print(f"⚠️ 분봉 조회 오류 {code}: {e}")
+            return []
+
+    def get_value_rank(self, blng: str = "3") -> list:
+        """거래량순위 API(FHPST01710000) — 최대 30건. blng: 0 평균거래량,
+        1 거래증가율, 3 거래금액순. ★ 2026-10-06 신규. 반환: [(code, name)]"""
+        url = f"{self.base_url}/uapi/domestic-stock/v1/quotations/volume-rank"
+        headers = {"Content-Type": "application/json",
+                   "authorization": f"Bearer {self.token}",
+                   "appKey": self.appkey, "appSecret": self.secret,
+                   "tr_id": "FHPST01710000", "custtype": "P"}
+        params  = {"FID_COND_MRKT_DIV_CODE": "J", "FID_COND_SCR_DIV_CODE": "20171",
+                   "FID_INPUT_ISCD": "0000", "FID_DIV_CLS_CODE": "0",
+                   "FID_BLNG_CLS_CODE": blng, "FID_TRGT_CLS_CODE": "111111111",
+                   "FID_TRGT_EXLS_CLS_CODE": "000000",
+                   "FID_INPUT_PRICE_1": "0", "FID_INPUT_PRICE_2": "0",
+                   "FID_VOL_CNT": "0", "FID_INPUT_DATE_1": "0"}
+        try:
+            res = _get(url, headers=headers, params=params, timeout=10).json()
+            return [((i.get("mksc_shrn_iscd") or "").strip(), (i.get("hts_kor_isnm") or "").strip())
+                    for i in res.get("output") or [] if i.get("mksc_shrn_iscd")]
+        except Exception as e:
+            print(f"⚠️ 거래순위 조회 오류: {e}")
+            return []
+
     def get_hoga(self, code: str) -> dict:
         """
         주식현재가 호가/예상체결 조회 (FHKST01010200)
