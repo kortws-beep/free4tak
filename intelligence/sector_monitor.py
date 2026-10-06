@@ -51,7 +51,11 @@ for _ep in [os.path.join(_here, ".env"), os.path.join(_here, "..", ".env")]:
 # ============================================================
 DB_PATH      = os.path.join(_here, "sector_monitor.db")
 TOP_THEMES   = 10    # 상위 테마 수
-TOP_STOCKS   = 3     # 테마당 주요 종목 수
+TOP_STOCKS   = 5     # 테마당 주요 종목 수 (그날 거래대금 순 상위)
+# ★ 2026-10-07 대장: 3→5. "대장·2등주가 치고 나가 못 들어가면 3~5등주가 하루쯤
+#   뒤에 따라가는 경우가 많고, 그러다 대장이 바뀌기도 한다." — 예전엔 키움 테마
+#   구성 목록의 앞 3개(정렬 기준 불명)를 그대로 썼는데, 이제 구성 종목 전체를
+#   복수시세로 한 번에 받아 오늘 거래대금 순 1~5위를 기록하고 순위도 저장.
 FLOW_INTERVAL   = 60   # 거래대금 수집 주기 (초)
 MOMENTUM_INTERVAL = 30  # 체결강도 수집 주기 (초)
 MARKET_START = "0900"
@@ -91,12 +95,17 @@ def init_db(db_path: str) -> sqlite3.Connection:
             vol_ratio   REAL DEFAULT 0,         -- 거래량비율
             trde_amt    REAL DEFAULT 0,         -- 거래대금 (억원)
             cntg_str    REAL DEFAULT 0,         -- 체결강도 (추정)
-            accel       REAL DEFAULT 0          -- 가속도 (전회 대비)
+            accel       REAL DEFAULT 0,         -- 가속도 (전회 대비)
+            rank_in_theme INTEGER               -- 테마 내 오늘 거래대금 순위(1=대장)
         );
         CREATE INDEX IF NOT EXISTS idx_sm_ts ON stock_momentum(ts);
         CREATE INDEX IF NOT EXISTS idx_sm_code ON stock_momentum(code, ts);
     """)
-    conn.commit()
+    try:   # 기존 DB에 순위 컬럼 추가 (2026-10-07)
+        conn.execute("ALTER TABLE stock_momentum ADD COLUMN rank_in_theme INTEGER")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
     return conn
 
 
@@ -119,7 +128,7 @@ def get_theme_stock_codes(kiwoom, theme_cd: str,
     try:
         stocks = kiwoom.get_theme_stocks(theme_cd, code_name_map)
         codes = [s[0] if isinstance(s, (list, tuple)) else s for s in stocks]
-        return codes[:top_n]
+        return codes if top_n is None else codes[:top_n]
     except Exception as e:
         print(f"⚠️ 테마 종목 조회 오류({theme_cd}): {e}")
         return []
@@ -197,14 +206,15 @@ def save_sector_flow(conn: sqlite3.Connection, ts: str,
 def save_stock_momentum(conn: sqlite3.Connection, ts: str,
                         code: str, theme_cd: str, theme_nm: str,
                         change_rate: float, vol_ratio: float,
-                        trde_amt: float, cntg_str: float, accel: float):
+                        trde_amt: float, cntg_str: float, accel: float,
+                        rank: int = None):
     conn.execute("""
         INSERT INTO stock_momentum
         (ts, code, theme_cd, theme_nm, change_rate, vol_ratio,
-         trde_amt, cntg_str, accel)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         trde_amt, cntg_str, accel, rank_in_theme)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (ts, code, theme_cd, theme_nm, change_rate,
-          vol_ratio, trde_amt, cntg_str, accel))
+          vol_ratio, trde_amt, cntg_str, accel, rank))
     conn.commit()
 
 
@@ -226,6 +236,24 @@ def collect_once(api, kiwoom, conn: sqlite3.Connection,
 
     print(f"\n📊 [{ts_min}] 테마 수집 ({len(themes)}개)")
 
+    # 테마 구성 종목 전체(캐시 — 매시간 갱신) → 복수시세 한 번에 받아 거래대금 순위
+    members = {}
+    for item in themes:
+        theme_cd = item.get("thema_grp_cd", "")
+        if not theme_cd:
+            continue
+        cache_key = f"{now.strftime('%Y-%m-%d %H')}_{theme_cd}"
+        if cache_key not in theme_cache:
+            theme_cache[cache_key] = get_theme_stock_codes(kiwoom, theme_cd, code_name_map, None)
+            time.sleep(0.2)
+        members[theme_cd] = theme_cache[cache_key]
+    values = {}
+    try:
+        union = sorted({c for cs in members.values() for c in cs})
+        values = {c: q["value"] for c, q in api.get_multi_price(union, pause=0.1).items()}
+    except Exception as e:
+        print(f"⚠️ 복수시세 실패 — 구성목록 앞 {TOP_STOCKS}개로 대체: {e}")
+
     for item in themes:
         theme_cd  = item.get("thema_grp_cd", "")
         theme_nm  = item.get("thema_nm", "")
@@ -236,19 +264,15 @@ def collect_once(api, kiwoom, conn: sqlite3.Connection,
         if not theme_cd:
             continue
 
-        # 2) 테마 구성 종목 조회 (캐시 — 매시간 갱신)
-        cache_key = f"{now.strftime('%Y-%m-%d %H')}_{theme_cd}"
-        if cache_key not in theme_cache:
-            codes = get_theme_stock_codes(
-                kiwoom, theme_cd, code_name_map, TOP_STOCKS)
-            theme_cache[cache_key] = codes
-            time.sleep(0.2)
-        else:
-            codes = theme_cache[cache_key]
+        # 2) 테마 내 오늘 거래대금 순 상위 TOP_STOCKS (시세 실패 시 구성목록 순서)
+        codes = list(members.get(theme_cd, []))
+        if values:
+            codes.sort(key=lambda c: -values.get(c, 0))
+        codes = codes[:TOP_STOCKS]
 
         # 3) 종목별 시세 → 테마 거래대금 합산
         total_amt = 0.0
-        for code in codes:
+        for rank, code in enumerate(codes, 1):
             stock = get_stock_data(api, code)
             if not stock:
                 continue
@@ -259,9 +283,13 @@ def collect_once(api, kiwoom, conn: sqlite3.Connection,
             save_stock_momentum(
                 conn, ts_sec, code, theme_cd, theme_nm,
                 stock["change_rate"], stock["vol_ratio"],
-                stock["trde_amt"], stock["cntg_str"], accel
+                stock["trde_amt"], stock["cntg_str"], accel,
+                rank if values else None
             )
-            total_amt += stock["trde_amt"]
+            # 테마 거래대금 합산은 예전처럼 상위 3종목만 — sbot·대시보드·바톤터치가 쓰는
+            # sector_flow.trde_amt 규모가 갑자기 커지지 않게(4·5등은 기록만)
+            if rank <= 3:
+                total_amt += stock["trde_amt"]
             time.sleep(0.1)
 
         # 4) 거래대금 변동률 계산

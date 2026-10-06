@@ -40,16 +40,24 @@ def digest(days: int = 10, db_path: str = SECTOR_DB) -> tuple:
                    MAX(substr(ts,1,10))
             FROM sector_flow WHERE substr(ts,1,10) >= ?
             GROUP BY theme_nm""", (since,)).fetchall()
-        stocks = conn.execute("""
-            SELECT theme_nm, code, COUNT(*), AVG(trde_amt), AVG(change_rate)
-            FROM stock_momentum WHERE substr(ts,1,10) >= ?
-            GROUP BY theme_nm, code""", (since,)).fetchall()
+        try:   # rank_in_theme(2026-10-07~)이 있으면 날짜별 대장(1위) 횟수도
+            stocks = conn.execute("""
+                SELECT theme_nm, code, COUNT(*), AVG(trde_amt), AVG(change_rate),
+                       COUNT(DISTINCT CASE WHEN rank_in_theme = 1 THEN substr(ts,1,10) END)
+                FROM stock_momentum WHERE substr(ts,1,10) >= ?
+                GROUP BY theme_nm, code""", (since,)).fetchall()
+        except sqlite3.OperationalError:
+            stocks = [r + (0,) for r in conn.execute("""
+                SELECT theme_nm, code, COUNT(*), AVG(trde_amt), AVG(change_rate)
+                FROM stock_momentum WHERE substr(ts,1,10) >= ?
+                GROUP BY theme_nm, code""", (since,))]
     finally:
         conn.close()
     by_theme: dict = {}
-    for theme, code, n, amt, chg in stocks:
+    for theme, code, n, amt, chg, lead_days in stocks:
         by_theme.setdefault(theme, []).append(
-            {"code": code, "appear": n, "avg_amt": amt or 0.0, "avg_chg": chg or 0.0})
+            {"code": code, "appear": n, "avg_amt": amt or 0.0, "avg_chg": chg or 0.0,
+             "lead_days": lead_days or 0})
     out = []
     for theme, d, m, avg, mx, last in themes:
         st = sorted(by_theme.get(theme, []), key=lambda s: (-s["appear"], -s["avg_amt"]))
@@ -79,7 +87,8 @@ def format_digest(rows: list, n_days: int, since: str, names: dict,
         parts = []
         for s in t["stocks"][:TOP_STOCKS_SHOW]:
             mark = "" if in_groups is None else ("⭕" if s["code"] in in_groups else "➕")
-            parts.append(f"{mark}{names.get(s['code'], s['code'])}({s['avg_amt']:,.0f}억)")
+            lead = f", 대장 {s['lead_days']}일" if s.get("lead_days") else ""
+            parts.append(f"{mark}{names.get(s['code'], s['code'])}({s['avg_amt']:,.0f}억{lead})")
         if parts:
             lines.append("      " + ", ".join(parts))
     return "\n".join(lines)
