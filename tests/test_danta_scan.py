@@ -80,9 +80,10 @@ class DantaScan(unittest.TestCase):
         r = s.scan(NOW)["results"][0]
         self.assertTrue(r["passed"], r["fails"])
         self.assertGreater(r["netbuy_1m"], 100)
-        self.assertIn("K잔량비 150%", D.explain(s, "종목2")[0])
-        self.assertIn("G시총", D.explain(s, "444444")[0])
-        self.assertIn("없음", D.explain(s, "없는종목")[0])
+        self.assertIn("K잔량비 150%", D.explain(s, "종목2")[1])
+        self.assertIn("G시총", D.explain(s, "444444")[1])
+        self.assertIn("없음", D.explain(s, "없는종목")[1])
+        self.assertIn("아직", D.explain(D.DantaScanner(api), "종목2")[0])
         api.strength = 101.0; clock[0] += 60
         r = s.scan(NOW)["results"][0]
         self.assertIn("B체결강도101%", r["fails"]); self.assertIn("H매수비율50%", r["fails"])

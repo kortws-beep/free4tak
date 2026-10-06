@@ -107,6 +107,7 @@ class DantaScanner:
         self.bars: dict = {}        # code → {(date,time): bar}
         self._pool = (0.0, {})
         self.diag: dict = {}        # 마지막 스캔의 종목별 판정 {code: (name, 설명)} — !단타 종목명 용
+        self.diag_time = ""
 
     # ── 데이터 준비 ──
     def pool(self) -> dict:
@@ -242,7 +243,7 @@ class DantaScanner:
             })
         for r in results:
             diag[r["code"]] = (r["name"], "✅ 전 조건 통과" if r["passed"] else ", ".join(r["fails"]))
-        self.diag = diag
+        self.diag, self.diag_time = diag, now.strftime("%H:%M")
         results.sort(key=lambda r: (not r["passed"], len(r["fails"]), -r["chg"]))
         return {"time": now.strftime("%H:%M"), "pool": len(pool), "stage1": len(stage1),
                 "results": results}
@@ -271,9 +272,14 @@ def overlap_today(code: str, date: str, db_path: str = tml.LOG_DB) -> str:
 
 def explain(scanner: "DantaScanner", keyword: str) -> list:
     """마지막 스캔에서 이름/코드에 keyword가 들어간 종목의 판정 설명."""
+    # ★ 재시작 직후엔 첫 검사(상장주식수 조회로 1분 넘게 걸림)가 끝나기 전이라
+    #   diag가 비어 있음 — "풀에 없음"으로 오해하지 않게 구분(10:57 실사례).
+    if not scanner.diag:
+        return ["첫 검사가 아직 끝나지 않았어 — 1~2분 뒤 다시 쳐줘"]
     out = [f"{n}({c}) — {why}" for c, (n, why) in scanner.diag.items()
            if keyword and (keyword in n or keyword == c)]
-    return out or [f"'{keyword}' — 후보 풀(일봉 DB 종목 + 순위 API)에 없음"]
+    out = out or [f"'{keyword}' — 후보 풀(일봉 DB 종목 + 순위 API)에 없음"]
+    return [f"({scanner.diag_time} 검사 기준)"] + out
 
 
 def scan_and_tag(scanner: "DantaScanner", now: datetime.datetime = None) -> dict:
