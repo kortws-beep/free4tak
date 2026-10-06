@@ -756,7 +756,7 @@ def notify_report(total_saved: list) -> int:
     if report_lines:
         try:
             from notifier import Notifier
-            Notifier(name="유튜브스카우트").send(
+            Notifier(name="유튜브스카우트", route="scan").send(
                 f"[유튜브] {MANUAL_REF_DAYS}일내 {MANUAL_REF_MIN_COUNT}회+ 언급 종목 "
                 f"({len(report_lines)}건, ⭐=교차확인/3회+)\n"
                 + "\n".join(report_lines)
