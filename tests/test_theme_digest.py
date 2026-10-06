@@ -37,6 +37,25 @@ class Digest(unittest.TestCase):
         txt = D.format_digest(rows, n, since, {"100001": "우주대장"}, in_groups={"100001"})
         self.assertIn("⭕우주대장(300억)", txt); self.assertIn("➕100002(100억)", txt)
 
+    def test_lead_days_with_rank(self):
+        db = os.path.abspath("rank.db")
+        if os.path.exists(db):
+            os.remove(db)
+        c = sqlite3.connect(db)
+        c.execute("CREATE TABLE sector_flow (ts TEXT, theme_nm TEXT, flu_rt REAL)")
+        c.execute("CREATE TABLE stock_momentum (ts TEXT, code TEXT, theme_nm TEXT, change_rate REAL, "
+                  "trde_amt REAL, rank_in_theme INTEGER)")
+        # 10-05 대장 A, 10-06엔 3등이던 B가 대장으로 바뀜
+        for day, ranks in (("2026-10-05", {"A": 1, "B": 3}), ("2026-10-06", {"A": 2, "B": 1})):
+            c.execute("INSERT INTO sector_flow VALUES (?, '우주', 3)", (f"{day} 09:00",))
+            for code, r in ranks.items():
+                c.execute("INSERT INTO stock_momentum VALUES (?, ?, '우주', 5, 100, ?)", (f"{day} 09:00:00", code, r))
+        c.commit(); c.close()
+        rows, _, _ = D.digest(5, db)
+        lead = {s["code"]: s["lead_days"] for s in rows[0]["stocks"]}
+        self.assertEqual(lead, {"A": 1, "B": 1})
+        self.assertIn("대장 1일", D.format_digest(rows, 2, "2026-10-05", {}))
+
     def test_empty(self):
         db = os.path.abspath("empty.db")
         c = sqlite3.connect(db)
