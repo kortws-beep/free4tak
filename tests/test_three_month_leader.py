@@ -90,5 +90,32 @@ class ThreeMonthLeader(unittest.TestCase):
         self.assertEqual(len(r[0]["fails"]), 3)
 
 
+    def test_strength_only_fail_logged_and_reported(self):
+        api = API({"stck_prpr": "10700", "prdy_ctrt": "7.0",
+                   "acml_tr_pbmn": "5000000000", "acml_vol": "900000"})
+        log = os.path.abspath("log.db")
+        if os.path.exists(log):
+            os.remove(log)
+        for hhmm, st in (("09:03", 88.0), ("09:06", 96.0), ("09:09", 101.0)):
+            api.get_execution_strength = lambda c, st=st: st
+            r = T.check_candidates(api, self.u)
+            self.assertEqual(r[0]["passed"], st >= 100); self.assertTrue(r[0]["others_ok"])
+            T.log_observations(r, datetime.datetime.fromisoformat(f"2026-10-05T{hhmm}"), log)
+        con = sqlite3.connect(os.path.abspath("t.db"))
+        con.execute("INSERT OR REPLACE INTO kr_stock_daily_data VALUES ('2026-10-05','좋은종목',11000,1,1,1,1)")
+        con.commit(); con.close()
+        T.datetime = type("D", (), {"datetime": type("X", (datetime.datetime,), {
+            "now": classmethod(lambda c, tz=None: datetime.datetime(2026, 10, 6, tzinfo=tz))}),
+            "timedelta": datetime.timedelta, "date": datetime.date})
+        try:
+            rep = T.report(30, log, os.path.abspath("t.db"))
+        finally:
+            T.datetime = datetime
+        e = rep[0]["entry"]
+        self.assertEqual(e[100], ("09:09", 10700.0))
+        self.assertEqual(e[95][0], "09:06"); self.assertEqual(e[85][0], "09:03")
+        self.assertIn("당일종가 +2.8%", T.format_report(rep))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1520,6 +1520,11 @@ async def three_month_leader_watch():
         if _TML_STATE["date"] != today:
             _TML_STATE.update(date=today, alerted=set())
         universe, results = await asyncio.to_thread(_tml_scan_sync)
+        try:   # 체결강도 기준 결정용 기록 (python three_month_leader.py report)
+            import three_month_leader as tml
+            await asyncio.to_thread(tml.log_observations, results)
+        except Exception as e:
+            print(f"⚠️ [3개월수급] 기록 오류: {e}")
         hits = [r for r in results if r["passed"] and r["code"] not in _TML_STATE["alerted"]]
         print(f"🧪 [3개월수급] 후보 {len(universe['items'])}개 → 통과 {sum(r['passed'] for r in results)}개 (신규 {len(hits)})")
         if not hits:
