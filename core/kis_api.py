@@ -376,6 +376,8 @@ class KisAPI:
                         "prev_close": num(it.get("inter2_prdy_clpr")),
                         "value":      num(it.get("acml_tr_pbmn")),
                         "volume":     num(it.get("acml_vol")),
+                        "ask_rsqn":   num(it.get("total_askp_rsqn")),   # 매도호가 총잔량
+                        "bid_rsqn":   num(it.get("total_bidp_rsqn")),   # 매수호가 총잔량
                     }
             except Exception as e:
                 print(f"⚠️ 복수시세 조회 오류({len(chunk)}종목): {e}")
@@ -400,14 +402,54 @@ class KisAPI:
                 t = str(b.get("stck_cntg_hour") or "")
                 if len(t) != 6:
                     continue
-                bars.append({"time": t,
-                             "price": float(b.get("stck_prpr") or 0),
-                             "volume": float(b.get("cntg_vol") or 0),
-                             "acml_value": float(b.get("acml_tr_pbmn") or 0)})
+                bars.append(self._minute_bar(b, t))
             return bars
         except Exception as e:
             print(f"⚠️ 분봉 조회 오류 {code}: {e}")
             return []
+
+    @staticmethod
+    def _minute_bar(b: dict, t: str) -> dict:
+        price = float(b.get("stck_prpr") or 0)
+        return {"date": str(b.get("stck_bsop_date") or ""), "time": t, "price": price,
+                "high": float(b.get("stck_hgpr") or price), "low": float(b.get("stck_lwpr") or price),
+                "volume": float(b.get("cntg_vol") or 0),
+                "acml_value": float(b.get("acml_tr_pbmn") or 0)}
+
+    def get_minute_bars_by_date(self, code: str, date: str, hhmmss: str) -> list:
+        """일별 1분봉(FHKST03010230) — date(YYYYMMDD) hhmmss 이전 최대 120개, 최신→과거.
+        과거 날짜 분봉까지 이어 받을 수 있음(단타000 5분봉 CCI(100)용, 2026-10-06 신규)."""
+        url = f"{self.base_url}/uapi/domestic-stock/v1/quotations/inquire-time-dailychartprice"
+        headers = {"authorization": f"Bearer {self.token}",
+                   "appkey": self.appkey, "appsecret": self.secret,
+                   "tr_id": "FHKST03010230", "custtype": "P"}
+        params = {"FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": code,
+                  "FID_INPUT_HOUR_1": hhmmss, "FID_INPUT_DATE_1": date,
+                  "FID_PW_DATA_INCU_YN": "Y", "FID_FAKE_TICK_INCU_YN": ""}
+        try:
+            res = _get(url, headers=headers, params=params, timeout=10).json()
+            return [self._minute_bar(b, str(b.get("stck_cntg_hour") or ""))
+                    for b in res.get("output2") or [] if len(str(b.get("stck_cntg_hour") or "")) == 6]
+        except Exception as e:
+            print(f"⚠️ 일별분봉 조회 오류 {code}: {e}")
+            return []
+
+    def get_ccnl(self, code: str) -> dict:
+        """체결(FHKST01010300) — 당일 체결강도 + 최근 체결 30건 시각.
+        ★ 2026-10-06 신규(단타000). 반환: {"strength": float|None, "ticks": ["HHMMSS", ...]}"""
+        url = f"{self.base_url}/uapi/domestic-stock/v1/quotations/inquire-ccnl"
+        headers = {"authorization": f"Bearer {self.token}",
+                   "appkey": self.appkey, "appsecret": self.secret,
+                   "tr_id": "FHKST01010300"}
+        params  = {"FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": code}
+        try:
+            out = _get(url, headers=headers, params=params, timeout=10).json().get("output") or []
+            val = out[0].get("tday_rltv") if out else None
+            return {"strength": float(val) if val not in (None, "") else None,
+                    "ticks": [str(o.get("stck_cntg_hour") or "") for o in out]}
+        except Exception as e:
+            print(f"⚠️ 체결 조회 오류 {code}: {e}")
+            return {"strength": None, "ticks": []}
 
     def get_value_rank(self, blng: str = "3", market: str = "0000") -> list:
         """거래량순위 API(FHPST01710000) — 최대 30건. blng: 0 평균거래량,

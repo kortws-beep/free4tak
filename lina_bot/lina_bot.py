@@ -1619,6 +1619,67 @@ async def before_leader_scan_watch():
     await client.wait_until_ready()
 
 
+# ══════════════════════════════════════════════════════════════
+# 단타000 — 키움 조건식의 파이썬 구현 (2026-10-06, 관찰 전용)
+# ══════════════════════════════════════════════════════════════
+# intelligence/danta_scan.py 참고. 잠깐 떴다 사라지는 유형이라 1분마다 보고,
+# 같은 날 주도주3/3개월수급 기록과 겹치면 🔗로 표시(대장: "단타000에 걸린
+# 넘이 다른 두 곳에서 걸릴 가능성이 높다" — 겹침 확인이 목적).
+DANTA_WATCH_START, DANTA_WATCH_END = "0900", "1520"
+_DANTA_STATE = {"date": "", "alerted": set(), "scanner": None}
+
+
+def _danta_scan_sync():
+    global _tml_api
+    import danta_scan
+    if _tml_api is None:
+        from kis_api import KisAPI
+        _tml_api = KisAPI()
+    if _DANTA_STATE["scanner"] is None:
+        _DANTA_STATE["scanner"] = danta_scan.DantaScanner(_tml_api)
+    out = danta_scan.scan_and_tag(_DANTA_STATE["scanner"])
+    return out
+
+
+@tasks.loop(minutes=1)
+async def danta_scan_watch():
+    kst_now = datetime.datetime.now(KST)
+    if not (DANTA_WATCH_START <= kst_now.strftime("%H%M") < DANTA_WATCH_END):
+        return
+    if not _is_trading_day():
+        return
+    try:
+        import danta_scan
+        today = kst_now.strftime("%Y-%m-%d")
+        if _DANTA_STATE["date"] != today:
+            _DANTA_STATE.update(date=today, alerted=set())
+        out = await asyncio.to_thread(_danta_scan_sync)
+        try:
+            await asyncio.to_thread(danta_scan.log_scan, out)
+        except Exception as e:
+            print(f"⚠️ [단타000] 기록 오류: {e}")
+        hits = [r for r in out["results"] if r["passed"] and r["code"] not in _DANTA_STATE["alerted"]]
+        print(f"🧪 [단타000] 풀 {out['pool']} → 1단계 {out['stage1']} → 통과 "
+              f"{sum(r['passed'] for r in out['results'])}개 (신규 {len(hits)})")
+        if not hits:
+            return
+        channel = await client.fetch_channel(REPORT_CHANNEL_ID)
+        await send_safe_message(
+            channel,
+            f"🧪 **[단타000 — 파이썬판, 관찰 전용]** {kst_now.strftime('%H:%M')}\n"
+            + "\n".join(danta_scan.format_hit(r, r.get("overlap", "")) for r in hits)
+            + "\n   (키움 단타000과 같은지 비교해줘 — 🔗는 오늘 주도주/3개월수급 기록과 겹침)"
+        )
+        _DANTA_STATE["alerted"].update(r["code"] for r in hits)
+    except Exception as e:
+        print(f"⚠️ [단타000] 스캔 오류: {e}")
+
+
+@danta_scan_watch.before_loop
+async def before_danta_scan_watch():
+    await client.wait_until_ready()
+
+
 _KIWOOM_POOL_SCAN_TIMES = {(9, 30), (12, 30), (15, 0)}
 _kiwoom_pool_scan_state = {"date": "", "done": set(), "retry_at": None, "retry_label": None}
 
@@ -2246,6 +2307,12 @@ async def on_ready():
         print("✅ [시스템] 주도주검색식3 파이썬판 (09:00~15:20, 3분 주기) 가동 성공! (관찰 전용)")
     except Exception as e: print(f"⚠️ [에러] 주도주3 스케줄러: {e}")
 
+    try:
+        if not danta_scan_watch.is_running():
+            danta_scan_watch.start()
+        print("✅ [시스템] 단타000 파이썬판 (09:00~15:20, 1분 주기) 가동 성공! (관찰 전용)")
+    except Exception as e: print(f"⚠️ [에러] 단타000 스케줄러: {e}")
+
 def _fetch_sbo2_status_sync(api, positions: dict):
     """!상태 — 보유종목 기준 주문가능금액+시세 조회 (동기, to_thread로 실행)."""
     psbl = 0
@@ -2393,6 +2460,28 @@ async def on_message(message):
 
     # ── !3개월수급 (파이썬판 조건검색 수동 확인, 2026-10-06) ──────────
     #   시간 제한 없이 즉시 실행 — 장외엔 마지막 시세 기준이라 참고용.
+    # ── !단타 — 단타000 파이썬판 즉시 조회 (2026-10-06) ──
+    #   1분 순매수(E)는 직전 검사와의 차이라, 1분 감시가 돌고 있어야 값이 나온다.
+    if message.content.startswith("!단타"):
+        async with message.channel.typing():
+            try:
+                import danta_scan
+                out = await asyncio.to_thread(_danta_scan_sync)
+                passed = [r for r in out["results"] if r["passed"]]
+                lines = [f"🧪 **단타000 (파이썬판)** {out['time']} — 풀 {out['pool']} → "
+                         f"1단계(시총·회전율·잔량비) {out['stage1']} → 검사 {len(out['results'])}"]
+                lines += [danta_scan.format_hit(r, r.get("overlap", "")) for r in passed] \
+                    or ["   지금 전 조건 통과 종목 없음"]
+                near = [r for r in out["results"] if not r["passed"]][:8]
+                if near:
+                    lines.append("\n**근접 후보 (탈락 조건)**")
+                    lines += [f"   {r['name']}({r['code']}) {r['chg']:+.1f}% — {', '.join(r['fails'])}"
+                              + (f"  🔗 {r['overlap']}" if r.get("overlap") else "") for r in near]
+                await send_safe_message(message.channel, "\n".join(lines))
+            except Exception as e:
+                await send_safe_message(message.channel, f"❌ 단타 조회 오류: {e}")
+        return
+
     # ── !주도주 — 주도주검색식3 파이썬판 즉시 조회 (2026-10-06) ──
     if message.content.startswith("!주도주"):
         async with message.channel.typing():
