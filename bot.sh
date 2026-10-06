@@ -17,7 +17,12 @@
 #   롤백 대비 살아있음), status/log/today도 인자로 sbo2 주면 그대로 조회 가능.
 # ★ 2026-09-29 밤: daybot(단타봇) 신설 — sbo2가 쓰던 계좌 재사용, 키움
 #   스크리닝+KIS 실행 하이브리드. 배포 전 sbo2 완전정지(disable) 필수.
-BOTS="sbot cbot daybot kiki sector dashboard lina"
+# ★ 2026-10-07 — youtube-live(intelligence/youtube_live_monitor.py, 지속실행
+#   서비스) 추가. pkill -f "${bot}.py" 좀비청소 단계는 스크립트 파일명이
+#   youtube_live_monitor.py라 "youtube-live.py"와 안 맞아 매칭 안 되지만,
+#   그건 수동실행 잔재 프로세스 청소용이라 무해(systemctl 쪽은 이름이
+#   정확히 yeongam9-youtube-live라 정상 동작).
+BOTS="sbot cbot daybot kiki sector dashboard lina youtube-live"
 
 case "$1" in
 
