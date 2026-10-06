@@ -51,6 +51,13 @@ H_BUY_RATIO_MIN = 51.0
 K_ASK_BID_MAX   = 100.0
 PRE_VALUE_MIN   = 2_900_000_000   # 1단계 사전필터(F·G에서 따라나오는 최소 거래대금)
 BAR_CACHE_MAX   = 600
+# ★ 2026-10-06 probe 실측: 일별분봉 API가 넥스트레이드(NXT) 시간외 분봉(08:00대,
+#   15:30~20:00)까지 준다 — 키움 5분봉은 정규장만이라 정규장 분봉만 쓴다.
+REG_START, REG_END = "090000", "153000"
+
+
+def _regular(b: dict) -> bool:
+    return REG_START <= b["time"] <= REG_END
 
 
 def _secs(hhmmss: str) -> int:
@@ -71,7 +78,7 @@ def tick_rate(ticks: list, now_hhmmss: str) -> float:
 def five_min_cci(bars: list, period: int = CCI_PERIOD):
     """1분봉(아무 순서) → 5분봉(09:00, 09:05 …) → 마지막 봉의 CCI. (값, 사용한 5분봉 수)"""
     groups: dict = {}
-    for b in sorted(bars, key=lambda x: (x["date"], x["time"])):
+    for b in sorted((b for b in bars if _regular(b)), key=lambda x: (x["date"], x["time"])):
         key = (b["date"], b["time"][:2], int(b["time"][2:4]) // 5)
         g = groups.get(key)
         if g is None:
@@ -125,15 +132,18 @@ class DantaScanner:
         if cache is None:
             cache = {}
             d, t = today, now.strftime("%H%M%S")
-            for _ in range(6):                      # 120개씩 최대 6번 ≈ 5분봉 140개
+            for _ in range(10):                     # 120개씩, 정규장 분봉 510개 모일 때까지
                 got = self.api.get_minute_bars_by_date(code, d, t)
                 new = [b for b in got if (b["date"], b["time"]) not in cache]
                 if not new:
                     break
                 for b in new:
-                    cache[(b["date"], b["time"])] = b
+                    if _regular(b):
+                        cache[(b["date"], b["time"])] = b
                 oldest = min(new, key=lambda b: (b["date"], b["time"]))
                 d, t = oldest["date"], oldest["time"]
+                if t > REG_END:                     # 시간외 구간에 들어가면 그날 장마감으로 점프
+                    t = REG_END
                 if len(cache) >= CCI_PERIOD * 5 + 10:
                     break
             self.bars[code] = cache
