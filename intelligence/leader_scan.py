@@ -155,7 +155,9 @@ if __name__ == "__main__":
     import json
     sys.path.insert(0, os.path.join(tml._BASE, "core"))
     from dotenv import load_dotenv
-    load_dotenv(os.path.join(tml._BASE, ".env"))   # 리나 안에선 이미 로드돼 있음 — 단독 실행용
+    # 리나 안에선 이미 로드돼 있음 — 단독 실행용 (리나와 같은 위치들)
+    for _env in (os.path.join(tml._BASE, ".env"), os.path.join(tml._BASE, "lina_bot", ".env")):
+        load_dotenv(_env)
     from kis_api import KisAPI
     api = KisAPI()
     if len(sys.argv) > 1 and sys.argv[1] == "probe":
