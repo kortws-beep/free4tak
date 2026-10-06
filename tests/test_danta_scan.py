@@ -42,7 +42,7 @@ class API:
         }
         self.strength = 120.0
         self.minute_calls = 0
-    def get_multi_price(self, codes): return {c: self.quotes[c] for c in codes if c in self.quotes}
+    def get_multi_price(self, codes, pause=0): return {c: self.quotes[c] for c in codes if c in self.quotes}
     def get_market_data(self, code): return {"lstn_stcn": "20000000"}
     def get_ccnl(self, code):
         return {"strength": self.strength, "ticks": [f"1029{59 - i // 2:02d}" for i in range(30)]}

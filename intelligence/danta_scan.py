@@ -51,6 +51,7 @@ H_BUY_RATIO_MIN = 51.0
 K_ASK_BID_MAX   = 100.0
 PRE_VALUE_MIN   = 2_900_000_000   # 1단계 사전필터(F·G에서 따라나오는 최소 거래대금)
 BAR_CACHE_MAX   = 600
+MULTI_PAUSE     = 0.15            # 복수시세 묶음 사이 쉬는 시간(초) — 70묶음 ≈ 15초
 # ★ 2026-10-06 probe 실측: 일별분봉 API가 넥스트레이드(NXT) 시간외 분봉(08:00대,
 #   15:30~20:00)까지 준다 — 키움 5분봉은 정규장만이라 정규장 분봉만 쓴다.
 REG_START, REG_END = "090000", "153000"
@@ -108,9 +109,18 @@ class DantaScanner:
 
     # ── 데이터 준비 ──
     def pool(self) -> dict:
+        """★ 2026-10-06: 처음엔 주도주 풀(거래대금 상위 위주)을 같이 썼는데, 키움에 뜬
+        한선엔지니어링 같은 중소형주가 빠졌음 — 단타000은 시총 1000억대도 대상이라
+        일봉 DB 전 종목(약 2,100) + 순위 API 보완을 쓴다(복수시세 70여 회/분)."""
         ts, p = self._pool
         if time.time() - ts > 180 or not p:
             p = leader_scan.build_pool(self.api)
+            conn = sqlite3.connect(tml.THEME_DB, timeout=10)
+            try:
+                for name, code in tml._name_code_map(conn).items():
+                    p.setdefault(code, name)
+            finally:
+                conn.close()
             self._pool = (time.time(), p)
         return p
 
@@ -160,7 +170,7 @@ class DantaScanner:
         now = now or datetime.datetime.now(KST)
         today = now.strftime("%Y-%m-%d")
         pool = self.pool()
-        quotes = self.api.get_multi_price(list(pool))
+        quotes = self.api.get_multi_price(list(pool), pause=MULTI_PAUSE)
         stage1 = []
         for code, q in quotes.items():
             name = pool.get(code) or q["name"]

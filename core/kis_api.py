@@ -339,7 +339,7 @@ class KisAPI:
         except Exception as e:
             print(f"⚠️ 체결강도 조회 오류 {code}: {e}"); return None
 
-    def get_multi_price(self, codes: list) -> dict:
+    def get_multi_price(self, codes: list, pause: float = 0.0) -> dict:
         """관심종목 복수시세(FHKST11300006) — 한 번에 최대 30종목.
         ★ 2026-10-06 신규(주도주검색식3 파이썬판: 수백 종목 거래대금 순위를
           적은 호출로 계산). 반환: {code: {"price","chg","high","prev_close",
@@ -356,6 +356,8 @@ class KisAPI:
                 return 0.0
         out = {}
         for i in range(0, len(codes), 30):
+            if i and pause:
+                time.sleep(pause)   # 전 종목 조회 시 다른 봇과 초당 호출 한도 나눠 쓰기
             chunk  = codes[i:i + 30]
             params = {}
             for k, c in enumerate(chunk, 1):
