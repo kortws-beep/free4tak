@@ -1548,6 +1548,63 @@ async def before_three_month_leader_watch():
     await client.wait_until_ready()
 
 
+# ══════════════════════════════════════════════════════════════
+# 주도주검색식3 — 키움 조건식의 파이썬 구현 (2026-10-06, 관찰 전용)
+# ══════════════════════════════════════════════════════════════
+# intelligence/leader_scan.py 참고. 09:00~15:20 3분마다, 새로 걸린 종목만
+# 알리고 매 스캔 결과는 기록(three_month_leader_log.db의 leader_obs).
+LEADER_WATCH_START, LEADER_WATCH_END = "0900", "1520"
+_LEADER_STATE = {"date": "", "alerted": set()}
+
+
+def _leader_scan_sync():
+    global _tml_api
+    import leader_scan
+    if _tml_api is None:
+        from kis_api import KisAPI
+        _tml_api = KisAPI()
+    return leader_scan.scan(_tml_api, leader_scan.build_pool(_tml_api))
+
+
+@tasks.loop(minutes=3)
+async def leader_scan_watch():
+    kst_now = datetime.datetime.now(KST)
+    if not (LEADER_WATCH_START <= kst_now.strftime("%H%M") < LEADER_WATCH_END):
+        return
+    if not _is_trading_day():
+        return
+    try:
+        import leader_scan
+        today = kst_now.strftime("%Y-%m-%d")
+        if _LEADER_STATE["date"] != today:
+            _LEADER_STATE.update(date=today, alerted=set())
+        out = await asyncio.to_thread(_leader_scan_sync)
+        try:
+            await asyncio.to_thread(leader_scan.log_scan, out)
+        except Exception as e:
+            print(f"⚠️ [주도주3] 기록 오류: {e}")
+        hits = [r for r in out["results"] if r["passed"] and r["code"] not in _LEADER_STATE["alerted"]]
+        print(f"🧪 [주도주3] 풀 {out['pool']} → 상위 {out['ranked']} → 통과 "
+              f"{sum(r['passed'] for r in out['results'])}개 (신규 {len(hits)})")
+        if not hits:
+            return
+        channel = await client.fetch_channel(REPORT_CHANNEL_ID)
+        await send_safe_message(
+            channel,
+            f"🧪 **[주도주검색식3 — 파이썬판, 관찰 전용]** {kst_now.strftime('%H:%M')}\n"
+            + "\n".join(leader_scan.format_hit(r) for r in hits)
+            + "\n   (키움 조건검색 결과와 같은지 비교해줘 — 매매는 안 해)"
+        )
+        _LEADER_STATE["alerted"].update(r["code"] for r in hits)
+    except Exception as e:
+        print(f"⚠️ [주도주3] 스캔 오류: {e}")
+
+
+@leader_scan_watch.before_loop
+async def before_leader_scan_watch():
+    await client.wait_until_ready()
+
+
 _KIWOOM_POOL_SCAN_TIMES = {(9, 30), (12, 30), (15, 0)}
 _kiwoom_pool_scan_state = {"date": "", "done": set(), "retry_at": None, "retry_label": None}
 
@@ -2169,6 +2226,12 @@ async def on_ready():
         print("✅ [시스템] 3개월수급 당일주도주 파이썬판 (09:00~12:00, 3분 주기) 가동 성공! (관찰 전용)")
     except Exception as e: print(f"⚠️ [에러] 3개월수급 스케줄러: {e}")
 
+    try:
+        if not leader_scan_watch.is_running():
+            leader_scan_watch.start()
+        print("✅ [시스템] 주도주검색식3 파이썬판 (09:00~15:20, 3분 주기) 가동 성공! (관찰 전용)")
+    except Exception as e: print(f"⚠️ [에러] 주도주3 스케줄러: {e}")
+
 def _fetch_sbo2_status_sync(api, positions: dict):
     """!상태 — 보유종목 기준 주문가능금액+시세 조회 (동기, to_thread로 실행)."""
     psbl = 0
@@ -2316,6 +2379,26 @@ async def on_message(message):
 
     # ── !3개월수급 (파이썬판 조건검색 수동 확인, 2026-10-06) ──────────
     #   시간 제한 없이 즉시 실행 — 장외엔 마지막 시세 기준이라 참고용.
+    # ── !주도주 — 주도주검색식3 파이썬판 즉시 조회 (2026-10-06) ──
+    if message.content.startswith("!주도주"):
+        async with message.channel.typing():
+            try:
+                import leader_scan
+                out = await asyncio.to_thread(_leader_scan_sync)
+                passed = [r for r in out["results"] if r["passed"]]
+                lines = [f"🧪 **주도주검색식3 (파이썬판)** {out['time']} — 풀 {out['pool']}종목 "
+                         f"(시세 {out['priced']}) → 거래대금 상위 {out['ranked']}"]
+                lines += [leader_scan.format_hit(r) for r in passed] or ["   지금 전 조건 통과 종목 없음"]
+                near = [r for r in out["results"] if not r["passed"]][:8]
+                if near:
+                    lines.append("\n**근접 후보 (탈락 조건)**")
+                    lines += [f"   {r['name']}({r['code']}) {r['chg']:+.1f}% [{r['path']}] — "
+                              f"{', '.join(r['fails'])}" for r in near]
+                await send_safe_message(message.channel, "\n".join(lines))
+            except Exception as e:
+                await send_safe_message(message.channel, f"❌ 주도주 조회 오류: {e}")
+        return
+
     if message.content.startswith("!3개월수급"):
         async with message.channel.typing():
             try:
