@@ -76,6 +76,30 @@ def tick_rate(ticks: list, now_hhmmss: str) -> float:
     return len(ts) * 60.0 / span
 
 
+def count_ticks_1m(api, code: str, now_hhmmss: str, max_pages: int = 5):
+    """최근 60초 체결건수를 시간대별체결 API로 거슬러 올라가며 직접 센다.
+    ★ 2026-10-06: 처음엔 최근 30건의 간격으로 "분당 속도"를 추정했는데, 한 번에
+      몰린 체결(30건이 1초 안)이 1,800건/분으로 부풀려져 키움에 없는 종목이
+      통과했음(알멕·한선엔지니어링 10:59). 반환: (건수, 확실한지)"""
+    now = _secs(now_hhmmss)
+    seen, t = set(), now_hhmmss
+    for _ in range(max_pages):
+        page = api.get_time_ticks(code, t)
+        if not page:
+            return len(seen), False
+        new = [x for x in page if x["acml_vol"] not in seen]
+        for x in new:
+            if now - _secs(x["time"]) < 60:
+                seen.add(x["acml_vol"])
+        if len(seen) >= C_TICKS_MIN:
+            return len(seen), True
+        oldest = min(page, key=lambda x: x["time"])["time"]
+        if now - _secs(oldest) >= 60 or not new:
+            return len(seen), True             # 1분 구간을 다 덮음
+        t = oldest
+    return len(seen), False
+
+
 def five_min_cci(bars: list, period: int = CCI_PERIOD):
     """1분봉(아무 순서) → 5분봉(09:00, 09:05 …) → 마지막 봉의 CCI. (값, 사용한 5분봉 수)"""
     groups: dict = {}
@@ -214,8 +238,11 @@ class DantaScanner:
                 if s < B_STRENGTH_MIN:            fails.append(f"B체결강도{s:.0f}%")
                 if buy_ratio < H_BUY_RATIO_MIN:   fails.append(f"H매수비율{buy_ratio:.0f}%")
                 if net < D_NETBUY_MIN:            fails.append(f"D순매수{net:,.0f}주")
+            # 최근 30건 안에 1분이 다 들어가면 그대로 센 값이 정확 → 100건 미만 확정.
+            # 30건이 전부 1분 안이면(활발) 아래에서 다른 조건 통과 후 직접 센다.
             rate = tick_rate(cc["ticks"], now.strftime("%H%M%S"))
-            if rate < C_TICKS_MIN:                fails.append(f"C체결{rate:.0f}건/분")
+            rate_exact = rate < len(cc["ticks"]) or not cc["ticks"]
+            if rate_exact and rate < C_TICKS_MIN: fails.append(f"C체결{rate:.0f}건/분")
             net_1m = None
             if net is not None:
                 # 60초 전에 가장 가까운 기록(30~180초 전)과의 차이 → 1분당 순매수.
@@ -231,6 +258,11 @@ class DantaScanner:
                 fails.append("E1분순매수 측정중")
             elif net_1m < E_NETBUY_1M_MIN:
                 fails.append(f"E1분순매수{net_1m:,.0f}주")
+            if not fails and not rate_exact:    # 체결건수 직접 세기(호출 최대 5회)
+                cnt, sure = count_ticks_1m(self.api, code, now.strftime("%H%M%S"))
+                rate = float(cnt)
+                if cnt < C_TICKS_MIN:
+                    fails.append(f"C체결{cnt}건/분" + ("" if sure else " (확인불가)"))
             cci = n5 = None
             if not fails:                       # CCI는 분봉 조회가 비싸서 마지막에
                 cci, n5 = five_min_cci(self._minute_bars(code, now))
@@ -336,6 +368,9 @@ if __name__ == "__main__":
         # python danta_scan.py probe — 새 API 응답 확인
         now = datetime.datetime.now(KST)
         print("체결:", api.get_ccnl("005930"))
+        tk = api.get_time_ticks("005930", now.strftime("%H%M%S"))
+        print(f"시간대별체결: {len(tk)}건", tk[:2], "…", tk[-1:])
+        print("최근 1분 체결건수:", count_ticks_1m(api, "005930", now.strftime("%H%M%S")))
         bars = api.get_minute_bars_by_date("005930", now.strftime("%Y%m%d"), now.strftime("%H%M%S"))
         print(f"일별분봉: {len(bars)}개", bars[:1], "…", bars[-1:])
         print("잔량:", {k: v for k, v in api.get_multi_price(["005930"]).get("005930", {}).items()
