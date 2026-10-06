@@ -7,6 +7,7 @@ hold_days는 항상 0에 가깝지만, 다른 봇들과 동일한 DB 관례를 �
 위해 컬럼은 남겨둔다.
 ================================================================
 """
+import os
 import sqlite3
 import json
 import datetime
@@ -22,6 +23,37 @@ def _connect() -> sqlite3.Connection:
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA busy_timeout=10000")
     return conn
+
+
+# ★ 2026-10-07: 키움 조건검색 원본 결과 기록 — 파이썬판 검색식(리나)과 날마다
+#   자동 대조(intelligence/scan_compare.py)하려고. 리나 검색식 기록과 같은 DB에
+#   쓴다(경로는 이 파일 기준 절대경로 — daybot 작업폴더와 무관).
+SCAN_LOG_DB = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                           "lina_bot", "three_month_leader_log.db")
+
+
+def log_kiwoom_hits(code_multi_tag_map: dict, code_name_map: dict = None,
+                    db_path: str = None) -> None:
+    """스캔 1회분 {code: [검색식명, ...]} 저장 + 스캔했다는 표시(__scan__) 1줄.
+    결과가 0개인 스캔도 '그 시각엔 키움이 봤는데 없었다'를 알 수 있게.
+    실패해도 조용히 넘어감(매매 로직에 영향 X)."""
+    try:
+        now = datetime.datetime.now()
+        d, t = now.strftime("%Y-%m-%d"), now.strftime("%H:%M:%S")
+        rows = [(d, t, "", "", "__scan__")]
+        for code, tags in (code_multi_tag_map or {}).items():
+            for tag in set(tags):
+                rows.append((d, t, code, (code_name_map or {}).get(code, ""), tag))
+        conn = sqlite3.connect(db_path or SCAN_LOG_DB, timeout=10)
+        try:
+            conn.execute("""CREATE TABLE IF NOT EXISTS kiwoom_cond_log (
+                date TEXT, time TEXT, code TEXT, name TEXT, tag TEXT)""")
+            conn.executemany("INSERT INTO kiwoom_cond_log VALUES (?,?,?,?,?)", rows)
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception as e:
+        print(f"⚠️ 키움 조건검색 기록 실패: {e}")
 
 
 class DayTradeDB:

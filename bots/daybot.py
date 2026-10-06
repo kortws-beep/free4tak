@@ -72,7 +72,7 @@ from kis_api import KisAPI
 from kis_websocket import KisWebSocket
 from kiwoom_api import KiwoomAPI
 from notifier import Notifier
-from daybot_db import DayTradeDB
+from daybot_db import DayTradeDB, log_kiwoom_hits
 
 load_dotenv(_os.path.join(_BASE, ".env"))
 
@@ -940,6 +940,7 @@ class DayBot:
             return [], {}
         code_name_map, code_multi_tag_map = {}, {}
         loop = asyncio.new_event_loop()
+        scan_ok = False
         try:
             codes = loop.run_until_complete(
                 self.kiwoom.get_condition_codes(
@@ -948,6 +949,7 @@ class DayBot:
                     code_multi_tag_map=code_multi_tag_map,
                 )
             )
+            scan_ok = True
         except Exception as e:
             print(f"⚠️ [daybot] 조건검색 오류: {e}")
             self.kiwoom.reset_token()
@@ -956,6 +958,10 @@ class DayBot:
             loop.close()
         with self._positions_lock:
             self.code_name_map.update(code_name_map)
+        if scan_ok:
+            # 파이썬판 검색식과 자동 대조용 원본 기록(실패해도 매매 영향 없음).
+            # 조회 실패한 스캔은 기록 안 함 — "키움이 봤는데 0개"로 오해하지 않게
+            log_kiwoom_hits(code_multi_tag_map, code_name_map)
 
         now_ts = time.time()
         for code, tags in code_multi_tag_map.items():
