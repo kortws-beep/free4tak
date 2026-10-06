@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "smartfarm-dashboard",
+      "runtimeExecutable": "/home/free4tak/smartfarm/dashboard/venv/bin/python",
+      "runtimeArgs": ["/home/free4tak/smartfarm/dashboard/app.py"],
+      "port": 5055
+    }
+  ]
+}
