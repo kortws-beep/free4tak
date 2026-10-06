@@ -37,7 +37,9 @@ systemd 서비스로 상시 실행(다른 봇들과 동일 패턴) — cron 아�
 import os
 import sys
 import re
+import gc
 import json
+import ctypes
 import time
 import shutil
 import tempfile
@@ -147,14 +149,54 @@ def capture_audio_chunk(video_id: str, duration_sec: int, out_path: str) -> bool
         return False
 
 
+# ★ 2026-10-07: 서비스가 3일 10시간 동안 재시작 없이 돌며 메모리 4.8GB까지 증가
+#   (마스터 실측). 60분 오디오를 전사할 때마다 faster-whisper가 오디오 전체를
+#   float 배열로 디코딩(약 230MB)하고 VAD·추론 버퍼를 잡는데, 여러 스레드가
+#   번갈아 쓰는 장기 프로세스에선 glibc가 해제된 메모리를 OS에 돌려주지 않고
+#   쌓아 두는(단편화) 경우가 흔함. 전사 직후 gc + malloc_trim으로 돌려주고,
+#   전후 메모리를 로그로 남겨 실제로 어디서 늘어나는지 확인할 수 있게 함.
+try:
+    _libc = ctypes.CDLL("libc.so.6")
+except OSError:
+    _libc = None
+
+
+def _rss_mb() -> int:
+    """현재 프로세스 실사용 메모리(MB). 리눅스 외엔 0."""
+    try:
+        with open("/proc/self/status") as f:
+            for line in f:
+                if line.startswith("VmRSS:"):
+                    return int(line.split()[1]) // 1024
+    except OSError:
+        pass
+    return 0
+
+
+def _release_memory():
+    gc.collect()
+    if _libc is not None:
+        try:
+            _libc.malloc_trim(0)
+        except Exception:
+            pass
+
+
 def transcribe_audio(model, path: str) -> str:
+    before = _rss_mb()
     try:
         with _whisper_lock:
             segments, _info = model.transcribe(path, language="ko", vad_filter=True)
-            return " ".join(seg.text for seg in segments)
+            text = " ".join(seg.text for seg in segments)
+            del segments, _info
+            return text
     except Exception as e:
         print(f"⚠️ [Whisper] 전사 오류: {e}")
         return ""
+    finally:
+        peak = _rss_mb()
+        _release_memory()
+        print(f"   🧠 [메모리] 전사 전 {before}MB → 직후 {peak}MB → 정리 후 {_rss_mb()}MB")
 
 
 def process_chunk(handle: str, channel_label: str, llm, model):

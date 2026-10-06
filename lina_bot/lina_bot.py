@@ -162,6 +162,29 @@ def _save_manual_watch_updates(watches: dict, changed_codes: set):
         _write_state_raw(MANUAL_WATCH_STATE_FILE, latest)
 
 
+def _log_manual_watch(event: str, code: str, w: dict, sell_price: float = None,
+                      profit_rate: float = None):
+    """★ 2026-10-07 — 등록/해제 이력(manual_watch_log). 해제하면 상태파일에서
+    지워져 기록이 사라졌음 — 대장 수동매매를 그날 검색식·섹터 신호와 맞춰보려면
+    (나중 분석용) 언제 얼마에 들어가고 나왔는지가 남아 있어야 함. 실패해도 무시."""
+    try:
+        import three_month_leader as tml
+        conn = sqlite3.connect(tml.LOG_DB, timeout=10)
+        try:
+            conn.execute("""CREATE TABLE IF NOT EXISTS manual_watch_log (
+                ts TEXT, event TEXT, code TEXT, name TEXT, entry_price REAL,
+                sell_price REAL, profit_rate REAL, peak_price REAL, registered_at TEXT)""")
+            conn.execute("INSERT INTO manual_watch_log VALUES (?,?,?,?,?,?,?,?,?)", (
+                datetime.datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S"), event, code,
+                w.get("name"), w.get("entry_price"), sell_price, profit_rate,
+                w.get("peak_price"), w.get("registered_at")))
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception as e:
+        print(f"⚠️ [리나등록] 이력 기록 실패: {e}")
+
+
 async def _register_manual_watch(channel, code: str, buy_price: float = None,
                                   name_override: str = None):
     """!리나등록/자연어("등록 종목명 [평단가]") 공용 등록 로직.
@@ -206,6 +229,7 @@ async def _register_manual_watch(channel, code: str, buy_price: float = None,
                 "registered_at": datetime.datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S"),
             }
             _save_manual_watches(watches)
+            _log_manual_watch("register", code, watches[code])
             await send_safe_message(
                 channel,
                 f"✅ {name}({code}) 등록 완료 — 평단가 {buy_price:,.0f}원\n"
@@ -232,8 +256,11 @@ async def _deregister_manual_watch(channel, code: str, sell_price: float = None)
     _save_manual_watches(watches)
 
     entry_price = w.get("entry_price")
+    profit_rate = None
     if sell_price is not None and entry_price:
         profit_rate = (sell_price - entry_price) / entry_price * 100 - MANUAL_WATCH_FEE_DRAG_PCT
+    _log_manual_watch("deregister", code, w, sell_price, profit_rate)
+    if profit_rate is not None:
         emoji = "💰" if profit_rate >= 0 else "💔"
         await send_safe_message(
             channel,
