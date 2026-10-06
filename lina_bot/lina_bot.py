@@ -1502,9 +1502,12 @@ async def daily_momentum_checkin():
 # 3개월수급 당일주도주 — 키움 조건식의 파이썬 구현 (2026-10-06, 관찰 전용)
 # ══════════════════════════════════════════════════════════════
 # ★ 키움 API 없이 일봉 DB(B·E) + 한투 현재가(F·G·H·I) + 체결강도(A)로
-#   같은 조건을 계산(intelligence/three_month_leader.py 참고). daybot과 같은
-#   10시 매수마감 기준이라 09:00~10:00에만 3분마다 확인하고, 새로 걸린 종목만
-#   알린다. 매매는 하지 않음 — 며칠간 키움 결과와 나란히 비교하는 용도.
+#   같은 조건을 계산(intelligence/three_month_leader.py 참고). 09:00~12:00에
+#   3분마다 확인하고, 새로 걸린 종목만 알린다. 매매는 하지 않음 — 며칠간 키움
+#   결과와 나란히 비교하는 용도.
+# ★ 2026-10-06 대장: 장 초반엔 체결강도가 100% 아래라 안 잡히는 경우가 많아
+#   키움 쪽 감시를 12시까지로 늘림 → 여기도 맞춤.
+TML_WATCH_END = "1200"
 _TML_STATE = {"date": "", "alerted": set()}
 _tml_api = None
 
@@ -1522,7 +1525,7 @@ def _tml_scan_sync(with_strength: bool = True):
 @tasks.loop(minutes=3)
 async def three_month_leader_watch():
     kst_now = datetime.datetime.now(KST)
-    if not ("0900" <= kst_now.strftime("%H%M") < "1000"):
+    if not ("0900" <= kst_now.strftime("%H%M") < TML_WATCH_END):
         return
     if not _is_trading_day():
         return
@@ -1531,6 +1534,11 @@ async def three_month_leader_watch():
         if _TML_STATE["date"] != today:
             _TML_STATE.update(date=today, alerted=set())
         universe, results = await asyncio.to_thread(_tml_scan_sync)
+        try:   # 체결강도 기준 결정용 기록 (python three_month_leader.py report)
+            import three_month_leader as tml
+            await asyncio.to_thread(tml.log_observations, results)
+        except Exception as e:
+            print(f"⚠️ [3개월수급] 기록 오류: {e}")
         hits = [r for r in results if r["passed"] and r["code"] not in _TML_STATE["alerted"]]
         print(f"🧪 [3개월수급] 후보 {len(universe['items'])}개 → 통과 {sum(r['passed'] for r in results)}개 (신규 {len(hits)})")
         if not hits:
@@ -2172,7 +2180,7 @@ async def on_ready():
     try:
         if not three_month_leader_watch.is_running():
             three_month_leader_watch.start()
-        print("✅ [시스템] 3개월수급 당일주도주 파이썬판 (09:00~10:00, 3분 주기) 가동 성공! (관찰 전용)")
+        print("✅ [시스템] 3개월수급 당일주도주 파이썬판 (09:00~12:00, 3분 주기) 가동 성공! (관찰 전용)")
     except Exception as e: print(f"⚠️ [에러] 3개월수급 스케줄러: {e}")
 
 def _fetch_sbo2_status_sync(api, positions: dict):

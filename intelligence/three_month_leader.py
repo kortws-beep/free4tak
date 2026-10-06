@@ -46,6 +46,10 @@ import datetime
 
 _BASE     = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 THEME_DB  = os.path.join(_BASE, "lina_bot", "kr_theme_finance.db")
+# ★ 2026-10-06: 장중 검사 결과 기록 — 체결강도 기준(100%)을 어디까지 내릴지
+#   데이터로 정하기 위함. `python three_month_leader.py report`로 요약.
+LOG_DB    = os.path.join(_BASE, "lina_bot", "three_month_leader_log.db")
+A_TRIAL_LEVELS = (100, 95, 90, 85, 80)   # report에서 "이 기준이었다면" 비교할 값
 KST       = datetime.timezone(datetime.timedelta(hours=9))
 
 # ── 키움 조건식 기준값 (키움 거래대금 단위: 일봉 백만원 → 여기선 원) ──
@@ -198,7 +202,9 @@ def _f(d: dict, key: str) -> float:
 
 
 def check_candidates(api, universe: dict, with_strength: bool = True) -> list:
-    """후보마다 F·G·H·I(+B 오늘분)를 한투 현재가로 확인, 다 통과하면 A(체결강도) 조회.
+    """후보마다 F·G·H·I를 한투 현재가로 확인하고 A(체결강도)도 조회.
+    ★ 2026-10-06: 예전엔 F·G·H·I를 다 통과해야 A를 조회했는데, 체결강도 기준을
+      정하려면 근접 후보 값도 필요해서 항상 조회(후보가 몇 개뿐이라 호출 부담 작음).
     반환: [{"name","code","price","chg","value","vol_ratio","disparity",
             "strength","passed": bool, "fails": [실패한 조건]}, ...]"""
     results = []
@@ -223,7 +229,7 @@ def check_candidates(api, universe: dict, with_strength: bool = True) -> list:
         if base and price <= base * SPIKE_RETRACE_MAX:  fails.append(f"가짜:되돌림(스파이크전 {base:,.0f})")
 
         strength = None
-        if not fails and with_strength:
+        if with_strength:
             strength = api.get_execution_strength(it["code"])
             if strength is None:
                 fails.append("A체결강도 조회실패")
@@ -236,9 +242,94 @@ def check_candidates(api, universe: dict, with_strength: bool = True) -> list:
             "strength": strength, "passed": not fails, "fails": fails,
             "b_spike_date": it.get("b_spike_date"), "b_spike_value": it.get("b_spike_value"),
             "approx_value": it.get("approx_value", False),
+            # A를 뺀 나머지 조건은 다 통과 — 체결강도만 문제인 경우
+            "others_ok": all(f.startswith("A") for f in fails),
         })
     results.sort(key=lambda r: (not r["passed"], len(r["fails"]), -r["chg"]))
     return results
+
+
+def log_observations(results: list, ts: datetime.datetime = None, db_path: str = LOG_DB) -> int:
+    """장중 검사 결과를 한 줄씩 기록(통과·탈락 모두)."""
+    if not results:
+        return 0
+    ts = ts or datetime.datetime.now(KST)
+    conn = sqlite3.connect(db_path, timeout=10)
+    try:
+        conn.execute("""CREATE TABLE IF NOT EXISTS tml_obs (
+            date TEXT, time TEXT, code TEXT, name TEXT, price REAL, chg REAL,
+            value REAL, vol_ratio REAL, disparity REAL, strength REAL,
+            passed INTEGER, others_ok INTEGER, fails TEXT)""")
+        conn.executemany("INSERT INTO tml_obs VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", [
+            (ts.strftime("%Y-%m-%d"), ts.strftime("%H:%M"), r["code"], r["name"], r["price"],
+             r["chg"], r["value"], r["vol_ratio"], r["disparity"], r.get("strength"),
+             int(r["passed"]), int(r.get("others_ok", False)), ", ".join(r["fails"]))
+            for r in results])
+        conn.commit()
+        return len(results)
+    finally:
+        conn.close()
+
+
+def report(days: int = 30, db_path: str = LOG_DB, theme_db: str = THEME_DB) -> list:
+    """종목·날짜별로 "체결강도 기준이 N%였다면 언제 얼마에 잡혔고 결과는?"을 정리.
+    결과(종가)는 일봉 DB에서 — 당일 종가, 다음 거래일 종가 대비 수익률."""
+    if not os.path.exists(db_path):
+        return []
+    conn = sqlite3.connect(db_path, timeout=10)
+    since = (datetime.datetime.now(KST) - datetime.timedelta(days=days)).strftime("%Y-%m-%d")
+    obs = conn.execute("SELECT date, time, code, name, price, strength, others_ok FROM tml_obs "
+                       "WHERE date >= ? ORDER BY date, code, time", (since,)).fetchall()
+    conn.close()
+    tconn = sqlite3.connect(theme_db, timeout=10)
+
+    def closes_after(name, date):
+        return [c for (c,) in tconn.execute(
+            "SELECT close_price FROM kr_stock_daily_data WHERE stock_name=? AND date >= ? "
+            "ORDER BY date LIMIT 2", (name, date))]
+
+    out, groups = [], {}
+    for row in obs:
+        groups.setdefault((row[0], row[2]), []).append(row)
+    for (date, code), rows in groups.items():
+        name = rows[0][3]
+        ok_rows = [r for r in rows if r[6] and r[5] is not None]
+        entry = {}
+        for lv in A_TRIAL_LEVELS:
+            first = next((r for r in ok_rows if r[5] >= lv), None)
+            if first:
+                entry[lv] = (first[1], first[4])
+        closes = closes_after(name, date)
+        out.append({
+            "date": date, "code": code, "name": name,
+            "others_ok_count": len(ok_rows),
+            "max_strength_ok": max((r[5] for r in ok_rows), default=None),
+            "entry": entry,                       # {기준: (시각, 가격)}
+            "close_d0": closes[0] if closes else None,
+            "close_d1": closes[1] if len(closes) > 1 else None,
+        })
+    tconn.close()
+    return out
+
+
+def format_report(rows: list) -> str:
+    if not rows:
+        return "기록 없음 — 장중(09:00~12:00) 리나가 3분마다 쌓는다."
+    lines = []
+    for r in rows:
+        mx = f"{r['max_strength_ok']:.0f}%" if r["max_strength_ok"] is not None else "-"
+        lines.append(f"{r['date']} {r['name']}({r['code']}) — 나머지 조건 통과 {r['others_ok_count']}회, "
+                     f"그때 최고 체결강도 {mx}")
+        for lv in A_TRIAL_LEVELS:
+            if lv not in r["entry"]:
+                lines.append(f"   기준 {lv:>3}%: 안 잡힘"); continue
+            t, px = r["entry"][lv]
+            res = []
+            for label, c in (("당일종가", r["close_d0"]), ("익일종가", r["close_d1"])):
+                if c:
+                    res.append(f"{label} {(c / px - 1) * 100:+.1f}%")
+            lines.append(f"   기준 {lv:>3}%: {t} {px:,.0f}원 → " + (" / ".join(res) or "종가 미수집"))
+    return "\n".join(lines)
 
 
 def format_hit(r: dict) -> str:
@@ -251,6 +342,11 @@ def format_hit(r: dict) -> str:
 
 
 if __name__ == "__main__":
+    import sys
+    if len(sys.argv) > 1 and sys.argv[1] == "report":
+        # python three_month_leader.py report [일수]
+        print(format_report(report(int(sys.argv[2]) if len(sys.argv) > 2 else 30)))
+        sys.exit(0)
     # 장 밖에서도 후보(B·E 통과) 목록은 확인 가능: python three_month_leader.py
     u = build_universe()
     print(f"기준 {u['date']} | DB 최신 {u['latest_db_date']} | 검사 {u['scanned']}종목 → 후보 {len(u['items'])}개")

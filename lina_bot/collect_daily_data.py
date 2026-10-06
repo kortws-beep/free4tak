@@ -288,14 +288,18 @@ if __name__ == "__main__":
     #   날짜 이전 100봉을 추가 수집(API 1회 최대 100봉이라 3개월수급 E조건의
     #   119거래일을 채우려면 필요). 여러 번 돌리면 그만큼 더 과거로 내려간다.
     if len(sys.argv) > 1 and sys.argv[1] == "backfill":
-        _c = sqlite3.connect(DB_PATH)
-        _oldest = _c.execute("SELECT MIN(date) FROM kr_stock_daily_data "
-                             "WHERE trade_value IS NOT NULL").fetchone()[0]
-        _c.close()
-        if not _oldest:
-            print("❌ trade_value가 있는 행이 없음 — 먼저 `python collect_daily_data.py 100` 실행")
-            sys.exit(1)
-        _end = (datetime.strptime(_oldest, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y%m%d")
+        # `backfill 20260507` 처럼 날짜를 주면 그 날짜까지 100봉(거래대금 빈 구간 메우기)
+        if len(sys.argv) > 2 and sys.argv[2].isdigit() and len(sys.argv[2]) == 8:
+            _end = sys.argv[2]
+        else:
+            _c = sqlite3.connect(DB_PATH)
+            _oldest = _c.execute("SELECT MIN(date) FROM kr_stock_daily_data "
+                                 "WHERE trade_value IS NOT NULL").fetchone()[0]
+            _c.close()
+            if not _oldest:
+                print("❌ trade_value가 있는 행이 없음 — 먼저 `python collect_daily_data.py 100` 실행")
+                sys.exit(1)
+            _end = (datetime.strptime(_oldest, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y%m%d")
         print(f"⏪ 과거 구간 추가수집: {_end} 이전 100봉")
         collect_all(days=100, delay=0.3, end_date=_end)
     else:
