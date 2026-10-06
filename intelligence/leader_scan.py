@@ -38,6 +38,15 @@ E_CLOSE_PCT     = 3.0
 F_DROP_PCT      = -5.0
 BAR_MIN         = 10
 POOL_FROM_DB    = 400
+# ★ 2026-10-06: 순위 API가 ETF/ETN도 주는데 키움 조건검색은 ETF 제외로 쓰고
+#   있어서(실측: KODEX 코스닥150레버리지가 통과로 나옴) 이름으로 거른다.
+ETF_KEYWORDS = ("KODEX", "TIGER", "KBSTAR", "RISE", "ARIRANG", "HANARO", "KOSEF", "TREX",
+                "SOL ", "ACE ", "PLUS ", "KIWOOM", "TIMEFOLIO", "WON ", "1Q ", "BNK ",
+                "레버리지", "인버스", "ETN", "선물")
+
+
+def _is_etf(name: str) -> bool:
+    return any(k in (name or "") for k in ETF_KEYWORDS)
 
 
 def build_pool(api, db_path: str = tml.THEME_DB, today: str = None) -> dict:
@@ -56,10 +65,18 @@ def build_pool(api, db_path: str = tml.THEME_DB, today: str = None) -> dict:
     finally:
         conn.close()
     pool = {name_code[n]: n for (n,) in rows if n in name_code}
-    for blng in ("3", "1"):
-        for code, name in api.get_value_rank(blng):
-            if len(code) == 6 and code not in pool:
-                pool[code] = name
+    # ★ 2026-10-06: 처음엔 전체시장 거래금액/거래증가율 순위(각 30)만 보탰는데,
+    #   키움엔 뜬 에스투더블유(+17.9%, 거래대금 ~580억)가 풀에서 빠졌음 —
+    #   전날 조용하다 오늘 터진 종목. 시장별(코스피/코스닥)로 나눠 받고
+    #   상승률 순위도 더해 오늘 새로 뜬 종목을 넓게 잡는다(호출 8회).
+    extra = []
+    for market in ("0001", "1001"):
+        for blng in ("3", "1", "0"):
+            extra += api.get_value_rank(blng, market)
+        extra += api.get_rise_rank(market)
+    for code, name in extra:
+        if len(code) == 6 and code not in pool and not _is_etf(name):
+            pool[code] = name
     return pool
 
 
@@ -88,6 +105,8 @@ def scan(api, pool: dict, now: datetime.datetime = None) -> dict:
                     key=lambda x: -x[1]["value"])[:B_RANK]
     results = []
     for rank, (code, q) in enumerate(ranked, 1):
+        if _is_etf(pool.get(code) or q["name"]):
+            continue
         prev = q["prev_close"] or (q["price"] / (1 + q["chg"] / 100) if q["chg"] > -100 else 0)
         high_pct = (q["high"] / prev - 1) * 100 if prev else 0.0
         de = high_pct >= D_HIGH_PCT and q["chg"] >= E_CLOSE_PCT
@@ -164,11 +183,13 @@ if __name__ == "__main__":
         print("복수시세:", json.dumps(api.get_multi_price(["005930", "000660"]), ensure_ascii=False))
         print("분봉 3개:", json.dumps(api.get_minute_bars("005930")[:3], ensure_ascii=False))
         print("거래금액순위 5개:", api.get_value_rank("3")[:5])
+        print("코스닥 거래금액순위 5개:", api.get_value_rank("3", "1001")[:5])
+        print("코스닥 상승률순위 5개:", api.get_rise_rank("1001")[:5])
         sys.exit(0)
     pool = build_pool(api)
     out = scan(api, pool)
     print(f"{out['time']} 풀 {out['pool']}종목 → 시세 {out['priced']} → 상위 {out['ranked']} "
           f"→ 급등/급락 {len(out['results'])}개, 통과 {sum(r['passed'] for r in out['results'])}개")
-    for r in out["results"]:
+    for r in out["results"][:20]:   # 통과가 앞, 근접 후보는 순위순 20개까지
         print(("✅ " if r["passed"] else "   ") + format_hit(r).replace("**", "")
               + ("" if r["passed"] else f"\n   ✗ {', '.join(r['fails'])}"))

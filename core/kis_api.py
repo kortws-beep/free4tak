@@ -409,16 +409,17 @@ class KisAPI:
             print(f"⚠️ 분봉 조회 오류 {code}: {e}")
             return []
 
-    def get_value_rank(self, blng: str = "3") -> list:
+    def get_value_rank(self, blng: str = "3", market: str = "0000") -> list:
         """거래량순위 API(FHPST01710000) — 최대 30건. blng: 0 평균거래량,
-        1 거래증가율, 3 거래금액순. ★ 2026-10-06 신규. 반환: [(code, name)]"""
+        1 거래증가율, 3 거래금액순. market: 0000 전체, 0001 코스피, 1001 코스닥.
+        ★ 2026-10-06 신규. 반환: [(code, name)]"""
         url = f"{self.base_url}/uapi/domestic-stock/v1/quotations/volume-rank"
         headers = {"Content-Type": "application/json",
                    "authorization": f"Bearer {self.token}",
                    "appKey": self.appkey, "appSecret": self.secret,
                    "tr_id": "FHPST01710000", "custtype": "P"}
         params  = {"FID_COND_MRKT_DIV_CODE": "J", "FID_COND_SCR_DIV_CODE": "20171",
-                   "FID_INPUT_ISCD": "0000", "FID_DIV_CLS_CODE": "0",
+                   "FID_INPUT_ISCD": market, "FID_DIV_CLS_CODE": "0",
                    "FID_BLNG_CLS_CODE": blng, "FID_TRGT_CLS_CODE": "111111111",
                    "FID_TRGT_EXLS_CLS_CODE": "000000",
                    "FID_INPUT_PRICE_1": "0", "FID_INPUT_PRICE_2": "0",
@@ -429,6 +430,28 @@ class KisAPI:
                     for i in res.get("output") or [] if i.get("mksc_shrn_iscd")]
         except Exception as e:
             print(f"⚠️ 거래순위 조회 오류: {e}")
+            return []
+
+    def get_rise_rank(self, market: str = "0000") -> list:
+        """등락률(상승률) 순위 API(FHPST01700000) — 최대 30건.
+        ★ 2026-10-06 신규(주도주3 후보 풀 보완). 반환: [(code, name)]"""
+        url = f"{self.base_url}/uapi/domestic-stock/v1/ranking/fluctuation"
+        headers = {"Content-Type": "application/json",
+                   "authorization": f"Bearer {self.token}",
+                   "appKey": self.appkey, "appSecret": self.secret,
+                   "tr_id": "FHPST01700000", "custtype": "P"}
+        params  = {"fid_cond_mrkt_div_code": "J", "fid_cond_scr_div_code": "20170",
+                   "fid_input_iscd": market, "fid_rank_sort_cls_code": "0",
+                   "fid_input_cnt_1": "0", "fid_prc_cls_code": "0",
+                   "fid_input_price_1": "", "fid_input_price_2": "", "fid_vol_cnt": "",
+                   "fid_trgt_cls_code": "0", "fid_trgt_exls_cls_code": "0",
+                   "fid_div_cls_code": "0", "fid_rsfl_rate1": "", "fid_rsfl_rate2": ""}
+        try:
+            res = _get(url, headers=headers, params=params, timeout=10).json()
+            return [((i.get("stck_shrn_iscd") or "").strip(), (i.get("hts_kor_isnm") or "").strip())
+                    for i in res.get("output") or [] if i.get("stck_shrn_iscd")]
+        except Exception as e:
+            print(f"⚠️ 등락률순위 조회 오류: {e}")
             return []
 
     def get_hoga(self, code: str) -> dict:
