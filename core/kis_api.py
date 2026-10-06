@@ -436,6 +436,26 @@ class KisAPI:
             print(f"⚠️ 일별분봉 조회 오류 {code}: {e}")
             return []
 
+    def get_time_ticks(self, code: str, hhmmss: str) -> list:
+        """당일 시간대별 체결(FHPST01060000) — hhmmss 이전 체결 내역(최신→과거).
+        ★ 2026-10-06 신규(단타000 "최근 1분 체결건수"를 30건 넘게 세려고).
+        반환: [{"time": "HHMMSS", "acml_vol": float}] — acml_vol(누적거래량)은
+        체결마다 달라서 페이지를 이어 받을 때 중복 제거 키로 쓴다."""
+        url = f"{self.base_url}/uapi/domestic-stock/v1/quotations/inquire-time-itemconclusion"
+        headers = {"authorization": f"Bearer {self.token}",
+                   "appkey": self.appkey, "appsecret": self.secret,
+                   "tr_id": "FHPST01060000", "custtype": "P"}
+        params = {"FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": code,
+                  "FID_INPUT_HOUR_1": hhmmss}
+        try:
+            res = _get(url, headers=headers, params=params, timeout=10).json()
+            return [{"time": str(o.get("stck_cntg_hour") or ""),
+                     "acml_vol": float(o.get("acml_vol") or 0)}
+                    for o in res.get("output2") or [] if len(str(o.get("stck_cntg_hour") or "")) == 6]
+        except Exception as e:
+            print(f"⚠️ 시간대별체결 조회 오류 {code}: {e}")
+            return []
+
     def get_ccnl(self, code: str) -> dict:
         """체결(FHKST01010300) — 당일 체결강도 + 최근 체결 30건 시각.
         ★ 2026-10-06 신규(단타000). 반환: {"strength": float|None, "ticks": ["HHMMSS", ...]}"""

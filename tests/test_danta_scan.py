@@ -50,6 +50,14 @@ class API:
         self.minute_calls += 1
         return rising_bars() if self.minute_calls == 1 else []
     def get_minute_bars(self, code, hhmmss): return []
+    tick_pages = None
+    def get_time_ticks(self, code, hhmmss):
+        # 기본: 1분 안에 체결 120건(0.5초 간격) — 30건씩 페이지
+        if self.tick_pages is not None:
+            return self.tick_pages.pop(0) if self.tick_pages else []
+        all_t = [(f"1029{59 - i // 2:02d}" if i < 120 else "102800", 10_000 - i) for i in range(150)]
+        start = next((k for k, (t, _) in enumerate(all_t) if t <= hhmmss), 150)
+        return [{"time": t, "acml_vol": v} for t, v in all_t[start:start + 30]]
 
 
 def scanner(api):
@@ -62,6 +70,17 @@ class DantaScan(unittest.TestCase):
     def test_tick_rate(self):
         self.assertAlmostEqual(D.tick_rate([f"1029{59 - i // 2:02d}" for i in range(30)], "103000"), 120.0)
         self.assertEqual(D.tick_rate(["102959", "102950", "102800"], "103000"), 2)
+
+    def test_burst_is_not_1800_per_min(self):
+        # 30건이 한 초에 몰리고 그 이전은 1분 밖 → 실제 30건
+        api = API()
+        api.tick_pages = [[{"time": "102959", "acml_vol": 100 - i} for i in range(30)],
+                          [{"time": "102700", "acml_vol": 50}]]
+        self.assertEqual(D.count_ticks_1m(api, "x", "103000"), (30, True))
+
+    def test_count_ticks_pages(self):
+        cnt, sure = D.count_ticks_1m(API(), "x", "103000")
+        self.assertTrue(cnt >= 100 and sure)
 
     def test_cci_flat_then_spike(self):
         cci, n = D.five_min_cci(rising_bars())
