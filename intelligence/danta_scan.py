@@ -106,6 +106,7 @@ class DantaScanner:
         self.netbuy: dict = {}      # code → [(시각 time.time(), 당일 순매수), ...] 최근 몇 개
         self.bars: dict = {}        # code → {(date,time): bar}
         self._pool = (0.0, {})
+        self.diag: dict = {}        # 마지막 스캔의 종목별 판정 {code: (name, 설명)} — !단타 종목명 용
 
     # ── 데이터 준비 ──
     def pool(self) -> dict:
@@ -171,15 +172,20 @@ class DantaScanner:
         today = now.strftime("%Y-%m-%d")
         pool = self.pool()
         quotes = self.api.get_multi_price(list(pool), pause=MULTI_PAUSE)
-        stage1 = []
+        stage1, diag = [], {}
+        missing = [c for c in pool if c not in quotes]
+        for c in missing:
+            diag[c] = (pool[c], "시세 조회 안 됨")
         for code, q in quotes.items():
             name = pool.get(code) or q["name"]
-            if q["price"] <= 0 or q["value"] < PRE_VALUE_MIN or leader_scan._is_etf(name):
-                continue
+            if q["price"] <= 0 or leader_scan._is_etf(name):
+                diag[code] = (name, "가격 없음/ETF"); continue
+            if q["value"] < PRE_VALUE_MIN:
+                diag[code] = (name, f"거래대금 {q['value'] / 1e8:.0f}억 < 29억 (시총·회전율 조건상 불가)"); continue
             if q.get("bid_rsqn"):
                 ratio = q["ask_rsqn"] / q["bid_rsqn"] * 100
                 if ratio > K_ASK_BID_MAX:
-                    continue
+                    diag[code] = (name, f"K잔량비 {ratio:.0f}% > 100%"); continue
             else:
                 ratio = None
             stage1.append((code, name, q, ratio))
@@ -188,11 +194,12 @@ class DantaScanner:
         for code, name, q, ratio in stage1:
             shares = self._shares(code, today)
             if shares <= 0:
-                continue
+                diag[code] = (name, "상장주식수 조회 실패"); continue
             cap = q["price"] * shares / 1e8
             turnover = q["volume"] / shares * 100
             if not (G_CAP_MIN_EOK <= cap <= G_CAP_MAX_EOK) or turnover < F_TURNOVER_MIN:
-                continue
+                diag[code] = (name, f"G시총 {cap:,.0f}억 / F회전율 {turnover:.1f}% "
+                                    f"(기준 1,000~9,990억, 3%↑)"); continue
             fails = []
             cc = self.api.get_ccnl(code)
             s = cc["strength"]
@@ -233,6 +240,9 @@ class DantaScanner:
                 "netbuy": net, "netbuy_1m": net_1m, "tick_rate": rate,
                 "cci": cci, "cci_bars": n5, "passed": not fails, "fails": fails,
             })
+        for r in results:
+            diag[r["code"]] = (r["name"], "✅ 전 조건 통과" if r["passed"] else ", ".join(r["fails"]))
+        self.diag = diag
         results.sort(key=lambda r: (not r["passed"], len(r["fails"]), -r["chg"]))
         return {"time": now.strftime("%H:%M"), "pool": len(pool), "stage1": len(stage1),
                 "results": results}
@@ -257,6 +267,13 @@ def overlap_today(code: str, date: str, db_path: str = tml.LOG_DB) -> str:
             conn.close()
     except Exception:
         return ""
+
+
+def explain(scanner: "DantaScanner", keyword: str) -> list:
+    """마지막 스캔에서 이름/코드에 keyword가 들어간 종목의 판정 설명."""
+    out = [f"{n}({c}) — {why}" for c, (n, why) in scanner.diag.items()
+           if keyword and (keyword in n or keyword == c)]
+    return out or [f"'{keyword}' — 후보 풀(일봉 DB 종목 + 순위 API)에 없음"]
 
 
 def scan_and_tag(scanner: "DantaScanner", now: datetime.datetime = None) -> dict:
