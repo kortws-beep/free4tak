@@ -48,6 +48,7 @@ class API:
             "000002": q(9400, -6.0, 10100, 7e10),   # 급락 F · 10분봉 10억 → C 탈락
             "000003": q(10900, 9.0, 11000, 1e8),    # 거래대금 꼴찌(순위 밖 가정)
             "999999": q(11000, 10.0, 11200, 6e10),  # 순위 API로만 들어온 종목, 시총 과대
+            "888888": q(10000, 9.0, 11000, 2e11),   # ETF — 거래대금 1위지만 결과에서 제외
         }
         self.bar_map = {"000000": 6e9, "000002": 1e9, "999999": 7e9, "000003": 9e9}
     def get_value_rank(self, blng, market="0000"):
@@ -63,13 +64,16 @@ class LeaderScan(unittest.TestCase):
     def test_scan(self):
         api = API()
         pool = L.build_pool(api, build_db(), today="2026-10-06")
-        self.assertEqual(set(pool), {"000000", "000001", "000002", "000003", "000004", "999999"})
+        # ETF도 풀에는 들어감(ETF 포함 순위 진단용) — 결과·B순위에선 제외
+        self.assertEqual(set(pool), {"000000", "000001", "000002", "000003", "000004", "999999", "888888"})
         L.B_RANK = 4
         try:
             out = L.scan(api, pool, NOW)
         finally:
             L.B_RANK = 200
         by = {r["code"]: r for r in out["results"]}
+        self.assertNotIn("888888", by)
+        self.assertEqual((by["000000"]["rank"], by["000000"]["rank_all"]), (1, 2))   # ETF 포함하면 2위
         self.assertNotIn("000001", by)              # (D·E) or F 불충족
         self.assertNotIn("000003", by)              # B 순위 밖
         self.assertTrue(by["000000"]["passed"]); self.assertEqual(by["000000"]["path"], "급등(D·E)")
