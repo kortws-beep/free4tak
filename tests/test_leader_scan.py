@@ -47,18 +47,20 @@ class API:
             "000001": q(10400, 4.0, 10400, 8e10),   # 고가 +4% → D 탈락(제외)
             "000002": q(9400, -6.0, 10100, 7e10),   # 급락 F · 10분봉 10억 → C 탈락
             "000003": q(10900, 9.0, 11000, 1e8),    # 거래대금 꼴찌(순위 밖 가정)
-            "999999": q(11000, 10.0, 11200, 6e10),  # 순위 API로만 들어온 종목, 시총 과대
+            "999990": q(11000, 10.0, 11200, 6e10),  # 순위 API로만 들어온 종목, 시총 과대
             "888888": q(10000, 9.0, 11000, 2e11),   # ETF — 거래대금 1위지만 결과에서 제외
+            "777775": q(10000, 9.0, 11000, 1.5e11), # 우선주(코드 끝 5) — 순위에서도 제외
         }
-        self.bar_map = {"000000": 6e9, "000002": 1e9, "999999": 7e9, "000003": 9e9}
+        self.bar_map = {"000000": 6e9, "000002": 1e9, "999990": 7e9, "000003": 9e9}
     def get_value_rank(self, blng, market="0000"):
-        return [("999999", "신규급등"), ("888888", "KODEX 레버리지")] if blng == "3" else []
+        return ([("999990", "신규급등"), ("888888", "KODEX 레버리지"), ("777775", "어떤회사우")]
+                if blng == "3" else [])
     def get_rise_rank(self, market="0000"): return []
     def get_multi_price(self, codes): return {c: self.quotes[c] for c in codes if c in self.quotes}
     def get_minute_bars(self, code, hhmmss): return bars(self.bar_map.get(code, 0))
     def get_market_data(self, code):
-        return {"hts_avls": "2000000" if code == "999999" else "5000",
-                "mrkt_warn_cls_code": "02" if code == "000000" else "00"}
+        return {"hts_avls": "2000000" if code == "999990" else "5000",
+                "mrkt_warn_cls_code": {"000000": "01", "000002": "02"}.get(code, "00")}
 
 
 class LeaderScan(unittest.TestCase):
@@ -66,7 +68,8 @@ class LeaderScan(unittest.TestCase):
         api = API()
         pool = L.build_pool(api, build_db(), today="2026-10-06")
         # ETF도 풀에는 들어감(ETF 포함 순위 진단용) — 결과·B순위에선 제외
-        self.assertEqual(set(pool), {"000000", "000001", "000002", "000003", "000004", "999999", "888888"})
+        self.assertEqual(set(pool), {"000000", "000001", "000002", "000003", "000004", "999990",
+                                     "888888", "777775"})
         L.B_RANK = 4
         try:
             out = L.scan(api, pool, NOW)
@@ -74,15 +77,18 @@ class LeaderScan(unittest.TestCase):
             L.B_RANK = 200
         by = {r["code"]: r for r in out["results"]}
         self.assertNotIn("888888", by)
-        self.assertEqual((by["000000"]["rank"], by["000000"]["rank_all"]), (1, 2))   # ETF 포함하면 2위
+        self.assertEqual((by["000000"]["rank"], by["000000"]["rank_all"]), (1, 3))   # ETF·우선주 포함하면 3위
         self.assertNotIn("000001", by)              # (D·E) or F 불충족
         self.assertNotIn("000003", by)              # B 순위 밖
         self.assertTrue(by["000000"]["passed"]); self.assertEqual(by["000000"]["path"], "급등(D·E)")
-        self.assertEqual(by["000002"]["fails"], ["C10분봉10억"]); self.assertEqual(by["000002"]["path"], "급락(F)")
-        self.assertEqual(by["999999"]["fails"], ["A시총2,000,000억"])
+        # 000002는 투자경고 → 키움 대상 밖(분봉 조회 없이 제외)
+        self.assertEqual(by["000002"]["fails"], ["대상제외:투자경고"]); self.assertEqual(by["000002"]["path"], "급락(F)")
+        self.assertNotIn("777775", by)
+        self.assertEqual(by["999990"]["fails"], ["A시총2,000,000억"])
         self.assertIn("000000", L.format_hit(by["000000"]))
-        self.assertEqual(by["000000"]["status"], "투자경고")
-        self.assertIn("⚠️투자경고", L.format_hit(by["000000"]))
+        self.assertEqual(by["000000"]["status"], "투자주의")          # 투자주의는 키움도 안 뺌 — 통과 + 표시
+        self.assertIn("⚠️투자주의", L.format_hit(by["000000"]))
+        self.assertTrue(L.is_preferred("005935", "삼성전자우")); self.assertFalse(L.is_preferred("0161M0", "네오사피엔스"))
         self.assertEqual(L.market_status({"iscd_stat_cls_code": "59", "short_over_yn": "Y"}), "단기과열")
         log = os.path.abspath("leadlog.db")
         self.assertEqual(L.log_scan(out, NOW, log), 3)
