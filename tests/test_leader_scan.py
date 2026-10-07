@@ -57,7 +57,8 @@ class API:
     def get_multi_price(self, codes): return {c: self.quotes[c] for c in codes if c in self.quotes}
     def get_minute_bars(self, code, hhmmss): return bars(self.bar_map.get(code, 0))
     def get_market_data(self, code):
-        return {"hts_avls": "2000000" if code == "999999" else "5000"}
+        return {"hts_avls": "2000000" if code == "999999" else "5000",
+                "mrkt_warn_cls_code": "02" if code == "000000" else "00"}
 
 
 class LeaderScan(unittest.TestCase):
@@ -80,6 +81,9 @@ class LeaderScan(unittest.TestCase):
         self.assertEqual(by["000002"]["fails"], ["C10분봉10억"]); self.assertEqual(by["000002"]["path"], "급락(F)")
         self.assertEqual(by["999999"]["fails"], ["A시총2,000,000억"])
         self.assertIn("000000", L.format_hit(by["000000"]))
+        self.assertEqual(by["000000"]["status"], "투자경고")
+        self.assertIn("⚠️투자경고", L.format_hit(by["000000"]))
+        self.assertEqual(L.market_status({"iscd_stat_cls_code": "59", "short_over_yn": "Y"}), "단기과열")
         log = os.path.abspath("leadlog.db")
         self.assertEqual(L.log_scan(out, NOW, log), 3)
 

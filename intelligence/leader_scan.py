@@ -83,6 +83,30 @@ def build_pool(api, db_path: str = tml.THEME_DB, today: str = None) -> dict:
     return pool
 
 
+# ★ 2026-10-07: 대조 첫날 파이썬만 오래 통과한 종목(제이앤티씨 순위 19~22위·10분봉
+#   최대 211억 등)은 순위·10분봉으론 설명이 안 됨 → 키움 조건식 '대상'에서 투자주의/
+#   경고/위험·단기과열 같은 종목을 빼고 있을 가능성. 한투 현재가의 상태값을 같이 기록.
+_STAT = {"51": "관리", "52": "투자위험", "53": "투자경고", "54": "투자주의", "58": "거래정지",
+         "59": "단기과열"}
+_WARN = {"01": "투자주의", "02": "투자경고", "03": "투자위험"}
+
+
+def market_status(md: dict) -> str:
+    """한투 현재가(inquire-price) 응답의 시장경고·종목상태를 짧은 글로. 정상이면 ""."""
+    tags = []
+    s = str(md.get("iscd_stat_cls_code") or "")
+    if s in _STAT:
+        tags.append(_STAT[s])
+    w = _WARN.get(str(md.get("mrkt_warn_cls_code") or ""))
+    if w and w not in tags:
+        tags.append(w)
+    if str(md.get("short_over_yn") or "").upper() == "Y" and "단기과열" not in tags:
+        tags.append("단기과열")
+    if str(md.get("invt_caful_yn") or "").upper() == "Y":
+        tags.append("투자유의")
+    return ",".join(tags)
+
+
 def bar_value(bars: list, now_hhmm: str) -> float:
     """지금 만들어지는 10분봉(09:00, 09:10 … 기준)의 거래대금(원).
     누적거래대금이 있으면 (최신 누적 − 봉 시작 직전 누적), 없으면 분봉 가격×거래량 합."""
@@ -119,7 +143,7 @@ def scan(api, pool: dict, now: datetime.datetime = None) -> dict:
         bv = bar_value(api.get_minute_bars(code, now.strftime("%H%M%S")), now.strftime("%H%M"))
         if bv < C_MIN_VALUE:
             fails.append(f"C10분봉{bv / 1e8:.0f}억")
-        cap = None
+        cap, status = None, ""
         if not fails:
             md = api.get_market_data(code) or {}
             try:
@@ -128,9 +152,10 @@ def scan(api, pool: dict, now: datetime.datetime = None) -> dict:
                 cap = 0.0
             if cap and not (A_MIN_CAP_EOK <= cap <= A_MAX_CAP_EOK):
                 fails.append(f"A시총{cap:,.0f}억")
+            status = market_status(md)
         results.append({
             "name": pool.get(code) or q["name"], "code": code, "rank": rank,
-            "rank_all": rank_all.get(code),
+            "rank_all": rank_all.get(code), "status": status,
             "price": q["price"], "chg": q["chg"], "high_pct": high_pct,
             "value": q["value"], "bar_value": bv, "cap_eok": cap,
             "path": "급등(D·E)" if de else "급락(F)",
@@ -142,8 +167,9 @@ def scan(api, pool: dict, now: datetime.datetime = None) -> dict:
 
 
 def format_hit(r: dict) -> str:
+    st = f" ⚠️{r['status']}" if r.get("status") else ""
     return (f"📌 **{r['name']}**({r['code']}) {r['price']:,.0f}원 {r['chg']:+.2f}% "
-            f"[{r['path']}]\n"
+            f"[{r['path']}]{st}\n"
             f"   거래대금 {r['value'] / 1e8:,.0f}억(풀 내 {r['rank']}위) | 10분봉 "
             f"{r['bar_value'] / 1e8:,.0f}억 | 고가 {r['high_pct']:+.1f}%")
 
@@ -164,12 +190,17 @@ def log_scan(out: dict, now: datetime.datetime = None, db_path: str = tml.LOG_DB
             conn.execute("ALTER TABLE leader_obs ADD COLUMN rank_all INTEGER")
         except sqlite3.OperationalError:
             pass
+        try:
+            conn.execute("ALTER TABLE leader_obs ADD COLUMN status TEXT")
+        except sqlite3.OperationalError:
+            pass
         conn.executemany("INSERT INTO leader_obs (date, time, code, name, rank, price, chg, high_pct, "
-                         "value, bar_value, path, passed, fails, rank_all) "
-                         "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", [
+                         "value, bar_value, path, passed, fails, rank_all, status) "
+                         "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", [
             (now.strftime("%Y-%m-%d"), now.strftime("%H:%M"), r["code"], r["name"], r["rank"],
              r["price"], r["chg"], r["high_pct"], r["value"], r["bar_value"], r["path"],
-             int(r["passed"]), ", ".join(r["fails"]), r.get("rank_all")) for r in rows])
+             int(r["passed"]), ", ".join(r["fails"]), r.get("rank_all"), r.get("status", ""))
+            for r in rows])
         conn.commit()
         return len(rows)
     finally:
