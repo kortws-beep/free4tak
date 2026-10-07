@@ -2160,7 +2160,9 @@ class CBot:
                 f"(한도:{DAILY_LOSS_LIMIT:,}원) — !c시작 으로 재개",
                 critical=True,
             )
-            _update_state(paused=True)
+            # ★ 2026-10-07: 자동 중단임을 표시 — 자정 초기화 때 이것만 자동 재개
+            #   (!c정지로 대장이 직접 멈춘 건 그대로 둠)
+            _update_state(paused=True, pause_reason="loss_limit")
 
     # ============================================================
     # 상태 딕셔너리
@@ -2296,6 +2298,15 @@ class CBot:
         self._tech_cache      = {}
         self._pool_cache_ts   = 0
         _update_state(daily_loss=0, loss_date=today)
+        # ★ 2026-10-07 대장 결정 — 일손실 한도로 멈춘 건 "그날만". 예전엔 paused가
+        #   자정에도 안 풀려 !c시작 전까지 며칠이고 매도체크만 했음. 사후분석상 시장
+        #   전체 급락 뒤엔 4시간 안 추가하락(평균 최저 -6.8%)이라 그날 쉬는 건 맞지만
+        #   다음 날까지 쉴 근거는 없음.
+        st = _read_state()
+        if st.get("paused") and st.get("pause_reason") == "loss_limit":
+            _update_state(paused=False, pause_reason="")
+            self._is_paused = False
+            self.notify("🔄 자정 — 어제 일손실 한도로 멈췄던 매수를 자동 재개", critical=False)
         print("🔄 일일 초기화 완료")
 
     # ============================================================

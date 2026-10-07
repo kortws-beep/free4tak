@@ -69,5 +69,24 @@ class CbotPositions(unittest.TestCase):
         self.assertEqual(list(b.sold_today), ["KRW-D"])
 
 
+class CbotLossLimitPause(unittest.TestCase):
+    def _state(self):
+        return json.load(open("cbot_state.json"))
+
+    def test_loss_limit_pause_auto_resumes_at_midnight_manual_does_not(self):
+        b = mk(); notes = []
+        b.notify = lambda m, critical=False: notes.append(m)
+        b.daily_pnl = -160_000
+        b._check_daily_loss_limit()
+        self.assertEqual((self._state()["paused"], self._state()["pause_reason"]), (True, "loss_limit"))
+        b._daily_reset("2026-10-08")
+        self.assertFalse(self._state()["paused"]); self.assertFalse(b._is_paused)
+        self.assertTrue(any("자동 재개" in n for n in notes))
+        # 대장이 직접 멈춘 건(pause_reason=manual) 자정에도 그대로
+        cbot._update_state(paused=True, pause_reason="manual")
+        b._daily_reset("2026-10-09")
+        self.assertTrue(self._state()["paused"])
+
+
 if __name__ == "__main__":
     unittest.main()
