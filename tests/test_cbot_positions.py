@@ -80,6 +80,9 @@ class CbotLossLimitPause(unittest.TestCase):
         b.coin_pool = ["KRW-A", "KRW-B", "KRW-C"]
         b.prices = prices
         b.get_current_price = lambda ms: {m: b.prices[m] for m in ms if m in b.prices}
+        cbot.cmc.fetch_krw_prices = lambda session, markets=None: dict(b.prices)
+        cbot.cmc.fetch_market_flags = lambda session: {"KRW-A": {"warning": False, "cautions": ["가격급등락"]}}
+        cbot.cmc.fetch_headlines = lambda session, hours=6, limit=6: []
         b._update_market_status = lambda: None
         b._last_market_check = 0
         b._is_paused = True
@@ -104,12 +107,15 @@ class CbotLossLimitPause(unittest.TestCase):
 
     def test_keep_paused_when_trend_continues(self):
         b = self._bot({"KRW-BTC": 100, "KRW-A": 10, "KRW-B": 10})
+        b.sold_today = {"KRW-A": time.time()}
         b.daily_pnl = -160_000
         b._check_daily_loss_limit()
         b.prices = {"KRW-BTC": 97, "KRW-A": 9.5, "KRW-B": 9.4}
         self.assertFalse(b._review_loss_pause(self._state()))
         self.assertTrue(self._state()["paused"])
         self.assertTrue(any("유지" in n for n in b.notes))
+        # 최근 손실매도 코인의 업비트 경보가 점검 알림에 참고로 붙음
+        self.assertTrue(any("털린 코인 업비트 경보: A(가격급등락)" in n for n in b.notes), b.notes)
 
     def test_weak_market_keeps_pause_and_midnight_does_not_resume(self):
         b = self._bot({"KRW-BTC": 100, "KRW-A": 10})
