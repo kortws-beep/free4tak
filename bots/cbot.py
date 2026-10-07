@@ -160,6 +160,14 @@ BUY_2ND_THRESHOLD = -9999       # 추매 비활성화 (절대 도달 안 하는 
 MAX_POSITIONS     = 3           # 최대 3코인 (종목당 100만원 × 3 = 300만원, 익절슬롯반환시 4번째 가능)
 MIN_ORDER_AMT     = 5_000       # 업비트 최소 주문 금액
 
+# ★ 2026-10-07 대장 결정 — 위험 기준 매수금액. 매수금액 = min(100만, 이 값 ÷ 손절폭),
+#   손절폭 = ATR×2(_check_sell 손절가와 같은 계산, 없으면 폴백 7%). 손절 한 번 손실을
+#   약 5만원으로 맞춤(변동성 큰 코인은 적게 삼). 백테스트(04-06~10-07, 184일):
+#   100만 고정 대비 수익률 +73.69%→+73.31%로 거의 같고 MDD -7.83→-6.30%,
+#   PF 2.60→2.83, 최악의 날 -20.3만→-10.1만, -15만 이하로 끝난 날 1→0일.
+#   0으로 두면 예전처럼 항상 100만원.
+RISK_PER_TRADE    = 50_000
+
 # ★ 2026-09-05: 매수직후 동기화 보호 — sbot/sbo2가 실제 사고(sbo2는 3번)로
 #   겪고 도입한 것과 동일한 클래스의 보호를 cbot에도 이식. 업비트는 KIS보다
 #   체결반영이 빨라 위험도는 낮지만 방어장치 자체가 아예 없었음.
@@ -1512,6 +1520,16 @@ class CBot:
         self._tech_cache[market] = (result, time.time())
         return result
 
+    def _risk_sized_amount(self, market: str, base_amt: int) -> int:
+        """손절 한 번 손실이 RISK_PER_TRADE가 되도록 매수금액을 줄임(최대 base_amt)."""
+        if RISK_PER_TRADE <= 0:
+            return base_amt
+        atr_rate = self.get_atr_rate(market)
+        stop_pct = ATR_STOP_MULT * atr_rate if atr_rate > 0 else abs(FALLBACK_STOP)
+        if stop_pct <= 0:
+            return base_amt
+        return int(min(base_amt, RISK_PER_TRADE / stop_pct))
+
     def get_atr_rate(self, market: str) -> float:
         """ATR/현재가 비율 (14봉 기준, 4시간봉)"""
         if market in self.atr_cache:
@@ -2729,6 +2747,11 @@ class CBot:
                         # ★ 마지막 슬롯(포지션 MAX_POSITIONS번째)이면 잔액만큼만 매수
                         _is_last_slot = (len(self.positions) + 1) >= MAX_POSITIONS
                         _buy_amt = min(BUY_1ST_AMT, int(krw * 0.98)) if _is_last_slot else BUY_1ST_AMT
+                        _full_amt = _buy_amt
+                        _buy_amt = self._risk_sized_amount(market, _buy_amt)
+                        if _buy_amt < _full_amt:
+                            print(f"  📏 {market} 손절폭 기준 매수금액 {_full_amt:,}→{_buy_amt:,}원 "
+                                  f"(손절 1회 손실 약 {RISK_PER_TRADE:,}원)")
                         if _buy_amt < MIN_ORDER_AMT:
                             print(f"  ⏭️ {market} — 잔액 부족({_buy_amt:,}원 < 최소주문)")
                             continue

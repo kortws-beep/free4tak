@@ -123,5 +123,15 @@ class CbotLossLimitPause(unittest.TestCase):
         self.assertEqual(b._loss_base, 0.0)
 
 
+class CbotRiskSizing(unittest.TestCase):
+    def test_amount_by_stop_width(self):
+        b = mk()
+        for atr, want in ((0.025, 1_000_000), (0.04, 625_000), (0.05, 500_000), (0, int(50_000 / 0.07))):
+            b.get_atr_rate = lambda m, a=atr: a
+            self.assertEqual(b._risk_sized_amount("KRW-X", 1_000_000), want)
+        b.get_atr_rate = lambda m: 0.05
+        self.assertEqual(b._risk_sized_amount("KRW-X", 300_000), 300_000)   # 마지막 슬롯 잔액이 더 작으면 그대로
+
+
 if __name__ == "__main__":
     unittest.main()
