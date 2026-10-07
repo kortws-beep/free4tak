@@ -43,6 +43,26 @@ def get_cbot_scenarios(base: CBotBacktestConfig) -> list:
     ]
 
 
+def get_sizing_scenarios(base: CBotBacktestConfig) -> list:
+    """★ 2026-10-07: 위험 기준 매수금액 비교 — 손절 한 번 손실을 N원에 맞춤."""
+    out = [{"name": "기본(100만 고정)", "config": {**base.__dict__, "risk_per_trade": 0}}]
+    for r in (30_000, 40_000, 50_000, 60_000):
+        out.append({"name": f"위험기준({r // 10000}만/회)", "config": {**base.__dict__, "risk_per_trade": r}})
+    return out
+
+
+def day_stats(trades: list, limit: int = -150_000) -> dict:
+    """청산일별 실현손익 — 최악의 날, 일손실 한도(-15만) 이하로 끝난 날 수."""
+    days = {}
+    for t in trades:
+        d = (t.get("sell_date") if isinstance(t, dict) else getattr(t, "sell_date", "")) or ""
+        k = (t.get("profit_krw") if isinstance(t, dict) else getattr(t, "profit_krw", 0)) or 0
+        if d:
+            days[d[:10]] = days.get(d[:10], 0) + k
+    worst = min(days.values()) if days else 0
+    return {"worst_day": worst, "limit_days": sum(1 for v in days.values() if v <= limit)}
+
+
 def run_one(name: str, config: CBotBacktestConfig, db_path: str) -> dict:
     print(f"\n{'=' * 60}")
     print(f"▶ [CBOT] {name}")
@@ -125,6 +145,8 @@ def main():
     parser.add_argument("--max-positions", type=int, default=3)
     parser.add_argument("--buy-score-min", type=int, default=55)
     parser.add_argument("--compare", action="store_true")
+    parser.add_argument("--sizing", action="store_true",
+                        help="위험 기준 매수금액 비교(손절 1회 손실 3~6만 vs 100만 고정)")
     parser.add_argument("--db", default=os.path.join(
         os.path.dirname(__file__), "..", "backtestc", "coin_backtest.db"))
     parser.add_argument("--results-dir", default=os.path.join(
@@ -164,7 +186,19 @@ def main():
         verbose=args.verbose,
     )
 
-    if args.compare:
+    if args.sizing:
+        results = []
+        for sc in get_sizing_scenarios(base_config):
+            results.append(run_one(sc["name"], CBotBacktestConfig(**sc["config"]), args.db))
+        print_cbot_summary(results, args.start, end_date)
+        print(f"\n{'=' * 70}\n💸 [CBOT] 하루 손실 관점 (일손실 한도 -15만)\n{'=' * 70}")
+        for r in results:
+            ds = day_stats(r["trades"])
+            m = r["metrics"]
+            print(f"  {r['name']:<18} 수익률 {m.get('total_return', 0):+7.2f}% | MDD {m.get('mdd', 0):6.2f}% | "
+                  f"PF {m.get('profit_factor', 0) or 0:.2f} | 최악의 날 {ds['worst_day']:+,.0f}원 | "
+                  f"-15만 이하 {ds['limit_days']}일")
+    elif args.compare:
         scenarios = get_cbot_scenarios(base_config)
         results = []
         for sc in scenarios:
