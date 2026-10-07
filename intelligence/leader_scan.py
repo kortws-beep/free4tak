@@ -91,6 +91,43 @@ _STAT = {"51": "관리", "52": "투자위험", "53": "투자경고", "54": "투�
 _WARN = {"01": "투자주의", "02": "투자경고", "03": "투자위험"}
 
 
+# ★ 2026-10-07 대장 키움 '대상변경' 화면 확인 — 주도주검색식3이 빼는 종목:
+#   관리종목·투자경고/위험·우선주·거래정지·환기종목·정리매매·불성실공시·ETF·스팩·ETN
+#   (투자주의·단기과열은 제외 안 함). 한투로 알 수 있는 것만 맞춤:
+#   이름/코드로 ETF·ETN·스팩·우선주, 현재가 상태값으로 관리·경고·위험·거래정지·정리매매.
+#   환기종목·불성실공시는 한투 현재가에 항목이 없어 못 거름(드묾).
+EXCLUDE_STAT = {"51", "52", "53", "58"}          # 관리, 투자위험, 투자경고, 거래정지
+EXCLUDE_WARN = {"02", "03"}                      # 투자경고, 투자위험
+
+
+def is_preferred(code: str, name: str) -> bool:
+    """우선주 — 보통주 코드는 끝자리 0, 우선주는 5·7·9 또는 영문(K 등). 이름 끝 '우'·'우B'도."""
+    n = (name or "").strip()
+    last = code[-1:] if len(code) == 6 else ""
+    return last in ("5", "6", "7", "8", "9") or last.isalpha() or n.endswith("우") or n[-2:] in ("우B", "우C")
+
+
+def excluded_by_name(code: str, name: str) -> bool:
+    return _is_etf(name) or "스팩" in (name or "") or is_preferred(code, name)
+
+
+def excluded_by_status(md: dict) -> str:
+    """키움 대상에서 빠지는 상태면 사유, 아니면 ""."""
+    s = str(md.get("iscd_stat_cls_code") or "")
+    if s in EXCLUDE_STAT:
+        return _STAT[s]
+    w = str(md.get("mrkt_warn_cls_code") or "")
+    if w in EXCLUDE_WARN:
+        return _WARN[w]
+    if str(md.get("mang_issu_cls_code") or "").upper() == "Y":
+        return "관리"
+    if str(md.get("sltr_yn") or "").upper() == "Y":
+        return "정리매매"
+    if str(md.get("temp_stop_yn") or "").upper() == "Y":
+        return "거래정지"
+    return ""
+
+
 def market_status(md: dict) -> str:
     """한투 현재가(inquire-price) 응답의 시장경고·종목상태를 짧은 글로. 정상이면 ""."""
     tags = []
@@ -130,7 +167,8 @@ def scan(api, pool: dict, now: datetime.datetime = None) -> dict:
     quotes = api.get_multi_price(list(pool))
     priced = sorted(((c, q) for c, q in quotes.items() if q["price"] > 0), key=lambda x: -x[1]["value"])
     rank_all = {c: i for i, (c, _) in enumerate(priced, 1)}          # ETF 포함 순위(진단용)
-    ranked = [(c, q) for c, q in priced if not _is_etf(pool.get(c) or q["name"])][:B_RANK]
+    # 순위(B)도 키움 대상 기준으로 — ETF·ETN·스팩·우선주는 줄 세우기 전에 뺌
+    ranked = [(c, q) for c, q in priced if not excluded_by_name(c, pool.get(c) or q["name"])][:B_RANK]
     results = []
     for rank, (code, q) in enumerate(ranked, 1):
         prev = q["prev_close"] or (q["price"] / (1 + q["chg"] / 100) if q["chg"] > -100 else 0)
@@ -140,19 +178,23 @@ def scan(api, pool: dict, now: datetime.datetime = None) -> dict:
         if not (de or f):
             continue
         fails = []
-        bv = bar_value(api.get_minute_bars(code, now.strftime("%H%M%S")), now.strftime("%H%M"))
-        if bv < C_MIN_VALUE:
-            fails.append(f"C10분봉{bv / 1e8:.0f}억")
-        cap, status = None, ""
-        if not fails:
-            md = api.get_market_data(code) or {}
+        # 상태(관리·경고·위험·거래정지·정리매매)를 먼저 — 키움 대상 밖이면 분봉 조회 생략
+        md = api.get_market_data(code) or {}
+        status = market_status(md)
+        bv, cap = 0.0, None
+        excl = excluded_by_status(md)
+        if excl:
+            fails.append(f"대상제외:{excl}")
+        else:
+            bv = bar_value(api.get_minute_bars(code, now.strftime("%H%M%S")), now.strftime("%H%M"))
+            if bv < C_MIN_VALUE:
+                fails.append(f"C10분봉{bv / 1e8:.0f}억")
             try:
                 cap = float(md.get("hts_avls") or 0)   # 억원
             except (TypeError, ValueError):
                 cap = 0.0
-            if cap and not (A_MIN_CAP_EOK <= cap <= A_MAX_CAP_EOK):
+            if not fails and cap and not (A_MIN_CAP_EOK <= cap <= A_MAX_CAP_EOK):
                 fails.append(f"A시총{cap:,.0f}억")
-            status = market_status(md)
         results.append({
             "name": pool.get(code) or q["name"], "code": code, "rank": rank,
             "rank_all": rank_all.get(code), "status": status,

@@ -208,8 +208,10 @@ class DantaScanner:
             diag[c] = (pool[c], "시세 조회 안 됨")
         for code, q in quotes.items():
             name = pool.get(code) or q["name"]
-            if q["price"] <= 0 or leader_scan._is_etf(name):
-                diag[code] = (name, "가격 없음/ETF"); continue
+            # ★ 2026-10-07: 키움 단타000의 대상은 '제외없음'(대장 화면 확인) — ETF도 포함
+            #   (첫날 대조에서 키움만 잡은 게 KODEX 코스닥150선물). ETF를 빼지 않는다.
+            if q["price"] <= 0:
+                diag[code] = (name, "가격 없음"); continue
             if q["value"] < PRE_VALUE_MIN:
                 diag[code] = (name, f"거래대금 {q['value'] / 1e8:.0f}억 < 29억 (시총·회전율 조건상 불가)"); continue
             num, den = ((q.get("bid_rsqn"), q.get("ask_rsqn")) if K_BID_OVER_ASK
