@@ -113,6 +113,7 @@ from common_utils import (
     extract_claude_text,
 )
 from notifier import Notifier
+import coin_market_context as cmc   # ★ 2026-10-07 시장판단 재료(업비트 경보·전체흐름·뉴스)
 
 load_dotenv('/home/free4tak/k-bot/stock_bot/.env')
 try:
@@ -972,6 +973,13 @@ class CBot:
                 if not any(kw in m.replace("KRW-", "") for kw in EXCLUDE_KEYWORDS)
                 and m not in EXCLUDE_MARKETS
             ]
+            # ★ 2026-10-07: 업비트 유의종목(상장폐지 위험)은 신규매수 후보에서 제외.
+            #   주의 경보(가격급등락 등)는 막지 않고 기록만(시장판단 참고용).
+            self._market_flags = cmc.fetch_market_flags(self.session) or getattr(self, "_market_flags", {})
+            _warned = [m for m in krw_markets if self._market_flags.get(m, {}).get("warning")]
+            if _warned:
+                krw_markets = [m for m in krw_markets if m not in _warned]
+                print(f"  🏷️ 유의종목 제외: {', '.join(x.replace('KRW-', '') for x in _warned)}")
 
             # 3) 전체 시세 (100개씩 청크)
             ticker_data = []
@@ -2195,13 +2203,26 @@ class CBot:
         return self.daily_pnl <= DAILY_LOSS_LIMIT
 
     def _snapshot_market(self) -> dict:
-        """BTC + 코인풀 현재가 스냅샷(멈춤/점검 비교용)."""
+        """원화마켓 전 종목 현재가 스냅샷(멈춤/점검 비교용, BTC 포함).
+        ★ 2026-10-07: 코인풀만 보던 걸 전 종목으로 — '다 같이 빠졌는지'를 직접 봄.
+        실패하면 BTC+코인풀로 대체."""
+        snap = cmc.fetch_krw_prices(self.session)
+        if snap:
+            return snap
         markets = ["KRW-BTC"] + [m for m in self.coin_pool if m != "KRW-BTC"]
         try:
             return {m: p for m, p in (self.get_current_price(markets) or {}).items() if p}
         except Exception as e:
             print(f"⚠️ 시장 스냅샷 실패: {e}")
             return {}
+
+    def _recent_loss_flags(self, within_sec: int = 2 * 3600) -> dict:
+        """최근 손실 매도한 코인들의 업비트 경보(유의종목·주의) — 개별 이벤트 여부 참고."""
+        recent = [m for m, ts in self.sold_today.items() if ts and time.time() - ts <= within_sec]
+        if not recent:
+            return {}
+        flags = cmc.fetch_market_flags(self.session)
+        return {m: flags.get(m, {"warning": False, "cautions": []}) for m in recent}
 
     def _check_daily_loss_limit(self):
         if self._loss_limit_hit():
@@ -2216,6 +2237,7 @@ class CBot:
             #   4시간 뒤 이걸 기준으로 판단(!c정지로 대장이 직접 멈춘 건 건드리지 않음)
             _update_state(paused=True, pause_reason="loss_limit",
                           pause_at=time.time(), pause_snapshot=snap,
+                          pause_flags=self._recent_loss_flags(),
                           next_review_at=time.time() + LOSS_PAUSE_REVIEW_SEC)
 
     def _review_loss_pause(self, st: dict) -> bool:
@@ -2229,15 +2251,29 @@ class CBot:
             a, b = base_snap.get(m), now_snap.get(m)
             return (b / a - 1) * 100 if a and b else None
         btc = chg("KRW-BTC")
-        pool = sorted(c for c in (chg(m) for m in base_snap if m != "KRW-BTC") if c is not None)
-        pool_med = pool[len(pool) // 2] if pool else None
+        br = cmc.breadth({m: p for m, p in base_snap.items() if m != "KRW-BTC"}, now_snap)
+        pool_med = br["median"]
         hours = (time.time() - float(st.get("pause_at") or time.time())) / 3600
         ok = (btc is not None and btc >= RESUME_BTC_MIN_PCT
               and (pool_med is None or pool_med >= RESUME_POOL_MIN_PCT)
               and self.market_status == "normal")
         fmt = lambda v: f"{v:+.2f}%" if v is not None else "-"
-        detail = (f"멈춘 뒤 {hours:.1f}시간 | BTC {fmt(btc)} · 코인풀 중앙값 {fmt(pool_med)} · "
-                  f"시장 {self.market_status}(BTC 일간 {self.btc_rate:+.2f}%)")
+        up = f"{br['up_pct']:.0f}%" if br["up_pct"] is not None else "-"
+        detail = (f"멈춘 뒤 {hours:.1f}시간 | BTC {fmt(btc)} · 원화마켓 {br['n']}종목 중앙값 {fmt(pool_med)}"
+                  f"(오른 종목 {up}) · 시장 {self.market_status}(BTC 일간 {self.btc_rate:+.2f}%)")
+        # 참고 정보(판단엔 안 씀): 털린 코인의 업비트 경보, 최근 뉴스 제목, AI 한 줄
+        flags = st.get("pause_flags") or {}
+        flagged = [f"{m.replace('KRW-', '')}({'유의종목' if f.get('warning') else ','.join(f.get('cautions') or [])})"
+                   for m, f in flags.items() if f.get("warning") or f.get("cautions")]
+        if flags:
+            detail += ("\n🏷️ 털린 코인 업비트 경보: " + (", ".join(flagged) if flagged else "없음(개별 이벤트 표시 없음)"))
+        heads = cmc.fetch_headlines(self.session, hours=max(hours, 4) + 2)
+        if heads:
+            detail += "\n📰 " + "\n📰 ".join(f"{t:%H:%M}UTC {title[:70]}" for t, title, _ in heads[:4])
+        ai = cmc.ai_judgement(getattr(self, "llm", None), getattr(self, "model", ""),
+                              detail.splitlines()[0], heads)
+        if ai:
+            detail += f"\n🤖 {ai}"
         if ok:
             self._loss_base = float(self.daily_pnl)
             _update_state(paused=False, pause_reason="", next_review_at=None,
