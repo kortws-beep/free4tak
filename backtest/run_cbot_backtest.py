@@ -51,6 +51,16 @@ def get_sizing_scenarios(base: CBotBacktestConfig) -> list:
     return out
 
 
+def get_positions_scenarios(base: CBotBacktestConfig, risk: int, counts: list) -> list:
+    """★ 2026-10-07 대장 제안: 위험 기준으로 매수금액이 줄면 종목 수를 늘리자 —
+    손절 1회 손실 고정(risk) + 최대 보유 종목 수만 바꿔 비교."""
+    out = [{"name": "기본(100만 고정·3종목)", "config": {**base.__dict__, "risk_per_trade": 0, "max_positions": 3}}]
+    for n in counts:
+        out.append({"name": f"위험{risk // 10000}만·{n}종목",
+                    "config": {**base.__dict__, "risk_per_trade": risk, "max_positions": n}})
+    return out
+
+
 def day_stats(trades: list, limit: int = -150_000) -> dict:
     """청산일별 실현손익 — 최악의 날, 일손실 한도(-15만) 이하로 끝난 날 수."""
     days = {}
@@ -147,6 +157,9 @@ def main():
     parser.add_argument("--compare", action="store_true")
     parser.add_argument("--sizing", action="store_true",
                         help="위험 기준 매수금액 비교(손절 1회 손실 3~6만 vs 100만 고정)")
+    parser.add_argument("--positions", default="",
+                        help="--sizing과 함께: 위험 5만 고정 + 최대 종목 수 비교, 예: 3,4,5,6")
+    parser.add_argument("--risk", type=int, default=50_000, help="--positions 비교 때 손절 1회 손실(원)")
     parser.add_argument("--db", default=os.path.join(
         os.path.dirname(__file__), "..", "backtestc", "coin_backtest.db"))
     parser.add_argument("--results-dir", default=os.path.join(
@@ -188,16 +201,24 @@ def main():
 
     if args.sizing:
         results = []
-        for sc in get_sizing_scenarios(base_config):
+        scen = (get_positions_scenarios(base_config, args.risk,
+                                        [int(x) for x in args.positions.split(",") if x.strip()])
+                if args.positions else get_sizing_scenarios(base_config))
+        for sc in scen:
             results.append(run_one(sc["name"], CBotBacktestConfig(**sc["config"]), args.db))
         print_cbot_summary(results, args.start, end_date)
         print(f"\n{'=' * 70}\n💸 [CBOT] 하루 손실 관점 (일손실 한도 -15만)\n{'=' * 70}")
         for r in results:
             ds = day_stats(r["trades"])
             m = r["metrics"]
+            avg_invest = ""
+            buys = [t.get("buy_amount") or (t.get("buy_price", 0) * t.get("qty", 0)) for t in r["trades"]]
+            buys = [b for b in buys if b]
+            if buys:
+                avg_invest = f" | 평균 매수 {sum(buys) / len(buys) / 1e4:,.0f}만"
             print(f"  {r['name']:<18} 수익률 {m.get('total_return', 0):+7.2f}% | MDD {m.get('mdd', 0):6.2f}% | "
                   f"PF {m.get('profit_factor', 0) or 0:.2f} | 최악의 날 {ds['worst_day']:+,.0f}원 | "
-                  f"-15만 이하 {ds['limit_days']}일")
+                  f"-15만 이하 {ds['limit_days']}일" + avg_invest)
     elif args.compare:
         scenarios = get_cbot_scenarios(base_config)
         results = []

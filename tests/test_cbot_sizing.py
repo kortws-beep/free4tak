@@ -35,6 +35,9 @@ class Sizing(unittest.TestCase):
         self.assertEqual(R.day_stats(t), {"worst_day": -170_000, "limit_days": 1})
         self.assertEqual([s["name"] for s in R.get_sizing_scenarios(E.CBotBacktestConfig())][:2],
                          ["기본(100만 고정)", "위험기준(3만/회)"])
+        sc = R.get_positions_scenarios(E.CBotBacktestConfig(), 50_000, [4, 6])
+        self.assertEqual([(x["name"], x["config"]["max_positions"], x["config"]["risk_per_trade"]) for x in sc],
+                         [("기본(100만 고정·3종목)", 3, 0), ("위험5만·4종목", 4, 50_000), ("위험5만·6종목", 6, 50_000)])
 
 
 if __name__ == "__main__":
