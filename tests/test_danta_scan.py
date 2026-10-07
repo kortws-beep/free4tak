@@ -39,11 +39,14 @@ class API:
             "222222": q(10000, 5.0, 6e9, 600_000, bid=1500),   # 잔량비(매수÷매도) 150% → 1단계 탈락
             "333333": q(10000, 5.0, 1e9, 100_000),             # 거래대금 10억 → 사전필터 탈락
             "444444": q(100000, 5.0, 6e9, 60_000),             # 시총 5조 → G 탈락
+            "555550": q(10000, 8.0, 6e9, 1_000_000),           # 투자경고 → 대상제외
+            "666665": q(10000, 8.0, 6e9, 1_000_000),           # 우선주 → 대상제외
         }
         self.strength = 120.0
         self.minute_calls = 0
     def get_multi_price(self, codes, pause=0): return {c: self.quotes[c] for c in codes if c in self.quotes}
-    def get_market_data(self, code): return {"lstn_stcn": "20000000"}
+    def get_market_data(self, code):
+        return {"lstn_stcn": "20000000", "mrkt_warn_cls_code": "02" if code == "555550" else "00"}
     def get_ccnl(self, code):
         return {"strength": self.strength, "ticks": [f"1029{59 - i // 2:02d}" for i in range(30)]}
     def get_minute_bars_by_date(self, code, date, hhmmss):
@@ -91,7 +94,7 @@ class DantaScan(unittest.TestCase):
         D.time.time = lambda: clock[0]
         s = scanner(api)
         out = s.scan(NOW)
-        self.assertEqual(out["stage1"], 2)                        # 111111, 444444
+        self.assertEqual(out["stage1"], 3)                        # 111111, 444444, 555550(상태는 다음 단계)
         self.assertEqual([r["code"] for r in out["results"]], ["111111"])
         self.assertIn("E1분순매수 측정중", out["results"][0]["fails"])
         clock[0] += 60
@@ -101,6 +104,8 @@ class DantaScan(unittest.TestCase):
         self.assertGreater(r["netbuy_1m"], 100)
         self.assertIn("K잔량비 150%", D.explain(s, "종목2")[1])
         self.assertIn("G시총", D.explain(s, "444444")[1])
+        self.assertIn("대상제외:투자경고", D.explain(s, "555550")[1])
+        self.assertIn("대상제외(ETF", D.explain(s, "666665")[1])
         self.assertIn("없음", D.explain(s, "없는종목")[1])
         self.assertIn("아직", D.explain(D.DantaScanner(api), "종목2")[0])
         api.strength = 101.0; clock[0] += 60
