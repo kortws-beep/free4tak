@@ -74,8 +74,11 @@ def build_pool(api, db_path: str = tml.THEME_DB, today: str = None) -> dict:
         for blng in ("3", "1", "0"):
             extra += api.get_value_rank(blng, market)
         extra += api.get_rise_rank(market)
+    # ★ 2026-10-07: ETF도 풀에는 넣는다(결과에선 계속 제외). 키움 "거래대금 순위
+    #   상위 200"이 ETF를 포함해 줄 세우는지 확인하려고 ETF 포함 순위(rank_all)를
+    #   함께 기록 — 첫날 대조에서 파이썬만 통과가 많아(하위 순위 종목 위주) 의심.
     for code, name in extra:
-        if len(code) == 6 and code not in pool and not _is_etf(name):
+        if len(code) == 6 and code not in pool:
             pool[code] = name
     return pool
 
@@ -101,12 +104,11 @@ def scan(api, pool: dict, now: datetime.datetime = None) -> dict:
     results에는 B와 (D·E 또는 F)를 통과한 종목만 담긴다(근접 후보 = C·A 탈락)."""
     now = now or datetime.datetime.now(KST)
     quotes = api.get_multi_price(list(pool))
-    ranked = sorted(((c, q) for c, q in quotes.items() if q["price"] > 0),
-                    key=lambda x: -x[1]["value"])[:B_RANK]
+    priced = sorted(((c, q) for c, q in quotes.items() if q["price"] > 0), key=lambda x: -x[1]["value"])
+    rank_all = {c: i for i, (c, _) in enumerate(priced, 1)}          # ETF 포함 순위(진단용)
+    ranked = [(c, q) for c, q in priced if not _is_etf(pool.get(c) or q["name"])][:B_RANK]
     results = []
     for rank, (code, q) in enumerate(ranked, 1):
-        if _is_etf(pool.get(code) or q["name"]):
-            continue
         prev = q["prev_close"] or (q["price"] / (1 + q["chg"] / 100) if q["chg"] > -100 else 0)
         high_pct = (q["high"] / prev - 1) * 100 if prev else 0.0
         de = high_pct >= D_HIGH_PCT and q["chg"] >= E_CLOSE_PCT
@@ -128,6 +130,7 @@ def scan(api, pool: dict, now: datetime.datetime = None) -> dict:
                 fails.append(f"A시총{cap:,.0f}억")
         results.append({
             "name": pool.get(code) or q["name"], "code": code, "rank": rank,
+            "rank_all": rank_all.get(code),
             "price": q["price"], "chg": q["chg"], "high_pct": high_pct,
             "value": q["value"], "bar_value": bv, "cap_eok": cap,
             "path": "급등(D·E)" if de else "급락(F)",
@@ -157,10 +160,16 @@ def log_scan(out: dict, now: datetime.datetime = None, db_path: str = tml.LOG_DB
             date TEXT, time TEXT, code TEXT, name TEXT, rank INTEGER, price REAL,
             chg REAL, high_pct REAL, value REAL, bar_value REAL, path TEXT,
             passed INTEGER, fails TEXT)""")
-        conn.executemany("INSERT INTO leader_obs VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", [
+        try:
+            conn.execute("ALTER TABLE leader_obs ADD COLUMN rank_all INTEGER")
+        except sqlite3.OperationalError:
+            pass
+        conn.executemany("INSERT INTO leader_obs (date, time, code, name, rank, price, chg, high_pct, "
+                         "value, bar_value, path, passed, fails, rank_all) "
+                         "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", [
             (now.strftime("%Y-%m-%d"), now.strftime("%H:%M"), r["code"], r["name"], r["rank"],
              r["price"], r["chg"], r["high_pct"], r["value"], r["bar_value"], r["path"],
-             int(r["passed"]), ", ".join(r["fails"])) for r in rows])
+             int(r["passed"]), ", ".join(r["fails"]), r.get("rank_all")) for r in rows])
         conn.commit()
         return len(rows)
     finally:
