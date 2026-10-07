@@ -69,5 +69,59 @@ class CbotPositions(unittest.TestCase):
         self.assertEqual(list(b.sold_today), ["KRW-D"])
 
 
+class CbotLossLimitPause(unittest.TestCase):
+    """일손실 한도 멈춤 → 4시간 뒤 시장 점검으로 재개/유지 (2026-10-07 대장 결정)."""
+    def _state(self):
+        return json.load(open("cbot_state.json"))
+
+    def _bot(self, prices):
+        b = mk(); b.notes = []
+        b.notify = lambda m, critical=False: b.notes.append(m)
+        b.coin_pool = ["KRW-A", "KRW-B", "KRW-C"]
+        b.prices = prices
+        b.get_current_price = lambda ms: {m: b.prices[m] for m in ms if m in b.prices}
+        b._update_market_status = lambda: None
+        b._last_market_check = 0
+        b._is_paused = True
+        return b
+
+    def test_pause_snapshot_then_resume_when_market_recovers(self):
+        b = self._bot({"KRW-BTC": 100, "KRW-A": 10, "KRW-B": 10, "KRW-C": 10})
+        b.daily_pnl = -160_000
+        b._check_daily_loss_limit()
+        st = self._state()
+        self.assertEqual((st["paused"], st["pause_reason"]), (True, "loss_limit"))
+        self.assertEqual(st["pause_snapshot"]["KRW-BTC"], 100)
+        self.assertGreater(st["next_review_at"], time.time() + 3.9 * 3600)
+        # 4시간 뒤: BTC +1%, 코인 중앙값 +2% → 재개, 같은 날은 -7.5만까지만 더 허용
+        b.prices = {"KRW-BTC": 101, "KRW-A": 10.2, "KRW-B": 10.2, "KRW-C": 9.9}
+        self.assertTrue(b._review_loss_pause(self._state()))
+        self.assertFalse(self._state()["paused"]); self.assertFalse(b._is_paused)
+        b.daily_pnl = -200_000
+        self.assertFalse(b._loss_limit_hit())
+        b.daily_pnl = -240_000
+        self.assertTrue(b._loss_limit_hit())
+
+    def test_keep_paused_when_trend_continues(self):
+        b = self._bot({"KRW-BTC": 100, "KRW-A": 10, "KRW-B": 10})
+        b.daily_pnl = -160_000
+        b._check_daily_loss_limit()
+        b.prices = {"KRW-BTC": 97, "KRW-A": 9.5, "KRW-B": 9.4}
+        self.assertFalse(b._review_loss_pause(self._state()))
+        self.assertTrue(self._state()["paused"])
+        self.assertTrue(any("유지" in n for n in b.notes))
+
+    def test_weak_market_keeps_pause_and_midnight_does_not_resume(self):
+        b = self._bot({"KRW-BTC": 100, "KRW-A": 10})
+        b.daily_pnl = -160_000
+        b._check_daily_loss_limit()
+        b.market_status = "weak"
+        b.prices = {"KRW-BTC": 102, "KRW-A": 10.5}
+        self.assertFalse(b._review_loss_pause(self._state()))
+        b._daily_reset("2026-10-08")
+        self.assertTrue(self._state()["paused"])          # 자정에 자동으로 풀지 않음
+        self.assertEqual(b._loss_base, 0.0)
+
+
 if __name__ == "__main__":
     unittest.main()

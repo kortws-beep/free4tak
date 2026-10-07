@@ -166,6 +166,11 @@ class CBotBacktestConfig:
     enable_stage0_partial: bool = True
     stage0_partial_threshold: float = 0.10
 
+    # ★ 2026-10-07: 위험 기준 매수금액 실험(대장 결정, 사후분석 근거) — 0이면 끔(실전 현행:
+    #   항상 base_buy_amt). 켜면 매수금액 = min(base_buy_amt, risk_per_trade ÷ 손절폭)으로
+    #   손절 한 번 손실을 대략 risk_per_trade원에 맞춘다(손절폭 = ATR×2, 없으면 폴백 7%).
+    risk_per_trade: int = 0
+
 
 # ============================================================
 # 백테스트 엔진
@@ -301,6 +306,14 @@ class CBotBacktestEngine:
     # ----------------------------------------------------------
     # ATR 레벨 계산 (calc_atr_levels와 동일 패턴)
     # ----------------------------------------------------------
+    def _buy_amount(self, atr_rate: float) -> float:
+        amount = min(self.config.base_buy_amt, self.cash * 0.95)
+        if self.config.risk_per_trade > 0:
+            stop_pct = ATR_STOP_MULT * atr_rate if atr_rate > 0 else abs(FALLBACK_STOP)
+            if stop_pct > 0:
+                amount = min(amount, self.config.risk_per_trade / stop_pct)
+        return amount
+
     def _calc_atr_levels(self, entry: float, atr_rate: float) -> dict:
         if atr_rate > 0:
             atr_val = entry * atr_rate
@@ -650,7 +663,7 @@ class CBotBacktestEngine:
                         f"정체교체(→{best_market})", date_str,
                     )
                     candidates.pop(0)
-                    amount = min(self.config.base_buy_amt, self.cash * 0.95)
+                    amount = self._buy_amount(best_ind["atr_rate"])
                     if amount >= MIN_ORDER_AMT:
                         self._simulate_buy(best_market, best_ind["current"], int(amount),
                                            date_str, best_score, best_ind["atr_rate"])
@@ -661,7 +674,7 @@ class CBotBacktestEngine:
             for score, market, ind in candidates:
                 if len(self.positions) >= self.config.max_positions:
                     break
-                amount = min(self.config.base_buy_amt, self.cash * 0.95)
+                amount = self._buy_amount(ind["atr_rate"])
                 if amount < MIN_ORDER_AMT:
                     continue
                 self._simulate_buy(market, ind["current"], int(amount),

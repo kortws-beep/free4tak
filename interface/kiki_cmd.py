@@ -410,12 +410,14 @@ async def cmd_pause(ctx, pause: bool, bot_name: str = "sbot"):
     labels = {"sbot": "스윙봇", "sbo2": "스윙봇2", "cbot": "코인봇", "daybot": "단타봇"}
     label  = labels.get(bot_name, bot_name)
     if pause:
-        update_state(bot_name, paused=True)
+        # pause_reason="manual" — cbot은 자정에 '일손실 한도' 중단만 자동 재개하므로
+        #   대장이 직접 멈춘 건 구분해 둔다(2026-10-07)
+        update_state(bot_name, paused=True, pause_reason="manual")
         await ctx.send(f"⏸️ **{label} 일시 중단**\n보유 포지션 매도 체크는 계속됩니다")
     else:
         # ★ loss_date도 함께 갱신해 손절카운터 정상 초기화
         update_state(bot_name, paused=False, daily_loss=0,
-                    loss_date=today_str())
+                    loss_date=today_str(), pause_reason="")
         # 시장 상태 확인
         sbot_st = read_state("sbot")
         mkt_status = sbot_st.get("last_status", {}).get("market_status", "normal")
