@@ -40,7 +40,9 @@ class Compare(unittest.TestCase):
         r = {x["label"]: x for x in S.compare_day(D, db)}["주도주검색식3"]
         self.assertEqual([c for c, _ in r["both"]], ["A"])
         self.assertEqual(r["k_only"], [("B", "키움만", "C10분봉30억")])
-        self.assertEqual(r["p_only"], [("P", "파이썬만")])   # 14:00 'L'은 키움 스캔이 없던 시각 → 제외
+        self.assertEqual(r["p_only"], [("P", "파이썬만", "1회 09:33")])   # 14:00 'L'은 키움 스캔 없던 시각 → 제외
+        # 09:31 키움 스캔 ↔ 09:30 파이썬 검사: 키움{A,B} vs 파이썬{A} → 1/2
+        self.assertEqual((r["snaps"], r["snap_pct"]), (1, 50.0))
         self.assertAlmostEqual(r["match_pct"], 100 / 3)
         txt = S.format_day(D, S.compare_day(D, db))
         self.assertIn("키움만: 키움만(B) — 파이썬 판정: C10분봉30억", txt)
