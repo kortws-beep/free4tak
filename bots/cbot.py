@@ -228,6 +228,18 @@ FEAR_GREED_MIN   = 20
 DAILY_LOSS_LIMIT = -150_000     # 일일 손실 한도 (한도 내에서만 거래)
 MAX_DAILY_LOSS   = 5            # 당일 손절 최대 5회
 
+# ★ 2026-10-07 대장 결정 — 일손실 한도로 멈춘 뒤 "추세적 하락인지, 이벤트/뉴스성
+#   순간 급락인지" 4시간 뒤 시장을 보고 재개/유지를 정한다(예전: !c시작 전까지
+#   무기한 정지). 판단은 가격으로만 — 멈춘 시점 대비 BTC와 코인풀(중앙값)이
+#   제자리 이상으로 돌아왔고 BTC 시장상태가 정상이면 '순간 급락 후 안정'으로
+#   보고 재개, 아니면 '하락 지속'으로 보고 유지(4시간마다 재점검).
+#   사후분석(cbot_crash_review): 시장 전체 급락 직후 4시간은 평균 -6.8%까지 더
+#   빠졌음 → 바로 재개는 위험, 4시간 관찰이 타당.
+LOSS_PAUSE_REVIEW_SEC = 4 * 3600
+RESUME_BTC_MIN_PCT    = -0.5    # 멈춘 시점 대비 BTC 변화가 이 이상(거의 제자리 이상)
+RESUME_POOL_MIN_PCT   = -1.0    # 코인풀 중앙값 변화가 이 이상
+RESUME_EXTRA_LOSS_RATIO = 0.5   # 같은 날 재개 후엔 한도의 절반(-7.5만)만 더 허용
+
 # ★ 2026-09-15: 재매수 금지를 "당일(자정까지)"에서 "매도 후 5시간 롤링"으로
 #   변경(대장 결정) — 종목풀이 작아서 당일 재매수 금지가 걸리면 오히려
 #   더 안 좋은 대안 종목을 사게 되는 경우가 많고, 한 번 오른 뒤 조정받고
@@ -361,6 +373,7 @@ class CBot:
         self._dust_notified   = {}   # {market: 마지막 더스트알림 시각} — 아래 _check_sell 상단 참고
         self.daily_loss_count = 0
         self.daily_pnl        = 0
+        self._loss_base       = 0.0   # 시장점검으로 재개한 시점 손익(같은 날 추가 손실 허용 기준)
         self._is_paused       = False
 
         # ── 시장 상태 ─────────────────────────────────────
@@ -793,6 +806,8 @@ class CBot:
                     self.daily_pnl = saved_pnl
                 if self.daily_loss_count or self.daily_pnl:
                     print(f"♻️ 당일손익 복구: PNL {self.daily_pnl:+,}원 | 손절카운트 {self.daily_loss_count}")
+            if state.get("loss_base_date") == today_str():
+                self._loss_base = float(state.get("loss_base") or 0)   # 시장점검 재개 기준점
             if saved_pos:
                 # 실제 잔고와 교차 검증
                 balances = self.get_balances()
@@ -2153,16 +2168,71 @@ class CBot:
                     critical=False,
                 )
 
+    def _loss_limit_hit(self) -> bool:
+        """오늘 손실 한도 도달 여부 — 같은 날 시장점검으로 재개했으면 그 시점
+        손익(_loss_base)부터 한도의 절반만 더 허용."""
+        base = getattr(self, "_loss_base", 0.0)
+        if base:
+            return self.daily_pnl - base <= DAILY_LOSS_LIMIT * RESUME_EXTRA_LOSS_RATIO
+        return self.daily_pnl <= DAILY_LOSS_LIMIT
+
+    def _snapshot_market(self) -> dict:
+        """BTC + 코인풀 현재가 스냅샷(멈춤/점검 비교용)."""
+        markets = ["KRW-BTC"] + [m for m in self.coin_pool if m != "KRW-BTC"]
+        try:
+            return {m: p for m, p in (self.get_current_price(markets) or {}).items() if p}
+        except Exception as e:
+            print(f"⚠️ 시장 스냅샷 실패: {e}")
+            return {}
+
     def _check_daily_loss_limit(self):
-        if self.daily_pnl <= DAILY_LOSS_LIMIT:
+        if self._loss_limit_hit():
+            snap = self._snapshot_market()
             self.notify(
                 f"🚨 당일 손실 한도 초과! {self.daily_pnl:+,.0f}원\n"
-                f"(한도:{DAILY_LOSS_LIMIT:,}원) — !c시작 으로 재개",
+                f"(한도:{DAILY_LOSS_LIMIT:,}원) — 매수 멈춤, 4시간 뒤 시장 점검 후 "
+                f"재개/유지 판단 (바로 재개는 !c시작)",
                 critical=True,
             )
-            # ★ 2026-10-07: 자동 중단임을 표시 — 자정 초기화 때 이것만 자동 재개
-            #   (!c정지로 대장이 직접 멈춘 건 그대로 둠)
-            _update_state(paused=True, pause_reason="loss_limit")
+            # ★ 2026-10-07: 자동 중단 표시 + 멈춘 시점 시장 스냅샷 — _review_loss_pause()가
+            #   4시간 뒤 이걸 기준으로 판단(!c정지로 대장이 직접 멈춘 건 건드리지 않음)
+            _update_state(paused=True, pause_reason="loss_limit",
+                          pause_at=time.time(), pause_snapshot=snap,
+                          next_review_at=time.time() + LOSS_PAUSE_REVIEW_SEC)
+
+    def _review_loss_pause(self, st: dict) -> bool:
+        """일손실 한도 멈춤 4시간 점검 — 재개했으면 True."""
+        base_snap = st.get("pause_snapshot") or {}
+        now_snap = self._snapshot_market()
+        self._last_market_check = 0          # 시장상태 즉시 갱신
+        self._update_market_status()
+
+        def chg(m):
+            a, b = base_snap.get(m), now_snap.get(m)
+            return (b / a - 1) * 100 if a and b else None
+        btc = chg("KRW-BTC")
+        pool = sorted(c for c in (chg(m) for m in base_snap if m != "KRW-BTC") if c is not None)
+        pool_med = pool[len(pool) // 2] if pool else None
+        hours = (time.time() - float(st.get("pause_at") or time.time())) / 3600
+        ok = (btc is not None and btc >= RESUME_BTC_MIN_PCT
+              and (pool_med is None or pool_med >= RESUME_POOL_MIN_PCT)
+              and self.market_status == "normal")
+        fmt = lambda v: f"{v:+.2f}%" if v is not None else "-"
+        detail = (f"멈춘 뒤 {hours:.1f}시간 | BTC {fmt(btc)} · 코인풀 중앙값 {fmt(pool_med)} · "
+                  f"시장 {self.market_status}(BTC 일간 {self.btc_rate:+.2f}%)")
+        if ok:
+            self._loss_base = float(self.daily_pnl)
+            _update_state(paused=False, pause_reason="", next_review_at=None,
+                          loss_base=self._loss_base, loss_base_date=today_str())
+            self._is_paused = False
+            extra = -DAILY_LOSS_LIMIT * RESUME_EXTRA_LOSS_RATIO
+            self.notify(f"🟢 시장 점검: 순간 급락 후 안정으로 판단 — 매수 재개\n{detail}\n"
+                        f"(오늘은 여기서 {extra:,.0f}원 더 잃으면 다시 멈춤)", critical=False)
+            return True
+        _update_state(next_review_at=time.time() + LOSS_PAUSE_REVIEW_SEC)
+        self.notify(f"⏸️ 시장 점검: 하락 지속/불안정으로 판단 — 매수 멈춤 유지(4시간 뒤 재점검)\n"
+                    f"{detail}\n(직접 재개는 !c시작)", critical=False)
+        return False
 
     # ============================================================
     # 상태 딕셔너리
@@ -2298,15 +2368,10 @@ class CBot:
         self._tech_cache      = {}
         self._pool_cache_ts   = 0
         _update_state(daily_loss=0, loss_date=today)
-        # ★ 2026-10-07 대장 결정 — 일손실 한도로 멈춘 건 "그날만". 예전엔 paused가
-        #   자정에도 안 풀려 !c시작 전까지 며칠이고 매도체크만 했음. 사후분석상 시장
-        #   전체 급락 뒤엔 4시간 안 추가하락(평균 최저 -6.8%)이라 그날 쉬는 건 맞지만
-        #   다음 날까지 쉴 근거는 없음.
-        st = _read_state()
-        if st.get("paused") and st.get("pause_reason") == "loss_limit":
-            _update_state(paused=False, pause_reason="")
-            self._is_paused = False
-            self.notify("🔄 자정 — 어제 일손실 한도로 멈췄던 매수를 자동 재개", critical=False)
+        # 일손실 한도 멈춤은 자정에 자동으로 풀지 않음 — _review_loss_pause()가
+        #   4시간마다 시장을 보고 판단(2026-10-07 대장 결정). 재개 기준점만 초기화.
+        self._loss_base = 0.0
+        _update_state(loss_base=0, loss_base_date=today)
         print("🔄 일일 초기화 완료")
 
     # ============================================================
@@ -2522,6 +2587,11 @@ class CBot:
                     time.sleep(LOOP_SLEEP); continue
 
                 # ── 일시중단 ──────────────────────────────────
+                if (self._is_paused and bot_state.get("paused")
+                        and bot_state.get("pause_reason") == "loss_limit"
+                        and time.time() >= float(bot_state.get("next_review_at") or 0)):
+                    self._review_loss_pause(bot_state)
+
                 if self._is_paused:
                     print("⏸️ 일시중단 — 매도 체크만")
                     for market, pos in list(self.positions.items()):
@@ -2531,7 +2601,7 @@ class CBot:
                     time.sleep(LOOP_SLEEP); continue
 
                 # ── 일일 손실 한도 ────────────────────────────
-                if self.daily_pnl <= DAILY_LOSS_LIMIT:
+                if self._loss_limit_hit():
                     print(f"🚨 일손실 한도 초과: {self.daily_pnl:+,.0f}원")
                     for market, pos in list(self.positions.items()):
                         self._check_sell(market, pos)
