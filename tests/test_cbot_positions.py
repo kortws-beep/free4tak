@@ -117,6 +117,17 @@ class CbotLossLimitPause(unittest.TestCase):
         # 최근 손실매도 코인의 업비트 경보가 점검 알림에 참고로 붙음
         self.assertTrue(any("털린 코인 업비트 경보: A(가격급등락)" in n for n in b.notes), b.notes)
 
+    def test_legacy_pause_adopted_and_label(self):
+        b = self._bot({"KRW-BTC": 100, "KRW-A": 10})
+        cbot._update_state(paused=True, pause_reason="")     # 예전 코드가 걸어둔 멈춤
+        b.daily_pnl = -171_940
+        b._adopt_legacy_loss_pause()
+        st = self._state()
+        self.assertEqual(st["pause_reason"], "loss_limit"); self.assertEqual(st["pause_snapshot"]["KRW-BTC"], 100)
+        self.assertIn("4시간 시장점검 대기 중", b._pause_label(st))
+        self.assertIn("3시간 59분 남음", b._pause_label(st))
+        self.assertIn("수동 일시중단", b._pause_label({"pause_reason": "manual"}))
+
     def test_weak_market_keeps_pause_and_midnight_does_not_resume(self):
         b = self._bot({"KRW-BTC": 100, "KRW-A": 10})
         b.daily_pnl = -160_000

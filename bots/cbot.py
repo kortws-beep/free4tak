@@ -2240,6 +2240,28 @@ class CBot:
                           pause_flags=self._recent_loss_flags(),
                           next_review_at=time.time() + LOSS_PAUSE_REVIEW_SEC)
 
+    def _adopt_legacy_loss_pause(self):
+        """사유 없이 멈춰 있는데 오늘 손실이 한도를 넘은 상태 → 지금부터 4시간 점검 시작."""
+        snap = self._snapshot_market()
+        _update_state(pause_reason="loss_limit", pause_at=time.time(), pause_snapshot=snap,
+                      pause_flags=self._recent_loss_flags(),
+                      next_review_at=time.time() + LOSS_PAUSE_REVIEW_SEC)
+        self.notify(f"⏸️ 일손실 한도 멈춤(당일 {self.daily_pnl:+,.0f}원)을 시장 점검 방식으로 전환 — "
+                    f"지금 기준으로 4시간 뒤 점검", critical=False)
+
+    def _pause_label(self, st: dict) -> str:
+        """일시중단 로그 한 줄 — 왜 멈췄고 언제 점검하는지."""
+        reason = st.get("pause_reason") or ""
+        if reason == "loss_limit":
+            nxt = float(st.get("next_review_at") or 0)
+            left = max(0, nxt - time.time())
+            at = datetime.datetime.fromtimestamp(nxt).strftime("%H:%M") if nxt else "-"
+            return (f"⏸️ 일손실 한도 멈춤 — 4시간 시장점검 대기 중 (다음 점검 {at}, "
+                    f"{int(left // 3600)}시간 {int(left % 3600 // 60)}분 남음) | 매도 체크만")
+        if reason == "manual":
+            return "⏸️ 수동 일시중단(!c정지) — 매도 체크만 (재개: !c시작)"
+        return "⏸️ 일시중단 — 매도 체크만 (재개: !c시작)"
+
     def _review_loss_pause(self, st: dict) -> bool:
         """일손실 한도 멈춤 4시간 점검 — 재개했으면 True."""
         base_snap = st.get("pause_snapshot") or {}
@@ -2641,13 +2663,21 @@ class CBot:
                     time.sleep(LOOP_SLEEP); continue
 
                 # ── 일시중단 ──────────────────────────────────
+                # ★ 2026-10-07: 예전 코드가 걸어둔 일손실 멈춤(사유 표시 없음)도
+                #   4시간 점검 대상으로 편입 — 안 하면 !c시작 전까지 계속 멈춰 있음
+                if (bot_state.get("paused") and not bot_state.get("pause_reason")
+                        and self._loss_limit_hit()):
+                    self._adopt_legacy_loss_pause()
+                    bot_state = _read_state()
+
                 if (self._is_paused and bot_state.get("paused")
                         and bot_state.get("pause_reason") == "loss_limit"
                         and time.time() >= float(bot_state.get("next_review_at") or 0)):
                     self._review_loss_pause(bot_state)
+                    bot_state = _read_state()
 
                 if self._is_paused:
-                    print("⏸️ 일시중단 — 매도 체크만")
+                    print(self._pause_label(bot_state))
                     for market, pos in list(self.positions.items()):
                         self._check_sell(market, pos)
                     self._save_positions()
