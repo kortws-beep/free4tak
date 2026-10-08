@@ -76,13 +76,28 @@ def load(days: int, refresh: bool) -> dict:
 
 
 # ── 시뮬레이션 ────────────────────────────────────────────
-def simulate(rows: list, lookback: int, dip: float, tp: float, sl: float, max_hold: int) -> list:
-    """한 코인 거래 목록 [{entry_date, exit_date, ret, days, reason}]."""
+def simulate(rows: list, lookback: int, dip: float, tp: float, sl: float, max_hold: int,
+             trend_ma: int = 0, wait_new_high: bool = False) -> list:
+    """한 코인 거래 목록 [{entry_date, exit_date, ret, days, reason}].
+    ★ v2(2026-10-08, 1차 결과 보고): 1차는 판 다음 날에도 '고점 대비 -10%'가 그대로라
+      하락장에서 매일 다시 사는(떨어지는 칼) 구조였음 →
+      trend_ma: 전날 종가가 N일 이평선 위일 때만(상승 추세 중 눌림만)
+      wait_new_high: 청산 후엔 새 N일 고가가 한 번 나온 뒤에만 재진입"""
     trades, pos = [], None
-    for i in range(lookback, len(rows)):
+    blocked = False
+    start = max(lookback, trend_ma)
+    for i in range(start, len(rows)):
         d, o, h, l, c = rows[i]
         if pos is None:
             ref = max(r[2] for r in rows[i - lookback:i])
+            if blocked:
+                if h >= ref:                       # 새 N일 고가 → 다음부터 다시 매수 가능
+                    blocked = False
+                continue
+            if trend_ma:
+                ma = sum(r[4] for r in rows[i - trend_ma:i]) / trend_ma
+                if rows[i - 1][4] <= ma:
+                    continue
             trig = ref * (1 - dip)
             if l <= trig:
                 entry = min(o, trig) * (1 + SLIP)
@@ -90,6 +105,7 @@ def simulate(rows: list, lookback: int, dip: float, tp: float, sl: float, max_ho
                 if sl and l <= entry * (1 - sl):          # 들어간 날 더 빠져 손절
                     trades.append(_close(pos, entry * (1 - sl), d, i, "손절"))
                     pos = None
+                    blocked = wait_new_high
             continue
         held = i - pos["i"]
         if sl and l <= pos["entry"] * (1 - sl):
@@ -98,6 +114,8 @@ def simulate(rows: list, lookback: int, dip: float, tp: float, sl: float, max_ho
             trades.append(_close(pos, pos["entry"] * (1 + tp), d, i, "익절")); pos = None
         elif held >= max_hold:
             trades.append(_close(pos, c, d, i, "기한")); pos = None
+        if pos is None:
+            blocked = wait_new_high
     if pos:
         d, *_r, c = rows[-1]
         trades.append(_close(pos, c, d, len(rows) - 1, "보유중"))
@@ -133,19 +151,26 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--days", type=int, default=1095)
     ap.add_argument("--refresh", action="store_true")
+    ap.add_argument("--v1", action="store_true", help="1차 규칙(추세필터·재진입대기 없음) 조합")
     args = ap.parse_args()
     data = load(args.days, args.refresh)
     span = f"{data[COINS[0]][0][0]} ~ {data[COINS[0]][-1][0]}" if data[COINS[0]] else "-"
     print(f"\n📉 고정 4종목 눌림목 매수 — 기간 {span} | 종목당 {SLOT_KRW:,}원(합 100만)")
     print(f"{'조건':<34}{'거래':>5}{'승률':>7}{'평균':>8}{'PF':>6}{'누적손익':>12}{'최대낙폭':>11}{'최악':>8}{'보유일':>7}")
-    grid = itertools.product((7, 10), (0.10,), (0.05, 0.08, 0.12), (0.0, 0.08, 0.12), (10, 20))
+    if args.v1:
+        grid = [(lb, dip, tp, sl, mh, 0, False) for lb, dip, tp, sl, mh in
+                itertools.product((7, 10), (0.10,), (0.05, 0.08, 0.12), (0.0, 0.08, 0.12), (10, 20))]
+    else:   # v2: 추세필터(없음/50일/200일) × 재진입대기 항상
+        grid = [(lb, 0.10, tp, sl, 20, ma, True) for lb, ma, tp, sl in
+                itertools.product((7, 10), (0, 50, 200), (0.08, 0.12), (0.0, 0.12))]
     rows = []
-    for lb, dip, tp, sl, mh in grid:
-        trades = [t for m in COINS for t in simulate(data[m], lb, dip, tp, sl, mh)]
+    for lb, dip, tp, sl, mh, ma, wait in grid:
+        trades = [t for m in COINS for t in simulate(data[m], lb, dip, tp, sl, mh, ma, wait)]
         s = summarize(trades)
         if not s["n"]:
             continue
-        name = f"{lb}일고점-{dip:.0%} 익절+{tp:.0%} 손절{'-' + format(sl, '.0%') if sl else '없음'} {mh}일"
+        name = (f"{lb}일-{dip:.0%} 익+{tp:.0%} 손{'-' + format(sl, '.0%') if sl else 'X'} {mh}일"
+                + (f" MA{ma}" if ma else "") + (" 대기" if wait else ""))
         rows.append((s["pnl"], name, s))
     for _, name, s in sorted(rows, key=lambda x: -x[0]):
         pf = f"{s['pf']:.2f}" if s["pf"] != float("inf") else "∞"

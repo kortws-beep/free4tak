@@ -38,5 +38,17 @@ class DipBuy(unittest.TestCase):
         self.assertEqual(s["n"], 3); self.assertLess(s["mdd"], 0); self.assertEqual(s["open"], 1)
 
 
+    def test_v2_trend_filter_and_wait_new_high(self):
+        # 하락 추세(전날 종가 < 이평) → 안 삼
+        down = [day(i, 100 - i, 100 - i, 100 - i, 100 - i) for i in range(20)] + [day(20, 70, 70, 60, 62)]
+        self.assertEqual(D.simulate(down, 7, 0.10, 0.08, 0.0, 10, trend_ma=5), [])
+        # 손절 뒤 새 고가 전엔 재진입 안 함
+        rows = [day(i, 100, 100, 100, 100) for i in range(7)]
+        rows += [day(7, 95, 95, 89, 90), day(8, 90, 90, 80, 82), day(9, 82, 83, 80, 81)]
+        v1 = D.simulate(rows, 7, 0.10, 0.08, 0.08, 10)
+        v2 = D.simulate(rows, 7, 0.10, 0.08, 0.08, 10, wait_new_high=True)
+        self.assertGreater(len(v1), len(v2)); self.assertEqual(len(v2), 1)
+
+
 if __name__ == "__main__":
     unittest.main()
