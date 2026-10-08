@@ -161,6 +161,10 @@ BUY_2ND_AMT       = 0           # 추매 비활성화
 BUY_2ND_THRESHOLD = -9999       # 추매 비활성화 (절대 도달 안 하는 값)
 MAX_POSITIONS     = 3           # 최대 3코인 (종목당 100만원 × 3 = 300만원, 익절슬롯반환시 4번째 가능)
 MIN_ORDER_AMT     = 5_000       # 업비트 최소 주문 금액
+# ★ 2026-10-08 대장 결정: 눌림목 몫(최대 100만)을 남겨 두면 본체 가용현금이 줄어
+#   자투리로 사는 일이 생김 — 현금 때문에 줄어든 매수금액이 50만 미만이면 안 산다.
+#   (손절폭 기준 축소(_risk_sized_amount)는 일부러 줄이는 것이라 이 하한과 별개)
+CBOT_MIN_BUY_AMT  = 500_000
 
 # ★ 2026-10-07 대장 결정 — 위험 기준 매수금액. 매수금액 = min(100만, 이 값 ÷ 손절폭),
 #   손절폭 = ATR×2(_check_sell 손절가와 같은 계산, 없으면 폴백 7%). 손절 한 번 손실을
@@ -2844,6 +2848,10 @@ class CBot:
                         _buy_amt = min(BUY_1ST_AMT, int(krw_cbot * 0.98)) if _is_last_slot else BUY_1ST_AMT
                         if krw_cbot < _buy_amt:             # 눌림목 몫까지 쓰지 않게
                             _buy_amt = int(krw_cbot * 0.98)
+                        if _buy_amt < CBOT_MIN_BUY_AMT:
+                            print(f"  ⏭️ {market} — 가용현금 {krw_cbot:,.0f}원(눌림목 몫 제외) → "
+                                  f"{_buy_amt:,}원 < 최저 {CBOT_MIN_BUY_AMT:,}원, 매수 안 함")
+                            break                              # 다음 코인도 같은 현금이라 이번 루프 종료
                         _full_amt = _buy_amt
                         _buy_amt = self._risk_sized_amount(market, _buy_amt)
                         if _buy_amt < _full_amt:
