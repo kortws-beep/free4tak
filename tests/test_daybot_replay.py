@@ -44,6 +44,19 @@ class Simulate(unittest.TestCase):
         g = R.simulate(shake, "091000", E, R.Rule(grace=10))
         self.assertEqual(g["reason"], "보유중")                                          # 시초 10분 유예로 살아남음
 
+    def test_afternoon_rules(self):
+        # 아침에 -4%까지 밀렸다가 오후에 회복 — 현행은 손절, 대장식(-7%/13시후 +1%)은 오후정리
+        d = [("2026-10-08", [bar("091000", E), bar("093000", 9600, 9700, 9580), bar("120000", 9900),
+                             bar("133000", 10120, 10150, 10000), bar("151500", 10050)])]
+        self.assertEqual(R.simulate(d, "091000", E, R.CURRENT)["reason"], "손절")
+        r = R.simulate(d, "091000", E, R.Rule(stop=-7, pm_take=1.0, eod="151500"))
+        self.assertEqual((r["reason"], r["exit_time"]), ("오후정리", "133000"))
+        self.assertAlmostEqual(r["ret"], 10120 * (1 - R.SLIP) / 10000 - 1 - R.COST)
+        flat = [("2026-10-08", [bar("091000", E), bar("120000", 9900), bar("151500", 9950), bar("152000", 9990)])]
+        r2 = R.simulate(flat, "091000", E, R.Rule(stop=-7, pm_take=1.0, eod="151500"))
+        self.assertEqual((r2["reason"], r2["exit_time"]), ("당일청산", "151500"))
+        self.assertIn("13시후+1%정리", R.Rule(pm_take=1.0, eod="151500").label())
+
     def test_open_position(self):
         r = R.simulate([("2026-10-08", [bar("091000", E), bar("091100", 10100)])], "091000", E, R.CURRENT)
         self.assertEqual((r["reason"], r["exit_time"]), ("보유중", "091100"))
