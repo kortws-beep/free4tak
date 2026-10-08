@@ -54,9 +54,10 @@ def get_sizing_scenarios(base: CBotBacktestConfig) -> list:
 def get_positions_scenarios(base: CBotBacktestConfig, risk: int, counts: list) -> list:
     """★ 2026-10-07 대장 제안: 위험 기준으로 매수금액이 줄면 종목 수를 늘리자 —
     손절 1회 손실 고정(risk) + 최대 보유 종목 수만 바꿔 비교."""
-    out = [{"name": "기본(100만 고정·3종목)", "config": {**base.__dict__, "risk_per_trade": 0, "max_positions": 3}}]
+    out = [{"name": "기본(100만 고정·3종목)", "config": {**base.__dict__, "risk_per_trade": 0,
+                                                       "max_positions": 3, "base_buy_amt": 1_000_000}}]
     for n in counts:
-        out.append({"name": f"위험{risk // 10000}만·{n}종목",
+        out.append({"name": f"위험{risk // 10000}만·{n}종목·상한{base.base_buy_amt // 10000}만",
                     "config": {**base.__dict__, "risk_per_trade": risk, "max_positions": n}})
     return out
 
