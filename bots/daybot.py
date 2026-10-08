@@ -160,6 +160,11 @@ BUY_END_TIME     = "1930"             # 19:30 이후 신규매수 중단 — EOD
 #   스캔 자체를 정규장 마감 시각에 멈춘다. 보유종목 감시/EOD청산/수동매도감지는
 #   무관 — 계속 돈다.
 SCAN_END_TIME    = "1530"
+# ★ 2026-10-08 대장 결정(분봉 재현 백테스트 daybot_replay.py): 09:40 이후 신호는 어느
+#   시간대·어느 매도규칙으로도 손실(PF 0.29~0.47), 09:00~09:40만 슬롯 3개 기준 플러스
+#   (13건 승률 85%) — 신규매수는 09:40까지만, 그 뒤엔 보유종목 매도만 본다.
+#   되돌리려면 .env에 DAYBOT_NEW_BUY_END=1530
+NEW_BUY_END_TIME = os.getenv("DAYBOT_NEW_BUY_END", "0940").strip() or "0940"
 # ★ 2026-10-02 대장 지정 — 당일 EOD 강제청산 폐지, 대신 "트레일링
 #   미진입(아직 +2.5% 못 찍은) 상태로 3영업일 지나면 손익 무관 강제청산"
 #   으로 교체("가랑비에 옷 젖는다" — 매일 EOD에 억지로 끊다 손실만
@@ -1125,6 +1130,9 @@ class DayBot:
         for code in ranked:
             if len(self.positions) >= effective_max:
                 break
+            if now_hhmm() >= NEW_BUY_END_TIME:      # 스캔 도중 신규매수 마감 시각을 넘김
+                print(f"⏰ [daybot] 신규매수 마감({NEW_BUY_END_TIME[:2]}:{NEW_BUY_END_TIME[2:]}) — 남은 후보 매수 안 함")
+                break
             if code in self.positions or code in self.sold_today:
                 continue
             # ★ 2026-10-06 — 매도/취소 체결확인 대기중인 종목은 잔고로 구분이
@@ -1205,7 +1213,8 @@ class DayBot:
         print(f"🚀 [DAYBOT] 단타봇 가동 | 기본 {BASE_MAX_POSITIONS}종목"
               f"(+매수가능금액 {BONUS_SLOT_MIN_CASH:,}원 이상시 1종목 보너스) | "
               f"익절+{TAKE_PROFIT_PCT}% 손절{STOP_LOSS_PCT}% | "
-              f"미익절 {HOLD_DAYS_LIMIT}일 경과시 강제청산")
+              f"미익절 {HOLD_DAYS_LIMIT}일 경과시 강제청산 | "
+              f"신규매수 {BUY_START_TIME[:2]}:{BUY_START_TIME[2:]}~{NEW_BUY_END_TIME[:2]}:{NEW_BUY_END_TIME[2:]}")
         self._restore_state()
 
         while True:
@@ -1316,6 +1325,7 @@ class DayBot:
                 if (not self._is_paused
                         and len(self.positions) < MAX_POSITIONS
                         and BUY_START_TIME <= now_t <= SCAN_END_TIME
+                        and now_t < NEW_BUY_END_TIME
                         and time.time() - self._last_scan_ts >= SCAN_INTERVAL_SEC
                         and (self._scan_thread is None or not self._scan_thread.is_alive())):
                     self._last_scan_ts = time.time()

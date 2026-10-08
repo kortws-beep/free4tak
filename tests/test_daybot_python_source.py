@@ -61,5 +61,41 @@ class PythonSource(unittest.TestCase):
         daybot.SCAN_SOURCE = "kiwoom"
 
 
+class NewBuyCutoff(unittest.TestCase):
+    """2026-10-08 — 신규매수는 09:40까지만(분봉 재현 백테스트 결과)."""
+    def _scan_bot(self, bought):
+        b = object.__new__(daybot.DayBot)
+        b.positions, b.sold_today, b._sell_verify, b._cancel_reconcile = {}, {}, {}, {}
+        b._recent_tags, b.code_name_map = {}, {}
+        b._scan_conditions = lambda: (["111110"], {"111110": ["주도주검색식3"]})
+        b._rank_candidates = lambda codes, tags: (codes, {"111110": "tier2_주도주"})
+        b._name = lambda c: c
+
+        class Api:
+            def get_market_data(self, c): return {"stck_prpr": "10000", "prdy_ctrt": "5.0"}
+            def get_hoga(self, c): return {"ask_bid_ratio": 5.0}
+            def get_psbl_order_cash(self, *a): return 0
+        b.api = Api()
+        b.db = type("D", (), {"log_candidate": lambda self, *a, **k: None})()
+        b._do_buy = lambda code, name, price, tier: bought.append(code)
+        return b
+
+    def test_no_buy_after_cutoff(self):
+        old = daybot.now_hhmm, daybot.get_all_positions
+        daybot.get_all_positions = None
+        try:
+            bought = []
+            daybot.now_hhmm = lambda: "0930"
+            self._scan_bot(bought)._run_candidate_scan_and_maybe_buy()
+            self.assertEqual(bought, ["111110"])
+            bought.clear()
+            daybot.now_hhmm = lambda: "0940"
+            self._scan_bot(bought)._run_candidate_scan_and_maybe_buy()
+            self.assertEqual(bought, [])
+            self.assertEqual(daybot.NEW_BUY_END_TIME, "0940")
+        finally:
+            daybot.now_hhmm, daybot.get_all_positions = old
+
+
 if __name__ == "__main__":
     unittest.main()
