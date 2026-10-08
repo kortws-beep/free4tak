@@ -24,6 +24,7 @@ def build():
     c.executemany("INSERT INTO manual_watch_log VALUES (?,?,?,?,?,?,?,?,?)", [
         (f"{D} 09:30:00", "register", "111110", "가종목", 10000, None, None, None, None),
         (f"{D} 10:00:00", "register", "222220", "나종목", 5000, None, None, None, None),
+        (f"{D} 10:20:00", "register", "222220", "나종목", 5200, None, None, None, None),
         (f"{D} 11:00:00", "deregister", "111110", "가종목", 10000, 10300, 3.0, None, None),
         (f"{D} 13:00:00", "deregister", "333330", "다종목", 2000, 1950, -2.5, None, f"{D}T09:05:00")])
     c.execute("CREATE TABLE leader_obs (date TEXT, time TEXT, code TEXT, name TEXT, price REAL, chg REAL, "
@@ -46,6 +47,7 @@ class Manual(unittest.TestCase):
         t = M.load_manual(c, 3)
         self.assertEqual([x["code"] for x in t], ["111110", "222220", "333330"])
         self.assertEqual((t[0]["rate"], t[1]["dereg"], t[2]["reg"]), (3.0, None, f"{D} 09:05:00"))
+        self.assertEqual((t[1]["entry0"], t[1]["entry"], len(t[1]["adds"])), (5000, 5200, 1))   # 재등록=추가매수
 
     def test_buy_time_estimate(self):
         bars = [("090000", 9800, 9850, 9750), ("091000", 9990, 10010, 9980), ("093500", 10000, 10000, 10000)]
@@ -72,6 +74,7 @@ class Manual(unittest.TestCase):
         self.assertIn("사기 전에 파이썬 검색식이 잡았음 1/3", out)
         self.assertIn("주도주 09:06✅", out); self.assertIn("주도주 ✗(고가대비 이탈)", out)
         self.assertIn("관심:반도체관심", out)
+        self.assertIn("추가매수 1회→평단 5,200", out)
 
 
 if __name__ == "__main__":

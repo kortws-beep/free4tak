@@ -45,14 +45,19 @@ def load_manual(conn, days: int) -> list:
     open_, out = {}, []
     for ts, ev, code, name, entry, sell, rate, reg_at in rows:
         if ev == "register":
-            open_[code] = {"code": code, "name": name or code, "entry": entry, "reg": ts,
-                           "dereg": None, "sell": None, "rate": None}
+            if code in open_:                  # 해제 없이 다시 등록 = 추가매수(평단 갱신)
+                open_[code]["adds"].append((ts, entry))
+                open_[code]["entry"] = entry
+                continue
+            open_[code] = {"code": code, "name": name or code, "entry": entry, "entry0": entry, "reg": ts,
+                           "dereg": None, "sell": None, "rate": None, "adds": []}
             out.append(open_[code])
         elif ev == "deregister":
             t = open_.pop(code, None)
             if t is None:                      # 기록 시작 전에 등록한 종목
-                t = {"code": code, "name": name or code, "entry": entry,
-                     "reg": (reg_at or ts)[:19].replace("T", " "), "dereg": None, "sell": None, "rate": None}
+                t = {"code": code, "name": name or code, "entry": entry, "entry0": entry,
+                     "reg": (reg_at or ts)[:19].replace("T", " "), "dereg": None, "sell": None, "rate": None,
+                     "adds": []}
                 out.append(t)
             t.update(dereg=ts, sell=sell, rate=rate)
     return out
@@ -106,7 +111,7 @@ def analyze(trades: list, conn, store=None, groups: dict = None) -> list:
     for t in trades:
         date, reg_hms = t["reg"][:10], t["reg"][11:19].replace(":", "")
         bars = store.day(t["code"], date) if store else []
-        t["buy_t"] = estimate_buy_time(bars, t["entry"], reg_hms) or reg_hms
+        t["buy_t"] = estimate_buy_time(bars, t["entry0"], reg_hms) or reg_hms   # 첫 등록 평단 기준
         t["buy_est"] = t["buy_t"] != reg_hms
         t["sig"] = signals(conn, date, t["code"], t["buy_t"])
         firsts = [(v["first"], k) for k, v in t["sig"].items() if v["first"]]
@@ -167,12 +172,14 @@ def report(trades: list, days: int) -> str:
     for t in trades:
         bt = f"{t['buy_t'][:2]}:{t['buy_t'][2:4]}" + ("추정" if t["buy_est"] else "(등록)")
         res = f"{t['rate']:+.2f}%" if t["rate"] is not None else "보유중"
-        L.append(f"   {t['reg'][5:10]} {t['name']}({t['code']}) {res} | 매수 {bt} @{t['entry'] or 0:,.0f}")
+        adds = f" · 추가매수 {len(t['adds'])}회→평단 {t['entry']:,.0f}" if t.get("adds") else ""
+        L.append(f"   {t['reg'][5:10]} {t['name']}({t['code']}) {res} | 매수 {bt} @{t['entry0'] or 0:,.0f}{adds}")
         parts = []
         for label, v in t["sig"].items():
             if v["first"]:
                 mark = "✅" if t["sig_before"] and v["first"].replace(":", "") <= t["buy_t"][:4] else "⏩뒤"
-                parts.append(f"{label} {v['first']}{mark}")
+                why = f"(매수 때 ✗{v['near'][:20]})" if mark == "⏩뒤" and v["near"] else ""
+                parts.append(f"{label} {v['first']}{mark}{why}")
             elif v["near"]:
                 parts.append(f"{label} ✗({v['near'][:24]})")
             elif not v["seen"]:
