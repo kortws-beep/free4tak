@@ -2392,11 +2392,12 @@ async def on_ready():
         print("✅ [시스템] AI 모멘텀 스캐너(08:55/14:35) + 체크인(16:00) 스케줄러 가동 성공! (관찰 전용)")
     except Exception as e: print(f"⚠️ [에러] AI 모멘텀 스케줄러: {e}")
 
-    try:
-        if not kiwoom_pool_scan_loop.is_running():
-            kiwoom_pool_scan_loop.start()
-        print("✅ [시스템] 키움풀 스캔 스케줄러(09:30/12:30/15:00) 가동 성공! (관찰 전용)")
-    except Exception as e: print(f"⚠️ [에러] 키움풀 스캔 스케줄러: {e}")
+    # ★ 2026-10-08 — 키움풀 스캔(kiwoom_pool_scan_loop) 중단(대장 지적 — "거기도
+    #   타임아웃 투성이네"). daybot과 같은 get_condition_codes() API를 하루 3회
+    #   전체 조건검색식에 돌려서 똑같이 타임아웃이 잦았고, sbo2 실거래 후보에
+    #   자동연결도 안 된 관찰전용 기능이라 유지할 이유가 약함. 체크인(아래
+    #   2129번 라인 근처)은 이미 쌓인 DB만 읽으니 그대로 둠(새 스캔 없어 점점
+    #   조용해질 뿐, 에러 없음).
 
     try:
         if not daily_market_context_report.is_running():
