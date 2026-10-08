@@ -112,6 +112,15 @@ def analyze(trades: list, conn, store=None, groups: dict = None) -> list:
         date, reg_hms = t["reg"][:10], t["reg"][11:19].replace(":", "")
         bars = store.day(t["code"], date) if store else []
         t["buy_t"] = estimate_buy_time(bars, t["entry0"], reg_hms) or reg_hms   # 첫 등록 평단 기준
+        # 매도가 없이 해제했으면 해제 시각 직전 1분봉 시세로 수익률 추정(대장은 판 뒤에 해제)
+        t["rate_est"] = False
+        if t["dereg"] and t["rate"] is None and store and t["entry"]:
+            ddate, dhms = t["dereg"][:10], t["dereg"][11:19].replace(":", "")
+            dbars = bars if ddate == date else store.day(t["code"], ddate)
+            px = [p for tm, p, _h, _l in dbars if tm <= dhms]
+            if px:
+                t["rate"] = (px[-1] / t["entry"] - 1) * 100
+                t["rate_est"] = True
         t["buy_est"] = t["buy_t"] != reg_hms
         t["sig"] = signals(conn, date, t["code"], t["buy_t"])
         firsts = [(v["first"], k) for k, v in t["sig"].items() if v["first"]]
@@ -142,8 +151,8 @@ def _avg(xs):
 
 
 def report(trades: list, days: int) -> str:
-    L = [f"🧭 대장 수동매매 vs 신호 — 최근 {days}일, {len(trades)}건 (해제 완료 "
-         f"{sum(t['rate'] is not None for t in trades)}건)"]
+    L = [f"🧭 대장 수동매매 vs 신호 — 최근 {days}일, {len(trades)}건 (해제 {sum(bool(t['dereg']) for t in trades)}건"
+         f" · 그중 매도가 없어 해제 시각 시세로 추정 {sum(bool(t.get('rate_est')) for t in trades)}건)"]
     if not trades:
         return "\n".join(L + ["   리나 등록/해제 기록 없음(manual_watch_log는 10-07부터 쌓임)"])
     n = len(trades)
@@ -171,7 +180,10 @@ def report(trades: list, days: int) -> str:
     L.append("■ 건별")
     for t in trades:
         bt = f"{t['buy_t'][:2]}:{t['buy_t'][2:4]}" + ("추정" if t["buy_est"] else "(등록)")
-        res = f"{t['rate']:+.2f}%" if t["rate"] is not None else "보유중"
+        if t["rate"] is not None:
+            res = f"{t['rate']:+.2f}%" + ("(추정)" if t.get("rate_est") else "") + f" 해제 {t['dereg'][11:16]}"
+        else:
+            res = f"해제 {t['dereg'][11:16]}(시세없음)" if t["dereg"] else "보유중"
         adds = f" · 추가매수 {len(t['adds'])}회→평단 {t['entry']:,.0f}" if t.get("adds") else ""
         L.append(f"   {t['reg'][5:10]} {t['name']}({t['code']}) {res} | 매수 {bt} @{t['entry0'] or 0:,.0f}{adds}")
         parts = []

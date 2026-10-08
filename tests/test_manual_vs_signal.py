@@ -26,7 +26,9 @@ def build():
         (f"{D} 10:00:00", "register", "222220", "나종목", 5000, None, None, None, None),
         (f"{D} 10:20:00", "register", "222220", "나종목", 5200, None, None, None, None),
         (f"{D} 11:00:00", "deregister", "111110", "가종목", 10000, 10300, 3.0, None, None),
-        (f"{D} 13:00:00", "deregister", "333330", "다종목", 2000, 1950, -2.5, None, f"{D}T09:05:00")])
+        (f"{D} 13:00:00", "deregister", "333330", "다종목", 2000, 1950, -2.5, None, f"{D}T09:05:00"),
+        (f"{D} 13:10:00", "register", "444440", "라종목", 1000, None, None, None, None),
+        (f"{D} 14:00:00", "deregister", "444440", "라종목", 1000, None, None, None, None)])
     c.execute("CREATE TABLE leader_obs (date TEXT, time TEXT, code TEXT, name TEXT, price REAL, chg REAL, "
               "passed INTEGER, fails TEXT)")
     c.executemany("INSERT INTO leader_obs VALUES (?,?,?,?,?,?,?,?)", [
@@ -45,7 +47,7 @@ class Manual(unittest.TestCase):
     def test_pairs(self):
         c = build()
         t = M.load_manual(c, 3)
-        self.assertEqual([x["code"] for x in t], ["111110", "222220", "333330"])
+        self.assertEqual([x["code"] for x in t], ["111110", "222220", "333330", "444440"])
         self.assertEqual((t[0]["rate"], t[1]["dereg"], t[2]["reg"]), (3.0, None, f"{D} 09:05:00"))
         self.assertEqual((t[1]["entry0"], t[1]["entry"], len(t[1]["adds"])), (5000, 5200, 1))   # 재등록=추가매수
 
@@ -59,6 +61,8 @@ class Manual(unittest.TestCase):
 
         class Store:
             def day(self, code, date):
+                if code == "444440":
+                    return [("131000", 1000, 1000, 1000), ("135900", 1040, 1040, 1040), ("140500", 900, 900, 900)]
                 return [("090800", 9990, 10010, 9980), ("100000", 10300, 10300, 10300)] if code == "111110" else []
 
             def days_from(self, code, date, n):
@@ -70,8 +74,11 @@ class Manual(unittest.TestCase):
         self.assertEqual(a["bot"]["reason"], "보유중")                    # 09:06 신호 매수 → 10300 보유
         b = tr[1]
         self.assertIsNone(b["sig_before"]); self.assertEqual(b["sig"]["주도주"]["near"], "고가대비 이탈")
+        d = tr[3]
+        self.assertTrue(d["rate_est"]); self.assertAlmostEqual(d["rate"], 4.0)        # 14:00 직전 1040
         out = M.report(tr, 3)
-        self.assertIn("사기 전에 파이썬 검색식이 잡았음 1/3", out)
+        self.assertIn("+4.00%(추정) 해제 14:00", out)
+        self.assertIn("사기 전에 파이썬 검색식이 잡았음 1/4", out)
         self.assertIn("주도주 09:06✅", out); self.assertIn("주도주 ✗(고가대비 이탈)", out)
         self.assertIn("관심:반도체관심", out)
         self.assertIn("추가매수 1회→평단 5,200", out)
