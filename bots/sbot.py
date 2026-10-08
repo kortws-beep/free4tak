@@ -272,6 +272,12 @@ IDLE_SLEEP_SEC = 60
 
 REG_MARKET_START = "0900"
 REG_MARKET_END   = "1530"
+# ★ 2026-10-08 대장 지정 — "정규장에서만 처리하자"(daybot에서 먼저 발견 —
+#   장종료동시마감 15:20~15:30엔 시장가주문이 "129 주문불가시간"으로 거부,
+#   애프터마켓도 AFTERHOURS_ORD_DVSN 코드가 거부돼 재시도만 쌓임). sbot도
+#   같은 core/kis_api.py::sell()을 쓰므로 동일 위험 — 15:20 이후 매도
+#   시도 자체를 보류, 다음 정규장까지 대기.
+REGULAR_SELL_END_TIME = "1520"
 # ★ 2026-08-21: 09:10→09:20 — 시장 쏠림 안전check(intelligence/
 #   market_safety_stop.py)가 09:19에 시장폭(breadth_ratio) 판단해서
 #   위험하면 매수 시작 전에 봇을 정지시키는데, 그 판단 자체가 개장
@@ -286,6 +292,15 @@ BUY_END_TIME     = "2000"         # ★ 09:20~20:00 매수 가능
 SELL_CHECK_START = "0800"         # ★ 08:00부터 매도 체크
 SELL_CHECK_END   = "2000"         # ★ 20:00까지 매도 체크
 SLEEP_INTERVAL   = 60
+
+# ★ 2026-10-06 대장 지정 — 1차매수가 예산(목표금액)을 다 못 채우고
+#   끝나는 경우(주문가능금액 부족/고가종목 호가단위 때문에 1주만 사고
+#   끝나는 등, 058610/011070 사례로 발견)가 있어, 정규장 마감 후
+#   애프터마켓 시간대에 한 번 더 확인해서 목표금액까지 보충매수한다.
+#   가격이 매수가보다 오르면(추격매수 위험) 건너뛴다 — "동일가나
+#   이하가격에서만 재매수"(대장 지정).
+EVENING_TOPUP_START       = "1530"   # 정규장 마감 이후부터
+EVENING_TOPUP_MIN_FILL_RATIO  = 0.7  # 목표금액의 70% 미만이면 "미달"로 간주
 
 # 약세장 방어
 MARKET_WEAK_THRESH = -2.0   # -1.5%→-2.0% 완화 (nbot과 통일)
@@ -558,7 +573,14 @@ class SBot:
 
         # ★ 매수 직후 메모리 반영
         if not is_second:
-            self.positions[code] = {"entry_price": price, "qty": qty, "buy_date": today_str()}
+            # ★ 2026-10-06 — target_amount(원래 의도했던 예산) 저장. 저녁
+            #   보충매수(_run_evening_topup)가 실제 체결금액과 비교해
+            #   미달분을 판단하는 데 씀. 재시작시 _sync_positions()가
+            #   positions를 실계좌 기준으로 통째로 재구성해서 이 필드는
+            #   없어질 수 있음(허용 — 저녁 보충매수는 soft-optimization이라
+            #   재시작 사이에 놓쳐도 안전상 문제 없음).
+            self.positions[code] = {"entry_price": price, "qty": qty, "buy_date": today_str(),
+                                     "target_amount": amount}
         else:
             existing = self.positions.get(code, {"entry_price": price, "qty": 0})
             old_qty  = existing["qty"]
@@ -635,11 +657,15 @@ class SBot:
         if qty <= 0:
             return False
 
-        # ★ 2026-10-06: 애프터장(15:30~)은 kis_api가 price=0일 때 현재가-3호가로
-        #   체결보장가를 합성하는데, 여기서 현재가를 그대로 넘겨 "현재가 지정가"가
-        #   돼 손절/트레일링 주문이 잘 안 잡혔음. 프리장(62)은 가격 필수라 유지.
-        order_price = 0 if now_hhmm() >= REG_MARKET_END else int(sell_price)
-        ok = self.api.sell(code, qty, price=order_price)
+        # ★ 2026-10-08 대장 지정 — 정규장 끝(15:20) 이후엔 매도 시도 자체를
+        #   보류(daybot과 동일 이유 — 위 REGULAR_SELL_END_TIME 주석 참고).
+        if now_hhmm() >= REGULAR_SELL_END_TIME:
+            return False
+
+        # ★ 2026-10-08 — 위 REGULAR_SELL_END_TIME(15:20) 게이트로 이 시점엔
+        #   항상 정규장이라 애프터장 분기(2026-10-06에 추가했던 "price=0
+        #   합성가")는 더 이상 도달 못 함 — 그냥 지정가 그대로 사용.
+        ok = self.api.sell(code, qty, price=int(sell_price))
         if not ok:
             return False
 
@@ -1325,7 +1351,12 @@ class SBot:
                     db_path="sbot_trade_history.db",     # ★ 켈리: sbot DB 사용
                 )
             else:
-                buy_amount = min(BUY_1ST_AMT_BASE, psbl_cash)
+                # ★ 2026-10-06 대장 지정 — 마지막 슬롯은 다음 슬롯을 위해
+                #   현금을 아낄 이유가 없으니, 목표금액(BUY_1ST_AMT_BASE)
+                #   캡 없이 가용현금 최대까지 매수(스크랩매수 방지 체크는
+                #   그대로 유지).
+                is_last_slot = (slots == 1)
+                buy_amount = psbl_cash if is_last_slot else min(BUY_1ST_AMT_BASE, psbl_cash)
                 # ★ 2026-09-29: 목표 슬롯금액의 FLAT_BUY_MIN_RATIO 미만이면
                 #   스크랩 매수 방지(대장 지적 — 세방 21만원 매수 건)
                 if buy_amount < BUY_1ST_AMT_BASE * FLAT_BUY_MIN_RATIO:
@@ -1404,6 +1435,71 @@ class SBot:
             )
             slots -= 1
             time.sleep(1)
+
+    # ============================================================
+    # 저녁 보충매수 (목표금액 미달분 채우기)
+    # ============================================================
+    def _run_evening_topup(self, now_t: str, psbl_cash: int):
+        """★ 2026-10-06 대장 지정 — 당일 1차매수한 종목 중 목표금액
+        (target_amount)의 EVENING_TOPUP_MIN_FILL_RATIO 미만만 체결된
+        것을, 정규장 마감(15:30) 이후 애프터마켓 시간대에 한 번
+        확인해서 나머지를 보충매수한다. 하루 1종목당 1회만(topup_done).
+        ★ 2026-10-06 재조정(대장 지정) — "동일가나 이하가격에서만
+        재매수"로 단순화(물타기든 추격매수든 상단은 절대 안 넘고, 하단은
+        제한 없음 — 밑으로 더 내려가도 손절은 별도 로직이 독립적으로
+        돌고 있어 이 함수와 무관). 가격이 진입가보다 높으면 이번 루프는
+        건너뛰고(topup_done 안 찍음) 다음 루프에 다시 확인 — 저녁 동안
+        가격이 내려오면 그때 채운다."""
+        if now_t < EVENING_TOPUP_START:
+            return
+        for code, pos in list(self.positions.items()):
+            if pos.get("buy_date") != today_str():
+                continue
+            if pos.get("topup_done"):
+                continue
+            target = pos.get("target_amount", 0)
+            if target <= 0:
+                # ★ target_amount 없음(재시작으로 소실 등) — 판단 불가, 조용히 스킵
+                pos["topup_done"] = True
+                continue
+            entry  = pos.get("entry_price", 0)
+            qty    = pos.get("qty", 0)
+            if entry <= 0 or qty <= 0:
+                continue
+            filled = entry * qty
+            if filled >= target * EVENING_TOPUP_MIN_FILL_RATIO:
+                pos["topup_done"] = True
+                continue
+            if psbl_cash < MIN_ANALYSIS_CASH:
+                continue  # 현금 부족 — 다음 루프(저녁 동안 반복)에 재시도
+
+            mdata = self.api.get_market_data(code)
+            current = safe_float(mdata.get("stck_prpr", 0)) if mdata else 0
+            if current <= 0:
+                continue
+
+            if current > entry:
+                # 대장 지정 — 동일가나 이하만 재매수(추격매수 방지).
+                # 다음 루프에 다시 확인(topup_done 안 찍음).
+                continue
+
+            shortfall = min(int(target - filled), psbl_cash)
+            if shortfall < current:
+                pos["topup_done"] = True
+                continue
+
+            print(f"🌙 [SWING] {code}({self._name(code)}) 저녁보충매수 — "
+                  f"목표{fmt_won(target)} 중 {fmt_won(filled)}만 체결 → {fmt_won(shortfall)} 보충 시도")
+            old_buy_date = pos.get("buy_date")
+            ok = self._do_buy(code, current, shortfall, is_second=True)
+            # ★ _do_buy(is_second=True)는 entry_price/qty만 남기고 나머지
+            #   필드를 지우므로(기존 2차매수(물타기) 경로와 공유하는
+            #   한계), buy_date/topup_done을 다시 채워 넣는다.
+            if code in self.positions:
+                self.positions[code]["buy_date"]   = old_buy_date
+                self.positions[code]["topup_done"] = True
+            if ok:
+                psbl_cash = max(0, psbl_cash - shortfall)
 
     # ============================================================
     # 매도 체크
@@ -2127,6 +2223,9 @@ class SBot:
 
                 # ── 매도 체크 ─────────────────────────────
                 self._check_all_sells(pos_mkt_cache)
+
+                # ── 저녁 보충매수 (15:30 이후, 목표금액 미달분) ──────
+                self._run_evening_topup(now_t, psbl_cash)
 
                 # ── 상태 저장 ─────────────────────────────
                 self._save_status(cash, total_profit, score_enter, now, pos_mkt_cache)

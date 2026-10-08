@@ -77,7 +77,7 @@ class NewBuyCutoff(unittest.TestCase):
             def get_psbl_order_cash(self, *a): return 0
         b.api = Api()
         b.db = type("D", (), {"log_candidate": lambda self, *a, **k: None})()
-        b._do_buy = lambda code, name, price, tier: bought.append(code)
+        b._do_buy = lambda code, name, price, tier, **k: bought.append(code)
         return b
 
     def test_no_buy_after_cutoff(self):

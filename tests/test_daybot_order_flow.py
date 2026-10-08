@@ -74,13 +74,22 @@ def booked(b):
 
 class DaybotOrderFlow(unittest.TestCase):
     def setUp(self):
-        daybot.now_hhmm = lambda: "1600"   # 애프터장
+        daybot.now_hhmm = lambda: "1000"   # 정규장
+
+    def test_after_regular_hours_defers_without_calling_api(self):
+        # ★ 2026-10-08: 장종료동시마감/애프터마켓 모두 주문거부가 잦아
+        #   15:20 이후엔 매도 시도 자체를 보류(API 호출 없음).
+        daybot.now_hhmm = lambda: "1600"
+        b = mk(); b.positions["0035S0"] = pos()
+        self.assertFalse(b._do_sell("0035S0", 10, "손절", 9600))
+        self.assertEqual(b.api.sells, [])
+        self.assertIn("0035S0", b.positions)
 
     def test_unfilled_sell_is_readopted_not_booked(self):
         b = mk(); b.positions["0035S0"] = pos()
         self.assertTrue(b._do_sell("0035S0", 10, "손절", 9600))
         self.assertNotIn("0035S0", b.positions)
-        self.assertEqual(b.api.sells[-1][2], 0, "애프터장은 price=0(체결보장가 합성)")
+        self.assertEqual(b.api.sells[-1][2], 0, "정규장도 price=0(daybot._do_sell 관례)")
         expire(b._sell_verify, "0035S0")
         b.api.real = {"0035S0": {"qty": 10, "entry_price": 10000}}
         self.assertTrue(b._reconcile_due())

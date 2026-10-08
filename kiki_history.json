@@ -1,13 +1,37 @@
 {
-  "date": "2026-06-25",
+  "date": "2026-10-01",
   "history": [
     {
       "role": "user",
-      "content": "오늘 복기해줘."
+      "content": "전체봇 재시작하자."
     },
     {
       "role": "assistant",
-      "content": "CMD:!분석오늘"
+      "content": "CMD:!전체재시작"
+    },
+    {
+      "role": "user",
+      "content": "키키야 전체재시작하자.."
+    },
+    {
+      "role": "assistant",
+      "content": "CMD:!전체재시작"
+    },
+    {
+      "role": "user",
+      "content": "wjscpwotlwkrgkwk"
+    },
+    {
+      "role": "assistant",
+      "content": "CMD:!전체재시작"
+    },
+    {
+      "role": "user",
+      "content": "전체재시작"
+    },
+    {
+      "role": "assistant",
+      "content": "CMD:!전체재시작"
     }
   ]
 }

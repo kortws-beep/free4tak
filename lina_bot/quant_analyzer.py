@@ -21,7 +21,7 @@ def get_hybrid_top_picks():
     """
     [대장 전용 무적 융합 엔진 v3]
     우선순위 파이프라인: 
-    Stage 1 (ETF/헷지 매핑) ➡️ Stage 2 (개별주 상대적 강세) ➡️ Stage 3 (국내 텔레그램 우회)
+    Stage 1 (ETF/헷지 매핑) ➡️ Stage 2 (개별주 상대적 강세) ➡️ Stage 3 (국내 테마수급 우회)
     """
     if not os.path.exists(DB_PATH_THEME_FINANCE) or not os.path.exists(DB_PATH_MAPPING):
         return "⚠️ [엔진] 필요한 금융/맵핑 DB 파일이 누락되었어."
@@ -61,11 +61,6 @@ def get_hybrid_top_picks():
         except Exception:
             pass
 
-    # ★ 2026-10-06: 텔레그램 속보 언급수 크로스체크 제거 — DB 경로가 윈도우
-    #   경로(C:\\lina_bot\\...)라 서버에선 항상 실패해 빈 문자열이었고, 텔레그램도
-    #   10-03에 폐기됨. 아래 mentions 계산은 그대로 두되 항상 0(기존과 동일 결과).
-    combined_text = ""
-
     report_heading = ""
     final_picks = []
 
@@ -94,7 +89,6 @@ def get_hybrid_top_picks():
                     final_picks.append({
                         "kr_name": kr_name, "reason": reason, "price": price,
                         "source": f"🇺🇸 ETF 강세 연동 ({best_etf['ticker']} {best_etf['change']:+.2f}%)",
-                        "mentions": combined_text.count(kr_name)
                     })
             
             if final_picks:
@@ -122,61 +116,57 @@ def get_hybrid_top_picks():
                     final_picks.append({
                         "kr_name": kr_name, "reason": reason, "price": price,
                         "source": f"🇺🇸 개별주 상대적 강세 연동 ({best_stock['ticker']} {best_stock['change']:+.2f}%)",
-                        "mentions": combined_text.count(kr_name)
                     })
             
             if final_picks:
                 report_heading = "🎯 [우선순위 2차 필터 작동: 미장 개별주 상대적 강세 역추적]"
 
     # =========================================================================
-    # 💤 STAGE 3: 미장 전멸 시 국내 독고다이 텔레그램 속보 테마 우회 (우선순위 3등)
+    # 💤 STAGE 3: 미장 전멸 시 국내 독고다이 테마수급 우회 (우선순위 3등)
     # =========================================================================
     if not final_picks:
-        report_heading = "🚨 [우선순위 3차 필터 작동: 미장 전멸로 인한 국내 실시간 속보 우회]"
-        
+        report_heading = "🚨 [우선순위 3차 필터 작동: 미장 전멸로 인한 국내 테마 수급 우회]"
+
         candidates = []
         seen_names = set()
         for stock_raw, theme_name in kr_theme_mappings:
             pure_name = re.sub(r'(KOSPI|KOSDAQ).*|\d{6}', '', stock_raw).strip()
             if pure_name in seen_names: continue
-            
+
             price = check_up_trend(pure_name)
+            # ★ 2026-10-07 — 텔레그램 속보 언급수(10-03에 폐기, 이후 늘
+            #   0으로 고정돼 아래 "mention_cnt > 0" 게이트를 평생 못 넘어
+            #   STAGE 3이 사실상 죽어있었음, 대장 지적) 체크 제거 —
+            #   200일선 정배열(check_up_trend)만 통과하면 바로 후보로 인정.
             if price > 0:
-                # 최근 속보에서 종목명이나 테마명이 얼마나 불타오르는지 카운트
-                mention_cnt = combined_text.count(pure_name) + combined_text.count(theme_name.split('(')[0])
-                if mention_cnt > 0:
-                    seen_names.add(pure_name)
-                    candidates.append({
-                        "kr_name": pure_name,
-                        "reason": f"실시간 국내 [{theme_name}] 테마 수급 쏠림 현상 포착",
-                        "price": price,
-                        "source": "🇰🇷 국내 독고다이 테마 수급",
-                        "mentions": mention_cnt
-                    })
-        
-        # 텔레그램 언급량 순으로 탑 2 선출
-        candidates.sort(key=lambda x: x['mentions'], reverse=True)
+                seen_names.add(pure_name)
+                candidates.append({
+                    "kr_name": pure_name,
+                    "reason": f"실시간 국내 [{theme_name}] 테마 수급 쏠림 현상 포착",
+                    "price": price,
+                    "source": "🇰🇷 국내 독고다이 테마 수급",
+                })
+                if len(candidates) >= 2:
+                    break
+
         final_picks = candidates[:2]
 
     # ── 최종 결과 출력 빌드업 ──
     if not final_picks:
         return "💡 대장, 3단계 무적 필터라인을 돌렸으나 200일선 정배열 기준을 만족하는 국내 종목이 디비에 매핑되어 있지 않아."
 
-    # 텔레그램 속보 언급이나 모멘텀 순으로 상위 2개 압축
-    final_picks.sort(key=lambda x: x['mentions'], reverse=True)
     final_2 = final_picks[:2]
 
     report = f"🔥 **{report_heading}** 🔥\n"
-    report += "   *필터링: 미장 ETF/지수 ➡️ 개별주 상대강세 ➡️ 텔레그램 독고다이 ➡️ 200일 정배열*\n"
+    report += "   *필터링: 미장 ETF/지수 ➡️ 개별주 상대강세 ➡️ 국내 테마수급 ➡️ 200일 정배열*\n"
     report += "="*60 + "\n"
-    
+
     for idx, item in enumerate(final_2):
         report += (
             f" 📌 **{idx+1}위 주도주: {item['kr_name']}**\n"
             f"    - 📊 추출 경로 : {item['source']}\n"
             f"    - 💡 매칭 단서 : {item['reason']}\n"
             f"    - 💰 현재 종가 : {item['price']:,}원 (41만 건 연산 200일선 상단 완착)\n"
-            f"    - 📢 텔레 레이다: 최근 속보 내 {item['mentions']}회 포착\n"
             f"------------------------------------------------------------\n"
         )
     return report

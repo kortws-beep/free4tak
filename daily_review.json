@@ -1,79 +1,71 @@
 {
-  "date": "2026-06-29",
-  "saved_at": "2026-06-29 20:10",
+  "date": "2026-07-01",
+  "saved_at": "2026-07-01 20:10",
   "summary": {
-    "today": "2026-06-29",
+    "today": "2026-07-01",
     "trades": 3,
     "wins": 1,
     "losses": 2,
     "win_rate": 33.3,
-    "avg_profit": -3.66,
-    "total_pnl": -66930,
-    "avg_win": 0.78,
-    "avg_loss": -5.88,
+    "avg_profit": -5.21,
+    "total_pnl": -253260,
+    "avg_win": 8.22,
+    "avg_loss": -11.93,
     "by_hour": {},
     "by_reason": {
-      "손절": {
+      "기타": {
         "count": 2,
-        "avg_profit": -5.88,
+        "avg_profit": -3.21,
         "pct": 66.7
       },
-      "기타": {
+      "손절": {
         "count": 1,
-        "avg_profit": 0.78,
+        "avg_profit": -9.23,
         "pct": 33.3
       }
     },
-    "by_stock": [
-      {
-        "code": "189330",
-        "trades": 2,
-        "win_rate": 50.0,
-        "avg_profit": -0.44,
-        "total": -0.88
-      }
-    ],
+    "by_stock": [],
     "trade_details": [
       {
-        "code": "189330",
-        "buy_price": 9030.0,
-        "sell_price": 9100.0,
-        "profit_rate": 0.78,
-        "sell_reason": "목표1익절50%(+0.8%)",
+        "code": "035420",
+        "buy_price": 233700.0,
+        "sell_price": 199500.0,
+        "profit_rate": -14.63,
+        "sell_reason": "장기보유청산(-14.63%)",
         "buy_time": "",
-        "sell_time": "09:10",
-        "ai_score": 84
+        "sell_time": "09:02",
+        "ai_score": null
       },
       {
-        "code": "189330",
-        "buy_price": 9030.0,
-        "sell_price": 8880.0,
-        "profit_rate": -1.66,
-        "sell_reason": "손절(-1.7%)",
+        "code": "010690",
+        "buy_price": 11237.3171,
+        "sell_price": 10200.0,
+        "profit_rate": -9.23,
+        "sell_reason": "손절(-9.2%)",
         "buy_time": "",
-        "sell_time": "09:12",
-        "ai_score": 84
+        "sell_time": "10:20",
+        "ai_score": 0
       },
       {
-        "code": "007810",
-        "buy_price": 93200.0,
-        "sell_price": 83800.0,
-        "profit_rate": -10.09,
-        "sell_reason": "손절(-10.1%)",
+        "code": "036930",
+        "buy_price": 225000.0,
+        "sell_price": 243500.0,
+        "profit_rate": 8.22,
+        "sell_reason": "목표1익절50%(+8.2%)",
         "buy_time": "",
-        "sell_time": "09:48",
+        "sell_time": "12:37",
         "ai_score": 0
       }
     ]
   },
   "review": {
     "오늘평가": "승률 낮고 손절 다수 — 종목 선별 기준 강화 필요",
-    "잘한점": "익절 주문 설정이 적절히 이루어짐",
-    "못한점": "손절 주문이 너무 높게 설정되어 손실이 커짐, AI 점수가 낮은 종목 거래를 피하지 않음",
+    "잘한점": "목표익실율 달성한 거래 존재",
+    "못한점": "손절 비중 높음, 장기 보유 청산 발생",
     "반복패턴": "데이터 없음",
-    "내일전략": "손절 가격을 더 조기에 설정하고 AI 점수 낮은 종목 거래를 제한하기",
-    "주의종목유형": "AI 점수가 낮거나 과열된 종목 피해야 함",
-    "주목시간대": "매일 아침 시간대의 매매 결정을 신중하게 고려할 것",
+    "내일전략": "손절 기준 강화 및 매수 시장 분석 시간 확보",
+    "주의종목유형": "급등 종목 피하기",
+    "주목시간대": "10시 이전 시간대 주의",
     "신뢰도": 2
   }
 }
