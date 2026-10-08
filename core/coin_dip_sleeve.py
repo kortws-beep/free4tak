@@ -132,13 +132,26 @@ class DipSleeve:
 
     # 시세
     def _fetch_daily(self, market: str) -> list:
+        # ★ 2026-10-08 — 2라운드째가 가끔 조용히 비거나(레이트리밋 추정,
+        #   cbot 본체가 같은 session으로 다른 코인 시세를 많이 때리는
+        #   타이밍과 겹칠 때로 보임) 200개(201개 필요)에서 멈춰 daily_context가
+        #   계속 None("일봉부족")을 내던 문제(대장 지적 — ETH/XRP). 라운드가
+        #   비면 1회 짧게 쉬고 재시도, 그래도 비면 이유를 로그로 남김.
         out, to = [], None
-        for _ in range(2):                         # 200 + 200 → 200일선 + 오늘 봉 충분
+        for i in range(2):                         # 200 + 200 → 200일선 + 오늘 봉 충분
             params = {"market": market, "count": 200}
             if to:
                 params["to"] = to
-            data = self.bot.session.get(f"{BASE_URL}/candles/days", params=params, timeout=5).json()
+            data = None
+            for attempt in range(2):
+                raw = self.bot.session.get(f"{BASE_URL}/candles/days", params=params, timeout=5)
+                data = raw.json()
+                if isinstance(data, list) and data:
+                    break
+                if attempt == 0:
+                    time.sleep(1.0)
             if not isinstance(data, list) or not data:
+                print(f"⚠️ 눌림목 일봉 조회 {market} {i+1}라운드 실패(재시도 후): {data}")
                 break
             out += [(c["candle_date_time_kst"][:10], float(c["opening_price"]), float(c["high_price"]),
                      float(c["low_price"]), float(c["trade_price"])) for c in data]
