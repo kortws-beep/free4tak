@@ -272,6 +272,12 @@ IDLE_SLEEP_SEC = 60
 
 REG_MARKET_START = "0900"
 REG_MARKET_END   = "1530"
+# ★ 2026-10-08 대장 지정 — "정규장에서만 처리하자"(daybot에서 먼저 발견 —
+#   장종료동시마감 15:20~15:30엔 시장가주문이 "129 주문불가시간"으로 거부,
+#   애프터마켓도 AFTERHOURS_ORD_DVSN 코드가 거부돼 재시도만 쌓임). sbot도
+#   같은 core/kis_api.py::sell()을 쓰므로 동일 위험 — 15:20 이후 매도
+#   시도 자체를 보류, 다음 정규장까지 대기.
+REGULAR_SELL_END_TIME = "1520"
 # ★ 2026-08-21: 09:10→09:20 — 시장 쏠림 안전check(intelligence/
 #   market_safety_stop.py)가 09:19에 시장폭(breadth_ratio) 판단해서
 #   위험하면 매수 시작 전에 봇을 정지시키는데, 그 판단 자체가 개장
@@ -651,11 +657,15 @@ class SBot:
         if qty <= 0:
             return False
 
-        # ★ 2026-10-06: 애프터장(15:30~)은 kis_api가 price=0일 때 현재가-3호가로
-        #   체결보장가를 합성하는데, 여기서 현재가를 그대로 넘겨 "현재가 지정가"가
-        #   돼 손절/트레일링 주문이 잘 안 잡혔음. 프리장(62)은 가격 필수라 유지.
-        order_price = 0 if now_hhmm() >= REG_MARKET_END else int(sell_price)
-        ok = self.api.sell(code, qty, price=order_price)
+        # ★ 2026-10-08 대장 지정 — 정규장 끝(15:20) 이후엔 매도 시도 자체를
+        #   보류(daybot과 동일 이유 — 위 REGULAR_SELL_END_TIME 주석 참고).
+        if now_hhmm() >= REGULAR_SELL_END_TIME:
+            return False
+
+        # ★ 2026-10-08 — 위 REGULAR_SELL_END_TIME(15:20) 게이트로 이 시점엔
+        #   항상 정규장이라 애프터장 분기(2026-10-06에 추가했던 "price=0
+        #   합성가")는 더 이상 도달 못 함 — 그냥 지정가 그대로 사용.
+        ok = self.api.sell(code, qty, price=int(sell_price))
         if not ok:
             return False
 

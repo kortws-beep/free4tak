@@ -85,12 +85,14 @@ def mk():
 
 
 class SbotSell(unittest.TestCase):
-    def test_afterhours_uses_synthetic_price_and_remembers_tracker(self):
+    def test_after_regular_hours_defers_without_calling_api(self):
+        # ★ 2026-10-08: 장종료동시마감/애프터마켓 모두 주문거부가 잦아
+        #   15:20 이후엔 매도 시도 자체를 보류(API 호출 없음).
         sbot.now_hhmm = lambda: "1600"
         b = mk(); b.positions = {"C": {"entry_price": 900, "qty": 5}}; b.peak_tracker = {"C": {"stage": 1}}
-        self.assertTrue(b._do_sell("C", 5, "트레일링", 1000))
-        self.assertEqual(b.api.sells[-1], 0)
-        self.assertEqual(b._recent_sells["C"]["tracker"], {"stage": 1})
+        self.assertFalse(b._do_sell("C", 5, "트레일링", 1000))
+        self.assertEqual(b.api.sells, [])
+        self.assertIn("C", b.peak_tracker)   # 보류 — tracker 그대로 유지
 
     def test_premarket_passes_price(self):
         sbot.now_hhmm = lambda: "0830"
