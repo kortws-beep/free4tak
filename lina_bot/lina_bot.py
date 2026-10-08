@@ -2008,7 +2008,14 @@ async def daily_morning_report():
     try:
         reply_text = await asyncio.to_thread(_call_llm, prompt, max_tokens=1500, system=SYSTEM_PROMPT)
         if reply_text:
-            await send_safe_message(channel, f"☀️ **[대장! 07시 30분 융합 마스터 전략 브리핑이야]** ☀️\n\n{reply_text}")
+            # ★ 2026-10-08 시장 국면 한 줄(20일선 위 종목 비율 — 50% 미만이면 추격 불리, 스윙 백테스트)
+            try:
+                import market_regime
+                regime_line = await asyncio.to_thread(market_regime.format_line)
+            except Exception as e:
+                regime_line = f"📏 시장 국면: 계산 실패({e})"
+            await send_safe_message(channel, f"☀️ **[대장! 07시 30분 융합 마스터 전략 브리핑이야]** ☀️\n"
+                                             f"{regime_line}\n\n{reply_text}")
             print(f"✅ [디버그] 07시 30분 4합 통합 융합 마스터 브리핑 전송 완료!")
     except Exception as e: print(f"❌ 통합 브리핑 전송 에러: {e}")
 
@@ -2604,6 +2611,19 @@ async def on_message(message):
                     await send_safe_message(message.channel, sector_watch.format_ranking(out, top=10))
             except Exception as e:
                 await send_safe_message(message.channel, f"❌ 섹터 조회 오류: {e}")
+        return
+
+    # ── !국면 — 시장 국면(20일선 위 종목 비율) 최근 10일 (2026-10-08) ──
+    if message.content.strip() == "!국면":
+        try:
+            import market_regime
+            line = await asyncio.to_thread(market_regime.format_line)
+            bars = "\n".join(f"   {d[5:]} {b:5.1f}% {'█' * int(b // 5)}"
+                             for d, b in market_regime.history(10))
+            await send_safe_message(message.channel, f"{line}\n```\n{bars}\n```\n"
+                                    f"   (50% 이상=추격 유리 — 스윙 백테스트 1년 기준, 미만이면 데이봇 매수금 절반)")
+        except Exception as e:
+            await send_safe_message(message.channel, f"❌ 국면 조회 오류: {e}")
         return
 
     # ── !단타 — 단타000 파이썬판 즉시 조회 (2026-10-06) ──
