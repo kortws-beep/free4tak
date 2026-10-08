@@ -50,10 +50,18 @@ class Rule:
     floor: float = 1.0          # 트레일링 매도의 최소 보장 수익
     hold_days: int = 3          # 트레일링 못 타면 N영업일째 아침 정리
     grace: int = 0              # 하룻밤 넘긴 종목, 시초 N분은 손절 안 함
+    # ★ 대장 수동매매 방식(2026-10-08): "09:40쯤이면 승패가 나고, 안 오른 놈은 오후까지
+    #   가져가는데 거의 수익권" — 트레일링을 못 탄 종목을 아침에 -3.5%로 끊지 않고
+    #   오후에 정리하는 규칙
+    pm_take: float = 0.0        # pm_from 이후 이만큼(%) 수익이면 정리(0=안 씀)
+    pm_from: str = "130000"
+    eod: str = ""               # 이 시각까지 트레일링 못 탔으면 당일 정리(""=안 씀, 3영업일 기한 그대로)
 
     def label(self) -> str:
         return (f"손절{self.stop:g} 트레일 +{self.tp:g}→{self.tight:g}/{self.wide:g}"
-                + (f" 시초유예{self.grace}분" if self.grace else ""))
+                + (f" 시초유예{self.grace}분" if self.grace else "")
+                + (f" {self.pm_from[:2]}시후+{self.pm_take:g}%정리" if self.pm_take else "")
+                + (f" {self.eod[:2]}:{self.eod[2:4]}당일청산" if self.eod else ""))
 
 
 CURRENT = Rule()
@@ -145,6 +153,11 @@ def simulate(days: list, entry_time: str, entry_price: float, rule: Rule) -> dic
                     return done(d, t, min(stop_px, h), "손절")
                 if h >= entry * (1 + rule.tp / 100):
                     peak = h
+                    continue
+                if rule.pm_take and t >= rule.pm_from and h >= entry * (1 + rule.pm_take / 100):
+                    return done(d, t, max(p, entry * (1 + rule.pm_take / 100)), "오후정리")
+                if rule.eod and t >= rule.eod:
+                    return done(d, t, p, "당일청산")
                 continue
             peak_rate = (peak / entry - 1) * 100
             trail = rule.wide if peak_rate > rule.widen_at else rule.tight
@@ -357,13 +370,23 @@ def main():
         rule = replace(CURRENT, stop=stop, tp=tp, tight=tight, wide=wide, widen_at=widen, grace=grace)
         res = base if rule == CURRENT else run_signals(store, signals, rule)
         grid.append((stats([r["ret"] for r in res])["krw"], rule, res))
+    # 대장 수동 방식: 아침에 안 오른 종목은 오후까지 들고 가서 정리
+    for stop, pm, eod in ((-7.0, 1.0, "151500"), (-5.0, 1.0, "151500"), (-7.0, 1.0, ""),
+                          (-7.0, 0.0, "151500"), (-3.5, 0.0, "151500")):
+        rule = replace(CURRENT, stop=stop, pm_take=pm, eod=eod)
+        res = run_signals(store, signals, rule)
+        grid.append((stats([r["ret"] for r in res])["krw"], rule, res))
     for krw, rule, res in sorted(grid, key=lambda x: -x[0]):
         mark = " ← 현행" if rule == CURRENT else ""
         print(f"   {rule.label():<34} {fmt(stats([r['ret'] for r in res]))}{mark}")
 
-    print("\n■ 3. 슬롯 3개로 실제처럼 — 매수 시간창 × 일손실 대응 (매도 규칙: 현행 / 2번 1등)")
-    best = sorted(grid, key=lambda x: -x[0])[0]
-    for title, res in (("현행", base), (best[1].label(), best[2])):
+    print("\n■ 3. 슬롯 3개로 실제처럼 — 매수 시간창 × 일손실 대응 (매도 규칙: 현행 / 2번 1등 / 오후정리식 1등)")
+    ranked = sorted(grid, key=lambda x: -x[0])
+    picks = [("현행", base), (ranked[0][1].label(), ranked[0][2])]
+    boss = next((g for g in ranked if g[1].pm_take or g[1].eod), None)      # 대장식 중 1등
+    if boss and boss is not ranked[0]:
+        picks.append((boss[1].label(), boss[2]))
+    for title, res in picks:
         print(f"  [{title}]")
         rows = []
         for (wname, w), mode in itertools.product(WINDOWS.items(), LOSS_MODES):
