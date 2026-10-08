@@ -114,6 +114,7 @@ from common_utils import (
 )
 from notifier import Notifier
 import coin_market_context as cmc   # ★ 2026-10-07 시장판단 재료(업비트 경보·전체흐름·뉴스)
+import coin_dip_sleeve as dip       # ★ 2026-10-08 고정 4종목 눌림목 주머니(100만, 본체와 분리)
 
 load_dotenv('/home/free4tak/k-bot/stock_bot/.env')
 try:
@@ -428,6 +429,15 @@ class CBot:
         self._init_ai_db()
         self._init_tick_db()
         self._restore_positions()  # ★ 재시작 시 포지션 복구
+        # ★ 2026-10-08 대장 결정: 눌림목 주머니 바로 실전(알림만 단계 없이).
+        #   이 주머니가 든 코인은 아래 get_current_positions에서 빠져 본체 손절·트레일링·
+        #   수동매도감지와 안 섞이고, 손익도 당일PNL/일손실 한도와 별개.
+        self._dip = dip.DipSleeve(
+            self, TRADE_HIST_DB,
+            load_state=lambda: _read_state().get("dip"),
+            save_state=lambda st: _update_state(dip=st),
+            enabled=os.getenv("DIP_SLEEVE_ENABLED", "1") != "0",
+        )
 
     # ============================================================
     # 알림 (★ 재시도 강화)
@@ -922,11 +932,13 @@ class CBot:
         balances = self.get_balances()
         if balances is None:
             return None
+        _dip_held = self._dip.held() if getattr(self, "_dip", None) else set()
         held_markets = [
             f"KRW-{cur}" for cur in balances
             if cur != "KRW"
                and balances[cur]["balance"] > 0.00001
                and balances[cur]["avg_buy_price"] > 0
+               and f"KRW-{cur}" not in _dip_held      # 눌림목 주머니 몫은 본체가 관리 안 함
         ]
         if not held_markets:
             return {}
@@ -2338,6 +2350,7 @@ class CBot:
             "coin_pool":     self.coin_pool,
             "coins":         self.coin_pool,  # kiki 호환용
             "seed":          "300만원 모드",
+            "dip_positions": self._dip.summary() if getattr(self, "_dip", None) else {},
         }
 
     # ============================================================
@@ -2460,7 +2473,10 @@ class CBot:
             f"💰 단일매수:{BUY_1ST_AMT:,}원 | 최대:{MAX_POSITIONS}코인\n"
             f"🎯 ATR 추세추종 | 손절:ATR×2 | 목표:ATR×3 | 트레일:ATR×1.5\n"
             f"🛡️ BTC약세:{BTC_WEAK_THRESH:.0f}% | 탐욕MIN:{FEAR_GREED_MIN} | "
-            f"일손실:{DAILY_LOSS_LIMIT:,}원",
+            f"일손실:{DAILY_LOSS_LIMIT:,}원\n"
+            + (f"🪤 눌림목 주머니: {'/'.join(m[4:] for m in dip.DIP_COINS)} 각 {dip.SLOT_KRW:,}원 | "
+               f"7일고가 -{dip.DIP:.0%}·200일선 위 매수 → +{dip.TP:.0%} 익절·손절없음·{dip.MAX_HOLD}일"
+               if self._dip.enabled else "🪤 눌림목 주머니: 꺼짐"),
             critical=True,
         )
 
@@ -2644,6 +2660,19 @@ class CBot:
                     )
                 print(f"📈 평가손익: {total_profit:+,.0f}원")
 
+                # ── 눌림목 주머니(본체와 별개, 모든 모드에서 익절/기한 청산은 계속) ──
+                # 매수는 수동 일시중단·통합 긴급중단 땐 안 함. 일손실 한도 멈춤은 본체
+                # 추세추종의 손실이라 눌림목 매수는 막지 않음(급락장이 바로 이 전략의 자리).
+                try:
+                    _dip_buy_ok = not (bot_state.get("paused") and bot_state.get("pause_reason") != "loss_limit")
+                    if self._is_paused and not bot_state.get("paused"):
+                        _dip_buy_ok = False                 # 통합 리스크 긴급중단
+                    if self._dip.step(self.positions, krw, allow_buy=_dip_buy_ok):
+                        krw = self.get_krw_balance()
+                except Exception as _e:
+                    print(f"⚠️ 눌림목 주머니 오류: {_e}")
+                krw_cbot = max(0.0, krw - self._dip.reserved_krw())   # 눌림목 빈 슬롯 몫은 남겨 둠
+
                 # ── 디스코드 명령 처리 ───────────────────────
                 self._handle_pending_command(bot_state)
 
@@ -2703,7 +2732,7 @@ class CBot:
                     1 for m in self.positions
                     if self.peak_tracker.get(m, {}).get("stage", 0) >= 1
                 )
-                보너스 = 익절중 if krw >= 500_000 else 0
+                보너스 = 익절중 if krw_cbot >= 500_000 else 0
                 available_slots = MAX_POSITIONS - len(self.positions) + 보너스
                 if 보너스:
                     print(f"  ♻️ 익절진행중 {보너스}코인 슬롯 반환 → 가용:{available_slots}")
@@ -2719,7 +2748,7 @@ class CBot:
                     stagnant_market = self._find_stagnant_market()
                     if stagnant_market:
                         for _cand in self.coin_pool:
-                            if _cand in self.positions or _cand == stagnant_market:
+                            if _cand in self.positions or _cand == stagnant_market or self._dip.holds(_cand):
                                 continue
                             if self._is_rebuy_blocked(_cand):
                                 continue
@@ -2758,7 +2787,7 @@ class CBot:
                     for market in self.coin_pool:
                         if available_slots <= 0:
                             break
-                        if market in self.positions:
+                        if market in self.positions or self._dip.holds(market):
                             continue
                         if self._is_rebuy_blocked(market):
                             print(f"🚫 재매수 금지 {market}")
@@ -2812,7 +2841,9 @@ class CBot:
 
                         # ★ 마지막 슬롯(포지션 MAX_POSITIONS번째)이면 잔액만큼만 매수
                         _is_last_slot = (len(self.positions) + 1) >= MAX_POSITIONS
-                        _buy_amt = min(BUY_1ST_AMT, int(krw * 0.98)) if _is_last_slot else BUY_1ST_AMT
+                        _buy_amt = min(BUY_1ST_AMT, int(krw_cbot * 0.98)) if _is_last_slot else BUY_1ST_AMT
+                        if krw_cbot < _buy_amt:             # 눌림목 몫까지 쓰지 않게
+                            _buy_amt = int(krw_cbot * 0.98)
                         _full_amt = _buy_amt
                         _buy_amt = self._risk_sized_amount(market, _buy_amt)
                         if _buy_amt < _full_amt:
@@ -2841,6 +2872,7 @@ class CBot:
                                 market, buy_price, est_qty, ai_score, ai_reason,
                             )
                             available_slots -= 1
+                            krw_cbot -= _buy_amt
                             time.sleep(1)
 
                 # ── 매도 체크 (모든 보유 코인) ────────────────
