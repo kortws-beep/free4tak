@@ -53,7 +53,14 @@ def compare_day(date: str, db_path: str = tml.LOG_DB) -> list:
         k_scans = sorted({_mins(t) for (t,) in q(
             "SELECT time FROM kiwoom_cond_log WHERE date=? AND tag='__scan__'", date)})
         out = []
+        all_scans = k_scans
         for k_tag, table, label in PAIRS:
+            # ★ 2026-10-08: 검색식별 성공 스캔(__scan__:이름)이 있으면 그것만 — 키움 타임아웃
+            #   (잦음)을 '키움이 봤는데 0개'로 세서 파이썬만이 부풀던 문제. 없으면 예전 방식.
+            per = sorted({_mins(t) for (t,) in q(
+                "SELECT time FROM kiwoom_cond_log WHERE date=? AND tag LIKE ?", date, f"__scan__:%{k_tag}%")})
+            has_per = bool(q("SELECT 1 FROM kiwoom_cond_log WHERE date=? AND tag LIKE '__scan__:%' LIMIT 1", date))
+            k_scans = per if has_per else all_scans
             k_hits: dict = {}
             for t, code, name in q("SELECT time, code, name FROM kiwoom_cond_log "
                                    "WHERE date=? AND tag=? ORDER BY time", date, k_tag):
@@ -109,6 +116,7 @@ def compare_day(date: str, db_path: str = tml.LOG_DB) -> list:
             denom = len(both) + len(k_only) + len(p_only)
             out.append({
                 "label": label, "k_scans": len(k_scans), "p_scans": len(p_scans),
+                "k_all": len(all_scans),
                 "both": [(c, k_hits[c]["name"] or p_hits[c]["name"]) for c in both],
                 "k_only": [(c, k_hits[c]["name"], why(c)) for c in k_only],
                 "p_only": [(c, p_hits[c]["name"], span(p_hits[c])) for c in p_only],
@@ -122,7 +130,7 @@ def compare_day(date: str, db_path: str = tml.LOG_DB) -> list:
 
 def format_day(date: str, res: list) -> str:
     lines = [f"🔍 키움 vs 파이썬 검색식 대조 — {date}"]
-    if res and res[0]["k_scans"] == 0:
+    if res and res[0].get("k_all", res[0]["k_scans"]) == 0:
         lines.append("   ⚠️ 이날 키움 스캔 기록이 없음(데이봇 미가동/키움 오류) — 비교 불가")
         return "\n".join(lines)
     for r in res:
@@ -130,7 +138,7 @@ def format_day(date: str, res: list) -> str:
         snap = f"{r['snap_pct']:.0f}%" if r.get("snap_pct") is not None else "-"
         lines.append(f"■ {r['label']} — 하루 일치율 {pct} · 같은 순간 일치율 {snap}({r.get('snaps', 0)}회 대조) | "
                      f"둘 다 {len(r['both'])} · 키움만 {len(r['k_only'])} · 파이썬만 {len(r['p_only'])}  "
-                     f"(키움 스캔 {r['k_scans']}회 / 파이썬 {r['p_scans']}회)")
+                     f"(키움 성공 스캔 {r['k_scans']}/{r.get('k_all', r['k_scans'])}회 / 파이썬 {r['p_scans']}회)")
         if r["both"]:
             lines.append("   ✅ " + ", ".join(n or c for c, n in r["both"]))
         for c, n, why in r["k_only"]:

@@ -72,7 +72,7 @@ from kis_api import KisAPI
 from kis_websocket import KisWebSocket
 from kiwoom_api import KiwoomAPI
 from notifier import Notifier
-from daybot_db import DayTradeDB, log_kiwoom_hits
+from daybot_db import DayTradeDB, log_kiwoom_hits, python_scan_hits
 
 load_dotenv(_os.path.join(_BASE, ".env"))
 
@@ -245,6 +245,17 @@ EMPTY_BALANCE_TRUST_AFTER  = 3     # 보유중인데 잔고가 {}로 오면 API�
 #   전 거래 마른 소외주가 최근 3개월 내 2000억+ 수급유입 후 오늘 아침
 #   무릎자리(3~12%)에서 2차 시세 시작하는 종목 포착용).
 CONDITION_KEYWORDS = ["주도주검색식3", "단타000", "3개월수급 당일주도주"]
+# ★ 2026-10-07: 후보 소스 — 키움 조건검색 타임아웃이 잦아 파이썬판(리나가 계산·기록) 사용 준비.
+#   kiwoom   : 지금처럼 키움만 (기본값 — 대장이 대조 결과 보고 전환 결정)
+#   fallback : 키움 우선, 타임아웃 난 검색식만 파이썬판으로 채움
+#   union    : 키움 + 파이썬판 합침
+#   python   : 파이썬판만(키움 미사용)
+#   .env에 DAYBOT_SCAN_SOURCE=fallback 처럼 넣고 bot restart daybot.
+SCAN_SOURCE = os.getenv("DAYBOT_SCAN_SOURCE", "kiwoom").strip().lower()
+# 키움 미사용(python)이면 4분 간격(키움 검색식별 1분 재조회 제한·재시도 대비)이 필요 없음 —
+#   파이썬판은 리나가 1~3분마다 갱신하므로 1분마다 확인해 진입 지연을 줄인다(2026-10-08).
+if SCAN_SOURCE == "python":
+    SCAN_INTERVAL_SEC = 60
 COND_3MONTH_LEADER = "3개월수급 당일주도주"
 # ★ "5본봉거래대금단타"는 대장이 수동단타에서 안 쓰던 검색식이라 제외
 
@@ -936,32 +947,41 @@ class DayBot:
         누적(+타임스탬프)하고, OVERLAP_WINDOW_SEC보다 오래된 태그는 버려서
         스캔 사이클을 넘나드는 겹침도 잡아낸다(위 OVERLAP_WINDOW_SEC
         코멘트 참고)."""
-        if not self.kiwoom.enabled:
-            return [], {}
         code_name_map, code_multi_tag_map = {}, {}
-        loop = asyncio.new_event_loop()
+        codes, cond_ok = [], set()
+        use_kiwoom = SCAN_SOURCE != "python" and self.kiwoom.enabled
+        if not use_kiwoom and SCAN_SOURCE == "kiwoom":
+            return [], {}
         scan_ok = False
-        try:
-            codes = loop.run_until_complete(
-                self.kiwoom.get_condition_codes(
-                    use_keywords=CONDITION_KEYWORDS,
-                    code_name_map=code_name_map,
-                    code_multi_tag_map=code_multi_tag_map,
+        if use_kiwoom:
+            loop = asyncio.new_event_loop()
+            try:
+                codes = loop.run_until_complete(
+                    self.kiwoom.get_condition_codes(
+                        use_keywords=CONDITION_KEYWORDS,
+                        code_name_map=code_name_map,
+                        code_multi_tag_map=code_multi_tag_map,
+                        cond_ok=cond_ok,
+                        # 파이썬판이 메워주는 모드면 재시도(65초씩 대기) 없이 한 번만
+                        max_retry=0 if SCAN_SOURCE in ("fallback", "union") else None,
+                    )
                 )
-            )
-            scan_ok = True
-        except Exception as e:
-            print(f"⚠️ [daybot] 조건검색 오류: {e}")
-            self.kiwoom.reset_token()
-            codes = []
-        finally:
-            loop.close()
-        with self._positions_lock:
-            self.code_name_map.update(code_name_map)
+                scan_ok = True
+            except Exception as e:
+                print(f"⚠️ [daybot] 조건검색 오류: {e}")
+                self.kiwoom.reset_token()
+                codes = []
+            finally:
+                loop.close()
         if scan_ok:
             # 파이썬판 검색식과 자동 대조용 원본 기록(실패해도 매매 영향 없음).
             # 조회 실패한 스캔은 기록 안 함 — "키움이 봤는데 0개"로 오해하지 않게
-            log_kiwoom_hits(code_multi_tag_map, code_name_map)
+            log_kiwoom_hits(code_multi_tag_map, code_name_map, cond_ok=cond_ok)
+
+        if SCAN_SOURCE in ("fallback", "union", "python"):
+            codes = self._merge_python_hits(codes, code_multi_tag_map, code_name_map, cond_ok)
+        with self._positions_lock:
+            self.code_name_map.update(code_name_map)
 
         now_ts = time.time()
         for code, tags in code_multi_tag_map.items():
@@ -977,6 +997,31 @@ class DayBot:
                 del self._recent_tags[code]
 
         return codes, code_multi_tag_map
+
+    def _merge_python_hits(self, codes: list, tag_map: dict, name_map: dict, cond_ok: set) -> list:
+        """파이썬판 통과 종목을 키움 결과 형식으로 합침(SCAN_SOURCE에 따라).
+        fallback: 키움에서 조회 실패한(타임아웃) 검색식만 채움 / union·python: 전부."""
+        hits, names, latest = python_scan_hits()
+        used = {}
+        for code, tags in hits.items():
+            for tag in tags:
+                kiwoom_ok = any(tag in n for n in cond_ok)
+                if SCAN_SOURCE == "fallback" and kiwoom_ok:
+                    continue
+                if tag in tag_map.get(code, []):
+                    continue
+                tag_map.setdefault(code, []).append(tag)
+                name_map.setdefault(code, names.get(code, code))
+                if code not in codes:
+                    codes.append(code)
+                used[tag] = used.get(tag, 0) + 1
+        stale = [t for t, ts in latest.items() if ts is None]
+        if used:
+            print(f"🐍 [daybot] 파이썬판 후보 반영({SCAN_SOURCE}): "
+                  + ", ".join(f"{t} {n}개" for t, n in used.items()))
+        if stale and datetime.datetime.now().strftime("%H%M") >= "0905":
+            print(f"⚠️ [daybot] 파이썬판 오늘 기록 없음: {', '.join(stale)} (리나 동작 확인)")
+        return codes
 
     def _load_scout_tier3_picks(self) -> list:
         """day_trade_scout.py가 저장한 공유후보 JSON에서 3순위 fallback

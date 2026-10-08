@@ -49,6 +49,20 @@ class Compare(unittest.TestCase):
         self.assertIn("■ 단타000", txt)
         self.assertEqual(S.recent_dates(5, db), [D])
 
+    def test_timeout_scans_not_counted(self):
+        # 09:31 스캔: 주도주는 타임아웃(cond_ok에 없음), 단타만 성공 → 주도주 비교 대상 스캔 0회
+        db = build()
+        daybot_db.datetime = type("DT", (), {"datetime": type("X", (), {
+            "now": staticmethod(lambda: __import__("datetime").datetime(2026, 10, 7, 9, 31))})})
+        try:
+            daybot_db.log_kiwoom_hits({}, {}, db, cond_ok={"단타000"})
+        finally:
+            daybot_db.datetime = __import__("datetime")
+        r = {x["label"]: x for x in S.compare_day(D, db)}
+        self.assertEqual((r["주도주검색식3"]["k_scans"], r["주도주검색식3"]["k_all"]), (0, 1))
+        self.assertEqual(r["주도주검색식3"]["p_only"], [])            # 키움이 못 본 순간이라 '파이썬만'으로 안 셈
+        self.assertEqual(r["단타000"]["k_scans"], 1)
+
     def test_no_kiwoom_data(self):
         db = build()
         self.assertIn("비교 불가", S.format_day(D, S.compare_day(D, db)))
