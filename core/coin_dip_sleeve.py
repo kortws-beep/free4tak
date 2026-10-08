@@ -230,8 +230,8 @@ class DipSleeve:
             elif st.get("blocked"):
                 line.append(f"{coin} 새고점대기")
             else:
-                gap = (px / ctx["trig"] - 1) * 100
-                line.append(f"{coin} {'추세X' if not ctx['trend_ok'] else f'트리거까지 {gap:+.1f}%'}")
+                gap = (ctx["trig"] / px - 1) * 100        # 지금가에서 몇 % 더 빠지면 매수인지(음수)
+                line.append(f"{coin} {'추세X' if not ctx['trend_ok'] else f'매수까지 {gap:+.1f}%'}")
         print("🪤 눌림목 | " + " · ".join(line))
         if acted:
             self._save(self.state)
@@ -299,5 +299,5 @@ if __name__ == "__main__":
             continue
         px = r[-1][4]
         print(f"{m:<8} 현재 {px:>14,.1f} | 7일고가 {c['ref']:,.1f} → 매수선 {c['trig']:,.1f} "
-              f"({(px / c['trig'] - 1) * 100:+.1f}%) | 200일선 {c['ma']:,.1f} "
+              f"(매수까지 {(c['trig'] / px - 1) * 100:+.1f}%) | 200일선 {c['ma']:,.1f} "
               f"{'위 ✅' if c['trend_ok'] else '아래 ❌(매수 안 함)'}")
