@@ -30,6 +30,8 @@ PY_TABLES = (("leader_obs", "주도주"), ("danta_obs", "단타000"), ("tml_obs"
 DAYBOT_DB = os.path.join(tml._BASE, "daybot_trade_history.db")
 YOUTUBE_DB = os.path.join(tml._BASE, "intelligence", "youtube_picks.db")
 YT_LOOKBACK_DAYS = 3     # 매수 전 며칠 안의 유튜브 언급까지 볼지
+US_MAP_DB = os.path.join(tml._BASE, "lina_bot", "us_kr_mapping.db")
+US_STRONG_PCT = 0.5      # 미국 연결 종목이 전일 이만큼 이상 올랐으면 "미국장 강세 연결"
 
 
 def _q(conn, sql, *a):
@@ -105,6 +107,45 @@ def youtube_mentions(name: str, buy_dt: str, path: str = YOUTUBE_DB) -> list:
     return [(c[5:10], ch or "-") for c, ch in rows]
 
 
+# ── 미국장 전일 연결 (lina_bot/quant_analyzer.get_hybrid_top_picks와 같은 재료) ──
+#    그 함수는 아침 브리핑용 상위 2종목만 문자열로 돌려줘 저장이 안 됨 → 같은 매핑표
+#    (us_kr_mapping.db)와 미국 일봉 종가로 매수일마다 거꾸로 계산한다.
+def us_links(name: str, path: str = US_MAP_DB) -> list:
+    """국내 종목명 → [(미국 티커, 매핑 사유)]."""
+    if not os.path.exists(path) or not name:
+        return []
+    conn = sqlite3.connect(path)
+    try:
+        rows = _q(conn, "SELECT us_ticker, kr_name, reason FROM us_kr_mapping")
+    finally:
+        conn.close()
+    return [(tk, reason) for tk, kr, reason in rows if kr and (kr == name or (len(kr) >= 3 and kr in name))]
+
+
+def fetch_us_changes(tickers: list, days: int = 45) -> dict:
+    """{티커: {미국날짜: 전일대비 %}} — yfinance 일봉."""
+    import yfinance as yf
+    out = {}
+    for tk in sorted(set(tickers)):
+        try:
+            h = yf.Ticker(tk).history(period=f"{days}d")["Close"]
+            vals = list(h.items())
+            out[tk] = {str(d.date()): (c / p - 1) * 100 for (d, c), (_, p) in zip(vals[1:], vals[:-1])}
+        except Exception as e:
+            print(f"⚠️ 미국 시세 실패 {tk}: {e}")
+    return out
+
+
+def us_context(links: list, kr_date: str, changes: dict) -> list:
+    """매수일(한국) 직전 미국 거래일의 연결 티커 등락 [(티커, %, 사유)] — 등락 큰 순."""
+    out = []
+    for tk, reason in links:
+        prev = [d for d in changes.get(tk, {}) if d < kr_date]
+        if prev:
+            out.append((tk, changes[tk][max(prev)], reason))
+    return sorted(out, key=lambda x: -x[1])
+
+
 def daybot_candidate(date: str, code: str, path: str = DAYBOT_DB):
     if not os.path.exists(path):
         return None
@@ -125,8 +166,9 @@ def business_days(d0: str, d1: str) -> int:
     return sum(1 for i in range((b - a).days) if (a + datetime.timedelta(days=i + 1)).weekday() < 5)
 
 
-def analyze(trades: list, conn, store=None, groups: dict = None, price_fn=None) -> list:
-    """price_fn(code) → 현재가: 아직 들고 있는 종목 평가손익용(대장은 스윙도 함 — 2026-10-08)."""
+def analyze(trades: list, conn, store=None, groups: dict = None, price_fn=None, us_changes=None) -> list:
+    """price_fn(code) → 현재가: 아직 들고 있는 종목 평가손익용(대장은 스윙도 함 — 2026-10-08).
+    us_changes: fetch_us_changes() 결과(없으면 미국장 연결 생략)."""
     member = {}
     for g, stocks in (groups or {}).items():
         for c, _n in stocks:
@@ -162,6 +204,7 @@ def analyze(trades: list, conn, store=None, groups: dict = None, price_fn=None) 
         rp.sector_tags(probe, tml.LOG_DB)
         t["sector"] = probe[0]["sector"]
         t["daybot"] = daybot_candidate(date, t["code"])
+        t["us"] = us_context(us_links(t["name"]), date, us_changes) if us_changes else []
         t["youtube"] = youtube_mentions(t["name"], f"{date} {t['buy_t'][:2]}:{t['buy_t'][2:4]}:{t['buy_t'][4:6]}")
         t["groups"] = member.get(t["code"], [])
         t["bot"] = None
@@ -192,7 +235,8 @@ def report(trades: list, days: int) -> str:
     L.append(f"■ 사기 전에 파이썬 검색식이 잡았음 {len(has)}/{n} · 섹터 상위 1·2등 "
              f"{sum(bool(t['sector']) for t in trades)}/{n} · 데이봇 후보였음 "
              f"{sum(bool(t['daybot']) for t in trades)}/{n} · 관심그룹 종목 {sum(bool(t['groups']) for t in trades)}/{n} · "
-             f"유튜브 언급({YT_LOOKBACK_DAYS}일 안) {sum(bool(t.get('youtube')) for t in trades)}/{n}")
+             f"유튜브 언급({YT_LOOKBACK_DAYS}일 안) {sum(bool(t.get('youtube')) for t in trades)}/{n} · "
+             f"미국 연결 강세(+{US_STRONG_PCT}%↑) {sum(1 for t in trades if t.get('us') and t['us'][0][1] >= US_STRONG_PCT)}/{n}")
     for label in ("주도주", "단타000", "3개월수급"):
         k = sum(1 for t in trades if t["sig"][label]["first"])
         L.append(f"   {label:<6} 그날 통과 {k}/{n}")
@@ -244,6 +288,9 @@ def report(trades: list, days: int) -> str:
             extra.append(t["sector"])
         if t["groups"]:
             extra.append("관심:" + "/".join(t["groups"][:3]))
+        if t.get("us"):
+            tk, chg, _r = t["us"][0]
+            extra.append(f"미국 {tk} {chg:+.2f}%" + ("🔥" if chg >= US_STRONG_PCT else ""))
         if t.get("youtube"):
             chans = sorted({ch for _, ch in t["youtube"]})
             extra.append(f"유튜브 {len(t['youtube'])}회(" + ", ".join(chans[:2]) + f"{'…' if len(chans) > 2 else ''})")
@@ -263,7 +310,7 @@ def report(trades: list, days: int) -> str:
 def main():
     n = next((int(a) for a in sys.argv[1:] if a.isdigit()), 14)
     conn = sqlite3.connect(tml.LOG_DB)
-    store, groups, price_fn = None, {}, None
+    store, groups, price_fn, us_changes = None, {}, None, None
     if "--no-api" not in sys.argv:
         from dotenv import load_dotenv
         for env in (os.path.join(tml._BASE, ".env"), os.path.join(tml._BASE, "lina_bot", ".env")):
@@ -281,7 +328,11 @@ def main():
         except Exception as e:
             print(f"⚠️ 관심그룹 조회 실패(생략): {e}")
     try:
-        print(report(analyze(load_manual(conn, n), conn, store, groups, price_fn), n))
+        trades = load_manual(conn, n)
+        if "--no-api" not in sys.argv:
+            tickers = [tk for t in trades for tk, _ in us_links(t["name"])]
+            us_changes = fetch_us_changes(tickers, n + 20) if tickers else None
+        print(report(analyze(trades, conn, store, groups, price_fn, us_changes), n))
     finally:
         conn.close()
 

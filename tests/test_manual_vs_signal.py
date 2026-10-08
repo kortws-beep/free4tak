@@ -44,6 +44,20 @@ def build():
 
 
 class Manual(unittest.TestCase):
+    def test_us_links_and_context(self):
+        p = os.path.abspath("us.db")
+        c = sqlite3.connect(p)
+        c.execute("CREATE TABLE us_kr_mapping (us_ticker TEXT, kr_name TEXT, reason TEXT)")
+        c.executemany("INSERT INTO us_kr_mapping VALUES (?,?,?)", [
+            ("MSFT", "SK하이닉스", "AI 메모리"), ("NVDA", "SK하이닉스", "HBM"), ("SOXX", "LG", "x")])
+        c.commit(); c.close()
+        links = M.us_links("SK하이닉스", p)
+        self.assertEqual(sorted(tk for tk, _ in links), ["MSFT", "NVDA"])
+        self.assertEqual(M.us_links("LG전자", p), [])                 # 두 글자 매핑은 부분일치 안 함
+        ch = {"MSFT": {"2026-10-06": 0.2, "2026-10-07": 0.78, "2026-10-08": 3.0}, "NVDA": {"2026-10-07": -1.0}}
+        self.assertEqual([(tk, v) for tk, v, _ in M.us_context(links, "2026-10-08", ch)],
+                         [("MSFT", 0.78), ("NVDA", -1.0)])             # 한국 10-08 아침 = 미국 10-07 종가
+
     def test_youtube_mentions(self):
         p = os.path.abspath("yt.db")
         c = sqlite3.connect(p)
