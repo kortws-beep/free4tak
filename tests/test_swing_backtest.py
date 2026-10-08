@@ -55,5 +55,16 @@ class Signals(unittest.TestCase):
         self.assertEqual(S.universe("000030", g), "관심그룹 밖")
 
 
+class Breadth(unittest.TestCase):
+    def test_breadth(self):
+        rows_up = [(f"d{i:02d}", 1, 1, 1, 100 + i, 0) for i in range(25)]
+        rows_dn = [(f"d{i:02d}", 1, 1, 1, 100 - i, 0) for i in range(25)]
+        daily = {f"u{k}": rows_up for k in range(30)}
+        daily.update({f"x{k}": rows_dn for k in range(30)})
+        b = S.market_breadth(daily, ma=20)
+        self.assertEqual(sorted(b)[0], "d20"); self.assertAlmostEqual(b["d24"], 50.0)
+        self.assertEqual(S.market_breadth({"a": rows_up}, ma=20), {})          # 종목 50개 미만 날은 뺌
+
+
 if __name__ == "__main__":
     unittest.main()
