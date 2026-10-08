@@ -103,5 +103,30 @@ class Portfolio(unittest.TestCase):
         self.assertEqual(early["n"], 5)
 
 
+class Sector(unittest.TestCase):
+    def test_tags_new_and_top_sector(self):
+        import sqlite3
+        c = sqlite3.connect("s.db")
+        c.execute("CREATE TABLE sector_obs (date TEXT, time TEXT, grp TEXT, rank INTEGER, avg_chg REAL, "
+                  "up_ratio REAL, value REAL, leader TEXT, leader_chg REAL, second TEXT, second_chg REAL)")
+        c.execute("CREATE TABLE sector_alerts (date TEXT, time TEXT, code TEXT, name TEXT, grp TEXT, role TEXT, "
+                  "chg REAL, is_new INTEGER)")
+        d = "2026-10-08"
+        c.executemany("INSERT INTO sector_obs (date, time, grp, rank, leader, second) VALUES (?,?,?,?,?,?)", [
+            (d, "09:10", "반도체", 1, "가", "나"), (d, "09:10", "로봇", 5, "다", "라"),
+            (d, "10:00", "로봇", 2, "다", "라"), (d, "10:00", "반도체", 1, "가", "나")])
+        c.execute("INSERT INTO sector_alerts VALUES (?,?,?,?,?,?,?,?)", (d, "10:20", "009", "마", "x", "대장", 4, 0))
+        c.commit(); c.close()
+        sig = [{"date": d, "time": "100500", "code": "003", "name": "다"},     # 로봇 5위→2위 = 새섹터
+               {"date": d, "time": "100500", "code": "001", "name": "가"},     # 반도체 처음부터 1위
+               {"date": d, "time": "100500", "code": "009", "name": "마"},     # 알림은 10:20 — 아직
+               {"date": d, "time": "103000", "code": "009", "name": "마"},
+               {"date": d, "time": "090500", "code": "003", "name": "다"}]     # 첫 기록 전
+        R.sector_tags(sig, "s.db")
+        self.assertEqual([x["sector"] for x in sig], ["새섹터1·2등", "상위섹터1·2등", "", "상위섹터1·2등", ""])
+        w = R.WINDOWS["09:40 이전+이후엔 새섹터만"]
+        self.assertTrue(w(sig[0])); self.assertFalse(w(sig[1])); self.assertTrue(w(sig[4]))
+
+
 if __name__ == "__main__":
     unittest.main()

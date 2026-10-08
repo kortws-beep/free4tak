@@ -274,21 +274,72 @@ def run_signals(store: MinuteStore, signals: list, rule: Rule) -> list:
     return out
 
 
+# ── 섹터 태그 (대장 아이디어 2026-10-08: "변화된 섹터의 1·2등주와 검색식이 겹치면
+#    09:40 이후에도 사도 되지 않을까") — 리나 섹터감시 기록(sector_obs: 3분마다 분야 순위와
+#    대장·2등 이름, sector_alerts: 강한 분야 대장·2등이 +3% 넘은 알림)으로 신호 시각 기준 판정
+TOP_N = 3
+
+
+def sector_tags(signals: list, db_path: str = None) -> None:
+    """각 신호에 s["sector"] = "새섹터1·2등" / "상위섹터1·2등" / "" 를 붙임(제자리).
+    새섹터 = 그날 첫 기록 땐 상위 TOP_N 밖이었다가 신호 시각엔 상위 TOP_N 안에 든 분야."""
+    db_path = db_path or _find("three_month_leader_log.db")
+    for s_ in signals:
+        s_["sector"] = ""
+    if not db_path:
+        return
+    conn = sqlite3.connect(db_path)
+    try:
+        rows = conn.execute("SELECT date, time, grp, rank, leader, second FROM sector_obs "
+                            "ORDER BY date, time").fetchall()
+        alerts = conn.execute("SELECT date, time, code FROM sector_alerts").fetchall()
+    except sqlite3.OperationalError:
+        return
+    finally:
+        conn.close()
+    snaps, first_rank = {}, {}
+    for d, t, grp, rank, leader, second in rows:
+        snaps.setdefault(d, {}).setdefault(t, []).append((grp, rank, leader, second))
+        first_rank.setdefault((d, grp), rank)
+    alerted = {}
+    for d, t, code in alerts:
+        alerted.setdefault((d, code), t)
+    for s_ in signals:
+        times = [t for t in snaps.get(s_["date"], {}) if t.replace(":", "") <= s_["time"][:4]]
+        if not times:
+            continue
+        snap = snaps[s_["date"]][max(times)]
+        for grp, rank, leader, second in snap:
+            if rank <= TOP_N and s_["name"] in (leader, second):
+                new = first_rank.get((s_["date"], grp), rank) > TOP_N
+                s_["sector"] = "새섹터1·2등" if new else "상위섹터1·2등"
+                break
+        a = alerted.get((s_["date"], s_["code"]))
+        if not s_["sector"] and a and a.replace(":", "") <= s_["time"][:4]:
+            s_["sector"] = "상위섹터1·2등"
+
+
+def _early(r) -> bool:
+    return r["time"][:4] < "0940"
+
+
 WINDOWS = {
-    "전체": lambda t: True,
-    "09:40~11:00 제외": lambda t: not ("0940" <= t[:4] < "1100"),
-    "09:40 이전만": lambda t: t[:4] < "0940",
-    "11:00 이전만": lambda t: t[:4] < "1100",
-    "09:40 이전+13시 이후": lambda t: t[:4] < "0940" or t[:4] >= "1300",
+    "전체": lambda r: True,
+    "09:40~11:00 제외": lambda r: not ("0940" <= r["time"][:4] < "1100"),
+    "09:40 이전만": _early,
+    "11:00 이전만": lambda r: r["time"][:4] < "1100",
+    "09:40 이전+13시 이후": lambda r: _early(r) or r["time"][:4] >= "1300",
+    "09:40 이전+이후엔 섹터1·2등": lambda r: _early(r) or bool(r.get("sector")),
+    "09:40 이전+이후엔 새섹터만": lambda r: _early(r) or r.get("sector") == "새섹터1·2등",
 }
-LOSS_MODES = ("없음", "-10만 매수중단", "-10만 절반매수", "-15만 절반매수")
+LOSS_MODES = ("없음", "-10만 매수중단", "-10만 절반매수")   # -15만 절반은 1차 결과에서 늘 밀려 뺌
 
 
 def portfolio(results: list, window, loss_mode: str, slots: int = 3) -> dict:
     """신호 시간순으로 슬롯 N개에 넣어 실제처럼 굴림. results는 run_signals 결과."""
     taken, by_day = [], {}
     for r in sorted(results, key=lambda x: (x["date"], x["time"])):
-        if not window(r["time"]):
+        if not window(r):
             continue
         now = (r["date"], r["time"])
         open_ = [x for x in taken if (x["exit_date"], x["exit_time"]) > now]
@@ -345,6 +396,7 @@ def main():
         print(f"   재현   {fmt(stats([r['ret'] for r in sim]))}")
 
     signals = load_signals(src, n)
+    sector_tags(signals)
     print(f"\n📈 신호: {src} {len(signals)}개 (종목·날짜별 첫 신호, 최근 {n}일) — 분봉 받는 중…")
     base = run_signals(store, signals, CURRENT)
     print(f"   분봉 재현 {len(base)}개 · 한투 호출 {store.calls}회")
@@ -357,6 +409,9 @@ def main():
                          ["마이너스", "0~3%", "3~8%", "8~15%", "15%~", "-"])))
     print("  [출처]")
     print("\n".join(group(base, lambda r: r["source"])))
+    late = [r for r in base if not _early(r)]
+    print(f"  [09:40 이후 신호 {len(late)}개 — 섹터 1·2등과 겹침 여부]")
+    print("\n".join(group(late, lambda r: r.get("sector") or "섹터 무관")))
     if src == "cands":
         print("  [daybot이 거른 사유 — '매수'보다 거른 쪽이 나으면 그 거름이 틀린 것]")
         print("\n".join(group(base, lambda r: r["extra"])))
@@ -393,8 +448,10 @@ def main():
             s = portfolio(res, w, mode)
             if s["n"]:
                 rows.append((s["krw"], wname, mode, s))
-        for krw, wname, mode, s in sorted(rows, key=lambda x: -x[0]):
-            print(f"   {wname:<18} {mode:<12} {s['n']:>3}건 승률 {s['win']:>3.0f}% | {s['krw']:>+10,.0f}원 "
+        rows.sort(key=lambda x: -x[0])
+        show = rows[:10] + [x for x in rows[10:] if "섹터" in x[1] or x[1] == "전체"]   # 섹터 조합·전체는 항상
+        for krw, wname, mode, s in show:
+            print(f"   {wname:<24} {mode:<12} {s['n']:>3}건 승률 {s['win']:>3.0f}% | {s['krw']:>+10,.0f}원 "
                   f"| 최악의 날 {s['worst']:+,.0f} · 최대낙폭 {s['mdd']:+,.0f}")
     print("\n※ 분봉 고가/저가 근사·신호가 매수 가정. 표본이 작으면(특히 시간대·등락률 칸) 방향만 참고.")
 
