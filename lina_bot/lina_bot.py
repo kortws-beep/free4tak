@@ -1527,6 +1527,14 @@ TML_WATCH_END = "1200"
 _TML_STATE = {"date": "", "alerted": set()}
 
 
+def _scan_footer(extra: str = "") -> str:
+    """★ 2026-10-08: 데이봇이 파이썬판을 후보로 쓰기 시작(DAYBOT_SCAN_SOURCE=python) —
+    '관찰 전용/키움과 비교' 문구를 실제 용도에 맞게."""
+    src = os.getenv("DAYBOT_SCAN_SOURCE", "kiwoom").strip().lower()
+    use = "→ 데이봇 매수 후보로 전달" if src in ("python", "union", "fallback") else "관찰 전용(데이봇 미사용)"
+    return f"\n   ({use}{' · ' + extra if extra else ''})"
+
+
 def _alerted_today(table: str, today: str) -> set:
     """오늘 이미 통과 기록이 있는 종목 = 이미 알린 종목.
     ★ 2026-10-06: 알림 중복방지가 메모리에만 있어서 bot restart 할 때마다 같은
@@ -1579,9 +1587,9 @@ async def three_month_leader_watch():
         channel = await client.fetch_channel(SCAN_CHANNEL_ID)
         await send_safe_message(
             channel,
-            f"🧪 **[3개월수급 당일주도주 — 파이썬판, 관찰 전용]** {kst_now.strftime('%H:%M')}\n"
+            f"🧪 **[3개월수급 당일주도주]** {kst_now.strftime('%H:%M')}\n"
             + "\n".join(tml.format_hit(r) for r in hits)
-            + "\n   (키움 조건검색 결과와 같은지 비교해줘 — 매매는 안 해)"
+            + _scan_footer()
         )
         for r in hits:
             _TML_STATE["alerted"].add(r["code"])
@@ -1637,9 +1645,9 @@ async def leader_scan_watch():
         channel = await client.fetch_channel(SCAN_CHANNEL_ID)
         await send_safe_message(
             channel,
-            f"🧪 **[주도주검색식3 — 파이썬판, 관찰 전용]** {kst_now.strftime('%H:%M')}\n"
+            f"🧪 **[주도주검색식3]** {kst_now.strftime('%H:%M')}\n"
             + "\n".join(leader_scan.format_hit(r) for r in hits)
-            + "\n   (키움 조건검색 결과와 같은지 비교해줘 — 매매는 안 해)"
+            + _scan_footer()
         )
         _LEADER_STATE["alerted"].update(r["code"] for r in hits)
     except Exception as e:
@@ -1698,9 +1706,9 @@ async def danta_scan_watch():
         channel = await client.fetch_channel(SCAN_CHANNEL_ID)
         await send_safe_message(
             channel,
-            f"🧪 **[단타000 — 파이썬판, 관찰 전용]** {kst_now.strftime('%H:%M')}\n"
+            f"🧪 **[단타000]** {kst_now.strftime('%H:%M')}\n"
             + "\n".join(danta_scan.format_hit(r, r.get("overlap", "")) for r in hits)
-            + "\n   (키움 단타000과 같은지 비교해줘 — 🔗는 오늘 주도주/3개월수급 기록과 겹침)"
+            + _scan_footer("🔗 = 오늘 주도주/3개월수급과 겹침")
         )
         _DANTA_STATE["alerted"].update(r["code"] for r in hits)
     except Exception as e:
@@ -2397,19 +2405,19 @@ async def on_ready():
     try:
         if not three_month_leader_watch.is_running():
             three_month_leader_watch.start()
-        print("✅ [시스템] 3개월수급 당일주도주 파이썬판 (09:00~12:00, 3분 주기) 가동 성공! (관찰 전용)")
+        print("✅ [시스템] 3개월수급 당일주도주 파이썬판 (09:00~12:00, 3분 주기) 가동 성공!")
     except Exception as e: print(f"⚠️ [에러] 3개월수급 스케줄러: {e}")
 
     try:
         if not leader_scan_watch.is_running():
             leader_scan_watch.start()
-        print("✅ [시스템] 주도주검색식3 파이썬판 (09:00~15:20, 3분 주기) 가동 성공! (관찰 전용)")
+        print("✅ [시스템] 주도주검색식3 파이썬판 (09:00~15:20, 3분 주기) 가동 성공!")
     except Exception as e: print(f"⚠️ [에러] 주도주3 스케줄러: {e}")
 
     try:
         if not danta_scan_watch.is_running():
             danta_scan_watch.start()
-        print("✅ [시스템] 단타000 파이썬판 (09:00~15:20, 1분 주기) 가동 성공! (관찰 전용)")
+        print("✅ [시스템] 단타000 파이썬판 (09:00~15:20, 1분 주기) 가동 성공!")
     except Exception as e: print(f"⚠️ [에러] 단타000 스케줄러: {e}")
 
     try:
