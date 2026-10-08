@@ -244,6 +244,10 @@ CONDITION_KEYWORDS = ["주도주검색식3", "단타000", "3개월수급 당일�
 #   python   : 파이썬판만(키움 미사용)
 #   .env에 DAYBOT_SCAN_SOURCE=fallback 처럼 넣고 bot restart daybot.
 SCAN_SOURCE = os.getenv("DAYBOT_SCAN_SOURCE", "kiwoom").strip().lower()
+# 키움 미사용(python)이면 4분 간격(키움 검색식별 1분 재조회 제한·재시도 대비)이 필요 없음 —
+#   파이썬판은 리나가 1~3분마다 갱신하므로 1분마다 확인해 진입 지연을 줄인다(2026-10-08).
+if SCAN_SOURCE == "python":
+    SCAN_INTERVAL_SEC = 60
 COND_3MONTH_LEADER = "3개월수급 당일주도주"
 # ★ "5본봉거래대금단타"는 대장이 수동단타에서 안 쓰던 검색식이라 제외
 
