@@ -161,9 +161,10 @@ BUY_2ND_AMT       = 0           # 추매 비활성화
 BUY_2ND_THRESHOLD = -9999       # 추매 비활성화 (절대 도달 안 하는 값)
 MAX_POSITIONS     = 3           # 최대 3코인 (종목당 100만원 × 3 = 300만원, 익절슬롯반환시 4번째 가능)
 MIN_ORDER_AMT     = 5_000       # 업비트 최소 주문 금액
-# ★ 2026-10-08 대장 결정: 눌림목 몫(최대 100만)을 남겨 두면 본체 가용현금이 줄어
-#   자투리로 사는 일이 생김 — 현금 때문에 줄어든 매수금액이 50만 미만이면 안 산다.
-#   (손절폭 기준 축소(_risk_sized_amount)는 일부러 줄이는 것이라 이 하한과 별개)
+# ★ 2026-10-08 대장 결정: 본체 한 종목 매수금은 최저 50만 — 미만이면 안 산다.
+#   ① 눌림목 몫을 남겨 가용현금이 모자랄 때  ② 손절폭 기준 축소(_risk_sized_amount)로
+#   변동성 큰 코인이 50만 밑으로 줄어들 때(10-09 대장 지적 "최저 50만인데 안 먹히네" —
+#   처음엔 ②를 일부러 뺐는데, 30만대 자투리 매수가 실제로 나감) 둘 다 적용.
 CBOT_MIN_BUY_AMT  = 500_000
 
 # ★ 2026-10-07 대장 결정 — 위험 기준 매수금액. 매수금액 = min(100만, 이 값 ÷ 손절폭),
@@ -1544,6 +1545,23 @@ class CBot:
         self._tech_cache[market] = (result, time.time())
         return result
 
+    def _plan_buy_amount(self, market: str, krw_cbot: float, is_last_slot: bool) -> tuple:
+        """(매수금액, 건너뛸 사유, 이번 루프 매수 중단 여부). 금액 0이면 안 산다."""
+        amt = min(BUY_1ST_AMT, int(krw_cbot * 0.98)) if is_last_slot else BUY_1ST_AMT
+        if krw_cbot < amt:                       # 눌림목 몫까지 쓰지 않게
+            amt = int(krw_cbot * 0.98)
+        if amt < CBOT_MIN_BUY_AMT:               # 현금 부족 — 다음 코인도 같은 현금이라 루프 종료
+            return 0, (f"가용현금 {krw_cbot:,.0f}원(눌림목 몫 제외) → {amt:,}원 < "
+                       f"최저 {CBOT_MIN_BUY_AMT:,}원"), True
+        full = amt
+        amt = self._risk_sized_amount(market, amt)
+        if amt < full:
+            print(f"  📏 {market} 손절폭 기준 매수금액 {full:,}→{amt:,}원 "
+                  f"(손절 1회 손실 약 {RISK_PER_TRADE:,}원)")
+        if amt < CBOT_MIN_BUY_AMT:               # 변동성이 커서 줄어든 것 — 다른 코인은 될 수 있음
+            return 0, f"손절폭이 커서 {amt:,}원 < 최저 {CBOT_MIN_BUY_AMT:,}원(변동성 큼)", False
+        return amt, "", False
+
     def _risk_sized_amount(self, market: str, base_amt: int) -> int:
         """손절 한 번 손실이 RISK_PER_TRADE가 되도록 매수금액을 줄임(최대 base_amt)."""
         if RISK_PER_TRADE <= 0:
@@ -2845,20 +2863,11 @@ class CBot:
 
                         # ★ 마지막 슬롯(포지션 MAX_POSITIONS번째)이면 잔액만큼만 매수
                         _is_last_slot = (len(self.positions) + 1) >= MAX_POSITIONS
-                        _buy_amt = min(BUY_1ST_AMT, int(krw_cbot * 0.98)) if _is_last_slot else BUY_1ST_AMT
-                        if krw_cbot < _buy_amt:             # 눌림목 몫까지 쓰지 않게
-                            _buy_amt = int(krw_cbot * 0.98)
-                        if _buy_amt < CBOT_MIN_BUY_AMT:
-                            print(f"  ⏭️ {market} — 가용현금 {krw_cbot:,.0f}원(눌림목 몫 제외) → "
-                                  f"{_buy_amt:,}원 < 최저 {CBOT_MIN_BUY_AMT:,}원, 매수 안 함")
-                            break                              # 다음 코인도 같은 현금이라 이번 루프 종료
-                        _full_amt = _buy_amt
-                        _buy_amt = self._risk_sized_amount(market, _buy_amt)
-                        if _buy_amt < _full_amt:
-                            print(f"  📏 {market} 손절폭 기준 매수금액 {_full_amt:,}→{_buy_amt:,}원 "
-                                  f"(손절 1회 손실 약 {RISK_PER_TRADE:,}원)")
-                        if _buy_amt < MIN_ORDER_AMT:
-                            print(f"  ⏭️ {market} — 잔액 부족({_buy_amt:,}원 < 최소주문)")
+                        _buy_amt, _skip, _stop = self._plan_buy_amount(market, krw_cbot, _is_last_slot)
+                        if not _buy_amt:
+                            print(f"  ⏭️ {market} — {_skip}, 매수 안 함")
+                            if _stop:
+                                break
                             continue
                         print(f"🚀 매수 시도 {market} | {ai_score}점 | "
                               f"{_buy_amt:,}원" + (" (마지막슬롯·잔액매수)" if _is_last_slot else ""))

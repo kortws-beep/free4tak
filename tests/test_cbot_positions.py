@@ -69,6 +69,23 @@ class CbotPositions(unittest.TestCase):
         self.assertEqual(list(b.sold_today), ["KRW-D"])
 
 
+class CbotMinBuy(unittest.TestCase):
+    """2026-10-09 — 본체 최저 50만: 현금 부족이든 손절폭 축소든 50만 밑이면 안 산다."""
+    def _plan(self, krw, sized, last=False):
+        b = mk()
+        b._risk_sized_amount = lambda market, amt: min(amt, sized)
+        return b._plan_buy_amount("KRW-A", krw, last)
+
+    def test_floor(self):
+        self.assertEqual(self._plan(3_000_000, 10**9), (cbot.BUY_1ST_AMT, "", False))
+        self.assertEqual(self._plan(3_000_000, 620_000)[0], 620_000)          # 손절폭 축소 62만 → 삼
+        amt, why, stop = self._plan(3_000_000, 312_000)                        # 변동성 커서 31만
+        self.assertEqual((amt, stop), (0, False)); self.assertIn("변동성", why)  # 다른 코인은 계속 봄
+        amt, why, stop = self._plan(400_000, 10**9)                            # 현금 40만
+        self.assertEqual((amt, stop), (0, True)); self.assertIn("가용현금", why)
+        self.assertEqual(self._plan(700_000, 10**9, last=True)[0], 686_000)    # 마지막 슬롯 잔액
+
+
 class CbotLossLimitPause(unittest.TestCase):
     """일손실 한도 멈춤 → 4시간 뒤 시장 점검으로 재개/유지 (2026-10-07 대장 결정)."""
     def _state(self):
