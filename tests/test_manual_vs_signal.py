@@ -67,7 +67,8 @@ class Manual(unittest.TestCase):
 
             def days_from(self, code, date, n):
                 return [(date, self.day(code, date))]
-        tr = M.analyze(M.load_manual(c, 3), c, Store(), {"반도체관심": [("111110", "가종목")]})
+        tr = M.analyze(M.load_manual(c, 3), c, Store(), {"반도체관심": [("111110", "가종목")]},
+                       price_fn=lambda code: 5720)
         a = tr[0]
         self.assertEqual((a["buy_t"], a["buy_est"], a["sig_before"], a["lead_min"]), ("090800", True, "주도주", 2))
         self.assertEqual(a["sector"], "상위섹터1·2등"); self.assertEqual(a["groups"], ["반도체관심"])
@@ -82,6 +83,9 @@ class Manual(unittest.TestCase):
         self.assertIn("주도주 09:06✅", out); self.assertIn("주도주 ✗(고가대비 이탈)", out)
         self.assertIn("관심:반도체관심", out)
         self.assertIn("추가매수 1회→평단 5,200", out)
+        self.assertAlmostEqual(b["unreal"], 10.0)                        # 평단 5200 → 현재 5720
+        self.assertIn("보유중 +10.00%", out)
+        self.assertEqual(M.business_days("2026-10-02", "2026-10-06"), 2)  # 금→화: 월·화
 
 
 if __name__ == "__main__":

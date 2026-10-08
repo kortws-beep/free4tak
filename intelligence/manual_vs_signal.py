@@ -103,7 +103,13 @@ def daybot_candidate(date: str, code: str, path: str = DAYBOT_DB):
     return f"매수({bought[0][0][11:16]})" if bought else f"후보 {len(rows)}회·{rows[-1][2] or '-'}"
 
 
-def analyze(trades: list, conn, store=None, groups: dict = None) -> list:
+def business_days(d0: str, d1: str) -> int:
+    a, b = datetime.date.fromisoformat(d0), datetime.date.fromisoformat(d1)
+    return sum(1 for i in range((b - a).days) if (a + datetime.timedelta(days=i + 1)).weekday() < 5)
+
+
+def analyze(trades: list, conn, store=None, groups: dict = None, price_fn=None) -> list:
+    """price_fn(code) → 현재가: 아직 들고 있는 종목 평가손익용(대장은 스윙도 함 — 2026-10-08)."""
     member = {}
     for g, stocks in (groups or {}).items():
         for c, _n in stocks:
@@ -121,6 +127,14 @@ def analyze(trades: list, conn, store=None, groups: dict = None) -> list:
             if px:
                 t["rate"] = (px[-1] / t["entry"] - 1) * 100
                 t["rate_est"] = True
+        t["unreal"], t["held_days"] = None, business_days(date, (t["dereg"] or str(datetime.date.today()))[:10])
+        if not t["dereg"] and price_fn and t["entry"]:
+            try:
+                cur = price_fn(t["code"])
+                if cur:
+                    t["unreal"] = (cur / t["entry"] - 1) * 100
+            except Exception:
+                pass
         t["buy_est"] = t["buy_t"] != reg_hms
         t["sig"] = signals(conn, date, t["code"], t["buy_t"])
         firsts = [(v["first"], k) for k, v in t["sig"].items() if v["first"]]
@@ -166,6 +180,13 @@ def report(trades: list, days: int) -> str:
     lead, ln = _avg([t["lead_min"] for t in has])
     if lead is not None:
         L.append(f"   신호 → 대장 매수 평균 {lead:.0f}분 뒤 ({ln}건)")
+    done = [t for t in trades if t["rate"] is not None]
+    hold = [t for t in trades if t.get("unreal") is not None]
+    if done or hold:
+        a, k = _avg([t["rate"] for t in done])
+        u, m = _avg([t["unreal"] for t in hold])
+        L.append("   대장 성적 — " + (f"정리 {k}건 평균 {a:+.2f}%" if k else "정리 0건")
+                 + (f" · 보유 {m}건 평가 평균 {u:+.2f}%(손절 거의 안 함 — 들고 가는 매매)" if m else ""))
     for title, grp in (("신호 있던 것", has), ("신호 없던 것", [t for t in trades if not t["sig_before"]])):
         a, k = _avg([t["rate"] for t in grp])
         if k:
@@ -183,7 +204,9 @@ def report(trades: list, days: int) -> str:
         if t["rate"] is not None:
             res = f"{t['rate']:+.2f}%" + ("(추정)" if t.get("rate_est") else "") + f" 해제 {t['dereg'][11:16]}"
         else:
-            res = f"해제 {t['dereg'][11:16]}(시세없음)" if t["dereg"] else "보유중"
+            res = f"해제 {t['dereg'][11:16]}(시세없음)" if t["dereg"] else (
+                f"보유중 {t['unreal']:+.2f}%" if t.get("unreal") is not None else "보유중")
+        res += f" · {t.get('held_days', 0)}영업일"
         adds = f" · 추가매수 {len(t['adds'])}회→평단 {t['entry']:,.0f}" if t.get("adds") else ""
         L.append(f"   {t['reg'][5:10]} {t['name']}({t['code']}) {res} | 매수 {bt} @{t['entry0'] or 0:,.0f}{adds}")
         parts = []
@@ -218,7 +241,7 @@ def report(trades: list, days: int) -> str:
 def main():
     n = next((int(a) for a in sys.argv[1:] if a.isdigit()), 14)
     conn = sqlite3.connect(tml.LOG_DB)
-    store, groups = None, {}
+    store, groups, price_fn = None, {}, None
     if "--no-api" not in sys.argv:
         from dotenv import load_dotenv
         for env in (os.path.join(tml._BASE, ".env"), os.path.join(tml._BASE, "lina_bot", ".env")):
@@ -227,13 +250,16 @@ def main():
         from kis_api import KisAPI
         api = KisAPI()
         store = rp.MinuteStore(api)
+
+        def price_fn(code):
+            return float((api.get_market_data(code) or {}).get("stck_prpr") or 0)
         try:
             import sector_watch as sw
             groups = sw.load_groups(api, sw.hts_id())
         except Exception as e:
             print(f"⚠️ 관심그룹 조회 실패(생략): {e}")
     try:
-        print(report(analyze(load_manual(conn, n), conn, store, groups), n))
+        print(report(analyze(load_manual(conn, n), conn, store, groups, price_fn), n))
     finally:
         conn.close()
 
