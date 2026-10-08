@@ -146,6 +146,20 @@ def make_signals(daily: dict, name_code: dict, chg_min: float = CHG_MIN, top: in
     return sorted(sig, key=lambda s: (s["date"], s["rank"]))
 
 
+def market_breadth(daily: dict, ma: int = 20) -> dict:
+    """{날짜: 종가가 ma일선 위인 종목 비율(%)} — 시장 국면(2026-10-08 기간별 결과: 6월 이후 모든
+    규칙이 손실 → 종목·규칙보다 시장 국면이 먼저). 지수 데이터 없이 일봉 DB 전 종목으로 계산."""
+    up, tot = {}, {}
+    for rows in daily.values():
+        closes = [r[4] for r in rows]
+        for i in range(ma, len(rows)):
+            d = rows[i][0]
+            tot[d] = tot.get(d, 0) + 1
+            if closes[i] > sum(closes[i - ma:i]) / ma:
+                up[d] = up.get(d, 0) + 1
+    return {d: up.get(d, 0) / n * 100 for d, n in tot.items() if n >= 50}
+
+
 def load_groups(refresh: bool, api_ok: bool) -> dict:
     if not refresh and os.path.exists(GROUPS_JSON):
         with open(GROUPS_JSON, encoding="utf-8") as f:
@@ -237,6 +251,10 @@ def main():
     except Exception as e:
         print(f"⚠️ 맥락(유튜브·미국) 계산 생략: {e}")
 
+    breadth = market_breadth(daily)
+    for s in sig:
+        s["breadth"] = breadth.get(s["date"])
+
     results = {}
     for rule in RULES:
         rs = []
@@ -282,6 +300,15 @@ def main():
                                  ("NEW 또는 미국", lambda r: r["uni"] == "NEW그룹" or r.get("us")),
                                  ("그 외", lambda r: r["uni"] != "NEW그룹" and not r.get("us"))):
                     print(f"     {label:<12}{fmt(stats([r for r in rs if f(r)]))}")
+
+    print("\n■ 시장 국면별 — 그날 20일선 위 종목 비율(일봉 DB 전 종목)")
+    for rname in ("스윙 손절-10 20일 트레일5", "단타형(현행 근사)"):
+        print(f"  [{rname}]")
+        for lo, hi in ((0, 40), (40, 50), (50, 60), (60, 101)):
+            rs = [r for r in results[rname] if r.get("breadth") is not None and lo <= r["breadth"] < hi]
+            nf = [r for r in rs if r["uni"] == "NEW그룹" or r.get("us")]
+            print(f"   {lo:>3}~{min(hi, 100)}%  전체 {fmt(stats(rs))}")
+            print(f"            NEW·미국 {fmt(stats(nf))}")
 
     print("\n■ 들고 있으면 돌아오나 — 손절 없이 10거래일, 밀린 뒤 본전 회복 비율")
     for dip in (5, 10):
