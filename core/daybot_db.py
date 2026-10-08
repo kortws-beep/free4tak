@@ -33,14 +33,17 @@ SCAN_LOG_DB = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__fil
 
 
 def log_kiwoom_hits(code_multi_tag_map: dict, code_name_map: dict = None,
-                    db_path: str = None) -> None:
+                    db_path: str = None, cond_ok: set = None) -> None:
     """스캔 1회분 {code: [검색식명, ...]} 저장 + 스캔했다는 표시(__scan__) 1줄.
     결과가 0개인 스캔도 '그 시각엔 키움이 봤는데 없었다'를 알 수 있게.
-    실패해도 조용히 넘어감(매매 로직에 영향 X)."""
+    ★ 2026-10-07: cond_ok(조회 성공한 검색식)가 오면 검색식별로 '__scan__:이름'을
+      남김 — 키움 타임아웃(잦음)을 '0개'로 세지 않게. 실패해도 조용히 넘어감."""
     try:
         now = datetime.datetime.now()
         d, t = now.strftime("%Y-%m-%d"), now.strftime("%H:%M:%S")
         rows = [(d, t, "", "", "__scan__")]
+        for name in sorted(cond_ok or []):
+            rows.append((d, t, "", "", f"__scan__:{name}"))
         for code, tags in (code_multi_tag_map or {}).items():
             for tag in set(tags):
                 rows.append((d, t, code, (code_name_map or {}).get(code, ""), tag))
@@ -54,6 +57,44 @@ def log_kiwoom_hits(code_multi_tag_map: dict, code_name_map: dict = None,
             conn.close()
     except Exception as e:
         print(f"⚠️ 키움 조건검색 기록 실패: {e}")
+
+
+# ★ 2026-10-07: 파이썬판 검색식(리나가 1~3분마다 계산해 기록) → 데이봇 후보 소스.
+#   키움 조건검색 타임아웃이 잦아(대장: "그래서 파이썬으로 옮겨가야 해") 같은 기록을
+#   데이봇이 읽어 쓴다. (테이블, 키움 검색식명, 유효시간(분) — 리나 검사 주기+여유)
+PY_SOURCES = [
+    ("leader_obs", "주도주검색식3", 5),
+    ("danta_obs", "단타000", 3),
+    ("tml_obs", "3개월수급 당일주도주", 5),
+]
+
+
+def python_scan_hits(now: datetime.datetime = None, db_path: str = None) -> tuple:
+    """최근 통과 종목 → ({code: [검색식명]}, {code: 종목명}, {검색식명: 최신 기록시각 or None}).
+    기록이 없거나 오래되면 빈 결과(리나가 멈춘 경우 등) — 호출부가 경고."""
+    now = now or datetime.datetime.now()
+    hits, names, latest = {}, {}, {}
+    try:
+        conn = sqlite3.connect(db_path or SCAN_LOG_DB, timeout=10)
+    except Exception:
+        return hits, names, latest
+    try:
+        d = now.strftime("%Y-%m-%d")
+        for table, tag, win in PY_SOURCES:
+            since = (now - datetime.timedelta(minutes=win)).strftime("%H:%M")
+            try:
+                row = conn.execute(f"SELECT MAX(time) FROM {table} WHERE date=?", (d,)).fetchone()
+                latest[tag] = row[0] if row else None
+                for code, name in conn.execute(
+                        f"SELECT DISTINCT code, name FROM {table} WHERE date=? AND time>=? AND passed=1",
+                        (d, since)):
+                    hits.setdefault(code, []).append(tag)
+                    names[code] = name
+            except sqlite3.OperationalError:
+                latest[tag] = None
+    finally:
+        conn.close()
+    return hits, names, latest
 
 
 class DayTradeDB:

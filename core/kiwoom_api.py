@@ -62,7 +62,8 @@ class KiwoomAPI:
                                    code_name_map: dict = None,
                                    skip_keywords: list = None,
                                    code_tag_map: dict = None,
-                                   code_multi_tag_map: dict = None) -> list:
+                                   code_multi_tag_map: dict = None,
+                                   cond_ok: set = None) -> list:
         """
         키움 조건검색식으로 종목 조회.
         use_keywords:  이 키워드 포함된 검색식만 사용 (None이면 전체)
@@ -73,6 +74,8 @@ class KiwoomAPI:
                        한 종목이 여러 검색식에 걸리면 전부 기록 (★ 2026-07-25
                        추가, 키움풀 히스토리 추적용 — 검색식별로 소스를
                        구분해 누적 저장하려면 첫 매칭만으론 부족함)
+        cond_ok: 조회에 성공한 검색식명을 담아 줌(★ 2026-10-07 — 타임아웃 난
+                       검색식을 '0개'와 구분하려고. 0개라도 성공이면 들어감)
 
         ★ 2026-07-17: 기존엔 한 WebSocket 세션에서 여러 조건검색을 연달아
         (CNSRREQ) 요청했는데, 두 번째 조건부터 응답이 오류/빈값으로
@@ -200,6 +203,8 @@ class KiwoomAPI:
                     print(f"  ⚠️ 키움 WebSocket 오류 [{name}]({attempt}회차): {e}")
 
                 if success:
+                    if cond_ok is not None:
+                        cond_ok.add(name)
                     break
                 if attempt <= MAX_RETRY:
                     await asyncio.sleep(RETRY_WAIT_SEC)   # 조건별 1분 쿨다운 존중
