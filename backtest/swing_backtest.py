@@ -265,6 +265,24 @@ def main():
         print(f"   {label:<10} 스윙 {fmt(a)}")
         print(f"   {'':<10} 단타 {fmt(b)}")
 
+    # ★ 1차 결과(10-08): NEW그룹 × 스윙에서만 우위 → 뒤늦은 선택 편향 점검. NEW를 최근 뜬 종목으로
+    #   채웠다면 우위가 최근 기간에 몰리고 옛 기간엔 없어야 함. 미국 연결은 매핑표가 고정이라 편향이 덜함.
+    if sig:
+        dates = sorted({x["date"] for x in sig})
+        cuts = [dates[0], dates[len(dates) // 3], dates[2 * len(dates) // 3], "9999"]
+        print("\n■ 기간별 (뒤늦은 선택 편향 점검 — NEW 우위가 최근에만 있으면 편향 의심)")
+        for rname in ("스윙 손절-10 20일 트레일5", "단타형(현행 근사)"):
+            print(f"  [{rname}]")
+            for k in range(3):
+                lo, hi = cuts[k], cuts[k + 1]
+                rs = [r for r in results[rname] if lo <= r["date"] < hi]
+                print(f"   {lo}~ ")
+                for label, f in (("NEW그룹", lambda r: r["uni"] == "NEW그룹"),
+                                 ("미국 연결 강세", lambda r: r.get("us")),
+                                 ("NEW 또는 미국", lambda r: r["uni"] == "NEW그룹" or r.get("us")),
+                                 ("그 외", lambda r: r["uni"] != "NEW그룹" and not r.get("us"))):
+                    print(f"     {label:<12}{fmt(stats([r for r in rs if f(r)]))}")
+
     print("\n■ 들고 있으면 돌아오나 — 손절 없이 10거래일, 밀린 뒤 본전 회복 비율")
     for dip in (5, 10):
         for u in ["전체"] + unis:
