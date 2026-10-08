@@ -289,12 +289,14 @@ def sector_tags(signals: list, db_path: str = None) -> None:
     if not db_path:
         return
     conn = sqlite3.connect(db_path)
+    def q(sql):
+        try:
+            return conn.execute(sql).fetchall()
+        except sqlite3.OperationalError:          # 아직 안 만들어진 표(알림이 한 번도 안 나간 날 등)
+            return []
     try:
-        rows = conn.execute("SELECT date, time, grp, rank, leader, second FROM sector_obs "
-                            "ORDER BY date, time").fetchall()
-        alerts = conn.execute("SELECT date, time, code FROM sector_alerts").fetchall()
-    except sqlite3.OperationalError:
-        return
+        rows = q("SELECT date, time, grp, rank, leader, second FROM sector_obs ORDER BY date, time")
+        alerts = q("SELECT date, time, code FROM sector_alerts")
     finally:
         conn.close()
     snaps, first_rank = {}, {}
