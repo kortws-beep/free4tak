@@ -63,7 +63,8 @@ class KiwoomAPI:
                                    skip_keywords: list = None,
                                    code_tag_map: dict = None,
                                    code_multi_tag_map: dict = None,
-                                   cond_ok: set = None) -> list:
+                                   cond_ok: set = None,
+                                   max_retry: int = None) -> list:
         """
         키움 조건검색식으로 종목 조회.
         use_keywords:  이 키워드 포함된 검색식만 사용 (None이면 전체)
@@ -76,6 +77,9 @@ class KiwoomAPI:
                        구분해 누적 저장하려면 첫 매칭만으론 부족함)
         cond_ok: 조회에 성공한 검색식명을 담아 줌(★ 2026-10-07 — 타임아웃 난
                        검색식을 '0개'와 구분하려고. 0개라도 성공이면 들어감)
+        max_retry: 실패 시 재시도 횟수(기본 2 — 재시도마다 65초 쉼). 데이봇이 파이썬판으로
+                       메울 수 있을 땐 0(★ 2026-10-08 — 타임아웃 재시도로 스캔 1회가 5분+
+                       밀려 매수 시점이 늦어지던 문제, 대장 로그로 확인)
 
         ★ 2026-07-17: 기존엔 한 WebSocket 세션에서 여러 조건검색을 연달아
         (CNSRREQ) 요청했는데, 두 번째 조건부터 응답이 오류/빈값으로
@@ -146,7 +150,7 @@ class KiwoomAPI:
         #   재시도 타이밍이 근본원인일 가능성이 큼. 사용자 지적대로 이건
         #   단타가 아니라 스윙 후보수집이라 속도가 급하지 않으므로, 재시도
         #   대기를 65초(1분 쿨다운+여유)로 늘려 제대로 쉬었다가 재요청.
-        MAX_RETRY = 2
+        MAX_RETRY = 2 if max_retry is None else max_retry
         RETRY_WAIT_SEC = 65
         for i, (seq, name) in enumerate(targets):
             if i > 0:

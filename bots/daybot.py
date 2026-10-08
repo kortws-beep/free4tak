@@ -872,6 +872,8 @@ class DayBot:
                         code_name_map=code_name_map,
                         code_multi_tag_map=code_multi_tag_map,
                         cond_ok=cond_ok,
+                        # 파이썬판이 메워주는 모드면 재시도(65초씩 대기) 없이 한 번만
+                        max_retry=0 if SCAN_SOURCE in ("fallback", "union") else None,
                     )
                 )
                 scan_ok = True
