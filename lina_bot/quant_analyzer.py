@@ -21,7 +21,7 @@ def get_hybrid_top_picks():
     """
     [대장 전용 무적 융합 엔진 v3]
     우선순위 파이프라인: 
-    Stage 1 (ETF/헷지 매핑) ➡️ Stage 2 (개별주 상대적 강세) ➡️ Stage 3 (국내 테마수급 우회)
+    Stage 1 (ETF/헷지 매핑) ➡️ Stage 2 (개별주 상대적 강세) ➡️ Stage 3 (국내 테마DB 대체)
     """
     if not os.path.exists(DB_PATH_THEME_FINANCE) or not os.path.exists(DB_PATH_MAPPING):
         return "⚠️ [엔진] 필요한 금융/맵핑 DB 파일이 누락되었어."
@@ -29,11 +29,22 @@ def get_hybrid_top_picks():
     # ── 0. 기본 데이터 로드 (41만 건 디비 연산) ──
     fin_conn = sqlite3.connect(DB_PATH_THEME_FINANCE)
     fin_cursor = fin_conn.cursor()
-    fin_cursor.execute("SELECT stock_name, AVG(close_price) FROM kr_stock_daily_data GROUP BY stock_name")
+    # ★ 2026-10-08 — 기존엔 AVG(close_price) GROUP BY stock_name로 DB에
+    #   쌓인 "전체 기간" 평균을 200일선이라고 썼음. 지금은 종목당 데이터가
+    #   ~200일치라 거의 맞았지만, 수집이 쌓일수록 평균 기간이 매일 길어져
+    #   실제 200일선과 어긋나게 됨(오퍼스 발견). 최근 200개만 평균.
+    fin_cursor.execute("""
+        SELECT stock_name, AVG(close_price) FROM (
+            SELECT stock_name, close_price,
+                   ROW_NUMBER() OVER (PARTITION BY stock_name ORDER BY date DESC) AS rn
+            FROM kr_stock_daily_data
+        ) WHERE rn <= 200
+        GROUP BY stock_name
+    """)
     ma200_dict = {row[0]: row[1] for row in fin_cursor.fetchall()}
     fin_cursor.execute("SELECT stock_name, close_price FROM kr_stock_daily_data WHERE date = (SELECT MAX(date) FROM kr_stock_daily_data)")
     latest_prices = {row[0]: row[1] for row in fin_cursor.fetchall()}
-    
+
     # 테마 매핑 테이블 로드
     fin_cursor.execute("SELECT stock_name, theme_name FROM kr_theme_stocks")
     kr_theme_mappings = fin_cursor.fetchall()
@@ -41,6 +52,11 @@ def get_hybrid_top_picks():
 
     # 국내 종목 200일선 정배열 검증 함수 내장
     def check_up_trend(kr_name):
+        # ★ 2026-10-08 — 부분일치(kr_name in db_stock_name)가 짧은 이름일
+        #   때 엉뚱한 종목에 걸릴 위험(오퍼스 발견, 대조 스크립트에서는
+        #   이미 3자 이상만 받게 방어해둠) — 여기도 동일하게 방어.
+        if len(kr_name) < 3:
+            return 0
         for db_stock_name in latest_prices.keys():
             if kr_name in db_stock_name:
                 curr_p = latest_prices.get(db_stock_name, 0)
@@ -83,14 +99,21 @@ def get_hybrid_top_picks():
             rows = map_cursor.fetchall()
             map_conn.close()
 
+            # ★ 2026-10-08 — 방어ETF(USO/GLD/SQQQ)는 음수여도(하락장 속
+            #   방어) 통과하도록 의도된 로직인데, 그럴 때도 "강세 연동"
+            #   이라고 찍혀서 오해를 줬음(오퍼스 발견). 부호에 따라 문구
+            #   분리 — 로직은 그대로, 표현만 정확하게.
+            etf_label = (f"ETF 강세 연동 ({best_etf['ticker']} {best_etf['change']:+.2f}%)"
+                         if best_etf['change'] >= 0 else
+                         f"방어ETF 상대우위 (하락장 속 {best_etf['ticker']} {best_etf['change']:+.2f}%)")
             for kr_name, reason in rows:
                 price = check_up_trend(kr_name)
                 if price > 0:
                     final_picks.append({
                         "kr_name": kr_name, "reason": reason, "price": price,
-                        "source": f"🇺🇸 ETF 강세 연동 ({best_etf['ticker']} {best_etf['change']:+.2f}%)",
+                        "source": f"🇺🇸 {etf_label}",
                     })
-            
+
             if final_picks:
                 report_heading = "📊 [우선순위 1차 필터 작동: 미장 자금 유입 섹터 연동]"
 
@@ -125,7 +148,7 @@ def get_hybrid_top_picks():
     # 💤 STAGE 3: 미장 전멸 시 국내 독고다이 테마수급 우회 (우선순위 3등)
     # =========================================================================
     if not final_picks:
-        report_heading = "🚨 [우선순위 3차 필터 작동: 미장 전멸로 인한 국내 테마 수급 우회]"
+        report_heading = "🚨 [우선순위 3차 필터 작동: 미장 전멸로 인한 국내 테마DB 대체]"
 
         candidates = []
         seen_names = set()
@@ -138,13 +161,16 @@ def get_hybrid_top_picks():
             #   0으로 고정돼 아래 "mention_cnt > 0" 게이트를 평생 못 넘어
             #   STAGE 3이 사실상 죽어있었음, 대장 지적) 체크 제거 —
             #   200일선 정배열(check_up_trend)만 통과하면 바로 후보로 인정.
+            # ★ 2026-10-08 — "수급 쏠림 포착"이라는 문구가 실제 수급 계산
+            #   없이 테마DB 순서대로 첫 2종목을 고르는 것뿐이라 과장된
+            #   표현이었음(오퍼스 발견). 사실 그대로로 문구 교정.
             if price > 0:
                 seen_names.add(pure_name)
                 candidates.append({
                     "kr_name": pure_name,
-                    "reason": f"실시간 국내 [{theme_name}] 테마 수급 쏠림 현상 포착",
+                    "reason": f"[{theme_name}] 테마 소속 + 200일선 정배열(수급 계산은 안 함)",
                     "price": price,
-                    "source": "🇰🇷 국내 독고다이 테마 수급",
+                    "source": "🇰🇷 국내 테마DB 대체(미장 신호 없음)",
                 })
                 if len(candidates) >= 2:
                     break
@@ -158,7 +184,7 @@ def get_hybrid_top_picks():
     final_2 = final_picks[:2]
 
     report = f"🔥 **{report_heading}** 🔥\n"
-    report += "   *필터링: 미장 ETF/지수 ➡️ 개별주 상대강세 ➡️ 국내 테마수급 ➡️ 200일 정배열*\n"
+    report += "   *필터링: 미장 ETF/지수 ➡️ 개별주 상대강세 ➡️ 국내 테마DB 대체 ➡️ 200일 정배열*\n"
     report += "="*60 + "\n"
 
     for idx, item in enumerate(final_2):
