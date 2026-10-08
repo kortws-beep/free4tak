@@ -61,6 +61,8 @@ class DaybotHalf(unittest.TestCase):
         b._pending_orders, b.notes, b.amounts = {}, [], []
         b._regime = ("x", None)
         b._notify = lambda m, critical=False: b.notes.append(m)
+        # ★ 2026-10-08 — 시장국면 알림은 산야(scan) 쪼로 분리돼 _scan_notifier.send() 사용
+        b._scan_notifier = type("N", (), {"send": lambda self, m, critical=False: b.notes.append(m)})()
         b._ws = type("W", (), {"subscribe_price": lambda self, c: None})()
         b.db = type("D", (), {"save_buy": lambda self, *a, **k: None})()
 

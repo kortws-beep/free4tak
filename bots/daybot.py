@@ -327,6 +327,7 @@ class DayBot:
             acnt  =os.getenv("KIS_ACNT_PRDT_CD"),
         )   # ★ sbo2가 쓰던 계좌(무접미사) 재사용 — sbot(...2 접미사)과 다른 계좌
         self.notifier = Notifier(name="daybot")
+        self._scan_notifier = Notifier(name="daybot", route="scan")  # ★ 2026-10-08 시장국면 등 참고정보용(산야)
         self.db       = DayTradeDB()
         self.db.init_db()
 
@@ -584,7 +585,7 @@ class DayBot:
                        + ("정상 매수" if market_regime.is_strong(b) or WEAK_MARKET_RATIO >= 1
                           else f"약한 장 → 매수금 {WEAK_MARKET_RATIO:.0%}"))
                 print(msg)
-                self._notify(msg)
+                self._scan_notifier.send(msg, critical=False)  # ★ 2026-10-08 대장 지정 — 산야로
         return self._regime[1]
 
     def _do_buy(self, code: str, name: str, price: float, source_tier: str,
