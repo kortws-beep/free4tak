@@ -44,6 +44,16 @@ def build():
 
 
 class Manual(unittest.TestCase):
+    def test_youtube_mentions(self):
+        p = os.path.abspath("yt.db")
+        c = sqlite3.connect(p)
+        c.execute("CREATE TABLE youtube_picks (pick_date TEXT, stock_name TEXT, channel TEXT, created_at TEXT)")
+        c.executemany("INSERT INTO youtube_picks VALUES (?,?,?,?)", [
+            ("", "가종목", "주식채널A", "2026-10-06 20:00:00"), ("", "가종목", "B", "2026-10-01 20:00:00"),
+            ("", "가종목", "C", "2026-10-08 10:00:00")])
+        c.commit(); c.close()
+        self.assertEqual(M.youtube_mentions("가종목", "2026-10-08 09:10:00", p), [("10-06", "주식채널A")])
+
     def test_pairs(self):
         c = build()
         t = M.load_manual(c, 3)

@@ -28,6 +28,8 @@ import daybot_replay as rp  # noqa: E402
 
 PY_TABLES = (("leader_obs", "주도주"), ("danta_obs", "단타000"), ("tml_obs", "3개월수급"))
 DAYBOT_DB = os.path.join(tml._BASE, "daybot_trade_history.db")
+YOUTUBE_DB = os.path.join(tml._BASE, "intelligence", "youtube_picks.db")
+YT_LOOKBACK_DAYS = 3     # 매수 전 며칠 안의 유튜브 언급까지 볼지
 
 
 def _q(conn, sql, *a):
@@ -88,6 +90,21 @@ def signals(conn, date: str, code: str, before: str) -> dict:
     return out
 
 
+def youtube_mentions(name: str, buy_dt: str, path: str = YOUTUBE_DB) -> list:
+    """매수 전 YT_LOOKBACK_DAYS일 안 유튜브(전문가 방송) 언급 [(MM-DD, 채널)].
+    대장 매수 참고 요소(2026-10-08): 지금 이슈·전문가 분석(유튜브)·미국장 전일 상승."""
+    if not os.path.exists(path) or not name:
+        return []
+    since = (datetime.datetime.fromisoformat(buy_dt) - datetime.timedelta(days=YT_LOOKBACK_DAYS)).isoformat(" ")
+    conn = sqlite3.connect(path)
+    try:
+        rows = _q(conn, "SELECT created_at, channel FROM youtube_picks WHERE stock_name=? "
+                        "AND created_at>=? AND created_at<=? ORDER BY created_at", name, since, buy_dt)
+    finally:
+        conn.close()
+    return [(c[5:10], ch or "-") for c, ch in rows]
+
+
 def daybot_candidate(date: str, code: str, path: str = DAYBOT_DB):
     if not os.path.exists(path):
         return None
@@ -145,6 +162,7 @@ def analyze(trades: list, conn, store=None, groups: dict = None, price_fn=None) 
         rp.sector_tags(probe, tml.LOG_DB)
         t["sector"] = probe[0]["sector"]
         t["daybot"] = daybot_candidate(date, t["code"])
+        t["youtube"] = youtube_mentions(t["name"], f"{date} {t['buy_t'][:2]}:{t['buy_t'][2:4]}:{t['buy_t'][4:6]}")
         t["groups"] = member.get(t["code"], [])
         t["bot"] = None
         if store and firsts:
@@ -173,7 +191,8 @@ def report(trades: list, days: int) -> str:
     has = [t for t in trades if t["sig_before"]]
     L.append(f"■ 사기 전에 파이썬 검색식이 잡았음 {len(has)}/{n} · 섹터 상위 1·2등 "
              f"{sum(bool(t['sector']) for t in trades)}/{n} · 데이봇 후보였음 "
-             f"{sum(bool(t['daybot']) for t in trades)}/{n} · 관심그룹 종목 {sum(bool(t['groups']) for t in trades)}/{n}")
+             f"{sum(bool(t['daybot']) for t in trades)}/{n} · 관심그룹 종목 {sum(bool(t['groups']) for t in trades)}/{n} · "
+             f"유튜브 언급({YT_LOOKBACK_DAYS}일 안) {sum(bool(t.get('youtube')) for t in trades)}/{n}")
     for label in ("주도주", "단타000", "3개월수급"):
         k = sum(1 for t in trades if t["sig"][label]["first"])
         L.append(f"   {label:<6} 그날 통과 {k}/{n}")
@@ -225,6 +244,9 @@ def report(trades: list, days: int) -> str:
             extra.append(t["sector"])
         if t["groups"]:
             extra.append("관심:" + "/".join(t["groups"][:3]))
+        if t.get("youtube"):
+            chans = sorted({ch for _, ch in t["youtube"]})
+            extra.append(f"유튜브 {len(t['youtube'])}회(" + ", ".join(chans[:2]) + f"{'…' if len(chans) > 2 else ''})")
         if t["daybot"]:
             extra.append("데이봇 " + t["daybot"])
         if t["bot"]:
