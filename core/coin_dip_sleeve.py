@@ -160,13 +160,27 @@ class DipSleeve:
         return sorted({r[0]: r for r in out}.values())
 
     def _rows(self, market: str) -> list:
+        # ★ 2026-10-08 — 기존엔 "새로 받은 게 비어있지 않으면" 그대로 캐시를
+        #   덮어썼음. 그런데 2라운드만 실패해도 1라운드의 200개(201개 필요,
+        #   하나 모자람)가 "비어있지 않은" 값이라 그대로 덮어써버려서,
+        #   멀쩡히 400개 있던 캐시가 일시적 실패 한 번에 "일봉부족"으로
+        #   퇴화했음(대장 지적 — 하필 가격이 매수선까지 내려온 순간 이게
+        #   터지면, 복구될 때쯘 이미 반등해서 매수 기회를 그대로 날림).
+        #   이제 새로 받은 게 필요 개수보다 적으면 기존 캐시를 유지하고
+        #   타임스탬프도 안 갱신해 다음 루프에 바로 재시도한다.
         ts, rows = self._candles.get(market, (0, []))
         if time.time() - ts > CANDLE_TTL or not rows:
+            need = max(LOOKBACK, TREND_MA) + 1
             try:
-                rows = self._fetch_daily(market) or rows
-                self._candles[market] = (time.time(), rows)
+                fresh = self._fetch_daily(market)
             except Exception as e:
                 print(f"⚠️ 눌림목 일봉 조회 실패 {market}: {e}")
+                fresh = []
+            if len(fresh) >= need or not rows:
+                rows = fresh or rows
+                self._candles[market] = (time.time(), rows)
+            else:
+                print(f"⚠️ 눌림목 일봉 조회 {market} 모자람({len(fresh)}/{need}) — 기존 캐시 유지, 다음 루프 재시도")
         return rows
 
     def _day(self, m: str) -> str:

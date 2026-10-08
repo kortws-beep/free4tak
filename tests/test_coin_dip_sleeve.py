@@ -102,6 +102,45 @@ def sleeve(bot, saved=None):
     return s, store
 
 
+def _candle(date_kst, date_utc, price=100.0):
+    return {"candle_date_time_kst": f"{date_kst}T00:00:00", "candle_date_time_utc": f"{date_utc}T00:00:00",
+            "opening_price": price, "high_price": price, "low_price": price, "trade_price": price}
+
+
+class FetchCache(unittest.TestCase):
+    def test_short_refetch_keeps_good_cache(self):
+        # ★ 2026-10-08 — 2라운드만 실패해도(200개, 201개 필요) 멀쩡한 기존
+        #   캐시(400개)를 덮어쓰면 안 됨(대장 지적 — 하필 매수선 근처일 때
+        #   이게 터지면 복구될 때쯘 반등해서 기회를 놓침).
+        calls = {"n": 0}
+
+        def days(start_offset, n):
+            base = datetime.date(2026, 10, 8) - datetime.timedelta(days=start_offset)
+            return [_candle((base - datetime.timedelta(days=i)).isoformat(),
+                            (base - datetime.timedelta(days=i)).isoformat()) for i in range(n)]
+
+        class S:
+            def get(self, url, params=None, timeout=None):
+                calls["n"] += 1
+                if calls["n"] == 1:
+                    return _Resp(days(0, 200))        # 1라운드: 최근 200일
+                if calls["n"] == 2:
+                    return _Resp(days(200, 200))       # 2라운드: 그 이전 200일(안 겹침, 총 400개)
+                if calls["n"] == 3:
+                    return _Resp(days(0, 200))        # 재조회 1라운드만 성공
+                return _Resp({"error": "rate limited"})                         # 2라운드 실패(리스트 아님)
+
+        D.time.sleep = lambda n: None   # 재시도 대기(1초)·라운드 간(0.12초) 실제로 안 기다림
+        bot = type("B", (), {"session": S()})()
+        s = object.__new__(D.DipSleeve)
+        s.bot, s._candles = bot, {}
+        good = s._rows("KRW-BTC")
+        self.assertGreaterEqual(len(good), 201)
+        s._candles["KRW-BTC"] = (0, good)             # 캐시 만료시킴(새로 조회하게)
+        kept = s._rows("KRW-BTC")
+        self.assertEqual(kept, good, "2라운드 실패로 짧게 받았으면 기존 캐시를 그대로 유지해야 함")
+
+
 class Step(unittest.TestCase):
     def test_buy_skip_when_cbot_holds_and_paused(self):
         bot = FakeBot({m: 89.0 for m in D.DIP_COINS}, {})
