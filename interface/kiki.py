@@ -147,7 +147,7 @@ load_dotenv()
 # ============================================================
 BOT_TOKEN  = os.getenv("DISCORD_BOT_TOKEN")
 CHANNEL_ID = int(os.getenv("DISCORD_CHANNEL_ID", "0"))
-LINA_COMMANDS = ("!섹터", "!주도주", "!단타", "!3개월수급")   # 리나 담당 — 키키는 무시
+LINA_COMMANDS = ("!섹터", "!주도주", "!단타", "!3개월수급", "!국면")   # 리나 담당 — 키키는 무시
 # ★ 2026-10-06: 명령 권한 — 기존엔 채널 ID만 확인해서 그 채널에 글을 쓸 수
 #   있는 누구나 매도/정지/전체재시작/리스크중단을 실행할 수 있었음.
 #   .env에 KIKI_ALLOWED_USER_IDS=디스코드유저ID(쉼표구분)를 넣으면 그 사람만

@@ -73,6 +73,7 @@ from kis_websocket import KisWebSocket
 from kiwoom_api import KiwoomAPI
 from notifier import Notifier
 from daybot_db import DayTradeDB, log_kiwoom_hits, python_scan_hits
+import market_regime   # ★ 2026-10-08 시장 국면(20일선 위 종목 비율)
 
 load_dotenv(_os.path.join(_BASE, ".env"))
 
@@ -173,6 +174,10 @@ SCAN_END_TIME    = "1530"
 #   (13건 승률 85%) — 신규매수는 09:40까지만, 그 뒤엔 보유종목 매도만 본다.
 #   되돌리려면 .env에 DAYBOT_NEW_BUY_END=1530
 NEW_BUY_END_TIME = os.getenv("DAYBOT_NEW_BUY_END", "0940").strip() or "0940"
+# ★ 2026-10-08 대장 결정(스윙 백테스트 시장 국면별): 전 종목 중 20일선 위 비율이 50% 미만인
+#   장에선 추격매수가 본전~손실 → 그런 날은 매수금 절반(멈추면 기회까지 놓쳐서 절반으로).
+#   끄려면 .env에 DAYBOT_WEAK_MARKET_RATIO=1
+WEAK_MARKET_RATIO = float(os.getenv("DAYBOT_WEAK_MARKET_RATIO", "0.5") or 0.5)
 # ★ 2026-10-08 대장 지정 — "정규장에서만 처리하자." 장종료동시마감(15:20~15:30,
 #   시장가 주문이 '129 주문불가시간'으로 거부됨)과 애프터마켓(AFTERHOURS_ORD_DVSN
 #   코드가 실거래로 거부되는 걸 확인 — LG에너지솔루션 손절 10회 연속 실패)
@@ -343,6 +348,7 @@ class DayBot:
         self._holiday_checked = ""
         self._ws_paused       = False   # ★ 2026-10-06 — 주말/휴장일엔 웹소켓도 같이 쉼(아래 run() 참고)
         self._last_scan_ts    = 0.0
+        self._regime          = (None, None)   # (확인한 날, 20일선 위 비율%)
         self._last_manual_check_ts = 0.0
         self._is_paused       = False
         # ★ 2026-10-02 대장 지적 — 스캔 사이클(240초)을 넘나드는 겹침종목
@@ -566,6 +572,21 @@ class DayBot:
     # ============================================================
     # 매수/매도 실행
     # ============================================================
+    def _market_breadth(self):
+        """오늘 처음 부를 때 한 번 계산(전 거래일 종가 기준), 실패하면 None(축소 안 함)."""
+        today = today_str()
+        if self._regime[0] != today:
+            cur = market_regime.latest()
+            b = cur[1] if cur else None
+            self._regime = (today, b)
+            if b is not None:
+                msg = (f"📏 [daybot] 시장 국면 {b:.0f}% ({cur[0]} 종가, 20일선 위 종목 비율) — "
+                       + ("정상 매수" if market_regime.is_strong(b) or WEAK_MARKET_RATIO >= 1
+                          else f"약한 장 → 매수금 {WEAK_MARKET_RATIO:.0%}"))
+                print(msg)
+                self._notify(msg)
+        return self._regime[1]
+
     def _do_buy(self, code: str, name: str, price: float, source_tier: str,
                 is_last_slot: bool = False) -> bool:
         psbl_cash = self.api.get_psbl_order_cash(code, price)
@@ -573,6 +594,10 @@ class DayBot:
             return False
         # ★ 2026-10-06 대장 지정 — 마지막 슬롯은 캡 없이 가용현금 최대까지.
         amount = psbl_cash if is_last_slot else min(BUY_AMT_PER_SLOT, psbl_cash)
+        breadth = self._market_breadth()
+        if WEAK_MARKET_RATIO < 1 and breadth is not None and not market_regime.is_strong(breadth):
+            amount = int(amount * WEAK_MARKET_RATIO)
+            print(f"📏 [daybot] 약한 장(20일선 위 {breadth:.0f}%) — {code} 매수금 {amount:,}원으로 축소")
         ok, orgno, odno, qty = self.api.buy(
             code, price, amount, code_name_map=self.code_name_map,
             psbl_cash=psbl_cash,
