@@ -64,6 +64,13 @@ class Regroup(unittest.TestCase):
         self.assertIn("L0", res["loose"])                                  # 원전 테마지만 따로 놂
         self.assertIn("주달 테마 기준 재편안", R.report(res))
 
+    def test_specific_name(self):
+        themes = {"A": ["반도체", "HBM"], "B": ["반도체", "HBM"], "C": ["반도체"]}
+        themes.update({f"X{k}": ["반도체"] for k in range(20)})            # 반도체는 큰 테마
+        sizes = R.theme_sizes(themes)
+        self.assertEqual(R.name_cluster(["A", "B", "C"], themes, {}, sizes), "HBM")   # 3개 중 2개 = 절반 이상
+        self.assertEqual(R.name_cluster(["A", "C", "X0", "X1"], themes, {}, sizes), "반도체")
+
     def test_size_cap(self):
         res = R.analyze(self.groups, self.prices, self.themes, max_size=3, min_corr=0.35)
         self.assertTrue(all(len(c["members"]) <= 3 for c in res["clusters"]))

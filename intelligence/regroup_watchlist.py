@@ -11,6 +11,7 @@ regroup_watchlist.py — 관심그룹 재편 도우미: 주가가 같이 움직�
   · 정리 대상: 여러 그룹에 중복된 종목 / 지금 그룹과 따로 노는 종목 / 일봉 없는 종목
 제안일 뿐 HTS 관심그룹은 대장이 직접 고친다(같은 결과를 CSV로도 저장).
 실행:  python intelligence/regroup_watchlist.py [--days 120] [--max 12] [--min-corr 0.35]
+       python intelligence/regroup_watchlist.py --group 반도체   (그 그룹만 잘게, 기본 8개씩)
        관심그룹은 backtest/data/watch_groups.json(스윙 백테스트가 저장)을 쓰고, 없거나
        --refresh면 한투에서 다시 읽는다.
 """
@@ -138,8 +139,19 @@ def avg_corr(members: list, sim: dict):
     return sum(vs) / len(vs) if vs else None
 
 
-def name_cluster(members: list, themes: dict, cur_groups: dict) -> str:
-    """묶음 이름: 가장 흔한 테마(절반 이상이면) + 가장 흔한 지금 관심그룹."""
+def theme_sizes(themes: dict) -> dict:
+    """{테마: 전체 종목 수} — 작을수록 구체적인 테마(예: 반도체 > HBM)."""
+    out = {}
+    for ts in themes.values():
+        for t in ts:
+            out[t] = out.get(t, 0) + 1
+    return out
+
+
+def name_cluster(members: list, themes: dict, cur_groups: dict, sizes: dict = None) -> str:
+    """묶음 이름: 묶음 절반 이상(최소 2개)이 속한 주달 테마 중 가장 구체적인 것(전체 종목 수가
+    가장 적은 것) + 가장 흔한 지금 관심그룹. ★ 2026-10-10 대장: 한투는 반도체를 뭉뚱그려
+    구분이 안 됨 → 가장 흔한 테마 대신 가장 구체적인 테마를 이름으로."""
     tc, gc = {}, {}
     for c in members:
         for t in themes.get(c, []):
@@ -148,10 +160,11 @@ def name_cluster(members: list, themes: dict, cur_groups: dict) -> str:
             if g.strip().lower() not in NEW_GROUP_NAMES:
                 gc[g] = gc.get(g, 0) + 1
     parts = []
-    if tc:
-        t, n = max(tc.items(), key=lambda x: x[1])
-        if n >= max(2, len(members) // 2):
-            parts.append(t)
+    need = max(2, (len(members) + 1) // 2)
+    cover = [t for t, n in tc.items() if n >= need]
+    if cover:
+        sizes = sizes or {}
+        parts.append(min(cover, key=lambda t: (sizes.get(t, 10**6), -tc[t])))
     if gc:
         parts.append("지금 " + max(gc.items(), key=lambda x: x[1])[0])
     return " · ".join(parts) or "이름 없음"
@@ -227,6 +240,7 @@ def analyze(groups: dict, prices: dict, themes: dict, max_size: int = MAX_SIZE, 
             if v is not None:
                 sim[(a, b)] = v
     clusters = cluster(codes, sim, max_size, min_corr)
+    sizes = theme_sizes(themes)
     info = {}
     for c in codes:
         rows = prices[c]
@@ -236,7 +250,7 @@ def analyze(groups: dict, prices: dict, themes: dict, max_size: int = MAX_SIZE, 
     result = []
     for m in clusters:
         m = sorted(m, key=lambda c: -info[c]["val20"])
-        result.append({"name": name_cluster(m, themes, cur), "members": m, "avg": avg_corr(m, sim)})
+        result.append({"name": name_cluster(m, themes, cur, sizes), "members": m, "avg": avg_corr(m, sim)})
     # 지금 그룹과 따로 노는 종목: 같은 그룹 다른 종목들과 평균 상관이 낮음
     loners = []
     for g, stocks in groups.items():
@@ -326,6 +340,14 @@ def main():
     MAX_SIZE = int(a[a.index("--max") + 1]) if "--max" in a else MAX_SIZE
     MIN_CORR = float(a[a.index("--min-corr") + 1]) if "--min-corr" in a else MIN_CORR
     groups = load_groups("--refresh" in a)
+    if "--group" in a:                    # 큰 그룹 하나만 세분화(예: --group 반도체)
+        kw = a[a.index("--group") + 1]
+        groups = {g: v for g, v in groups.items() if kw in g}
+        if not groups:
+            print(f"'{kw}'가 들어간 관심그룹이 없어")
+            return
+        if "--max" not in a:
+            MAX_SIZE = 8                      # 세분화는 더 잘게
     names = {c: n for stocks in groups.values() for c, n in stocks}
     print(f"관심그룹 {len(groups)}개 · 종목 {len(names)}개 — 일봉 {days}일로 상관 계산 중…")
     res = analyze(groups, load_prices(names, days), load_themes(), MAX_SIZE, MIN_CORR)
