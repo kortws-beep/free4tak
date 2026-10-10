@@ -89,6 +89,18 @@ class Regroup(unittest.TestCase):
         self.assertNotIn("S1", res["missing"])                    # 55 ≥ 60×0.8
         self.assertIn("N0", res["missing"])                        # 20개는 빠짐
 
+    def test_proposal_and_cohesion(self):
+        prop = R.parse_proposal("# 주석\n반도체: 반0, 반1, 반2\n섞임: 반3, 전1, 혼자\n오타: 없는종목\n")
+        self.assertEqual(prop["반도체"], ["반0", "반1", "반2"])
+        names = {c: n for v in self.groups.values() for c, n in v}
+        pg, unknown = R.resolve_proposal(prop, {n: c for c, n in names.items()})
+        self.assertEqual(unknown, ["오타:없는종목"])
+        res = R.analyze(self.groups, self.prices, self.themes)
+        rows = R.cohesion(pg, res["codes"], res["sim"])
+        self.assertEqual([g for g, *_ in rows], ["섞임", "반도체"])          # 결속 낮은 순
+        self.assertGreater(rows[1][2], 0.8); self.assertLess(rows[0][2], 0.4)
+        self.assertIn("⚠️섞임", R.format_cohesion(rows, names, "t"))
+
     def test_size_cap(self):
         res = R.analyze(self.groups, self.prices, self.themes, max_size=3, min_corr=0.35)
         self.assertTrue(all(len(c["members"]) <= 3 for c in res["clusters"]))

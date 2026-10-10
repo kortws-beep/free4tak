@@ -212,6 +212,56 @@ def name_cluster(members: list, themes: dict, cur_groups: dict, sizes: dict = No
     return " · ".join(parts) or "이름 없음"
 
 
+def cohesion(groups: dict, rets_codes: list, sim: dict) -> list:
+    """그룹별 결속도 [(그룹, 종목수, 평균 상관, [(code, 그룹 내 적합도)] 낮은 순)] — 결속 낮은 순.
+    재편 뒤 '잘 묶였나' 확인용(2026-10-10). NEW 그룹 제외."""
+    fits = group_fit(groups, rets_codes, sim)
+    out = []
+    for g, stocks in groups.items():
+        if g.strip().lower() in NEW_GROUP_NAMES:
+            continue
+        ms = [(c, fits.get(c, {}).get(g)) for c, _ in stocks]
+        ms = [(c, f) for c, f in ms if f is not None]
+        if len(ms) >= 2:
+            out.append((g, len(stocks), sum(f for _, f in ms) / len(ms), sorted(ms, key=lambda x: x[1])))
+    return sorted(out, key=lambda x: x[2])
+
+
+def parse_proposal(text: str) -> dict:
+    """'그룹: 종목, 종목' 줄들 → {그룹: [종목명]} (# 줄·빈 줄 무시)."""
+    out = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or ":" not in line:
+            continue
+        g, rest = line.split(":", 1)
+        out[g.strip()] = [n.strip() for n in rest.split(",") if n.strip()]
+    return out
+
+
+def resolve_proposal(prop: dict, name_code: dict) -> tuple:
+    """종목명 → 코드. → ({그룹: [(code, name)]}, [못 찾은 이름])"""
+    groups, unknown = {}, []
+    for g, names in prop.items():
+        for n in names:
+            c = name_code.get(n)
+            if c:
+                groups.setdefault(g, []).append((c, n))
+            else:
+                unknown.append(f"{g}:{n}")
+    return groups, unknown
+
+
+def format_cohesion(rows: list, names: dict, title: str) -> str:
+    L = [f"\n■ {title} — 그룹별 결속도(그룹 안 평균 상관, 낮은 그룹부터) · 각 그룹 가장 안 맞는 종목 3개"]
+    for g, n, avg, ms in rows:
+        weak = ", ".join(f"{names.get(c, c)} {f:.2f}" for c, f in ms[:3])
+        flag = "⚠️" if avg < 0.4 else "  "
+        L.append(f"   {flag}{g:<22} {n:>2}종목 · 결속 {avg:.2f} | 약한 종목: {weak}")
+    L.append("   ※ 결속 0.4 미만(⚠️)은 그룹이 섞였다는 뜻 · 약한 종목이 0.3 밑이면 다른 그룹 후보")
+    return "\n".join(L)
+
+
 # ── 데이터 ────────────────────────────────────────────────
 def load_groups(refresh: bool) -> dict:
     if not refresh and os.path.exists(GROUPS_JSON):
@@ -313,7 +363,7 @@ def analyze(groups: dict, prices: dict, themes: dict, max_size: int = MAX_SIZE, 
     missing = [c for c in cur if c not in rets]
     by_theme, loose = theme_assign(codes, themes, sim)
     fits = group_fit(groups, codes, sim)
-    return {"fits": fits, "clusters": result, "info": info, "names": names, "cur": cur, "loners": loners,
+    return {"fits": fits, "sim": sim, "codes": codes, "clusters": result, "info": info, "names": names, "cur": cur, "loners": loners,
             "dups": dups, "missing": missing, "n": len(codes), "by_theme": by_theme, "loose": loose,
             "no_theme": [c for c in codes if not themes.get(c)]}
 
@@ -415,7 +465,24 @@ def main():
     names = {c: n for stocks in groups.values() for c, n in stocks}
     print(f"관심그룹 {len(groups)}개 · 종목 {len(names)}개 — 일봉 {days}일로 상관 계산 중…")
     res = analyze(groups, load_prices(names, days), load_themes(), MAX_SIZE, MIN_CORR)
+    if "--proposal" in a:                 # 재편안 파일 점검 + HTS 입력용 코드 목록
+        with open(a[a.index("--proposal") + 1], encoding="utf-8") as f:
+            prop = parse_proposal(f.read())
+        pg, unknown = resolve_proposal(prop, {n: c for c, n in names.items()})
+        print(format_cohesion(cohesion(pg, res["codes"], res["sim"]), names, f"재편안 {len(pg)}개 그룹 점검"))
+        placed = {c for v in pg.values() for c, _ in v}
+        left = [n for c, n in names.items() if c not in placed and
+                not all(g.strip().lower() in NEW_GROUP_NAMES for g in res["cur"].get(c, []))]
+        if unknown:
+            print(f"\n⚠️ 이름으로 못 찾은 종목 {len(unknown)}개(지금 관심그룹에 없는 이름·오타): " + ", ".join(unknown))
+        if left:
+            print(f"\n· 재편안에 안 들어간 종목 {len(left)}개(NEW 전용 제외): " + ", ".join(left))
+        print("\n■ HTS 입력용 — 그룹별 종목코드")
+        for g, v in pg.items():
+            print(f"[{g}] ({len(v)}) " + " ".join(c for c, _ in v))
+        return
     print(report(res))
+    print(format_cohesion(cohesion(groups, res["codes"], res["sim"]), names, "지금 관심그룹"))
     save_csv(res)
     print(f"\n💾 CSV 저장: {OUT_CSV} (엑셀로 열어 정리용)")
 
