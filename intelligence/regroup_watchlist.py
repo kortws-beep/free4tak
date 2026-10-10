@@ -28,7 +28,9 @@ import three_month_leader as tml
 GROUPS_JSON = os.path.join(tml._BASE, "backtest", "data", "watch_groups.json")
 OUT_CSV = os.path.join(tml._BASE, "intelligence", "regroup_suggestion.csv")
 DAYS = 120          # 상관 계산 기간(거래일)
-MIN_DAYS = 60       # 이보다 일봉이 적으면 계산에서 뺌(신규 상장 등)
+MIN_DAYS_RATIO = 0.8  # 받은 기간의 80% 미만 일봉이면 계산에서 뺌(신규 상장 등)
+# ★ 2026-10-10 — 예전엔 고정 60개였는데 --days 60이면 휴장·수집 빠진 날 때문에 전 종목이
+#   58~59개라 229종목이 전부 "일봉 없음"으로 빠졌음(대장 실행 결과로 발견).
 MAX_SIZE = 12       # 묶음 최대 종목 수 — 대장 "분야별 10개 정도"
 MIN_CORR = 0.35     # 묶음 사이 평균 상관이 이보다 낮으면 더 안 합침
 NEW_GROUP_NAMES = ("new", "신규추천", "신규", "new추천")
@@ -263,15 +265,19 @@ def load_themes(db: str = tml.THEME_DB) -> dict:
 
 
 # ── 실행 ──────────────────────────────────────────────────
-def analyze(groups: dict, prices: dict, themes: dict, max_size: int = MAX_SIZE, min_corr: float = MIN_CORR):
+def analyze(groups: dict, prices: dict, themes: dict, max_size: int = MAX_SIZE, min_corr: float = MIN_CORR,
+            min_days: int = None):
     cur = {}
     names = {}
     for g, stocks in groups.items():
         for c, n in stocks:
             cur.setdefault(c, []).append(g)
             names[c] = n
+    if min_days is None:
+        longest = max((len(r) for r in prices.values()), default=0)
+        min_days = max(20, int(longest * MIN_DAYS_RATIO))
     rets = {c: returns([(d, cl) for d, cl, _ in rows]) for c, rows in prices.items()
-            if len(rows) >= MIN_DAYS}
+            if len(rows) >= min_days}
     codes = sorted(rets)
     sim = {}
     for x, a in enumerate(codes):

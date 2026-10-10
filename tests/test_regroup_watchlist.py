@@ -82,6 +82,13 @@ class Regroup(unittest.TestCase):
         out = R.report(res)
         self.assertIn("→ 주 그룹 업종6_전력", out)
 
+    def test_min_days_relative(self):
+        short = {k: v[:60] for k, v in self.prices.items()}       # 60일치만(일부 결측 가정)
+        short["S1"] = short["S1"][:55]
+        res = R.analyze(self.groups, short, self.themes)
+        self.assertNotIn("S1", res["missing"])                    # 55 ≥ 60×0.8
+        self.assertIn("N0", res["missing"])                        # 20개는 빠짐
+
     def test_size_cap(self):
         res = R.analyze(self.groups, self.prices, self.themes, max_size=3, min_corr=0.35)
         self.assertTrue(all(len(c["members"]) <= 3 for c in res["clusters"]))
