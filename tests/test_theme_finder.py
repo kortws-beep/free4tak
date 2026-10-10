@@ -13,7 +13,7 @@ ROWS = [("000001", "가로봇", "로봇(감속기)"), ("000001", "가로봇", "�
 
 def px(trend, val):
     rows, p = [], 100.0
-    for i in range(30):
+    for i in range(45):
         p *= 1 + trend + (0.01 if i % 2 else -0.01)
         rows.append((f"d{i:02d}", p, val))
     return rows
