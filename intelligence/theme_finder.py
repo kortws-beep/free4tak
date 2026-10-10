@@ -7,11 +7,13 @@ theme_finder.py — 주달 테마로 새 관심그룹 종목 찾기 (2026-10-10)
 키워드가 들어간 테마의 종목을 모아, 고르기 쉽게 보여준다.
   · 어떤 테마에서 걸렸는지, 지금 어느 관심그룹에 있는지
   · 최근 20일 수익률, 20일 평균 거래대금(큰 순 정렬 — 대장 후보가 위로)
-  · 그 종목들끼리 같이 움직이는 정도(평균 상관) — 낮으면 이름만 같은 테마
+  · 그 종목들끼리 같이 움직이는 정도(평균 상관) — 0.3(--min-fit) 미만은 이름만 같은
+    테마라 자동 제외(--ref 모드는 기준 종목과의 상관이 핵심이라 이 필터 안 걸음)
   · 마지막 줄에 HTS 입력용 종목코드
 실행:  python intelligence/theme_finder.py 탈모
        python intelligence/theme_finder.py 로봇 --and 현대     (로봇 테마이면서 현대 테마에도 있는 종목)
        python intelligence/theme_finder.py --list 로봇          (키워드 들어간 테마 이름만)
+       python intelligence/theme_finder.py 로봇 --min-fit 0.4   (제외 기준 '같이' 임계값 조정, 기본 0.3)
        python intelligence/theme_finder.py 로봇 --ref 현대무벡스 현대위아
            (로봇 테마 종목을 기준 종목들과 같이 움직이는 순으로 — 테마 교집합이 없을 때.
             주달 '현대자동차그룹'은 계열사뿐이라 로봇 부품 협력사는 주가로 찾아야 함, 2026-10-10)
@@ -26,6 +28,9 @@ import three_month_leader as tml
 import regroup_watchlist as rw
 
 DAYS = 60
+MIN_FIT = 0.3   # ★ 2026-10-10 대장: 거래대금 순으로 보여주되 '같이'(서로 평균 상관) 이 미만은 자동 제외
+                #   (이름만 테마고 따로 움직이는 종목 — 신규/누락 테마에 넣을 후보를 고를 때).
+                #   --ref 모드는 기준 종목과의 상관이 핵심 지표라 이 필터를 적용하지 않음.
 
 
 def load_theme_rows(db: str = tml.THEME_DB) -> list:
@@ -77,8 +82,9 @@ def current_groups() -> dict:
     return out
 
 
-def report(found: dict, prices: dict, cur: dict, title: str, ref: dict = None) -> str:
-    """ref: {기준 종목 코드: 수익률} — 있으면 기준과 같이 움직이는 순으로 정렬."""
+def report(found: dict, prices: dict, cur: dict, title: str, ref: dict = None, min_fit: float = MIN_FIT) -> str:
+    """ref: {기준 종목 코드: 수익률} — 있으면 기준과 같이 움직이는 순으로 정렬.
+    ref가 없으면 '같이'(후보끼리 평균 상관) < min_fit인 종목은 자동 제외(이름만 테마인 종목 걸러내기)."""
     info = {}
     rets = {}
     for c in found:
@@ -103,9 +109,15 @@ def report(found: dict, prices: dict, cur: dict, title: str, ref: dict = None) -
         vs = [rw.corr(rets[c], rets[o]) for o in have if o != c]
         vs = [v for v in vs if v is not None]
         fit[c] = sum(vs) / len(vs) if vs else None
-    allf = [v for v in fit.values() if v is not None]
-    L = [f"🔎 {title} — {len(found)}종목 ({'기준 종목과 같이 움직이는 순' if ref else '20일 거래대금 큰 순'})"
-         + (f" · 서로 같이 움직이는 정도 평균 {sum(allf) / len(allf):.2f}" if allf else "")]
+    excluded = 0
+    if not ref:
+        kept = [c for c in codes if fit.get(c) is not None and fit[c] >= min_fit]
+        excluded = len(codes) - len(kept)
+        codes = kept
+    allf = [fit[c] for c in codes if fit.get(c) is not None]
+    L = [f"🔎 {title} — {len(codes)}종목 ({'기준 종목과 같이 움직이는 순' if ref else '20일 거래대금 큰 순'})"
+         + (f" · 서로 같이 움직이는 정도 평균 {sum(allf) / len(allf):.2f}" if allf else "")
+         + (f" · 같이 {min_fit} 미만 {excluded}개 제외" if excluded else "")]
     for c in codes:
         i = info.get(c, {})
         r = f"{i['r20']:+.1f}%" if i.get("r20") is not None else "  -  "
@@ -115,9 +127,11 @@ def report(found: dict, prices: dict, cur: dict, title: str, ref: dict = None) -
         rf = (f" · 기준과 {refc[c]:.2f}" if refc.get(c) is not None else " · 기준과  - ") if ref else ""
         L.append(f"   {found[c]['name']:<14}({c}) 20일 {r:>7} · 대금 {val:>6} · 같이 {f}{rf} · 지금 {g}"
                  f" · 테마: {', '.join(found[c]['themes'][:2])}")
-    L.append("   ※ '같이' 0.3 미만은 테마 이름만 같고 따로 움직이는 종목 — 그룹에서 빼는 게 나음")
     if ref:
+        L.append("   ※ '같이' 0.3 미만은 테마 이름만 같고 따로 움직이는 종목 — 그룹에서 빼는 게 나음")
         L.append("   ※ '기준과' = 기준 종목들과 평균 상관. 0.4 이상이면 같이 움직이는 편")
+    if not codes:
+        L.append("   (후보는 있었지만 전부 서로 따로 움직여서 뺐어 — --ref 로 기준 종목을 주면 그 기준과 비교)")
     L.append(f"\n■ HTS 입력용({'기준과 같이 움직이는 순' if ref else '거래대금 큰 순'}): " + " ".join(codes))
     return "\n".join(L)
 
@@ -143,6 +157,10 @@ def main():
     if "--and" in a:
         k = a.index("--and")
         and_kw, a = a[k + 1:], a[:k]
+    min_fit = MIN_FIT
+    if "--min-fit" in a:
+        k = a.index("--min-fit")
+        min_fit, a = float(a[k + 1]), a[:k]
     found = find(rows, a, and_kw)
     if not found:
         if and_kw and find(rows, a):
@@ -169,7 +187,7 @@ def main():
         ref = {c: rw.returns([(d, cl) for d, cl, _ in prices[c]]) for c in ref_codes if c in prices}
     title = (f"'{' '.join(a)}' 테마" + (f" ∩ '{' '.join(and_kw)}' 테마" if and_kw else "")
              + (f" · 기준: {', '.join(ref_names)}" if ref_names else ""))
-    print(report(found, prices, current_groups(), title, ref))
+    print(report(found, prices, current_groups(), title, ref, min_fit))
 
 
 if __name__ == "__main__":

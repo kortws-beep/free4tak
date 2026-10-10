@@ -34,6 +34,28 @@ class Finder(unittest.TestCase):
         self.assertIn("지금 업종3_제약바이오", out)
         self.assertTrue(out.rstrip().endswith("000004 000003"))
 
+    def _trio(self):
+        """같이 움직이는 둘(000003/000005) + 정반대로 움직이는 하나(000004)."""
+        found = {"000003": {"name": "다탈모", "themes": ["탈모"]},
+                 "000005": {"name": "마탈모", "themes": ["탈모"]},
+                 "000004": {"name": "라제약", "themes": ["탈모 치료제"]}}
+        lone = [(d, 100.0 * (-1) ** i, v) for i, (d, _, v) in enumerate(px(0.0, 20e9))]
+        prices = {"000003": px(0.002, 5e9), "000005": px(0.002, 3e9), "000004": lone}
+        return found, prices
+
+    def test_low_fit_candidate_excluded(self):
+        # ★ 2026-10-10 대장: "같이 0.3 미만인 종목은 빼면 돼" — 거래대금이 커도 따로 움직이면 자동 제외.
+        found, prices = self._trio()
+        out = T.report(found, prices, {}, "탈모")
+        self.assertIn("2종목", out); self.assertIn("같이 0.3 미만 1개 제외", out)
+        self.assertIn("다탈모", out); self.assertIn("마탈모", out); self.assertNotIn("라제약", out)
+        self.assertTrue(out.rstrip().endswith("HTS 입력용(거래대금 큰 순): 000003 000005"))
+
+    def test_all_excluded_shows_hint(self):
+        found, prices = self._trio()
+        out = T.report(found, prices, {}, "탈모", min_fit=1.1)
+        self.assertIn("전부 서로 따로 움직여서 뺐어", out)
+
 
 class Ref(unittest.TestCase):
     def test_ref_sorting(self):
