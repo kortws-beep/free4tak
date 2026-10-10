@@ -30,6 +30,9 @@ class Regroup(unittest.TestCase):
                        "업종6_전력": [("P0", "전0"), ("P1", "전1"), ("P2", "전2"), ("P3", "전3")],
                        "new": [("S3", "반3"), ("S4", "반4"), ("N0", "신규")]}
         self.themes = {f"S{k}": ["반도체"] for k in range(5)}
+        self.themes.update({f"P{k}": ["전력설비", "원전"] for k in range(4)})
+        self.themes["S0"] = ["반도체", "원전"]                 # 두 테마에 걸린 종목
+        self.themes["L0"] = ["원전"]
 
     def _r(self, k):
         return R.returns([(d, c) for d, c, _ in self.prices[k]])
@@ -52,6 +55,14 @@ class Regroup(unittest.TestCase):
         self.assertIn(("업종2_반도체", "L0"), [(g, c) for g, c, _ in res["loners"]])
         out = R.report(res)
         self.assertIn("혼자 움직이는 종목 1개", out); self.assertIn("👑", out)
+
+    def test_theme_assign(self):
+        res = R.analyze(self.groups, self.prices, self.themes, max_size=12, min_corr=0.35)
+        bt = {t: sorted(c for c, _ in ms) for t, ms in res["by_theme"].items()}
+        self.assertEqual(bt["반도체"], ["S0", "S1", "S2", "S3", "S4"])      # S0는 원전보다 반도체와 같이 움직임
+        self.assertNotIn("S0", [c for c, _ in res["by_theme"].get("원전", [])])
+        self.assertIn("L0", res["loose"])                                  # 원전 테마지만 따로 놂
+        self.assertIn("주달 테마 기준 재편안", R.report(res))
 
     def test_size_cap(self):
         res = R.analyze(self.groups, self.prices, self.themes, max_size=3, min_corr=0.35)

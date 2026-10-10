@@ -4,8 +4,9 @@ import time
 from bs4 import BeautifulSoup
 from curl_cffi import requests
 
-# 대장의 통합 DB 파일 이름
-DB_PATH = "kr_theme_finance.db"
+# 대장의 통합 DB 파일 이름 (★ 2026-10-10 — 이 파일 옆 기준으로 고정, 어디서 실행해도 같은 DB)
+import os
+DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "kr_theme_finance.db")
 BASE_URL = "https://www.judal.co.kr"
 
 def init_db():
@@ -85,6 +86,16 @@ def crawl_judal():
                     if clean_stock and not clean_stock.isdigit():
                         stocks.add(clean_stock)
             
+            # ★ 2026-10-10 — 예전엔 추가만 해서(INSERT OR IGNORE) 테마에서 빠진 종목이 계속
+            #   남았음(관심그룹 재편 중 발견). 새로 읽은 목록이 충분하면 그 테마를 통째로 교체,
+            #   너무 적으면(사이트 구조 변경·일시 오류) 기존 데이터를 지킨다.
+            prev = cursor.execute("SELECT COUNT(*) FROM kr_theme_stocks WHERE theme_name=?",
+                                  (theme_name,)).fetchone()[0]
+            if stocks and (len(stocks) >= 3 or len(stocks) >= prev * 0.5):
+                cursor.execute("DELETE FROM kr_theme_stocks WHERE theme_name=?", (theme_name,))
+            elif prev:
+                print(f"   ⚠️ '{theme_name}' {len(stocks)}종목만 읽힘(기존 {prev}) — 기존 유지")
+                continue
             for stock in stocks:
                 try:
                     cursor.execute("""

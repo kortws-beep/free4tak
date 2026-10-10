@@ -106,6 +106,32 @@ def cluster(codes: list, sim: dict, max_size: int = MAX_SIZE, min_corr: float = 
     return sorted(groups.values(), key=len, reverse=True)
 
 
+def theme_assign(codes: list, themes: dict, sim: dict, min_members: int = 3, min_fit: float = 0.2) -> tuple:
+    """주달 테마 기준 재편(2026-10-10 대장: "주달 테마로 정리"). 한 종목이 여러 테마에 걸린 게
+    얽힘의 원인 → 종목마다 자기 테마들 중 그 테마의 다른 관심종목들과 평균 상관(fit)이
+    가장 높은 테마 하나에 배정. 관심종목이 min_members개 미만인 테마는 후보에서 뺌.
+    → ({테마: [(code, fit)]}, [어느 테마와도 fit < min_fit인 코드])"""
+    members = {}
+    for c in codes:
+        for t in themes.get(c, []):
+            members.setdefault(t, []).append(c)
+    members = {t: cs for t, cs in members.items() if len(cs) >= min_members}
+
+    def fit(c, t):
+        vs = [sim.get((c, o) if c < o else (o, c)) for o in members[t] if o != c]
+        vs = [v for v in vs if v is not None]
+        return sum(vs) / len(vs) if vs else None
+    out, loose = {}, []
+    for c in codes:
+        cand = [(f, t) for t in themes.get(c, []) if t in members for f in [fit(c, t)] if f is not None]
+        if not cand or max(cand)[0] < min_fit:
+            loose.append(c)
+            continue
+        f, t = max(cand)
+        out.setdefault(t, []).append((c, f))
+    return out, loose
+
+
 def avg_corr(members: list, sim: dict):
     vs = [sim.get((a, b) if a < b else (b, a)) for x, a in enumerate(members) for b in members[x + 1:]]
     vs = [v for v in vs if v is not None]
@@ -225,8 +251,10 @@ def analyze(groups: dict, prices: dict, themes: dict, max_size: int = MAX_SIZE, 
     dups = {c: gs for c, gs in cur.items()
             if len([g for g in gs if g.strip().lower() not in NEW_GROUP_NAMES]) >= 2}
     missing = [c for c in cur if c not in rets]
+    by_theme, loose = theme_assign(codes, themes, sim)
     return {"clusters": result, "info": info, "names": names, "cur": cur, "loners": loners,
-            "dups": dups, "missing": missing, "n": len(codes)}
+            "dups": dups, "missing": missing, "n": len(codes), "by_theme": by_theme, "loose": loose,
+            "no_theme": [c for c in codes if not themes.get(c)]}
 
 
 def report(res: dict) -> str:
@@ -244,6 +272,22 @@ def report(res: dict) -> str:
             lead = "👑" if k == 0 else "  "
             L.append(f"   {lead}{nm.get(code, code)}({code}) 20일 "
                      + (f"{r:+.1f}%" if r is not None else "-") + f" · 지금: {gs}")
+    if res.get("by_theme"):
+        L.append(f"\n■■ 주달 테마 기준 재편안 — 종목마다 가장 같이 움직이는 주달 테마 하나에 배정 "
+                 f"({len(res['by_theme'])}개 테마)")
+        for t, ms in sorted(res["by_theme"].items(), key=lambda x: -len(x[1])):
+            ms = sorted(ms, key=lambda x: -info[x[0]]["val20"])
+            coh = sum(f for _, f in ms) / len(ms)
+            L.append(f"   [{t}] {len(ms)}종목 · 결속도 {coh:.2f}")
+            L.append("      " + ", ".join(f"{'👑' if k == 0 else ''}{nm.get(c, c)}({f:.2f})"
+                                          for k, (c, f) in enumerate(ms)))
+        if res.get("loose"):
+            L.append(f"   어느 주달 테마와도 같이 안 움직임 {len(res['loose'])}개: "
+                     + ", ".join(nm.get(c, c) for c in res["loose"][:40]))
+        if res.get("no_theme"):
+            L.append(f"   주달 테마 정보 없음 {len(res['no_theme'])}개(신규·수집 전): "
+                     + ", ".join(nm.get(c, c) for c in res["no_theme"][:40]))
+        L.append("   ※ 괄호 숫자 = 그 테마 다른 관심종목들과 평균 상관(높을수록 같이 움직임)")
     if solo:
         L.append(f"\n■ 혼자 움직이는 종목 {len(solo)}개 (누구와도 상관 {MIN_CORR} 미만 — 개별 재료주이거나 정리 후보)")
         L.append("   " + ", ".join(nm.get(c, c) for c in solo))
