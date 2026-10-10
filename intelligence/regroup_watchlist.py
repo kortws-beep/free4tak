@@ -133,6 +133,46 @@ def theme_assign(codes: list, themes: dict, sim: dict, min_members: int = 3, min
     return out, loose
 
 
+BOTH_MARGIN = 0.10     # 두 그룹 적합도 차이가 이 안이면 "둘 다 유지"
+MOVE_MARGIN = 0.15     # 다른 그룹이 지금 그룹보다 이만큼 더 맞으면 "옮길 후보"
+
+
+def group_fit(groups: dict, codes: list, sim: dict) -> dict:
+    """{code: {그룹: 그 그룹 다른 종목들과 평균 상관}} — NEW 그룹 제외, 비교할 종목 2개 이상만.
+    ★ 2026-10-10 대장: 반도체·방산·우주에 같이 걸린 종목은 사람이 분류하기 어려움 → 지금
+    어느 그룹과 실제로 같이 움직이는지 숫자로."""
+    have = set(codes)
+    mem = {g: [c for c, _ in v if c in have] for g, v in groups.items()
+           if g.strip().lower() not in NEW_GROUP_NAMES}
+    out = {}
+    for c in codes:
+        fits = {}
+        for g, ms in mem.items():
+            vs = [sim.get((c, o) if c < o else (o, c)) for o in ms if o != c]
+            vs = [v for v in vs if v is not None]
+            if len(vs) >= 2:
+                fits[g] = sum(vs) / len(vs)
+        out[c] = fits
+    return out
+
+
+def placement(fits: dict, current: list) -> tuple:
+    """(판정, 주 그룹) — 판정: "둘 다 유지" / "주 그룹만" / "옮길 후보" / ""."""
+    cur = [g for g in current if g in fits]
+    if not fits:
+        return "", None
+    best = max(fits, key=fits.get)
+    ranked = sorted(fits.values(), reverse=True)
+    if len(cur) >= 2:
+        top2 = sorted(cur, key=fits.get, reverse=True)[:2]
+        if fits[top2[0]] - fits[top2[1]] <= BOTH_MARGIN:
+            return "둘 다 유지", top2[0]
+        return "주 그룹만", top2[0]
+    if cur and best not in cur and fits[best] - fits[cur[0]] >= MOVE_MARGIN:
+        return "옮길 후보", best
+    return "", (cur[0] if cur else best) if ranked else None
+
+
 def avg_corr(members: list, sim: dict):
     vs = [sim.get((a, b) if a < b else (b, a)) for x, a in enumerate(members) for b in members[x + 1:]]
     vs = [v for v in vs if v is not None]
@@ -266,7 +306,8 @@ def analyze(groups: dict, prices: dict, themes: dict, max_size: int = MAX_SIZE, 
             if len([g for g in gs if g.strip().lower() not in NEW_GROUP_NAMES]) >= 2}
     missing = [c for c in cur if c not in rets]
     by_theme, loose = theme_assign(codes, themes, sim)
-    return {"clusters": result, "info": info, "names": names, "cur": cur, "loners": loners,
+    fits = group_fit(groups, codes, sim)
+    return {"fits": fits, "clusters": result, "info": info, "names": names, "cur": cur, "loners": loners,
             "dups": dups, "missing": missing, "n": len(codes), "by_theme": by_theme, "loose": loose,
             "no_theme": [c for c in codes if not themes.get(c)]}
 
@@ -305,10 +346,27 @@ def report(res: dict) -> str:
     if solo:
         L.append(f"\n■ 혼자 움직이는 종목 {len(solo)}개 (누구와도 상관 {MIN_CORR} 미만 — 개별 재료주이거나 정리 후보)")
         L.append("   " + ", ".join(nm.get(c, c) for c in solo))
+    fits = res.get("fits", {})
     if res["dups"]:
-        L.append(f"\n■ 여러 그룹에 중복된 종목 {len(res['dups'])}개 (NEW 제외)")
-        for c, gs in sorted(res["dups"].items(), key=lambda x: -len(x[1]))[:30]:
-            L.append(f"   {nm.get(c, c)}: {' / '.join(gs)}")
+        L.append(f"\n■ 여러 그룹에 걸친 종목 {len(res['dups'])}개 — 그룹별 같이 움직이는 정도(평균 상관)")
+        for c, gs in sorted(res["dups"].items(), key=lambda x: -len(x[1])):
+            f = fits.get(c, {})
+            verdict, main = placement(f, gs)
+            parts = " / ".join(f"{g} {f[g]:.2f}" if g in f else f"{g} -" for g in gs
+                               if g.strip().lower() not in NEW_GROUP_NAMES)
+            tail = {"둘 다 유지": "→ 비슷하게 같이 움직임, 둘 다 유지",
+                    "주 그룹만": f"→ 주 그룹 {main}"}.get(verdict, "")
+            L.append(f"   {nm.get(c, c)}: {parts} {tail}")
+    moves = []
+    for c, f in fits.items():
+        verdict, best = placement(f, [g for g in cur.get(c, []) if g.strip().lower() not in NEW_GROUP_NAMES])
+        if verdict == "옮길 후보":
+            now = [g for g in cur.get(c, []) if g in f]
+            moves.append((nm.get(c, c), now[0], f[now[0]], best, f[best]))
+    if moves:
+        L.append(f"\n■ 다른 그룹과 더 같이 움직이는 종목 {len(moves)}개 (차이 {MOVE_MARGIN} 이상 — 옮기거나 추가 후보)")
+        for n_, g0, f0, g1, f1 in sorted(moves, key=lambda x: x[4] - x[2], reverse=True):
+            L.append(f"   {n_}: 지금 {g0} {f0:.2f} → {g1} {f1:.2f}")
     if res["loners"]:
         L.append(f"\n■ 지금 그룹과 따로 노는 종목 {len(res['loners'])}개 (같은 그룹 종목들과 평균 상관 0.15 미만)")
         for g, c, v in sorted(res["loners"]):

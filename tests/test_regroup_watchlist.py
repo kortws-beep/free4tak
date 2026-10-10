@@ -71,6 +71,17 @@ class Regroup(unittest.TestCase):
         self.assertEqual(R.name_cluster(["A", "B", "C"], themes, {}, sizes), "HBM")   # 3개 중 2개 = 절반 이상
         self.assertEqual(R.name_cluster(["A", "C", "X0", "X1"], themes, {}, sizes), "반도체")
 
+    def test_group_fit_and_placement(self):
+        res = R.analyze(self.groups, self.prices, self.themes, max_size=12, min_corr=0.35)
+        f = res["fits"]["P0"]                                   # 반도체·전력 둘 다 들어 있는 전력주
+        self.assertGreater(f["업종6_전력"], f["업종2_반도체"] + 0.3)
+        self.assertEqual(R.placement(f, ["업종2_반도체", "업종6_전력"]), ("주 그룹만", "업종6_전력"))
+        self.assertEqual(R.placement({"a": 0.6, "b": 0.55}, ["a", "b"]), ("둘 다 유지", "a"))
+        self.assertEqual(R.placement({"a": 0.2, "b": 0.5}, ["a"]), ("옮길 후보", "b"))
+        self.assertEqual(R.placement({"a": 0.45, "b": 0.5}, ["a"])[0], "")
+        out = R.report(res)
+        self.assertIn("→ 주 그룹 업종6_전력", out)
+
     def test_size_cap(self):
         res = R.analyze(self.groups, self.prices, self.themes, max_size=3, min_corr=0.35)
         self.assertTrue(all(len(c["members"]) <= 3 for c in res["clusters"]))
