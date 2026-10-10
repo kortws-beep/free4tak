@@ -35,5 +35,19 @@ class Finder(unittest.TestCase):
         self.assertTrue(out.rstrip().endswith("000004 000003"))
 
 
+class Ref(unittest.TestCase):
+    def test_ref_sorting(self):
+        found = T.find(ROWS, ["로봇"])
+        base = px(0.002, 1e9)
+        import random
+        rnd = random.Random(3)
+        noisy = [(d, c * (1 + rnd.gauss(0, 0.03)), v) for d, c, v in base]
+        prices = {"000001": noisy, "000002": base}
+        ref = {"R": T.rw.returns([(d, c) for d, c, _ in base])}
+        out = T.report(found, prices, {}, "로봇", ref)
+        self.assertLess(out.index("나로봇"), out.index("가로봇"))                 # 기준과 똑같이 움직이는 쪽이 위
+        self.assertIn("기준과 1.00", out)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -12,6 +12,9 @@ theme_finder.py — 주달 테마로 새 관심그룹 종목 찾기 (2026-10-10)
 실행:  python intelligence/theme_finder.py 탈모
        python intelligence/theme_finder.py 로봇 --and 현대     (로봇 테마이면서 현대 테마에도 있는 종목)
        python intelligence/theme_finder.py --list 로봇          (키워드 들어간 테마 이름만)
+       python intelligence/theme_finder.py 로봇 --ref 현대무벡스 현대위아
+           (로봇 테마 종목을 기준 종목들과 같이 움직이는 순으로 — 테마 교집합이 없을 때.
+            주달 '현대자동차그룹'은 계열사뿐이라 로봇 부품 협력사는 주가로 찾아야 함, 2026-10-10)
 """
 import os
 import re
@@ -74,7 +77,8 @@ def current_groups() -> dict:
     return out
 
 
-def report(found: dict, prices: dict, cur: dict, title: str) -> str:
+def report(found: dict, prices: dict, cur: dict, title: str, ref: dict = None) -> str:
+    """ref: {기준 종목 코드: 수익률} — 있으면 기준과 같이 움직이는 순으로 정렬."""
     info = {}
     rets = {}
     for c in found:
@@ -83,7 +87,16 @@ def report(found: dict, prices: dict, cur: dict, title: str) -> str:
             info[c] = {"r20": (rows[-1][1] / rows[-21][1] - 1) * 100 if rows[-21][1] else None,
                        "val": sum(v for _, _, v in rows[-20:]) / 20}
             rets[c] = rw.returns([(d, cl) for d, cl, _ in rows])
-    codes = sorted(found, key=lambda c: -(info.get(c, {}).get("val") or 0))
+    refc = {}
+    for c in found:
+        if ref and c in rets:
+            vs = [rw.corr(rets[c], r) for rc, r in ref.items() if rc != c]
+            vs = [v for v in vs if v is not None]
+            refc[c] = sum(vs) / len(vs) if vs else None
+    if ref:
+        codes = sorted(found, key=lambda c: -(refc.get(c) if refc.get(c) is not None else -9))
+    else:
+        codes = sorted(found, key=lambda c: -(info.get(c, {}).get("val") or 0))
     have = [c for c in codes if c in rets]
     fit = {}
     for c in have:
@@ -91,7 +104,7 @@ def report(found: dict, prices: dict, cur: dict, title: str) -> str:
         vs = [v for v in vs if v is not None]
         fit[c] = sum(vs) / len(vs) if vs else None
     allf = [v for v in fit.values() if v is not None]
-    L = [f"🔎 {title} — {len(found)}종목 (20일 거래대금 큰 순)"
+    L = [f"🔎 {title} — {len(found)}종목 ({'기준 종목과 같이 움직이는 순' if ref else '20일 거래대금 큰 순'})"
          + (f" · 서로 같이 움직이는 정도 평균 {sum(allf) / len(allf):.2f}" if allf else "")]
     for c in codes:
         i = info.get(c, {})
@@ -99,10 +112,13 @@ def report(found: dict, prices: dict, cur: dict, title: str) -> str:
         val = f"{i['val'] / 1e8:,.0f}억" if i.get("val") else "-"
         f = f"{fit[c]:.2f}" if fit.get(c) is not None else " - "
         g = "/".join(cur.get(c, [])) or "-"
-        L.append(f"   {found[c]['name']:<14}({c}) 20일 {r:>7} · 대금 {val:>6} · 같이 {f} · 지금 {g}"
+        rf = (f" · 기준과 {refc[c]:.2f}" if refc.get(c) is not None else " · 기준과  - ") if ref else ""
+        L.append(f"   {found[c]['name']:<14}({c}) 20일 {r:>7} · 대금 {val:>6} · 같이 {f}{rf} · 지금 {g}"
                  f" · 테마: {', '.join(found[c]['themes'][:2])}")
     L.append("   ※ '같이' 0.3 미만은 테마 이름만 같고 따로 움직이는 종목 — 그룹에서 빼는 게 나음")
-    L.append("\n■ HTS 입력용(거래대금 큰 순): " + " ".join(codes))
+    if ref:
+        L.append("   ※ '기준과' = 기준 종목들과 평균 상관. 0.4 이상이면 같이 움직이는 편")
+    L.append(f"\n■ HTS 입력용({'기준과 같이 움직이는 순' if ref else '거래대금 큰 순'}): " + " ".join(codes))
     return "\n".join(L)
 
 
@@ -119,18 +135,41 @@ def main():
         for t in themes:
             print(f"   {t} ({sum(1 for _, _, x in rows if x == t)}종목)")
         return
+    ref_names = []
+    if "--ref" in a:
+        k = a.index("--ref")
+        ref_names, a = a[k + 1:], a[:k]
     and_kw = []
     if "--and" in a:
         k = a.index("--and")
         and_kw, a = a[k + 1:], a[:k]
     found = find(rows, a, and_kw)
     if not found:
-        print(f"'{' '.join(a)}' 테마 종목이 없어 — --list {a[0]} 로 테마 이름부터 확인해줘")
+        if and_kw and find(rows, a):
+            print(f"'{' '.join(a)}' 테마 종목은 있는데, 그중 '{' '.join(and_kw)}' 테마에도 든 종목은 없어 — "
+                  f"주가로 찾으려면: {' '.join(a)} --ref <기준 종목명들>")
+        else:
+            print(f"'{' '.join(a)}' 테마 종목이 없어 — --list {a[0]} 로 테마 이름부터 확인해줘")
         return
     names = {c: v["name"] for c, v in found.items()}
+    ref = None
+    if ref_names:
+        conn = sqlite3.connect(tml.THEME_DB)
+        try:
+            nc = tml._name_code_map(conn)
+        finally:
+            conn.close()
+        ref_codes = {nc[n]: n for n in ref_names if n in nc}
+        missing = [n for n in ref_names if n not in nc]
+        if missing:
+            print(f"⚠️ 기준 종목 이름을 못 찾음: {', '.join(missing)}")
+        names.update(ref_codes)
     prices = rw.load_prices(names, DAYS)
-    title = f"'{' '.join(a)}' 테마" + (f" ∩ '{' '.join(and_kw)}' 테마" if and_kw else "")
-    print(report(found, prices, current_groups(), title))
+    if ref_names:
+        ref = {c: rw.returns([(d, cl) for d, cl, _ in prices[c]]) for c in ref_codes if c in prices}
+    title = (f"'{' '.join(a)}' 테마" + (f" ∩ '{' '.join(and_kw)}' 테마" if and_kw else "")
+             + (f" · 기준: {', '.join(ref_names)}" if ref_names else ""))
+    print(report(found, prices, current_groups(), title, ref))
 
 
 if __name__ == "__main__":
