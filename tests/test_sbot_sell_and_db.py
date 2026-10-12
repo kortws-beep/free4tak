@@ -71,6 +71,12 @@ class StrategyOct12(unittest.TestCase):
         self._check(pt, 95)
         self.assertEqual(pt["X"]["stop_price"], 80); self.assertEqual(self.sold, [])
 
+    def test_hold_never_stopped_but_rides_new_take_profit(self):
+        pt = {"X": tracker(hold=True)}
+        self.assertIsNone(self._check(pt, 80))   # 홀드 — 손절 안 함
+        self._check(pt, 108)                     # +8% — 30% 익절, 홀드 해제
+        self.assertEqual(self.sold[0][1], 3); self.assertFalse(pt["X"]["hold"])
+
     def test_no_averaging_down(self):
         self._check({"X": tracker(buy2_done=False)}, 96)
         self.assertEqual(self.bought, [])
