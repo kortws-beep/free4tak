@@ -147,9 +147,11 @@ TRAILING_STOP_PCT = 2.0                # 고점 대비 이만큼 밀리면 매�
 TRAILING_STOP_PCT_TIGHT  = 1.5          # 고점 변동률 2.5~4.5% 구간 전용(타이트)
 TRAILING_STOP_WIDEN_PCT  = 4.5          # 고점 변동률이 이 초과면 TRAILING_STOP_PCT(2.0%) 적용
 MIN_LOCKED_PROFIT_PCT    = 1.0          # 트레일링 매도가의 최소 보장 수익률(세전, 하한선)
-# ★ 2026-10-12 대장 결정 — +2.5% 도달 때 30%는 바로 팔아 최소 수익 확보(sbot·cbot과 같이),
-#   나머지는 기존 트레일링 그대로. 30%가 1주 미만이거나 팔고 남는 게 없으면 건너뜀.
+# ★ 2026-10-12 대장 결정 — +5% 도달 때 30%는 바로 팔아 최소 수익 확보(sbot·cbot과 같이),
+#   나머지는 기존 트레일링 그대로(트레일링 시작은 +2.5% 그대로). 2.5%는 손절 -3.5%에 비해
+#   너무 작아 1차 익절은 5%로. 30%가 1주 미만이거나 팔고 남는 게 없으면 건너뜀.
 FIRST_TP_RATIO           = 0.30
+FIRST_TP_PCT             = 5.0
 
 # ★ 2026-09-29 대장 지정 — 한투 애프터마켓 개편(09-14, 20시까지 정규장과
 #   동일 실시간매칭) 반영해 포지션 감시/청산 시간대를 08:00(프리장)~19:50까지 확장.
@@ -554,8 +556,8 @@ class DayBot:
             if pos.get("peak_price") is not None:
                 if current > pos["peak_price"]:
                     pos["peak_price"] = current
-                if not pos.get("partial_done") and rate >= TAKE_PROFIT_PCT:
-                    self._do_partial_sell(code, rate, current)   # 프리장에 +2.5% 찍었던 경우 등 재시도
+                if not pos.get("partial_done") and rate >= FIRST_TP_PCT:
+                    self._do_partial_sell(code, rate, current)   # 트레일링 중 +5% 도달(프리장 재시도 포함)
                 peak_rate  = (pos["peak_price"] - entry) / entry * 100
                 trail_pct  = (TRAILING_STOP_PCT if peak_rate > TRAILING_STOP_WIDEN_PCT
                               else TRAILING_STOP_PCT_TIGHT)
@@ -572,7 +574,7 @@ class DayBot:
                 pos["peak_price"] = current
                 print(f"📈 [daybot] {code} +{rate:.2f}% 도달 — 트레일링 모드 전환 "
                       f"(고점:{current:,.0f}, -{TRAILING_STOP_PCT_TIGHT:.1f}% 밀리면 매도)")
-                if not pos.get("partial_done"):
+                if not pos.get("partial_done") and rate >= FIRST_TP_PCT:
                     self._do_partial_sell(code, rate, current)
                 continue
             if rate <= STOP_LOSS_PCT:
@@ -782,7 +784,7 @@ class DayBot:
         return True
 
     def _do_partial_sell(self, code: str, rate: float, price: float) -> bool:
-        """★ 2026-10-12 — 1차 익절 30%. 접수되면 추적 수량을 바로 줄이고(트레일링은 나머지로),
+        """★ 2026-10-12 — 1차 익절(+5%) 30%. 접수되면 추적 수량을 바로 줄이고(트레일링은 나머지로),
         장부 기록은 _verify_partials()가 SELL_VERIFY_SEC 뒤 잔고로 체결을 확인한 다음에 한다.
         한 번 시도하면(실패·건너뜀 포함) 그 포지션에선 다시 안 함 — 트레일링이 본 업무."""
         pos = self.positions.get(code)

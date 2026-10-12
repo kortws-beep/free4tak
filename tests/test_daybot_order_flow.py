@@ -170,7 +170,7 @@ class DaybotOrderFlow(unittest.TestCase):
 
 
 class DaybotFirstTakeProfit(unittest.TestCase):
-    """2026-10-12 — +2.5% 도달 때 30% 매도, 나머지는 트레일링. 장부는 체결 확인 뒤."""
+    """2026-10-12 — +5% 도달 때 30% 매도(트레일링 시작은 +2.5% 그대로), 나머지는 트레일링. 장부는 체결 확인 뒤."""
     def setUp(self):
         daybot.now_hhmm = lambda: "1000"
 
@@ -180,12 +180,14 @@ class DaybotFirstTakeProfit(unittest.TestCase):
 
     def test_sells_30pct_then_trails_rest(self):
         b = mk(); b.positions["005930"] = pos(q=10)
-        self._hit(b, 10300)                                   # +3%
+        self._hit(b, 10300)                                   # +3% — 트레일링만, 매도 없음
+        self.assertEqual(b.api.sells, [])
+        self._hit(b, 10500)                                   # +5% — 30%
         self.assertEqual(b.api.sells, [("005930", 3, 0)])
         self.assertEqual(b.positions["005930"]["qty"], 7)
         self.assertIsNotNone(b.positions["005930"]["peak_price"])
         self.assertFalse(booked(b))                           # 체결 확인 전엔 장부 X
-        self._hit(b, 10400)                                   # 한 번만
+        self._hit(b, 10600)                                   # 한 번만
         self.assertEqual(len(b.api.sells), 1)
         expire(b._partial_verify, "005930")
         b.api.real = {"005930": {"qty": 7, "entry_price": 10000}}
@@ -195,7 +197,7 @@ class DaybotFirstTakeProfit(unittest.TestCase):
 
     def test_unfilled_partial_restored(self):
         b = mk(); b.positions["005930"] = pos(q=10)
-        self._hit(b, 10300)
+        self._hit(b, 10500)
         expire(b._partial_verify, "005930")
         b.api.real = {"005930": {"qty": 9, "entry_price": 10000}}  # 1주만 체결
         b._reconcile_with_account()
@@ -204,17 +206,17 @@ class DaybotFirstTakeProfit(unittest.TestCase):
 
     def test_too_small_skips(self):
         b = mk(); b.positions["005930"] = pos(q=3)            # 30% = 0주
-        self._hit(b, 10300)
+        self._hit(b, 10500)
         self.assertEqual(b.api.sells, [])
         self.assertTrue(b.positions["005930"]["partial_done"])
 
     def test_premarket_retries_after_open(self):
         daybot.now_hhmm = lambda: "0850"
         b = mk(); b.positions["005930"] = pos(q=10)
-        self._hit(b, 10300)
+        self._hit(b, 10500)
         self.assertEqual(b.api.sells, [])
         daybot.now_hhmm = lambda: "0901"
-        self._hit(b, 10300)
+        self._hit(b, 10500)
         self.assertEqual(b.api.sells, [("005930", 3, 0)])
 
     def test_partial_then_full_trailing_sell(self):

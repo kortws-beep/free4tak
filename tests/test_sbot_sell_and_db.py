@@ -66,12 +66,9 @@ class StrategyOct12(unittest.TestCase):
         self.assertEqual(self.s.calc_atr_levels(100, 0.08)["stop_price"], 90)   # ATR×2=-16% → -10%
         self.assertEqual(self.s.calc_atr_levels(100, 0.02)["stop_price"], 96)   # 얕으면 그대로
 
-    def test_old_deep_stop_raised_only_if_price_above_cap(self):
-        pt = {"X": tracker(stop_price=80)}
+    def test_existing_position_stop_kept(self):
+        pt = {"X": tracker(stop_price=80)}       # 이미 보유 중 — 손절가 그대로(대장 결정)
         self._check(pt, 95)
-        self.assertEqual(pt["X"]["stop_price"], 90)
-        pt = {"X": tracker(stop_price=80)}
-        self._check(pt, 88)                      # 이미 -12% — 재시작하자마자 던지지 않음
         self.assertEqual(pt["X"]["stop_price"], 80); self.assertEqual(self.sold, [])
 
     def test_no_averaging_down(self):

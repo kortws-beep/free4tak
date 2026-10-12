@@ -277,12 +277,8 @@ class SwingStrategy:
                       f"목표:{levels['target1']:,.0f})")
         tracker["last_entry"] = entry
 
-        # ★ 2026-10-12: 손절 상한 -10% — 예전에 깊게 잡힌 손절가도 끌어올림. 단 지금가가
-        #   이미 -10% 아래면 올리지 않음(재시작 직후 바로 던지지 않게, 기존 손절가 유지).
-        cap_stop = round(entry * (1 + STOP_CAP_RATE), 0)
-        if tracker["stage"] == 0 and tracker["stop_price"] < cap_stop < current:
-            print(f"   🛡️ {code} 손절 상한 -10% 적용: {tracker['stop_price']:,.0f}→{cap_stop:,.0f}")
-            tracker["stop_price"] = cap_stop
+        # ★ 2026-10-12: 손절 상한 -10%는 새 매수(와 평단 변경)부터만 — 이미 보유 중인 종목의
+        #   손절가는 그대로 둠(대장 결정).
 
         stage       = tracker["stage"]
         stop_price  = tracker["stop_price"]
