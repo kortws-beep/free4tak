@@ -85,6 +85,8 @@ def history(n: int = 10, log_db: str = LOG_DB) -> list:
 
 def latest(theme_db: str = THEME_DB, log_db: str = LOG_DB):
     """(date, 비율%) — 기록에 최신 거래일이 없으면 계산해 기록. 실패하면 None."""
+    if not os.path.exists(theme_db):          # sqlite가 빈 파일을 만들어 버리지 않게
+        return None
     try:
         conn = sqlite3.connect(theme_db)
         try:

@@ -1827,6 +1827,31 @@ async def before_risk_watch_loop():
     await client.wait_until_ready()
 
 
+# ── 저녁 봇 성적표 (2026-10-12, 대장 "개입 없이 돌려도 되나" 3번) ──────────
+#   거래일 16:00에 세 봇 성적·국면·한도·이상 징후를 리나 채널로 한 장. 수동: !성적표
+EVENING_REPORT_HHMM = "1600"
+
+
+@tasks.loop(minutes=1)
+async def evening_report_loop():
+    kst_now = datetime.datetime.now(KST)
+    if kst_now.strftime("%H%M") != EVENING_REPORT_HHMM or not _is_trading_day():
+        return
+    try:
+        import evening_report
+        text = await asyncio.to_thread(evening_report.build)
+        channel = await client.fetch_channel(REPORT_CHANNEL_ID)
+        await send_safe_message(channel, text)
+        print("✅ [성적표] 저녁 봇 성적표 전송")
+    except Exception as e:
+        print(f"⚠️ [성적표] 전송 오류: {e}")
+
+
+@evening_report_loop.before_loop
+async def before_evening_report_loop():
+    await client.wait_until_ready()
+
+
 _KIWOOM_POOL_SCAN_TIMES = {(9, 30), (12, 30), (15, 0)}
 _kiwoom_pool_scan_state = {"date": "", "done": set(), "retry_at": None, "retry_label": None}
 
@@ -2480,6 +2505,12 @@ async def on_ready():
         print("✅ [시스템] 세 봇 합산 손실 자동중단 감시 (1분 주기) 가동 성공!")
     except Exception as e: print(f"⚠️ [에러] 통합 리스크 감시: {e}")
 
+    try:
+        if not evening_report_loop.is_running():
+            evening_report_loop.start()
+        print(f"✅ [시스템] 저녁 봇 성적표 ({EVENING_REPORT_HHMM[:2]}:{EVENING_REPORT_HHMM[2:]}, 거래일) 가동 성공!")
+    except Exception as e: print(f"⚠️ [에러] 저녁 성적표: {e}")
+
 def _fetch_sbo2_status_sync(api, positions: dict):
     """!상태 — 보유종목 기준 주문가능금액+시세 조회 (동기, to_thread로 실행)."""
     psbl = 0
@@ -2643,6 +2674,15 @@ async def on_message(message):
                     await send_safe_message(message.channel, sector_watch.format_ranking(out, top=10))
             except Exception as e:
                 await send_safe_message(message.channel, f"❌ 섹터 조회 오류: {e}")
+        return
+
+    # ── !성적표 — 세 봇 오늘 성적 (2026-10-12) ──
+    if message.content.strip() == "!성적표":
+        try:
+            import evening_report
+            await send_safe_message(message.channel, await asyncio.to_thread(evening_report.build))
+        except Exception as e:
+            await send_safe_message(message.channel, f"❌ 성적표 오류: {e}")
         return
 
     # ── !국면 — 시장 국면(20일선 위 종목 비율) 최근 10일 (2026-10-08) ──
