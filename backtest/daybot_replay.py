@@ -23,7 +23,8 @@ daybot_review.py 결과: 손절 뒤 주가가 대개 제자리로 돌아오고(�
 판정(한 봉 안에서 저가 먼저 — 불리하게), 봉 전체가 손절선 아래면 그 봉 고가에 체결,
 수수료·세금 왕복 0.2%. 정규장(09:00~15:30) 분봉만. 분봉은 backtest/data/minute_cache.db에
 저장해 두고 재사용.
-실행:  python backtest/daybot_replay.py [최근 N일, 기본 20] [--src obs|trades|cands]
+실행:  python backtest/daybot_replay.py [최근 N일, 기본 20] [--src obs|trades|cands] [--early]
+       --early: 09:40 전 신호만(지금 데이봇 매수 시간대) — 손절폭 비교용
 """
 import os
 import sys
@@ -398,6 +399,10 @@ def main():
         print(f"   재현   {fmt(stats([r['ret'] for r in sim]))}")
 
     signals = load_signals(src, n)
+    if "--early" in sys.argv:
+        # ★ 2026-10-12 대장: "손절선이 너무 짧다" — 지금 데이봇은 09:40 전에만 사므로 그 신호만으로
+        #   손절폭 비교(전체 신호 기준 결과와 다를 수 있음)
+        signals = [x for x in signals if x["time"][:4] < "0940"]
     sector_tags(signals)
     print(f"\n📈 신호: {src} {len(signals)}개 (종목·날짜별 첫 신호, 최근 {n}일) — 분봉 받는 중…")
     base = run_signals(store, signals, CURRENT)
@@ -423,7 +428,8 @@ def main():
     print("\n■ 2. 매도 규칙 비교 (같은 신호 전부, 100만씩)")
     grid = []
     for stop, (tp, tight, wide, widen), grace in itertools.product(
-            (-3.5, -5.0, -6.0), ((2.5, 1.5, 2.0, 4.5), (3.0, 2.0, 3.0, 6.0), (4.0, 2.5, 3.5, 8.0)), (0, 10)):
+            (-3.5, -4.5, -5.0, -6.0, -7.0), ((2.5, 1.5, 2.0, 4.5), (3.0, 2.0, 3.0, 6.0), (4.0, 2.5, 3.5, 8.0)),
+            (0, 10)):
         rule = replace(CURRENT, stop=stop, tp=tp, tight=tight, wide=wide, widen_at=widen, grace=grace)
         res = base if rule == CURRENT else run_signals(store, signals, rule)
         grid.append((stats([r["ret"] for r in res])["krw"], rule, res))
