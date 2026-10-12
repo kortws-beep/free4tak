@@ -47,8 +47,54 @@ class StrategySellFailure(unittest.TestCase):
 
     def test_failed_trailing_keeps_stage(self):
         pt = {"X": tracker(stage=1, peak_rate=.2, peak_price=120, stop_price=103, target_next=130)}
-        self.assertIsNone(self._check(pt, 115, False, []))
+        self.assertIsNone(self._check(pt, 113, False, []))
         self.assertEqual(pt["X"]["stage"], 1)
+
+
+class StrategyOct12(unittest.TestCase):
+    """2026-10-12 대장 결정 — 손절 상한 -10%, 물타기 끔, +8%에 30%, 고점 -5% 트레일링."""
+    def setUp(self):
+        self.s = sbot_strategy.SwingStrategy()
+        self.sold, self.bought = [], []
+
+    def _check(self, pt, price, qty=10):
+        return self.s.check_sell("X", {"entry_price": 100, "qty": qty}, {"stck_prpr": str(price)},
+                                 "normal", pt, False, lambda *a: self.bought.append(a),
+                                 lambda *a: self.sold.append(a) or True, lambda: None, ma20=90)
+
+    def test_stop_capped_for_new_levels(self):
+        self.assertEqual(self.s.calc_atr_levels(100, 0.08)["stop_price"], 90)   # ATR×2=-16% → -10%
+        self.assertEqual(self.s.calc_atr_levels(100, 0.02)["stop_price"], 96)   # 얕으면 그대로
+
+    def test_existing_position_stop_kept(self):
+        pt = {"X": tracker(stop_price=80)}       # 이미 보유 중 — 손절가 그대로(대장 결정)
+        self._check(pt, 95)
+        self.assertEqual(pt["X"]["stop_price"], 80); self.assertEqual(self.sold, [])
+
+    def test_hold_never_stopped_but_rides_new_take_profit(self):
+        pt = {"X": tracker(hold=True)}
+        self.assertIsNone(self._check(pt, 80))   # 홀드 — 손절 안 함
+        self._check(pt, 108)                     # +8% — 30% 익절, 홀드 해제
+        self.assertEqual(self.sold[0][1], 3); self.assertFalse(pt["X"]["hold"])
+
+    def test_no_averaging_down(self):
+        self._check({"X": tracker(buy2_done=False)}, 96)
+        self.assertEqual(self.bought, [])
+
+    def test_first_take_profit_sells_30pct(self):
+        pt = {"X": tracker()}
+        self._check(pt, 108)
+        self.assertEqual(self.sold[0][1], 3); self.assertIn("30%", self.sold[0][2])
+        self.assertEqual(pt["X"]["stage"], 1)
+        self.sold.clear()
+        self._check({"X": tracker()}, 108, qty=2)
+        self.assertEqual(self.sold[0][1], 1)    # 최소 1주, 나머지 1주
+
+    def test_trailing_5pct_from_peak(self):
+        pt = {"X": tracker(stage=1, peak_rate=.2, peak_price=120)}
+        self.assertIsNone(self._check(pt, 115))  # 고점 -4.2%
+        self.assertEqual(self._check(pt, 114, qty=7), "트레일링")
+        self.assertEqual(self.sold[-1][1], 7)
 
 
 class SwingDBSecondBuy(unittest.TestCase):

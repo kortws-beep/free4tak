@@ -53,7 +53,18 @@ ATR_TARGET1_MULT = 3.0    # 목표1(최초): 매수가 + ATR × 3 (2026-08-17 �
 ATR_TARGET_MULT  = 3.0    # 목표2+(재상향): 현재가 + ATR × 3
 TARGET1_CAP_RATE = 0.20   # ★ 목표가1 상한 +20% (ATR×3과 비교해 작은 값 사용)
 ATR_RAISE_MULT   = 1.0    # 목표1 달성 후 손절 올림: 매수가 + ATR × 1
-ATR_TRAIL_MULT   = 1.5    # 트레일링: 고점 - ATR × 1.5
+ATR_TRAIL_MULT   = 1.5    # (2026-10-12부터 미사용 — TRAIL_PCT로 교체)
+
+# ★ 2026-10-12 대장 결정(sbot 실매매 점검 결과 — 손절 평균 -20%, 익절단계 거의 미도달):
+#   · 손절 상한 -10%: 손절가 = max(매수가-ATR×2, 매수가×0.90)
+#   · 물타기 끔
+#   · 1차 익절(+8% 또는 목표1)은 30%만 매도(데이봇·cbot과 같이 '최소 수익확보')
+#   · 나머지는 고점 대비 -5% 트레일링(ATR×1.5는 고변동 종목에서 너무 넓었음)
+#   · 보유기한 청산은 다시 넣지 않음(07-06 대장이 제거)
+STOP_CAP_RATE  = -0.10   # 손절선이 이보다 깊어지지 않게
+ENABLE_BUY2    = False   # 물타기(2차 매수)
+FIRST_TP_RATIO = 0.30    # 1차 익절 매도 비율
+TRAIL_PCT      = 0.05    # stage1 이후 고점 대비 하락폭
 
 # ★ 2026-09-29: sbot×sbo2 통합 작업 중 포팅 — sbo2가 2026-09-21에 추가한
 #   "목표1(ATR×3) 도달 전에 눌리는 경우가 많아 stage1 진입 자체가 거의
@@ -180,6 +191,7 @@ class SwingStrategy:
         if atr_rate > 0:
             atr_val  = entry * atr_rate
             stop     = round(entry - atr_val * ATR_STOP_MULT, 0)
+            stop     = max(stop, round(entry * (1 + STOP_CAP_RATE), 0))   # ★ 10-12 손절 상한 -10%
             # ★ 목표가1 상한 캡 (2026-06-23) — ATR×3과 +20% 중 작은 값
             #   고변동성 종목(예: 테크윙)은 ATR×3이 +50~80%까지 치솟아
             #   1차 목표가 사실상 도달불가능해지는 문제 방지
@@ -265,6 +277,9 @@ class SwingStrategy:
                       f"목표:{levels['target1']:,.0f})")
         tracker["last_entry"] = entry
 
+        # ★ 2026-10-12: 손절 상한 -10%는 새 매수(와 평단 변경)부터만 — 이미 보유 중인 종목의
+        #   손절가는 그대로 둠(대장 결정).
+
         stage       = tracker["stage"]
         stop_price  = tracker["stop_price"]
         target1     = tracker["target1"]
@@ -290,7 +305,7 @@ class SwingStrategy:
         VOL_RATIO_MIN = 150.0
         vol_ok    = (vol_ratio <= 0) or (vol_ratio >= VOL_RATIO_MIN)
 
-        if (not buy2_done and stage == 0
+        if (ENABLE_BUY2 and not buy2_done and stage == 0
                 and buy2_rate <= BUY_2ND_THRESHOLD
                 and not is_paused and not is_weak
                 and ma20_ok and mkt_ok and vol_ok):
@@ -337,23 +352,15 @@ class SwingStrategy:
         # ----------------------------------------------------------
         # ④ 트레일링 스탑 (목표가1 달성 이후)
         # ----------------------------------------------------------
-        if stage >= 1 and atr_val > 0:
-            trail_stop = peak_price - atr_val * ATR_TRAIL_MULT
+        # ★ 2026-10-12: ATR×1.5 → 고점 대비 -TRAIL_PCT(5%)로 교체(대장 결정)
+        if stage >= 1:
+            trail_stop = peak_price * (1 - TRAIL_PCT)
             if current <= trail_stop:
                 print(f"🔻 트레일링 {code} | 고점:{peak_price:,.0f} → "
                       f"트레일:{trail_stop:,.0f} | 현재:{current:,.0f} ({rate:+.2%})")
                 # ★ 2026-10-06: 실패 시 tracker를 지우면 다음 루프에 stage0으로
                 #   새로 만들어져 올려둔 손절/고점이 날아가고(보호선이 매수가-ATR×2로
-                #   후퇴) +8%에서 50%익절이 또 발동했음 — 성공했을 때만 정리.
-                if not on_sell(code, qty, f"트레일링({rate:+.2%})", current):
-                    print(f"⚠️ 트레일링 매도 실패 {code} — tracker 유지, 다음 루프 재시도")
-                    return None
-                peak_tracker.pop(code, None)
-                return "트레일링"
-        elif stage >= 1:
-            # ATR 없을 때 폴백 트레일링
-            trail_rate = tracker["peak_rate"] - FALLBACK_TRAIL
-            if rate <= trail_rate:
+                #   후퇴) +8%에서 익절이 또 발동했음 — 성공했을 때만 정리.
                 if not on_sell(code, qty, f"트레일링({rate:+.2%})", current):
                     print(f"⚠️ 트레일링 매도 실패 {code} — tracker 유지, 다음 루프 재시도")
                     return None
@@ -371,14 +378,17 @@ class SwingStrategy:
         if stage0_profit_hit or target_hit:
             if stage == 0:
                 # ★ 목표가1 달성 또는 수익률 STAGE1_PROFIT_PCT% 도달 →
-                #   50% 매도(수익실현) + 손절을 매수가+ATR×1로 올림
+                #   30% 매도(수익실현, 10-12 50→30) + 손절을 매수가+ATR×1로 올림
                 # ★ 2026-09-04: 매도 성공 여부를 확인하지 않고 무조건 stage를
                 #   올리던 버그 수정(sbo2에서 09-03에 먼저 발견/수정된 것과
                 #   동일 클래스 — 1주도 안 팔렸는데 손절가가 상향된 2단계로
                 #   넘어가는 실거래 위험). on_sell()이 성공(True)했을 때만
                 #   stage/손절/목표 갱신.
-                trigger_label = "목표1익절50%" if target_hit else f"익절{STAGE1_PROFIT_PCT:.0f}%달성50%"
-                sell_qty = qty if qty <= 1 else qty // 2
+                pct = int(FIRST_TP_RATIO * 100)
+                trigger_label = (f"목표1익절{pct}%" if target_hit
+                                 else f"익절{STAGE1_PROFIT_PCT:.0f}%달성{pct}%")
+                # ★ 2026-10-12: 50% → 30%(FIRST_TP_RATIO), 최소 1주·나머지 1주 이상
+                sell_qty = qty if qty <= 1 else min(qty - 1, max(1, int(qty * FIRST_TP_RATIO)))
                 ok_half = False
                 if sell_qty > 0:
                     ok_half = on_sell(code, sell_qty, f"{trigger_label}({rate:+.2%})", current)
@@ -393,7 +403,7 @@ class SwingStrategy:
                     #   홀드는 "1차목표 전 손절 안 당하게" 걸어두는 용도였는데,
                     #   목표를 이미 달성했으니 더 이상 걸어둘 이유가 없음.
                     tracker["hold"]        = False
-                    print(f"🎯 {trigger_label} {code} ({rate:+.2%}) | 50%매도:{sell_qty}주 | "
+                    print(f"🎯 {trigger_label} {code} ({rate:+.2%}) | {pct}%매도:{sell_qty}주 | "
                           f"손절 상향:{new_stop:,.0f} | 새목표:{new_target:,.0f}")
                 else:
                     print(f"⚠️ {trigger_label} 매도 실패 {code} — stage 유지, 손절가 그대로")

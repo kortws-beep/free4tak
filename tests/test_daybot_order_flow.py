@@ -52,7 +52,7 @@ def mk():
     b.api, b.db, b._ws, b.notes = API(), DB(), WS(), []
     b._notify = lambda m, critical=False: b.notes.append((critical, m))
     b.positions, b.code_name_map, b.sold_today, b._pending_orders = {}, {}, {}, {}
-    b._sell_verify, b._cancel_reconcile, b._sell_fail = {}, {}, {}
+    b._sell_verify, b._cancel_reconcile, b._sell_fail, b._partial_verify = {}, {}, {}, {}
     b._empty_balance_streak = 0
     b._positions_lock = threading.Lock()
     b._last_manual_check_ts = 0
@@ -167,6 +167,68 @@ class DaybotOrderFlow(unittest.TestCase):
         b._get_current_price = lambda c: 10000.0
         b._handle_pending_command({"pending_cmd": {"type": "sell", "code": "005930"}})
         self.assertTrue(st["cmd_result"].startswith("❌"))
+
+
+class DaybotFirstTakeProfit(unittest.TestCase):
+    """2026-10-12 — +5% 도달 때 30% 매도(트레일링 시작도 +5%), 나머지는 트레일링. 장부는 체결 확인 뒤."""
+    def setUp(self):
+        daybot.now_hhmm = lambda: "1000"
+
+    def _hit(self, b, price):
+        b._get_current_price = lambda c: float(price)
+        b._check_all_positions_for_exit()
+
+    def test_sells_30pct_then_trails_rest(self):
+        b = mk(); b.positions["005930"] = pos(q=10)
+        self._hit(b, 10300)                                   # +3% — 아무것도 안 함
+        self.assertEqual(b.api.sells, []); self.assertIsNone(b.positions["005930"]["peak_price"])
+        self._hit(b, 10500)                                   # +5% — 30%
+        self.assertEqual(b.api.sells, [("005930", 3, 0)])
+        self.assertEqual(b.positions["005930"]["qty"], 7)
+        self.assertIsNotNone(b.positions["005930"]["peak_price"])
+        self.assertFalse(booked(b))                           # 체결 확인 전엔 장부 X
+        self._hit(b, 10600)                                   # 한 번만
+        self.assertEqual(len(b.api.sells), 1)
+        expire(b._partial_verify, "005930")
+        b.api.real = {"005930": {"qty": 7, "entry_price": 10000}}
+        b._reconcile_with_account()
+        self.assertEqual(booked(b)[0][2]["sold_qty"], 3)
+        self.assertEqual(b.positions["005930"]["qty"], 7)
+
+    def test_unfilled_partial_restored(self):
+        b = mk(); b.positions["005930"] = pos(q=10)
+        self._hit(b, 10500)
+        expire(b._partial_verify, "005930")
+        b.api.real = {"005930": {"qty": 9, "entry_price": 10000}}  # 1주만 체결
+        b._reconcile_with_account()
+        self.assertEqual(b.positions["005930"]["qty"], 9)
+        self.assertEqual(booked(b)[0][2]["sold_qty"], 1)
+
+    def test_too_small_skips(self):
+        b = mk(); b.positions["005930"] = pos(q=3)            # 30% = 0주
+        self._hit(b, 10500)
+        self.assertEqual(b.api.sells, [])
+        self.assertTrue(b.positions["005930"]["partial_done"])
+
+    def test_premarket_retries_after_open(self):
+        daybot.now_hhmm = lambda: "0850"
+        b = mk(); b.positions["005930"] = pos(q=10)
+        self._hit(b, 10500)
+        self.assertEqual(b.api.sells, [])
+        daybot.now_hhmm = lambda: "0901"
+        self._hit(b, 10500)
+        self.assertEqual(b.api.sells, [("005930", 3, 0)])
+
+    def test_partial_then_full_trailing_sell(self):
+        b = mk(); b.positions["005930"] = pos(q=10)
+        self._hit(b, 10500)                                   # +5%: 3주 매도
+        self._hit(b, 10200)                                   # 고점 10500 -1.5%↓ → 나머지 7주
+        self.assertEqual(b.api.sells[-1], ("005930", 7, 0))
+        expire(b._partial_verify, "005930"); expire(b._sell_verify, "005930")
+        b.api.real = {}
+        b._empty_balance_streak = 99
+        b._reconcile_with_account()
+        self.assertEqual([c[2]["sold_qty"] for c in booked(b)], [3, 0])
 
 
 if __name__ == "__main__":

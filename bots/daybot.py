@@ -131,7 +131,7 @@ BUY_AMT_PER_SLOT = 1_000_000          # ★ 2026-10-02 대장 지정(150만→10
 AMOUNT_TOPUP_MIN_FILL_RATIO = 0.7     # 목표금액의 70% 미만이면 "미달"로 간주
 # ★ 2026-10-06 대장 지정 — 마지막 슬롯은 다음 슬롯을 위해 현금을 아낄
 #   이유가 없으니, 목표금액(100만원) 캡 없이 가용현금 최대까지 매수.
-TAKE_PROFIT_PCT  = 2.5                # 익절 +2~3% 중간값
+TAKE_PROFIT_PCT  = 5.0                # 트레일링 시작(2026-10-12 대장: 2.5→5, 손절 -3.5%에 비해 작았음)
 STOP_LOSS_PCT    = -3.5               # 손절 -3~4% 중간값
 # ★ 2026-09-29 밤 대장 지정 — 급등주 특성상 오르면 10%+ 가는 경우가
 #   많아서, +2.5% 도달해도 바로 전량매도하지 말고 트레일링스탑으로
@@ -147,6 +147,12 @@ TRAILING_STOP_PCT = 2.0                # 고점 대비 이만큼 밀리면 매�
 TRAILING_STOP_PCT_TIGHT  = 1.5          # 고점 변동률 2.5~4.5% 구간 전용(타이트)
 TRAILING_STOP_WIDEN_PCT  = 4.5          # 고점 변동률이 이 초과면 TRAILING_STOP_PCT(2.0%) 적용
 MIN_LOCKED_PROFIT_PCT    = 1.0          # 트레일링 매도가의 최소 보장 수익률(세전, 하한선)
+# ★ 2026-10-12 대장 결정 — +5% 도달 때 30%는 바로 팔아 최소 수익 확보(sbot·cbot과 같이),
+#   나머지는 트레일링. 트레일링 시작도 +5%로 통일(TAKE_PROFIT_PCT). 그래서 고점이 늘 4.5%
+#   초과라 실제 트레일 폭은 TRAILING_STOP_PCT(2.0%) — TIGHT(1.5%) 구간은 사실상 안 씀.
+#   30%가 1주 미만이거나 팔고 남는 게 없으면 건너뜀.
+FIRST_TP_RATIO           = 0.30
+FIRST_TP_PCT             = TAKE_PROFIT_PCT
 
 # ★ 2026-09-29 대장 지정 — 한투 애프터마켓 개편(09-14, 20시까지 정규장과
 #   동일 실시간매칭) 반영해 포지션 감시/청산 시간대를 08:00(프리장)~19:50까지 확장.
@@ -346,6 +352,7 @@ class DayBot:
         #   {code: {"ts", "pos", ...}} 형태로 상태파일에 같이 저장(재시작해도 이어서 확인).
         self._sell_verify: dict     = {}   # 매도주문 접수 → 체결 확인 대기
         self._cancel_reconcile: dict = {}  # 미체결매수 취소 → 부분체결 확인 대기
+        self._partial_verify: dict  = {}   # 1차 익절(30%) 접수 → 체결 확인 대기(포지션은 남아 있음)
         self._sell_fail: dict       = {}   # {code: {"count", "until"}} 매도거부 재시도 백오프
         self._empty_balance_streak  = 0
 
@@ -419,6 +426,7 @@ class DayBot:
             code_name_map=name_map_snapshot,
             sell_verify=self._sell_verify,
             cancel_reconcile=self._cancel_reconcile,
+            partial_verify=self._partial_verify,
             last_update=now_hms(),
         )
 
@@ -436,6 +444,7 @@ class DayBot:
         #   ts가 이미 지났으므로 첫 잔고대조 때 바로 처리된다.
         self._sell_verify      = saved.get("sell_verify", {}) or {}
         self._cancel_reconcile = saved.get("cancel_reconcile", {}) or {}
+        self._partial_verify   = saved.get("partial_verify", {}) or {}
 
         if self._sold_today_date != today_str():
             self.sold_today = {}
@@ -548,6 +557,8 @@ class DayBot:
             if pos.get("peak_price") is not None:
                 if current > pos["peak_price"]:
                     pos["peak_price"] = current
+                if not pos.get("partial_done") and rate >= FIRST_TP_PCT:
+                    self._do_partial_sell(code, rate, current)   # 트레일링 중 +5% 도달(프리장 재시도 포함)
                 peak_rate  = (pos["peak_price"] - entry) / entry * 100
                 trail_pct  = (TRAILING_STOP_PCT if peak_rate > TRAILING_STOP_WIDEN_PCT
                               else TRAILING_STOP_PCT_TIGHT)
@@ -564,6 +575,8 @@ class DayBot:
                 pos["peak_price"] = current
                 print(f"📈 [daybot] {code} +{rate:.2f}% 도달 — 트레일링 모드 전환 "
                       f"(고점:{current:,.0f}, -{TRAILING_STOP_PCT_TIGHT:.1f}% 밀리면 매도)")
+                if not pos.get("partial_done") and rate >= FIRST_TP_PCT:
+                    self._do_partial_sell(code, rate, current)
                 continue
             if rate <= STOP_LOSS_PCT:
                 self._do_sell(code, pos["qty"], f"손절({rate:.2f}%)", current)
@@ -771,6 +784,64 @@ class DayBot:
         print(f"{emoji} [daybot] 매도 {code}({name}) | {reason} @{price:,.0f}원")
         return True
 
+    def _do_partial_sell(self, code: str, rate: float, price: float) -> bool:
+        """★ 2026-10-12 — 1차 익절(+5%) 30%. 접수되면 추적 수량을 바로 줄이고(트레일링은 나머지로),
+        장부 기록은 _verify_partials()가 SELL_VERIFY_SEC 뒤 잔고로 체결을 확인한 다음에 한다.
+        한 번 시도하면(실패·건너뜀 포함) 그 포지션에선 다시 안 함 — 트레일링이 본 업무."""
+        pos = self.positions.get(code)
+        if not pos:
+            return False
+        qty  = int(pos.get("qty", 0))
+        part = int(qty * FIRST_TP_RATIO)
+        if part < 1 or qty - part < 1 or code in self._partial_verify:
+            pos["partial_done"] = True
+            return False
+        if now_hhmm() < "0900" or now_hhmm() >= REGULAR_SELL_END_TIME:
+            return False                       # 정규장에서만(시장가) — 장 열리면 다시 시도
+        fail = self._sell_fail.get(code)
+        if fail and time.time() < fail["until"]:
+            return False
+        pos["partial_done"] = True
+        reason = f"1차익절30%({rate:+.2f}%)"
+        if not self.api.sell(code, part, price=0):
+            print(f"⚠️ [daybot] 1차익절 30% 주문 실패 {code} — 건너뛰고 전량 트레일링")
+            return False
+        with self._positions_lock:
+            pos["qty"] = qty - part
+        self._partial_verify[code] = {"ts": time.time(), "qty": part, "price": price, "reason": reason,
+                                      "entry_price": pos.get("entry_price", price),
+                                      "buy_tag": pos.get("buy_tag", "")}
+        msg = f"💰 [daybot] 1차익절 {code}({self._name(code)}) {part}주(30%) @{price:,.0f}원 — 나머지 {qty - part}주 트레일링"
+        self._notify(msg)
+        print(msg)
+        return True
+
+    def _verify_partials(self, real_pos: dict):
+        """1차 익절 체결 확인 — 잔고가 추적 수량보다 많으면 그만큼 미체결로 보고 되돌림."""
+        now_ts = time.time()
+        for code, v in list(self._partial_verify.items()):
+            if now_ts - v.get("ts", 0) < SELL_VERIFY_SEC:
+                continue
+            self._partial_verify.pop(code, None)
+            part = int(v.get("qty", 0))
+            unfilled = 0
+            if code in self.positions:
+                real = int(real_pos.get(code, {}).get("qty", 0))
+                unfilled = max(0, min(part, real - int(self.positions[code].get("qty", 0))))
+                if unfilled:
+                    with self._positions_lock:
+                        self.positions[code]["qty"] += unfilled
+                    self._notify(f"⚠️ [daybot] {code}({self._name(code)}) 1차익절 {unfilled}/{part}주 미체결 "
+                                 f"— 다시 감시", critical=True)
+            filled = part - unfilled
+            if filled <= 0:
+                continue
+            self.db.save_sell(code, v["price"], v["reason"], sold_qty=filled)
+            if _master_record:
+                _master_record(bot_type="daybot", code=code, stock_name=self._name(code),
+                               buy_price=v.get("entry_price", v["price"]), sell_price=v["price"],
+                               qty=filled, sell_reason=v["reason"], buy_tag=v.get("buy_tag", ""))
+
     def _record_sell(self, code: str, v: dict, sold_qty: int, remain_qty: int):
         """체결이 확인된 매도분을 DB/master_db에 반영(_verify_sells 전용)."""
         name = self._name(code)
@@ -842,12 +913,13 @@ class DayBot:
     def _verify_due_items(self) -> list:
         now_ts = time.time()
         return [code for code, v in list(self._sell_verify.items()) + list(self._cancel_reconcile.items())
+                + list(self._partial_verify.items())
                 if now_ts - v.get("ts", 0) >= SELL_VERIFY_SEC]
 
     def _reconcile_due(self) -> bool:
         since = time.time() - self._last_manual_check_ts
         if since >= MANUAL_SELL_CHECK_INTERVAL_SEC:
-            return bool(self.positions or self._sell_verify or self._cancel_reconcile)
+            return bool(self.positions or self._sell_verify or self._cancel_reconcile or self._partial_verify)
         return since >= RECONCILE_MIN_INTERVAL_SEC and bool(self._verify_due_items())
 
     def _reconcile_with_account(self):
@@ -871,6 +943,7 @@ class DayBot:
             self._empty_balance_streak = 0
 
         self._check_manual_sells(real_pos)
+        self._verify_partials(real_pos)        # _verify_sells보다 먼저(같은 종목 전량매도가 뒤따른 경우)
         self._verify_sells(real_pos)
         self._reconcile_cancelled_buys(real_pos)
 
