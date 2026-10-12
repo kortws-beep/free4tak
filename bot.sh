@@ -143,11 +143,6 @@ case "$1" in
     case "$2" in
       start)
         echo "🐕 watchdog 시작..."
-        # ★ 2026-10-12 — cbot watchdog 추가(스크립트만 있고 타이머가 없어 24시간 cbot이 멈춰도
-        #   아무도 몰랐음). 유닛 파일이 아직 없으면 저장소에서 복사(-n: 이미 있으면 안 덮어씀).
-        for _u in yeongam9-watchdog-cbot.service yeongam9-watchdog-cbot.timer; do
-          [ -f "/etc/systemd/system/$_u" ] || sudo cp -n ~/k-bot/stock_bot/$_u /etc/systemd/system/
-        done
         sudo systemctl daemon-reload
         sudo systemctl start yeongam9-watchdog-sbo2.timer
         sudo systemctl enable yeongam9-watchdog-sbo2.timer
@@ -155,24 +150,20 @@ case "$1" in
         sudo systemctl enable yeongam9-watchdog-sbot.timer
         sudo systemctl start yeongam9-watchdog-daybot.timer
         sudo systemctl enable yeongam9-watchdog-daybot.timer
-        sudo systemctl start yeongam9-watchdog-cbot.timer
-        sudo systemctl enable yeongam9-watchdog-cbot.timer
-        echo "  ✅ sbo2 + sbot + daybot + cbot watchdog 시작 (30초 간격, 5분 무응답 시 재시작)"
+        echo "  ✅ sbo2 + sbot + daybot watchdog 시작 (30초 간격, 5분 무응답 시 재시작)"
         ;;
       stop)
         echo "🐕 watchdog 정지..."
         sudo systemctl stop yeongam9-watchdog-sbo2.timer
         sudo systemctl stop yeongam9-watchdog-sbot.timer
         sudo systemctl stop yeongam9-watchdog-daybot.timer
-        sudo systemctl stop yeongam9-watchdog-cbot.timer
-        echo "  ⏹  sbo2 + sbot + daybot + cbot watchdog 정지"
+        echo "  ⏹  sbo2 + sbot + daybot watchdog 정지"
         ;;
       status)
         echo "🐕 watchdog 상태"
         systemctl status yeongam9-watchdog-sbo2.timer --no-pager
         systemctl status yeongam9-watchdog-sbot.timer --no-pager
         systemctl status yeongam9-watchdog-daybot.timer --no-pager
-        systemctl status yeongam9-watchdog-cbot.timer --no-pager
         ;;
       *)
         echo "사용법: $0 watchdog {start|stop|status}"
