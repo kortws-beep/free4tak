@@ -169,3 +169,11 @@ class CbotRiskSizing(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CbotFirstTakeProfit(unittest.TestCase):
+    """2026-10-12 — 1차 익절(조기 +10%·목표1) 50% → 30%, 양쪽 모두 최소주문금액 이상일 때만."""
+    def test_thirty_percent(self):
+        self.assertAlmostEqual(cbot.first_tp_qty(1.0, 1_000_000), 0.3)
+        self.assertEqual(cbot.first_tp_qty(0.01, 1_000_000), 0)      # 1만원어치 — 30%가 5천 미만
+        self.assertAlmostEqual(cbot.first_tp_qty(0.02, 1_000_000), 0.006)

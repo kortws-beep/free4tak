@@ -198,6 +198,17 @@ ATR_TRAIL_MULT   = 1.5    # 트레일링: 고점 - ATR × 1.5
 #   발동하게 됨 — 별도로 MAX_POSITIONS을 늘리지 않아도 요청한 "여유자금
 #   생기면 슬롯 하나 더" 동작이 기존 로직으로 그대로 충족됨.
 STAGE0_PARTIAL_THRESHOLD = 0.10
+# ★ 2026-10-12 대장 결정: 1차 익절(조기 +10%, 목표1) 매도 비율 50% → 30% — 데이봇·sbot과
+#   같이 '최소 수익확보'만 하고 나머지는 트레일링으로 더 끌고 감.
+FIRST_TP_RATIO = 0.30
+
+
+def first_tp_qty(qty: float, price: float, ratio: float = FIRST_TP_RATIO, min_amt: float = 5_000) -> float:
+    """1차 익절 매도 수량 — 판 쪽·남는 쪽 모두 업비트 최소주문금액 이상일 때만, 아니면 0(매도 안 함)."""
+    part = round(qty * ratio, 8)
+    if part * price < min_amt or (qty - part) * price < min_amt:
+        return 0
+    return part
 
 # 폴백 (ATR 없을 때)
 FALLBACK_STOP    = -0.07   # -7%
@@ -2164,18 +2175,18 @@ class CBot:
 
         # ③-1 stage0 조기 부분익절 — 목표1 가격 도달 전이라도 수익률
         #     기준(STAGE0_PARTIAL_THRESHOLD)을 채우면 목표1때와 동일하게
-        #     50%매도+stage1 승격 (백테스트 검증, 상단 주석 참고)
+        #     30%매도(10-12, 원래 50%)+stage1 승격 (백테스트 검증, 상단 주석 참고)
         if stage == 0 and rate >= STAGE0_PARTIAL_THRESHOLD:
-            half_qty = qty if qty * current <= MIN_ORDER_AMT * 2 else qty / 2
+            part_qty = first_tp_qty(qty, current, min_amt=MIN_ORDER_AMT)
             # ★ 2026-10-06 — self.sell() 성공 여부와 무관하게 stage를 1로
             #   올리고 손절선을 위로 올리고 있었음(대장 지적, 리포트로
             #   발견 — sbot에서 09-04에 고친 것과 동일 버그 클래스). 매도가
             #   거부되면 지분은 그대로인데 손절선만 타이트해지는 꼴이라,
             #   매도 성공시에만 stage/stop/target을 갱신하도록 수정.
-            if half_qty > 0 and (qty - half_qty) * current >= MIN_ORDER_AMT:
-                if self.sell(market, half_qty, f"stage0조기익절50%({rate:+.2%})",
+            if part_qty > 0:
+                if self.sell(market, part_qty, f"stage0조기익절30%({rate:+.2%})",
                              sell_price=current, force_all=False):
-                    print(f"💰 stage0 조기 50%매도 {market} | {half_qty:.6f}개 @ {current:,.0f}")
+                    print(f"💰 stage0 조기 30%매도 {market} | {part_qty:.6f}개 @ {current:,.0f}")
                     new_stop   = round(entry + atr_val * ATR_RAISE_MULT, 0)
                     new_target = round(current + atr_val * ATR_TARGET_MULT, 0)
                     tracker["stop_price"]  = new_stop
@@ -2184,24 +2195,24 @@ class CBot:
                     print(f"🎯 stage0 조기익절 {market} ({rate:+.2%}) | "
                           f"손절↑:{new_stop:,.0f} | 새목표:{new_target:,.0f}")
                     self.notify(
-                        f"🎯 조기익절(목표1 전) {market} ({rate:+.2%}) — 50%매도\n"
+                        f"🎯 조기익절(목표1 전) {market} ({rate:+.2%}) — 30%매도\n"
                         f"손절↑:{new_stop:,.0f} | 새목표:{new_target:,.0f}",
                         critical=False,
                     )
             return
 
-        # ④ 목표가 달성 → 손절/목표가 상향 (stage>=1은 매도 안 함, stage==0만 50%매도) ────
+        # ④ 목표가 달성 → 손절/목표가 상향 (stage>=1은 매도 안 함, stage==0만 30%매도) ────
         if target_next > 0 and current >= target_next:
             if stage == 0:
-                # ★ 목표가1 달성 → 50% 매도(수익실현)
+                # ★ 목표가1 달성 → 30% 매도(수익실현, 10-12 50→30)
                 # ★ 2026-10-06 — ③-1과 동일 버그: self.sell() 실패해도
                 #   stage를 1로 올리고 손절선을 위로 올리고 있었음 — 매도
                 #   성공시에만 상태를 갱신하도록 수정(대장 지적).
-                half_qty = qty if qty * current <= MIN_ORDER_AMT * 2 else qty / 2
-                if half_qty > 0 and (qty - half_qty) * current >= MIN_ORDER_AMT:
-                    if self.sell(market, half_qty, f"목표1익절50%({rate:+.2%})",
+                part_qty = first_tp_qty(qty, current, min_amt=MIN_ORDER_AMT)
+                if part_qty > 0:
+                    if self.sell(market, part_qty, f"목표1익절30%({rate:+.2%})",
                                  sell_price=current, force_all=False):
-                        print(f"💰 목표1 50%매도 {market} | {half_qty:.6f}개 @ {current:,.0f}")
+                        print(f"💰 목표1 30%매도 {market} | {part_qty:.6f}개 @ {current:,.0f}")
                         new_stop   = round(entry + atr_val * ATR_RAISE_MULT, 0)
                         new_target = round(current + atr_val * ATR_TARGET_MULT, 0)
                         tracker["stop_price"]  = new_stop
@@ -2210,7 +2221,7 @@ class CBot:
                         print(f"🎯 목표가1 달성 {market} ({rate:+.2%}) | "
                               f"손절↑:{new_stop:,.0f} | 새목표:{new_target:,.0f}")
                         self.notify(
-                            f"🎯 목표가1 달성 {market} ({rate:+.2%}) — 50%매도\n"
+                            f"🎯 목표가1 달성 {market} ({rate:+.2%}) — 30%매도\n"
                             f"손절↑:{new_stop:,.0f} | 새목표:{new_target:,.0f}",
                             critical=False,
                         )
