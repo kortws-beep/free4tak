@@ -310,7 +310,7 @@ EVENING_TOPUP_MIN_FILL_RATIO  = 0.7  # 목표금액의 70% 미만이면 "미달"
 # 약세장 방어
 MARKET_WEAK_THRESH = -2.0   # -1.5%→-2.0% 완화 (nbot과 통일)
 MARKET_STOP_THRESH = -4.5   # -3%→-4.5% 완화 (nbot과 통일)
-MAX_DAILY_LOSS     = 5
+MAX_DAILY_LOSS     = 5      # RiskManager 생성 인자로만 남음 — 매수 중단에는 안 씀(2026-10-12 삭제)
 # ★ 2026-10-12 대장 결정 — 시드 1000만 기준 일손실 한도 -50만(5%). 오늘 실현손익이 이 아래면
 #   그날 신규매수만 멈춤(매도·손절은 계속), 다음 날 자동 해제(손절 횟수 한도와 달리 !시작 불필요).
 DAILY_LOSS_LIMIT_KRW = int(os.getenv("SBOT_DAILY_LOSS_LIMIT", "-500000") or -500000)
@@ -1329,16 +1329,8 @@ class SBot:
             print(f"⏳ {BUY_START_TIME} 이전 — 매수 대기 중")
             return
 
-        # 일일 손실 한도
-        should_stop, reason = self.risk.should_stop_trading(self.daily_loss_count)
-        if should_stop:
-            print(f"🛑 [SWING] {reason} — 매수 정지")
-            st = _read_state()
-            if not st.get("paused"):
-                self._notify(f"🛑 {reason}\n!시작 으로 재개", critical=True)
-                _update_state(paused=True)
-            return
-
+        # ★ 2026-10-12 대장 결정 — 손절 횟수 한도(5회면 일시중단, !시작 필요) 삭제: 손절 3회만으로도
+        #   약 60만이라 횟수 기준은 의미가 없음. 일손실은 아래 금액 한도(-50만)로만 본다.
         realized = self.db.get_today_realized()
         if realized <= DAILY_LOSS_LIMIT_KRW:
             print(f"🛑 [SWING] 일손실 한도({DAILY_LOSS_LIMIT_KRW:,}원) — 오늘 실현 {realized:+,}원, 신규매수 없음")

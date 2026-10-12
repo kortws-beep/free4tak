@@ -113,13 +113,14 @@ class SbotLossLimit(unittest.TestCase):
         b = object.__new__(sbot.SBot)
         b.positions, b.peak_tracker, b.daily_loss_count, b.notes = {}, {}, 0, []
         b._notify = lambda m, critical=False: b.notes.append(m)
-        b.risk = type("R", (), {"should_stop_trading": lambda self, n: (False, "")})()
+        b.risk = type("R", (), {"should_stop_trading": lambda self, n: (True, "손절 9회")})()   # 횟수 한도는 안 씀
         b.db = type("D", (), {"get_today_realized": lambda self: -500_000})()
         boom = [{"code": "X"}]                         # 한도에 걸리면 후보를 아예 안 봄
         b._execute_buys_unified(boom, "1000", 10_000_000)
         self.assertEqual(len(b.notes), 1); self.assertIn("신규매수 중단", b.notes[0])
         b._execute_buys_unified(boom, "1010", 10_000_000)
         self.assertEqual(len(b.notes), 1)
+        self.assertNotIn("손절 9회", " ".join(b.notes))
 
 
 class SbotWeakMarket(unittest.TestCase):
