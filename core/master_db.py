@@ -525,12 +525,32 @@ def set_pause_all(paused: bool, db_path: str = MASTER_DB) -> bool:
             datetime.date.today().strftime("%Y-%m-%d"),
             datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         ))
+        if not paused:
+            # ★ 2026-10-12 — 통합 리스크 자동중단을 연결하면서, 대장이 손으로 재개한 날은 같은
+            #   손실로 바로 다시 멈추지 않게 "오늘 수동 재개함"을 남김(unified_risk가 확인)
+            conn.execute("CREATE TABLE IF NOT EXISTS risk_resume (date TEXT PRIMARY KEY)")
+            conn.execute("INSERT OR REPLACE INTO risk_resume VALUES (?)",
+                         (datetime.date.today().strftime("%Y-%m-%d"),))
         conn.commit()
         conn.close()
         print(f"{'🚨 전봇 긴급중단 ON' if paused else '✅ 전봇 긴급중단 해제'}")
         return True
     except Exception as e:
         print(f"⚠️ master_db set_pause_all 오류: {e}")
+        return False
+
+
+def resumed_today(db_path: str = MASTER_DB) -> bool:
+    """오늘 대장이 전봇 긴급중단을 손으로 해제했는지(그날은 자동 재중단 안 함)."""
+    try:
+        conn = sqlite3.connect(db_path, timeout=5)
+        try:
+            row = conn.execute("SELECT 1 FROM risk_resume WHERE date=?",
+                               (datetime.date.today().strftime("%Y-%m-%d"),)).fetchone()
+        finally:
+            conn.close()
+        return bool(row)
+    except sqlite3.OperationalError:
         return False
 
 

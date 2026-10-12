@@ -44,7 +44,7 @@ for _d in ["core", "intelligence", "interface", "bots", ""]:
 
 from master_db import (
     update_risk, get_risk_state,
-    set_pause_all, set_daily_loss_limit,
+    set_pause_all, set_daily_loss_limit, resumed_today,
     MASTER_DB,
 )
 
@@ -59,16 +59,29 @@ CHECK_INTERVAL   = 30        # 체크 주기 (초)
 # ============================================================
 # 핵심 API
 # ============================================================
-def check_risk() -> dict:
+def ensure_limit(db_path: str = MASTER_DB) -> int:
+    """DB 한도가 테이블 기본값(5만)이면 DAILY_LOSS_LIMIT로 맞춤(대시보드에서 바꾼 값은 유지).
+    ★ 2026-10-12 — 자동중단을 처음 연결하면서 확인: 아무도 설정 안 해 5만이었음(하루 데이봇
+    손실만으로도 전봇 중단될 수준)."""
+    st = get_risk_state(db_path)
+    limit = st.get("daily_loss_limit") or 0
+    if not limit or limit <= 50_000:
+        set_daily_loss_limit(DAILY_LOSS_LIMIT, db_path)
+        return DAILY_LOSS_LIMIT
+    return int(limit)
+
+
+def check_risk(db_path: str = MASTER_DB) -> dict:
     """
-    리스크 상태 갱신 + 반환.
-    각 봇 루프에서 30초~1분마다 호출.
+    리스크 상태 갱신 + 반환. 위험하면 알림, 한도 초과면 전봇 자동 중단.
+    ★ 2026-10-12 — 이 함수를 아무도 안 불러 자동중단이 한 번도 작동한 적 없었음 →
+    리나가 1분마다 호출(lina_bot.risk_watch_loop).
     """
-    state = update_risk()
+    state = update_risk(db_path)
 
     # 위험 감지 시 디스코드 알림
     if state.get("risk_level") in ("warning", "danger"):
-        _notify_risk(state)
+        _notify_risk(state, db_path)
 
     return state
 
@@ -121,31 +134,32 @@ _last_notify_ts  = 0.0
 _last_risk_level = "normal"
 
 def _notify(msg: str, critical: bool = False):
-    """디스코드 알림 (notifier 없으면 print로 fallback)"""
+    """디스코드 알림(키키 채널 — 봇 관리 알림). 실패하면 print.
+    ★ 2026-10-12 — 예전엔 Notifier(웹훅주소)+asyncio.run(send)로 불러 매번 예외 → 조용히 print만
+    했음(Notifier는 name/route를 받는 동기 send)."""
+    print(f"[unified_risk] {msg}")
     try:
         from notifier import Notifier
-        from dotenv import load_dotenv
-        load_dotenv(os.path.join(_BASE, ".env"))
-        n = Notifier(os.getenv("DISCORD_WEBHOOK_URL", ""))
-        import asyncio
-        asyncio.run(n.send(msg, critical=critical))
-    except Exception:
-        print(f"[unified_risk] {msg}")
+        Notifier(name="risk").send(msg, critical=critical)
+    except Exception as e:
+        print(f"[unified_risk] 알림 실패: {e}")
 
 
-def _notify_risk(state: dict):
+def _notify_risk(state: dict, db_path: str = MASTER_DB):
     """리스크 레벨 변화 시만 알림 (중복 방지)"""
     global _last_notify_ts, _last_risk_level
 
     level = state.get("risk_level", "normal")
     now   = time.time()
 
-    # 같은 레벨이면 10분에 1회만
-    if level == _last_risk_level and now - _last_notify_ts < 600:
+    # ★ 2026-10-12 — 레벨이 바뀔 때만 알림(예전엔 같은 레벨이어도 10분마다 반복 → 경고 상태가
+    #   하루 종일이면 키키 채널이 도배됨). 날짜가 바뀌면 처음부터.
+    key = (state.get("date"), level)
+    if key == _last_risk_level:
         return
 
     _last_notify_ts  = now
-    _last_risk_level = level
+    _last_risk_level = key
 
     loss   = state.get("total_loss_krw", 0)
     limit  = state.get("daily_loss_limit", DAILY_LOSS_LIMIT)
@@ -162,9 +176,11 @@ def _notify_risk(state: dict):
         _notify(msg, critical=True)
 
     elif level == "danger":
+        if not state.get("paused_all") and resumed_today(db_path):
+            return          # 오늘 대장이 손으로 재개함 — 같은 손실로 다시 멈추지 않음
         if not state.get("paused_all"):
             # 자동 전봇 중단
-            set_pause_all(True)
+            set_pause_all(True, db_path)
             msg = (
                 f"🚨 리스크 한도 초과 — 전봇 자동 중단!\n"
                 f"당일 손실: {loss:,.0f}원 / 한도: {limit:,.0f}원 ({ratio:.0f}%)\n"
