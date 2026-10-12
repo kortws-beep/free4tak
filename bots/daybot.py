@@ -597,7 +597,10 @@ class DayBot:
         amount = psbl_cash if is_last_slot else min(BUY_AMT_PER_SLOT, psbl_cash)
         breadth = self._market_breadth()
         if WEAK_MARKET_RATIO < 1 and breadth is not None and not market_regime.is_strong(breadth):
-            amount = int(amount * WEAK_MARKET_RATIO)
+            # ★ 2026-10-12 — 마지막 슬롯(가용현금 전부)에도 절반만 곱해 89.5만이 나갔음(상신이디피,
+            #   대장 지적 "약한 장인데 89.5만"). 약한 장은 "종목당 100만 → 50만"이라 마지막 슬롯도
+            #   100만 한도를 먼저 건 뒤 절반.
+            amount = int(min(amount, BUY_AMT_PER_SLOT) * WEAK_MARKET_RATIO)
             print(f"📏 [daybot] 약한 장(20일선 위 {breadth:.0f}%) — {code} 매수금 {amount:,}원으로 축소")
         ok, orgno, odno, qty = self.api.buy(
             code, price, amount, code_name_map=self.code_name_map,

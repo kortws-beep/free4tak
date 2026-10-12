@@ -85,6 +85,12 @@ class DaybotHalf(unittest.TestCase):
             b2 = self._bot(55.0)
             b2._do_buy("111110", "가", 10000, "t")
             self.assertEqual(b2.amounts, [daybot.BUY_AMT_PER_SLOT])
+            b4 = self._bot(42.0)                                   # 약한 장 + 마지막 슬롯(현금 300만)
+            b4._do_buy("111110", "가", 10000, "t", is_last_slot=True)
+            self.assertEqual(b4.amounts, [daybot.BUY_AMT_PER_SLOT // 2])  # 150만이 아니라 50만
+            b5 = self._bot(55.0)                                   # 정상 장 마지막 슬롯은 현금 전부
+            b5._do_buy("111110", "가", 10000, "t", is_last_slot=True)
+            self.assertEqual(b5.amounts, [3_000_000])
             b3 = self._bot(None)                                   # 계산 실패 → 축소 안 함
             b3._do_buy("111110", "가", 10000, "t")
             self.assertEqual(b3.amounts, [daybot.BUY_AMT_PER_SLOT])
