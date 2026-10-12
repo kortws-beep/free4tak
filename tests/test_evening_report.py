@@ -51,5 +51,22 @@ class Report(unittest.TestCase):
         self.assertIn("국면 42%", out); self.assertIn("내일 데이봇·sbot 매수금 절반", out)
 
 
+class OpenPositions(unittest.TestCase):
+    def test_stale_rows_excluded(self):
+        # ★ 2026-10-13 — sbot에서 06월 매도분 4건이 master_positions에서 안 지워진 채
+        #   몇 달째 남아 보유 6인데 10으로 집계되던 버그. 봇은 매루프 갱신하므로
+        #   STALE_DAYS보다 오래 안 갱신된 행은 유령 행으로 보고 제외해야 함.
+        db = os.path.abspath("p.db")
+        if os.path.exists(db):
+            os.remove(db)
+        M.init_db(db)
+        M.upsert_position("sbot", "000001", db_path=db)              # 방금 갱신(최신)
+        conn = sqlite3.connect(db)
+        conn.execute("INSERT INTO master_positions (bot_type, code, updated_at) VALUES (?,?,?)",
+                     ("sbot", "999999", "2026-01-01 00:00:00"))      # 묵은 유령 행
+        conn.commit(); conn.close()
+        self.assertEqual(E.open_positions(db), {"sbot": 1})
+
+
 if __name__ == "__main__":
     unittest.main()
