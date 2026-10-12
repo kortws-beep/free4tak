@@ -1801,6 +1801,32 @@ async def before_sector_watch_loop():
     await client.wait_until_ready()
 
 
+# ── 세 봇 합산 손실 자동중단 (2026-10-12) ──────────────────────────
+#   core/unified_risk.check_risk()를 아무도 안 불러 "합산 손실 한도 넘으면 전봇 중단"이
+#   한 번도 작동한 적 없었음(대장: "개입 없이 돌려도 되나" 점검 중 발견). 리나가 1분마다
+#   호출 — 매매봇들은 이미 루프마다 master_db.is_paused_all()을 확인해 매수를 멈춘다
+#   (매도·손절은 계속). cbot이 24시간이라 시간 제한 없이 돈다.
+_RISK_STATE = {"init": False}
+
+
+@tasks.loop(minutes=1)
+async def risk_watch_loop():
+    try:
+        import unified_risk
+        if not _RISK_STATE["init"]:
+            lim = await asyncio.to_thread(unified_risk.ensure_limit)
+            print(f"🛡️ [통합리스크] 감시 시작 — 세 봇 합산 손실 한도 {lim:,}원 (넘으면 전봇 매수 중단)")
+            _RISK_STATE["init"] = True
+        await asyncio.to_thread(unified_risk.check_risk)
+    except Exception as e:
+        print(f"⚠️ [통합리스크] 점검 오류: {e}")
+
+
+@risk_watch_loop.before_loop
+async def before_risk_watch_loop():
+    await client.wait_until_ready()
+
+
 _KIWOOM_POOL_SCAN_TIMES = {(9, 30), (12, 30), (15, 0)}
 _kiwoom_pool_scan_state = {"date": "", "done": set(), "retry_at": None, "retry_label": None}
 
@@ -2447,6 +2473,12 @@ async def on_ready():
             sector_watch_loop.start()
         print("✅ [시스템] 한투 관심그룹 섹터 감시 (09:00~15:20, 3분 주기) 가동 성공! (관찰 전용)")
     except Exception as e: print(f"⚠️ [에러] 섹터 감시 스케줄러: {e}")
+
+    try:
+        if not risk_watch_loop.is_running():
+            risk_watch_loop.start()
+        print("✅ [시스템] 세 봇 합산 손실 자동중단 감시 (1분 주기) 가동 성공!")
+    except Exception as e: print(f"⚠️ [에러] 통합 리스크 감시: {e}")
 
 def _fetch_sbo2_status_sync(api, positions: dict):
     """!상태 — 보유종목 기준 주문가능금액+시세 조회 (동기, to_thread로 실행)."""

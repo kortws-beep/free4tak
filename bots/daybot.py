@@ -178,6 +178,10 @@ NEW_BUY_END_TIME = os.getenv("DAYBOT_NEW_BUY_END", "0940").strip() or "0940"
 #   장에선 추격매수가 본전~손실 → 그런 날은 매수금 절반(멈추면 기회까지 놓쳐서 절반으로).
 #   끄려면 .env에 DAYBOT_WEAK_MARKET_RATIO=1
 WEAK_MARKET_RATIO = float(os.getenv("DAYBOT_WEAK_MARKET_RATIO", "0.5") or 0.5)
+# ★ 2026-10-12 대장 결정 — 시드 300만 기준 일손실 한도 -15만(5%). 오늘 실현손익이 이 아래면
+#   그날 신규매수만 멈춤(보유 종목 손절·트레일링은 계속), 다음 날 자동 해제. 너무 작게 잡으면
+#   민감하게 멈춰 기회를 놓친다는 대장 판단으로 5%.
+DAILY_LOSS_LIMIT = int(os.getenv("DAYBOT_DAILY_LOSS_LIMIT", "-150000") or -150000)
 # ★ 2026-10-08 대장 지정 — "정규장에서만 처리하자." 장종료동시마감(15:20~15:30,
 #   시장가 주문이 '129 주문불가시간'으로 거부됨)과 애프터마켓(AFTERHOURS_ORD_DVSN
 #   코드가 실거래로 거부되는 걸 확인 — LG에너지솔루션 손절 10회 연속 실패)
@@ -1233,7 +1237,22 @@ class DayBot:
 
         return True, "매집패턴확인"
 
+    def _daily_loss_hit(self) -> bool:
+        realized = self.db.get_today_realized()
+        if realized > DAILY_LOSS_LIMIT:
+            return False
+        today = today_str()
+        if getattr(self, "_loss_notified", None) != today:
+            self._loss_notified = today
+            self._notify(f"🛑 [daybot] 오늘 실현손익 {realized:+,}원 ≤ 한도 {DAILY_LOSS_LIMIT:,}원 — "
+                         f"오늘 신규매수 중단(보유 종목 손절·트레일링은 계속, 내일 자동 해제)",
+                         critical=True)
+        return True
+
     def _run_candidate_scan_and_maybe_buy(self):
+        if self._daily_loss_hit():
+            print(f"🛑 [daybot] 일손실 한도({DAILY_LOSS_LIMIT:,}원) — 오늘 신규매수 없음")
+            return
         codes, code_multi_tag_map = self._scan_conditions()
         if not codes:
             return
