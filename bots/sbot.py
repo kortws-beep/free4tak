@@ -76,6 +76,7 @@ from sbot_analyzer import SwingAnalyzer
 from sbot_db       import SwingDB
 from risk_manager  import RiskManager
 import candidate_pool as _cpool   # sbot×sbo2 통합 — 모멘텀/추세/완화/유튜브 소스
+import market_regime              # ★ 2026-10-12 시장 국면(20일선 위 종목 비율)
 try:
     from account_sync import sync_positions as _sync_positions
 except ImportError:
@@ -212,6 +213,10 @@ BUY_1ST_AMT_BASE = 1_650_000    # 1차 매수 기본 금액 (2026-09-29: 150만�
 #   금액의 이 비율 미만이면 그냥 패스(다음 루프에 현금 늘면 재시도) —
 #   켈리기반 KISNEW 슬롯은 원래도 가변사이징이 의도된 설계라 대상 아님.
 FLAT_BUY_MIN_RATIO = 0.5
+# ★ 2026-10-12 대장 결정("양 봇 직격탄" — 국면 48%인 날 sbot도 140만씩 매수): 데이봇과 같이
+#   전 종목 20일선 위 비율이 50% 미만이면 매수금 절반. 마지막 슬롯(가용현금 전부)도 목표금액
+#   한도를 먼저 건 뒤 절반. 끄려면 .env에 SBOT_WEAK_MARKET_RATIO=1
+WEAK_MARKET_RATIO = float(os.getenv("SBOT_WEAK_MARKET_RATIO", "0.5") or 0.5)
 
 # ── 통합 후보풀 슬롯 상수 ────────────────────────────────────
 # sbot 자체 소스(KIS new그룹/S7) + core/candidate_pool.py의 sbo2 원천
@@ -449,6 +454,28 @@ class SBot:
     # ============================================================
     def _notify(self, msg: str, critical: bool = False):
         self.notifier.send(f"[SBOT] {msg}", critical=critical)
+
+    def _market_breadth(self):
+        """오늘 처음 부를 때 한 번 계산(전 거래일 종가 기준). 실패하면 None(축소 안 함)."""
+        today = today_str()
+        if getattr(self, "_regime", (None, None))[0] != today:
+            cur = market_regime.latest()
+            b = cur[1] if cur else None
+            self._regime = (today, b)
+            if b is not None:
+                weak = WEAK_MARKET_RATIO < 1 and not market_regime.is_strong(b)
+                msg = (f"📏 시장 국면 {b:.0f}% ({cur[0]} 종가, 20일선 위 종목 비율) — "
+                       + (f"약한 장 → 매수금 {WEAK_MARKET_RATIO:.0%}" if weak else "정상 매수"))
+                print(msg)
+                self._notify(msg)
+        return self._regime[1]
+
+    def _regime_amount(self, amount: int) -> int:
+        """약한 장이면 목표 슬롯금액 한도를 먼저 건 뒤 절반(마지막 슬롯·켈리 사이징 모두)."""
+        b = self._market_breadth()
+        if WEAK_MARKET_RATIO < 1 and b is not None and not market_regime.is_strong(b):
+            return int(min(amount, BUY_1ST_AMT_BASE) * WEAK_MARKET_RATIO)
+        return amount
 
     def _name(self, code: str) -> str:
         return self.code_name_map.get(code, code)
@@ -1364,6 +1391,11 @@ class SBot:
                           f"목표 슬롯금액({BUY_1ST_AMT_BASE:,}원)의 "
                           f"{FLAT_BUY_MIN_RATIO:.0%} 미만")
                     continue
+
+            _full = buy_amount
+            buy_amount = self._regime_amount(buy_amount)
+            if buy_amount < _full:
+                print(f"📏 [SWING] 약한 장 — {code} 매수금 {_full:,}→{buy_amount:,}원")
 
             # ★ 2026-10-06: 후보의 curr는 아침 분석(score_cache)이나 하루1회
             #   후보풀 갱신 때 가격이라 오후엔 크게 어긋남 — 그 가격+1호가

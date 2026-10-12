@@ -108,5 +108,29 @@ class SbotSell(unittest.TestCase):
         self.assertTrue(res["r"].startswith("❌"))
 
 
+class SbotWeakMarket(unittest.TestCase):
+    """2026-10-12 — 국면 50% 미만이면 매수금 절반(마지막 슬롯도 목표금액 한도 뒤 절반)."""
+    def _bot(self, breadth):
+        b = object.__new__(sbot.SBot)
+        b.notes = []
+        b._notify = lambda m, critical=False: b.notes.append(m)
+        sbot.market_regime.latest = lambda: ("2026-10-08", breadth)
+        return b
+
+    def test_half(self):
+        old = sbot.market_regime.latest
+        try:
+            base = sbot.BUY_1ST_AMT_BASE
+            self.assertEqual(self._bot(48.0)._regime_amount(base), base // 2)
+            self.assertEqual(self._bot(48.0)._regime_amount(3_000_000), base // 2)   # 마지막 슬롯(현금 전부)
+            self.assertEqual(self._bot(48.0)._regime_amount(400_000), 200_000)        # 켈리로 작게 잡힌 경우
+            self.assertEqual(self._bot(55.0)._regime_amount(3_000_000), 3_000_000)
+            self.assertEqual(self._bot(None)._regime_amount(base), base)
+            b = self._bot(48.0); b._regime_amount(base)
+            self.assertIn("약한 장", b.notes[0]); b._regime_amount(base); self.assertEqual(len(b.notes), 1)
+        finally:
+            sbot.market_regime.latest = old
+
+
 if __name__ == "__main__":
     unittest.main()
