@@ -79,6 +79,10 @@ class Store(unittest.TestCase):
         self.assertEqual((bars[0][0], bars[-1][0], len(bars)), ("090000", "153000", 391))
         self.assertEqual(api.calls[0], "153000"); self.assertEqual(len(api.calls), 4)
         n = len(api.calls); st.day("A", "2026-10-07"); self.assertEqual(len(api.calls), n)   # 캐시
+        import datetime as _d
+        today = _d.date.today().isoformat()
+        st.day("A", today); m = len(api.calls); st.day("A", today)
+        self.assertEqual(len(api.calls), m)                                  # 오늘(미확정)도 실행 중엔 한 번만
         days = st.days_from("A", "2026-10-02", 2)
         self.assertEqual([d for d, _ in days], ["2026-10-02", "2026-10-06"])           # 주말·10-05(분봉없음) 건너뜀
 

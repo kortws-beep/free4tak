@@ -82,14 +82,22 @@ class MinuteStore:
                           "high REAL, low REAL, PRIMARY KEY(code, date, time))")
         self.conn.execute("CREATE TABLE IF NOT EXISTS done (code TEXT, date TEXT, PRIMARY KEY(code, date))")
         self.calls = 0
+        # ★ 2026-10-12 — 오늘 분봉은 15:40 전엔 '확정'으로 안 남겨 부를 때마다 다시 받았음 →
+        #   매도규칙 35개를 돌리는 2번에서 한투 호출이 수천 번으로 늘어 멈춘 것처럼 보였음(대장 실행).
+        #   한 번 실행 안에서는 메모리에 기억.
+        self._mem = {}
 
     def day(self, code: str, date: str) -> list:
         """[(time, price, high, low)] 정규장, 오래된→최신. date는 YYYY-MM-DD."""
+        if (code, date) in self._mem:
+            return self._mem[(code, date)]
         done = self.conn.execute("SELECT 1 FROM done WHERE code=? AND date=?", (code, date)).fetchone()
         if not done and self.api is not None:
             self._fetch(code, date)
-        return self.conn.execute("SELECT time, price, high, low FROM bars WHERE code=? AND date=? "
+        rows = self.conn.execute("SELECT time, price, high, low FROM bars WHERE code=? AND date=? "
                                  "ORDER BY time", (code, date)).fetchall()
+        self._mem[(code, date)] = rows
+        return rows
 
     def _fetch(self, code: str, date: str):
         import time as _t
