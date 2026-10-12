@@ -150,20 +150,24 @@ case "$1" in
         sudo systemctl enable yeongam9-watchdog-sbot.timer
         sudo systemctl start yeongam9-watchdog-daybot.timer
         sudo systemctl enable yeongam9-watchdog-daybot.timer
-        echo "  ✅ sbo2 + sbot + daybot watchdog 시작 (30초 간격, 5분 무응답 시 재시작)"
+        sudo systemctl start yeongam9-watchdog-cbot.timer
+        sudo systemctl enable yeongam9-watchdog-cbot.timer
+        echo "  ✅ sbo2 + sbot + daybot + cbot watchdog 시작 (30초 간격, 5분 무응답 시 재시작)"
         ;;
       stop)
         echo "🐕 watchdog 정지..."
         sudo systemctl stop yeongam9-watchdog-sbo2.timer
         sudo systemctl stop yeongam9-watchdog-sbot.timer
         sudo systemctl stop yeongam9-watchdog-daybot.timer
-        echo "  ⏹  sbo2 + sbot + daybot watchdog 정지"
+        sudo systemctl stop yeongam9-watchdog-cbot.timer
+        echo "  ⏹  sbo2 + sbot + daybot + cbot watchdog 정지"
         ;;
       status)
         echo "🐕 watchdog 상태"
         systemctl status yeongam9-watchdog-sbo2.timer --no-pager
         systemctl status yeongam9-watchdog-sbot.timer --no-pager
         systemctl status yeongam9-watchdog-daybot.timer --no-pager
+        systemctl status yeongam9-watchdog-cbot.timer --no-pager
         ;;
       *)
         echo "사용법: $0 watchdog {start|stop|status}"
