@@ -98,5 +98,19 @@ class DaybotHalf(unittest.TestCase):
             daybot._master_upsert, MR.latest = old, old_latest
 
 
+class DaybotLossLimit(unittest.TestCase):
+    def test_limit(self):
+        b = object.__new__(daybot.DayBot)
+        b.notes = []
+        b._notify = lambda m, critical=False: b.notes.append(m)
+        b.db = type("D", (), {"get_today_realized": lambda self: -149_000})()
+        self.assertFalse(b._daily_loss_hit())
+        b.db = type("D", (), {"get_today_realized": lambda self: -150_000})()
+        self.assertTrue(b._daily_loss_hit()); self.assertTrue(b._daily_loss_hit())
+        self.assertEqual(len(b.notes), 1); self.assertIn("신규매수 중단", b.notes[0])
+        b._scan_conditions = lambda: self.fail("한도 걸리면 스캔도 안 함")
+        b._run_candidate_scan_and_maybe_buy()
+
+
 if __name__ == "__main__":
     unittest.main()

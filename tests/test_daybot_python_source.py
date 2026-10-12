@@ -76,7 +76,8 @@ class NewBuyCutoff(unittest.TestCase):
             def get_hoga(self, c): return {"ask_bid_ratio": 5.0}
             def get_psbl_order_cash(self, *a): return 0
         b.api = Api()
-        b.db = type("D", (), {"log_candidate": lambda self, *a, **k: None})()
+        b.db = type("D", (), {"log_candidate": lambda self, *a, **k: None,
+                              "get_today_realized": lambda self: 0})()
         b._do_buy = lambda code, name, price, tier, **k: bought.append(code)
         return b
 

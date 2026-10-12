@@ -51,7 +51,10 @@ from master_db import (
 # ============================================================
 # 상수
 # ============================================================
-DAILY_LOSS_LIMIT = 266_000   # 380만 × 7%
+# ★ 2026-10-12 대장 결정 — 봇별 일손실 한도(시드의 5%): cbot -15만(300만)·daybot -15만(300만)·
+#   sbot -50만(1000만). 합산 자동중단은 그 합(80만)을 마지막 안전망으로 — 너무 작으면 민감하게
+#   멈춰 기회를 놓침(대장). 예전 26.6만(380만×7%)은 봇 구성이 바뀌기 전 값.
+DAILY_LOSS_LIMIT = 800_000
 WARN_RATIO       = 0.70      # 경고 임계 70%
 CHECK_INTERVAL   = 30        # 체크 주기 (초)
 
@@ -65,7 +68,7 @@ def ensure_limit(db_path: str = MASTER_DB) -> int:
     손실만으로도 전봇 중단될 수준)."""
     st = get_risk_state(db_path)
     limit = st.get("daily_loss_limit") or 0
-    if not limit or limit <= 50_000:
+    if not limit or limit <= 50_000 or limit == 266_000:      # 테이블 기본값·예전 기본값이면 새 값으로
         set_daily_loss_limit(DAILY_LOSS_LIMIT, db_path)
         return DAILY_LOSS_LIMIT
     return int(limit)

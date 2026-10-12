@@ -108,6 +108,20 @@ class SbotSell(unittest.TestCase):
         self.assertTrue(res["r"].startswith("❌"))
 
 
+class SbotLossLimit(unittest.TestCase):
+    def test_amount_limit(self):
+        b = object.__new__(sbot.SBot)
+        b.positions, b.peak_tracker, b.daily_loss_count, b.notes = {}, {}, 0, []
+        b._notify = lambda m, critical=False: b.notes.append(m)
+        b.risk = type("R", (), {"should_stop_trading": lambda self, n: (False, "")})()
+        b.db = type("D", (), {"get_today_realized": lambda self: -500_000})()
+        boom = [{"code": "X"}]                         # 한도에 걸리면 후보를 아예 안 봄
+        b._execute_buys_unified(boom, "1000", 10_000_000)
+        self.assertEqual(len(b.notes), 1); self.assertIn("신규매수 중단", b.notes[0])
+        b._execute_buys_unified(boom, "1010", 10_000_000)
+        self.assertEqual(len(b.notes), 1)
+
+
 class SbotWeakMarket(unittest.TestCase):
     """2026-10-12 — 국면 50% 미만이면 매수금 절반(마지막 슬롯도 목표금액 한도 뒤 절반)."""
     def _bot(self, breadth):
