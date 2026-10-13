@@ -43,6 +43,17 @@ class Rebound(unittest.TestCase):
         self.assertIn("5일+ 연속 하락 다음 날 1번", out)
         self.assertNotIn("KODEX", out)
 
+    def test_leaders(self):
+        daily = mk_daily()
+        dates = sorted({r[0] for r in daily["종목0"]})
+        daily["주도"] = [(d, 100, 100, 100, 100 + 10 * i, 5000) for i, d in enumerate(dates)]
+        self.assertEqual(R.leaders(daily, dates, dates[3], lookback=3, top=1), {"주도"})
+        groups = {"2차전지": [("1", "주도"), ("2", "종목1"), ("3", "종목2")],
+                  "반도체": [("4", "종목3"), ("5", "종목4"), ("6", "종목5")]}
+        self.assertEqual(R.leader_groups(daily, groups, dates, dates[3], lookback=3, top=1)[0], ["2차전지"])
+        self.assertEqual(R.leaders(daily, dates, dates[1], lookback=3), set())   # 기간 모자람
+        self.assertIn("■ 4. 같은 날 비교", R.report(daily, 10, groups))
+
     def test_excluded(self):
         self.assertTrue(R.excluded("TIGER 200")); self.assertTrue(R.excluded("삼성전자우"))
         self.assertFalse(R.excluded("삼성전자"))
