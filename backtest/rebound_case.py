@@ -87,8 +87,28 @@ def report(name: str, daily: dict, groups: dict, days: int = 12, minutes: dict =
     si = dates.index(start)
     L.append(f"■ 2. 시장 하락 구간: {start}부터 (▼ 연속). 그 직전 {LOOKBACK}거래일 주도 여부")
     cs = rb._closes(daily)
+    # ★ 10-13 엘앤에프 사례: 20일로는 2차전지 10/10등(+2.6%)이었지만 하락 직전날(10-06) +9%로
+    #   그날의 주도주였음 → 대장 말 "하락이 나올 때 주도"는 직전 1~3일 기준이 맞아 보여 같이 보여줌.
+    for w in (1, 3):
+        if si - 1 - w < 0:
+            continue
+        b0, b1 = dates[si - 1 - w], dates[si - 1]
+        everyone = rank_in(cs, list(cs), b0, b1)
+        mine = next(((k, r) for k, (n, r) in enumerate(everyone, 1) if n == name), None)
+        if not mine:
+            continue
+        gs = []
+        for g, members in groups.items():
+            names = [n for _, n in members]
+            if name in names:
+                rk = rank_in(cs, names, b0, b1)
+                me = next((k for k, (n, _) in enumerate(rk, 1) if n == name), None)
+                gs.append(f"[{g}] {me}/{len(rk)}등")
+        L.append(f"   직전 {w}일({b1}) {name} {mine[1]:+.1f}% · 전 종목 {mine[0]}/{len(everyone)}위"
+                 + (" · " + " · ".join(gs) if gs else ""))
     if si - 1 - LOOKBACK >= 0:
         b0, b1 = dates[si - 1 - LOOKBACK], dates[si - 1]
+        L.append(f"   직전 {LOOKBACK}일:")
         everyone = rank_in(cs, list(cs), b0, b1)
         pos = next((k for k, (n, _) in enumerate(everyone, 1) if n == name), None)
         mine = next((r for n, r in everyone if n == name), None)

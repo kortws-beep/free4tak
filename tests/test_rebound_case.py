@@ -34,6 +34,7 @@ class Case(unittest.TestCase):
                                                                   ("091500", 97, 99, 96)]})
         self.assertIn("시장 하락 구간: 2026-09-26부터", out)
         self.assertIn("그룹 안 1/3등", out)
+        self.assertIn("직전 1일(2026-09-25) 엘앤에프", out); self.assertIn("[2차전지] 1/3등", out)
         self.assertIn("■ 4. 장중 2026-09-30", out)
         self.assertIn("일봉이 없어", C.report("없는종목", daily, {}))
 
