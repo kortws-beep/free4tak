@@ -53,10 +53,13 @@ def new_low_share(daily: dict, n: int = 20) -> dict:
     return {d: hit.get(d, 0) / t * 100 for d, t in tot.items() if t >= 50}
 
 
-def tp_exit(c: float, nxt: list, tp: float = 0.05, sl: float = None, close_sl: bool = False) -> float:
+def tp_exit(c: float, nxt: list, tp: float = 0.05, sl: float = None, close_sl: bool = False,
+            next_open: bool = False) -> float:
     """종가 c에 산 뒤 nxt 일봉으로 +tp 익절(·-sl 손절) — 못 닿으면 마지막 종가. 비용 차감 전.
     close_sl=False: 장중 손절(같은 날 익절·손절 둘 다 닿으면 손절 먼저 — 불리하게)
     close_sl=True : 종가 손절(장중엔 익절만 보고, 종가가 손절선 아래면 그 종가에 매도)"""
+    if next_open:
+        return nxt[0][1] / c - 1
     for d, o, h, l, cl, _ in nxt:
         if sl is not None and not close_sl and l <= c * (1 - sl):
             return min(o / c - 1, -sl)
@@ -69,7 +72,9 @@ def tp_exit(c: float, nxt: list, tp: float = 0.05, sl: float = None, close_sl: b
 
 # ★ 10-13 대장: "맞으면 하락장 손실 회복, 틀려도 손절 3.5%" — 장중 -5% 손절을 붙이면 전부 PF<1로
 #   떨어져서(바닥 근처는 흔들림이 커 반등 전에 털림) 손절 방식을 나눠 비교.
-EXIT_RULES = [("익절만", {}),
+# ★ 10-13 대장: "반등매매는 오후에 사서 아침 프리장에 승부 — 수익 줄 때 먹고 빠진다"(다음 날 daybot
+#   시드도 돌려줘야 함) → 다음 날 시가 매도(프리장 가격은 일봉에 없어 시가로 대신)를 맨 앞에.
+EXIT_RULES = [("다음날시가", {"next_open": True}), ("익절만", {}),
               ("장중-3.5", {"sl": 0.035}), ("장중-5", {"sl": 0.05}), ("장중-7", {"sl": 0.07}),
               ("종가-3.5", {"sl": 0.035, "close_sl": True}), ("종가-5", {"sl": 0.05, "close_sl": True})]
 
@@ -137,7 +142,7 @@ def fmt(s: dict) -> str:
     f = lambda v: f"{v:.2f}" if v != float("inf") else "∞"
     return (f"{s['days']:>3}일 {s['n']:>6}건 · +5%도달 {s['hit5']:4.0f}% · +3%도달 {s['hit3']:4.0f}% · "
             f"5일뒤 평균 {s['avg']:+.2f}% PF {f(s['pf']):>4} · 시장 5일 플러스 {s['mkt_up']:3.0f}%\n"
-            f"{'':<24}→ +5%익절 + " + " · ".join(f"{lab} {a:+.2f}%/{f(p)}" for (lab, _), (a, p)
+            f"{'':<24}→ " + " · ".join(f"{lab} {a:+.2f}%/{f(p)}" for (lab, _), (a, p)
                                                   in zip(EXIT_RULES, s["rules"])))
 
 
@@ -150,7 +155,7 @@ def report(daily: dict, top: int) -> str:
     dates = [d for d in sorted(table) if d in outs]
     L = [f"🔄 시장 바닥 신호 검증 — {dates[0]}~{dates[-1]} {len(dates)}거래일 · 신호 날 종가 매수 → "
          f"{HORIZON}거래일 (거래대금 상위 {top}종목, 비용 {COST:.1%})"]
-    L.append("   (+5%익절 줄: 규칙별 평균%/PF — 장중 손절은 같은 날 익절·손절 둘 다 닿으면 손절 먼저로 불리하게 계산)")
+    L.append("   (→ 줄: 매도 규칙별 평균%/PF — 다음날시가 = 오후 매수·아침 매도, 나머지는 5일 안 +5% 익절 +손절 방식 · 장중 손절은 같은 날 익절·손절 둘 다 닿으면 손절 먼저로 불리하게 계산)")
     L.append(f"   평소(모든 날)        {fmt(summarize(dates, outs))}")
     sig = signals(table, st, breadth, lows)
     for k, ds in sig.items():
