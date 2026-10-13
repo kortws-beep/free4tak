@@ -19,6 +19,10 @@ bottom_signal.py — 시장 하락 마무리(추세전환) 신호 찾기 (2026-1
 결과 (거래대금 상위 300종목, 비용 0.3% 차감):
   +5% 도달률(5일 안 고가 기준) · 3% 도달률 · 5일 뒤 종가 수익률 평균·PF · 시장(중앙값) 5일 수익률 플러스였던 날 비율
   그리고 신호 날짜 목록(그날 뒤 시장 5일 수익률) — 헛신호가 얼마나 되는지 눈으로
+★ 10-13 대장 방식 그대로: "+5% 찍으면 팔고 나온다" — 5일 안 고가가 +5% 닿으면 그 값에 매도
+  (시가가 이미 넘었으면 시가), 못 닿으면 5일째 종가. 손절 -5%를 같이 둔 규칙도(같은 날 둘 다
+  닿으면 손절이 먼저라고 불리하게 가정). 평소에도 '5일 안 +5% 찍는 종목'이 절반이라 도달률만으론
+  부족 — 실제로 챙기는 돈(PF)으로 비교.
 한계: 지수 아닌 전 종목 중앙값, 코스피·코스닥 구분 없음(다음 단계), 일봉 약 1년치.
 실행:  python backtest/bottom_signal.py [--days 300] [--top 300]
 """
@@ -49,8 +53,18 @@ def new_low_share(daily: dict, n: int = 20) -> dict:
     return {d: hit.get(d, 0) / t * 100 for d, t in tot.items() if t >= 50}
 
 
+def tp_exit(c: float, nxt: list, tp: float = 0.05, sl: float = None) -> float:
+    """종가 c에 산 뒤 nxt 일봉으로 +tp 익절(·-sl 손절) — 못 닿으면 마지막 종가. 비용 차감 전."""
+    for d, o, h, l, cl, _ in nxt:
+        if sl is not None and l <= c * (1 - sl):
+            return min(o / c - 1, -sl)                 # 같은 날 둘 다 닿으면 손절 먼저(불리하게)
+        if h >= c * (1 + tp):
+            return max(o / c - 1, tp)
+    return nxt[-1][4] / c - 1
+
+
 def outcomes(daily: dict, top: int, horizon: int = HORIZON) -> dict:
-    """{날짜: [(최대상승%, 5일뒤 수익률)]} — 그날 거래대금 상위 top 종목을 종가에 샀다면."""
+    """{날짜: [(최대상승%, 5일뒤 수익률, +5%익절, +5%익절·-5%손절)]} — 그날 거래대금 상위 top 종목을 종가에 샀다면."""
     by_date = {}
     for name, rows in daily.items():
         if rb.excluded(name):
@@ -60,11 +74,12 @@ def outcomes(daily: dict, top: int, horizon: int = HORIZON) -> dict:
             if not c:
                 continue
             nxt = rows[i + 1:i + 1 + horizon]
-            by_date.setdefault(d, []).append((val, max(r[2] for r in nxt) / c - 1, nxt[-1][4] / c - 1 - COST))
+            by_date.setdefault(d, []).append((val, max(r[2] for r in nxt) / c - 1, nxt[-1][4] / c - 1 - COST,
+                                              tp_exit(c, nxt) - COST, tp_exit(c, nxt, sl=0.05) - COST))
     out = {}
     for d, xs in by_date.items():
         xs.sort(key=lambda x: -x[0])
-        out[d] = [(mx, r) for _, mx, r in xs[:top]]
+        out[d] = [x[1:] for x in xs[:top]]
     return out
 
 
@@ -91,22 +106,28 @@ def summarize(days: list, outs: dict) -> dict:
     xs = [x for d in days for x in outs.get(d, [])]
     if not xs:
         return {"days": len(days), "n": 0}
-    rets = [r for _, r in xs]
-    w, l = [r for r in rets if r > 0], [r for r in rets if r <= 0]
-    mkt = [statistics.median(r for _, r in outs[d]) for d in days if outs.get(d)]
+
+    def ap(k):
+        rets = [x[k] for x in xs]
+        w, l = [r for r in rets if r > 0], [r for r in rets if r <= 0]
+        return sum(rets) / len(rets) * 100, (sum(w) / -sum(l) if l and sum(l) < 0 else float("inf"))
+    mkt = [statistics.median(x[1] for x in outs[d]) for d in days if outs.get(d)]
+    (avg, pf), (tavg, tpf), (savg, spf) = ap(1), ap(2), ap(3)
     return {"days": len(days), "n": len(xs),
-            "hit5": sum(mx >= 0.05 for mx, _ in xs) / len(xs) * 100,
-            "hit3": sum(mx >= 0.03 for mx, _ in xs) / len(xs) * 100,
-            "avg": sum(rets) / len(rets) * 100, "pf": sum(w) / -sum(l) if l and sum(l) < 0 else float("inf"),
+            "hit5": sum(x[0] >= 0.05 for x in xs) / len(xs) * 100,
+            "hit3": sum(x[0] >= 0.03 for x in xs) / len(xs) * 100,
+            "avg": avg, "pf": pf, "tavg": tavg, "tpf": tpf, "savg": savg, "spf": spf,
             "mkt_up": sum(m > 0 for m in mkt) / len(mkt) * 100 if mkt else 0}
 
 
 def fmt(s: dict) -> str:
     if not s["n"]:
         return f"{s['days']:>3}일  (결과 없음)"
-    pf = f"{s['pf']:.2f}" if s["pf"] != float("inf") else "∞"
+    f = lambda v: f"{v:.2f}" if v != float("inf") else "∞"
     return (f"{s['days']:>3}일 {s['n']:>6}건 · +5%도달 {s['hit5']:4.0f}% · +3%도달 {s['hit3']:4.0f}% · "
-            f"5일뒤 평균 {s['avg']:+.2f}% PF {pf:>4} · 시장 5일 플러스 {s['mkt_up']:3.0f}%")
+            f"5일뒤 평균 {s['avg']:+.2f}% PF {f(s['pf']):>4} · 시장 5일 플러스 {s['mkt_up']:3.0f}%\n"
+            f"{'':<24}→ +5%익절 평균 {s['tavg']:+.2f}% PF {f(s['tpf']):>4} · "
+            f"+5%익절·-5%손절 평균 {s['savg']:+.2f}% PF {f(s['spf']):>4}")
 
 
 def report(daily: dict, top: int) -> str:
@@ -128,7 +149,7 @@ def report(daily: dict, top: int) -> str:
             continue
         L.append(f"   [{k}]")
         for d in ds[-15:]:
-            m = statistics.median(r for _, r in outs[d]) * 100 if outs.get(d) else None
+            m = statistics.median(x[1] for x in outs[d]) * 100 if outs.get(d) else None
             mtxt = f"{m:+.2f}%" if m is not None else "(아직)"
             L.append(f"     {d}  5일 뒤 {mtxt:>7} · 20일선 위 {breadth.get(d, 0):4.0f}% · 신저가 {lows.get(d, 0):4.1f}%")
     L.append("■ 최근 10거래일 시장 상태 (지금 어디쯤인지)")
