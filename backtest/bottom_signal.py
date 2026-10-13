@@ -53,18 +53,29 @@ def new_low_share(daily: dict, n: int = 20) -> dict:
     return {d: hit.get(d, 0) / t * 100 for d, t in tot.items() if t >= 50}
 
 
-def tp_exit(c: float, nxt: list, tp: float = 0.05, sl: float = None) -> float:
-    """종가 c에 산 뒤 nxt 일봉으로 +tp 익절(·-sl 손절) — 못 닿으면 마지막 종가. 비용 차감 전."""
+def tp_exit(c: float, nxt: list, tp: float = 0.05, sl: float = None, close_sl: bool = False) -> float:
+    """종가 c에 산 뒤 nxt 일봉으로 +tp 익절(·-sl 손절) — 못 닿으면 마지막 종가. 비용 차감 전.
+    close_sl=False: 장중 손절(같은 날 익절·손절 둘 다 닿으면 손절 먼저 — 불리하게)
+    close_sl=True : 종가 손절(장중엔 익절만 보고, 종가가 손절선 아래면 그 종가에 매도)"""
     for d, o, h, l, cl, _ in nxt:
-        if sl is not None and l <= c * (1 - sl):
-            return min(o / c - 1, -sl)                 # 같은 날 둘 다 닿으면 손절 먼저(불리하게)
+        if sl is not None and not close_sl and l <= c * (1 - sl):
+            return min(o / c - 1, -sl)
         if h >= c * (1 + tp):
             return max(o / c - 1, tp)
+        if sl is not None and close_sl and cl <= c * (1 - sl):
+            return cl / c - 1
     return nxt[-1][4] / c - 1
 
 
+# ★ 10-13 대장: "맞으면 하락장 손실 회복, 틀려도 손절 3.5%" — 장중 -5% 손절을 붙이면 전부 PF<1로
+#   떨어져서(바닥 근처는 흔들림이 커 반등 전에 털림) 손절 방식을 나눠 비교.
+EXIT_RULES = [("익절만", {}),
+              ("장중-3.5", {"sl": 0.035}), ("장중-5", {"sl": 0.05}), ("장중-7", {"sl": 0.07}),
+              ("종가-3.5", {"sl": 0.035, "close_sl": True}), ("종가-5", {"sl": 0.05, "close_sl": True})]
+
+
 def outcomes(daily: dict, top: int, horizon: int = HORIZON) -> dict:
-    """{날짜: [(최대상승%, 5일뒤 수익률, +5%익절, +5%익절·-5%손절)]} — 그날 거래대금 상위 top 종목을 종가에 샀다면."""
+    """{날짜: [(최대상승%, 5일뒤 수익률, *EXIT_RULES 수익률)]} — 그날 거래대금 상위 top 종목을 종가에 샀다면."""
     by_date = {}
     for name, rows in daily.items():
         if rb.excluded(name):
@@ -75,7 +86,7 @@ def outcomes(daily: dict, top: int, horizon: int = HORIZON) -> dict:
                 continue
             nxt = rows[i + 1:i + 1 + horizon]
             by_date.setdefault(d, []).append((val, max(r[2] for r in nxt) / c - 1, nxt[-1][4] / c - 1 - COST,
-                                              tp_exit(c, nxt) - COST, tp_exit(c, nxt, sl=0.05) - COST))
+                                              *[tp_exit(c, nxt, **kw) - COST for _, kw in EXIT_RULES]))
     out = {}
     for d, xs in by_date.items():
         xs.sort(key=lambda x: -x[0])
@@ -112,11 +123,11 @@ def summarize(days: list, outs: dict) -> dict:
         w, l = [r for r in rets if r > 0], [r for r in rets if r <= 0]
         return sum(rets) / len(rets) * 100, (sum(w) / -sum(l) if l and sum(l) < 0 else float("inf"))
     mkt = [statistics.median(x[1] for x in outs[d]) for d in days if outs.get(d)]
-    (avg, pf), (tavg, tpf), (savg, spf) = ap(1), ap(2), ap(3)
+    avg, pf = ap(1)
     return {"days": len(days), "n": len(xs),
             "hit5": sum(x[0] >= 0.05 for x in xs) / len(xs) * 100,
             "hit3": sum(x[0] >= 0.03 for x in xs) / len(xs) * 100,
-            "avg": avg, "pf": pf, "tavg": tavg, "tpf": tpf, "savg": savg, "spf": spf,
+            "avg": avg, "pf": pf, "rules": [ap(2 + k) for k in range(len(EXIT_RULES))],
             "mkt_up": sum(m > 0 for m in mkt) / len(mkt) * 100 if mkt else 0}
 
 
@@ -126,8 +137,8 @@ def fmt(s: dict) -> str:
     f = lambda v: f"{v:.2f}" if v != float("inf") else "∞"
     return (f"{s['days']:>3}일 {s['n']:>6}건 · +5%도달 {s['hit5']:4.0f}% · +3%도달 {s['hit3']:4.0f}% · "
             f"5일뒤 평균 {s['avg']:+.2f}% PF {f(s['pf']):>4} · 시장 5일 플러스 {s['mkt_up']:3.0f}%\n"
-            f"{'':<24}→ +5%익절 평균 {s['tavg']:+.2f}% PF {f(s['tpf']):>4} · "
-            f"+5%익절·-5%손절 평균 {s['savg']:+.2f}% PF {f(s['spf']):>4}")
+            f"{'':<24}→ +5%익절 + " + " · ".join(f"{lab} {a:+.2f}%/{f(p)}" for (lab, _), (a, p)
+                                                  in zip(EXIT_RULES, s["rules"])))
 
 
 def report(daily: dict, top: int) -> str:
@@ -139,6 +150,7 @@ def report(daily: dict, top: int) -> str:
     dates = [d for d in sorted(table) if d in outs]
     L = [f"🔄 시장 바닥 신호 검증 — {dates[0]}~{dates[-1]} {len(dates)}거래일 · 신호 날 종가 매수 → "
          f"{HORIZON}거래일 (거래대금 상위 {top}종목, 비용 {COST:.1%})"]
+    L.append("   (+5%익절 줄: 규칙별 평균%/PF — 장중 손절은 같은 날 익절·손절 둘 다 닿으면 손절 먼저로 불리하게 계산)")
     L.append(f"   평소(모든 날)        {fmt(summarize(dates, outs))}")
     sig = signals(table, st, breadth, lows)
     for k, ds in sig.items():

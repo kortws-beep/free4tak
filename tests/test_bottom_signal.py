@@ -35,12 +35,15 @@ class Bottom(unittest.TestCase):
         self.assertEqual(lows[dates[25]], 0.0); self.assertEqual(lows[dates[31]], 100.0)
         outs = B.outcomes(daily, 10)
         self.assertEqual(len(outs[dates[32]]), 10)
-        mx, r, tp, tpsl = outs[dates[32]][0]
+        mx, r, tp, *rest = outs[dates[32]][0]
+        self.assertEqual(len(rest), len(B.EXIT_RULES) - 1)
         self.assertAlmostEqual(mx, 1.02 ** 5 - 1); self.assertAlmostEqual(r, 1.02 ** 5 - 1 - B.COST)
         self.assertAlmostEqual(tp, 0.05 - B.COST)          # 3일째 고가 1.0612 ≥ +5%
         nxt = [("d", 100, 101, 94, 95, 0), ("d", 95, 120, 95, 110, 0)]
         self.assertAlmostEqual(B.tp_exit(100, nxt), 0.05)
         self.assertAlmostEqual(B.tp_exit(100, nxt, sl=0.05), -0.05)
+        self.assertAlmostEqual(B.tp_exit(100, nxt, sl=0.05, close_sl=True), -0.05)   # 종가 95 = -5% 딱 → 손절
+        self.assertAlmostEqual(B.tp_exit(100, nxt, sl=0.06, close_sl=True), 0.05)   # 종가는 안 깨짐 → 익절
         self.assertAlmostEqual(B.tp_exit(100, [("d", 107, 108, 106, 107, 0)]), 0.07)   # 갭 위 시가
         self.assertAlmostEqual(B.tp_exit(100, [("d", 100, 103, 99, 102, 0)]), 0.02)    # 못 닿음
         import rebound_backtest as rb, swing_backtest as sb
