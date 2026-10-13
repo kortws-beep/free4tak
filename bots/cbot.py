@@ -679,13 +679,17 @@ class CBot:
         except Exception as e:
             print(f"⚠️ 매도이력 저장 오류: {e}")
         # ★ master_trades 기록
+        # ★ 2026-10-13 — sold_qty=0은 "전량매도" 신호값인데 그대로 넘기면
+        #   master_db.record_trade()가 qty=0으로 profit_krw를 0*가격차=0으로
+        #   계산해버림(실현손익 항상 0으로 기록되던 버그, 저녁성적표에서 발견).
+        #   실제 수량(전량이면 total_qty)으로 바꿔서 넘김.
         if _master_record:
             try:
                 _master_record(
                     bot_type="cbot", code=market,
                     stock_name=market,
                     buy_price=buy_price, sell_price=sell_price,
-                    qty=sold_qty,
+                    qty=total_qty if is_full_sell else sold_qty,
                     sell_reason=sell_reason,
                     market_status=self.market_status,
                 )

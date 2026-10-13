@@ -56,6 +56,25 @@ class CbotPositions(unittest.TestCase):
         self.assertTrue(b.sell("KRW-A", 2.0, "all", sell_price=110000))
         self.assertNotIn("KRW-A", b.positions)
 
+    def test_full_sell_reports_real_qty_to_master_trades(self):
+        # ★ 2026-10-13 — sold_qty=0("전량매도" 신호값)을 그대로 master_db.record_trade에
+        #   넘기면 qty=0이라 profit_krw가 항상 0으로 기록됨(저녁성적표 "실현 +0원" 버그).
+        b = mk()
+        b._init_trade_db()
+        import sqlite3
+        conn = sqlite3.connect(cbot.TRADE_HIST_DB)
+        conn.execute("INSERT INTO trades (market, buy_price, buy_time, qty) VALUES (?,?,?,?)",
+                     ("KRW-NEAR", 7640.0, "2026-10-13T06:00:00", 3.5))
+        conn.commit(); conn.close()
+        captured = {}
+        cbot._master_record = lambda **kw: captured.update(kw)
+        try:
+            b._save_sell_history("KRW-NEAR", 6890.0, "손절(-9.82%)")   # sold_qty 기본값 0 = 전량
+        finally:
+            cbot._master_record = None
+        self.assertEqual(captured["qty"], 3.5)
+        self.assertNotEqual(captured["qty"], 0)
+
     def test_restore_with_balance_failure_and_prune(self):
         now = time.time()
         json.dump({"positions": {"KRW-A": {"qty": 1, "entry_price": 100}},
