@@ -1976,6 +1976,14 @@ class SBot:
                         self.db.save_manual_trade(
                             _code, self._name(_code), _buy_price, _sell_price,
                             _sell_qty, "수동매도")
+                        # ★ 2026-10-13: 수동매도도 master_trades에 — 안 넣어서 저녁 성적표·합산 손실 한도에서 빠졌음(대장 지적, 가온전선)
+                        if _master_record and _sell_qty and _buy_price and _sell_price:
+                            try:
+                                _master_record(bot_type="sbot", code=_code, stock_name=self._name(_code),
+                                               buy_price=_buy_price, sell_price=_sell_price, qty=_sell_qty,
+                                               sell_reason="수동매도")
+                            except Exception as _e:
+                                print(f"⚠️ master_db 기록 오류: {_e}")
                         # ★ 2026-07-02: master_positions 정리 누락 수정 —
                         #   기존엔 여기서 감지만 하고 지우질 않아 수동매도된
                         #   종목이 master_positions에 유령으로 계속 남아있었음
@@ -2006,6 +2014,14 @@ class SBot:
                                            if _mdata else self.positions[_code].get("entry_price", 0))
                             self.db.save_sell(_code, _sell_price, "수동일부매도",
                                                sold_qty=_sold_qty)
+                            if _master_record and _sell_price and self.positions[_code].get("entry_price"):
+                                try:
+                                    _master_record(bot_type="sbot", code=_code, stock_name=self._name(_code),
+                                                   buy_price=self.positions[_code]["entry_price"],
+                                                   sell_price=_sell_price, qty=_sold_qty,
+                                                   sell_reason="수동일부매도")
+                                except Exception as _e:
+                                    print(f"⚠️ master_db 기록 오류: {_e}")
                             print(f"   🔍 수동 일부매도 감지: {self._name(_code)}"
                                   f"({_code}) {_sold_qty}주 @ {_sell_price:,.0f}원")
 

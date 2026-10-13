@@ -724,6 +724,14 @@ class CBot:
             print(f"   {emoji} 수동거래 기록 {market} | {profit_rate:+.2f}% | {sell_reason}")
         except Exception as e:
             print(f"⚠️ 수동거래 저장 오류 {market}: {e}")
+        # ★ 2026-10-13: 수동매도도 master_trades에 — 안 넣어서 저녁 성적표·합산 손실 한도에서 빠졌음(대장 지적, 가온전선)
+        if _master_record and qty and buy_price:
+            try:
+                _master_record(bot_type="cbot", code=market, stock_name=market,
+                               buy_price=buy_price, sell_price=sell_price, qty=qty,
+                               sell_reason=sell_reason, market_status=self.market_status)
+            except Exception as _e:
+                print(f"⚠️ master_db 기록 오류: {_e}")
 
     def _get_monthly_performance(self):
         """이번 달(1일~오늘) 성과만 집계 — ★ 2026-09-02: 콘솔 "📊 성과" 출력이

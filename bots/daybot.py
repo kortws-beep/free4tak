@@ -990,6 +990,17 @@ class DayBot:
                 if _master_remove:
                     _master_remove("daybot", code)
 
+    def _master_manual(self, code: str, pos: dict, sell_price: float, qty: int, reason: str):
+        """★ 2026-10-13: 수동매도도 master_trades에 — 안 넣어서 저녁 성적표·합산 손실 한도에서 빠졌음(대장 지적, 가온전선)"""
+        if not (_master_record and qty and sell_price and pos.get("entry_price")):
+            return
+        try:
+            _master_record(bot_type="daybot", code=code, stock_name=self._name(code),
+                           buy_price=pos["entry_price"], sell_price=sell_price, qty=qty,
+                           sell_reason=reason, buy_tag=pos.get("buy_tag", ""))
+        except Exception as e:
+            print(f"⚠️ master_db 기록 오류: {e}")
+
     def _check_manual_sells(self, real_pos: dict):
         """★ 2026-10-01 대장 지정 — 대장이 HTS/MTS로 daybot 보유종목을
         직접 매도할 계획이라 sbot의 수동매도 감지 패턴을 이식(bots/sbot.py
@@ -1018,6 +1029,7 @@ class DayBot:
                         sell_price = 0.0
                     sell_price = sell_price or self.positions[code].get("entry_price", 0)
                     self.db.save_sell(code, sell_price, "수동일부매도", sold_qty=old_qty - real_qty)
+                    self._master_manual(code, self.positions[code], sell_price, old_qty - real_qty, "수동일부매도")
                     with self._positions_lock:
                         if code in self.positions:
                             self.positions[code]["qty"] = real_qty
@@ -1055,6 +1067,7 @@ class DayBot:
 
             self.db.save_manual_trade(code, name, buy_price, sell_price, sell_qty,
                                        "수동매도", buy_tag=old_pos.get("buy_tag", "수동"))
+            self._master_manual(code, dict(old_pos, entry_price=buy_price), sell_price, sell_qty, "수동매도")
             if _master_remove:
                 _master_remove("daybot", code)
 

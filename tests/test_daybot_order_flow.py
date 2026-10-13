@@ -169,6 +169,23 @@ class DaybotOrderFlow(unittest.TestCase):
         self.assertTrue(st["cmd_result"].startswith("❌"))
 
 
+class DaybotManualSellMaster(unittest.TestCase):
+    """2026-10-13 — 수동매도·수동일부매도도 master_trades에(성적표에서 빠지던 문제, 가온전선)."""
+    def setUp(self):
+        self.rec = []
+        daybot._master_record = lambda **k: self.rec.append(k)
+
+    def tearDown(self):
+        daybot._master_record = None
+
+    def test_full_and_partial(self):
+        b = mk(); b.positions["A"] = pos(q=10); b.positions["B"] = pos(q=10)
+        b.api.real = {"B": {"qty": 6, "entry_price": 10000}, "Z": {"qty": 1}}
+        b._reconcile_with_account()
+        got = sorted((r["code"], r["qty"], r["sell_reason"]) for r in self.rec)
+        self.assertEqual(got, [("A", 10, "수동매도"), ("B", 4, "수동일부매도")])
+
+
 class DaybotFirstTakeProfit(unittest.TestCase):
     """2026-10-12 — +5% 도달 때 30% 매도(트레일링 시작도 +5%), 나머지는 트레일링. 장부는 체결 확인 뒤."""
     def setUp(self):
