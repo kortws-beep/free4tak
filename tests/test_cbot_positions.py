@@ -167,8 +167,6 @@ class CbotRiskSizing(unittest.TestCase):
         self.assertEqual(b._risk_sized_amount("KRW-X", 300_000), 300_000)   # 마지막 슬롯 잔액이 더 작으면 그대로
 
 
-if __name__ == "__main__":
-    unittest.main()
 
 
 class CbotFirstTakeProfit(unittest.TestCase):
@@ -177,3 +175,33 @@ class CbotFirstTakeProfit(unittest.TestCase):
         self.assertAlmostEqual(cbot.first_tp_qty(1.0, 1_000_000), 0.3)
         self.assertEqual(cbot.first_tp_qty(0.01, 1_000_000), 0)      # 1만원어치 — 30%가 5천 미만
         self.assertAlmostEqual(cbot.first_tp_qty(0.02, 1_000_000), 0.006)
+
+
+class CbotMasterRecordQty(unittest.TestCase):
+    """2026-10-13 — 전량매도(sold_qty=0)도 master엔 실제 수량·손익으로."""
+    def test_full_and_partial(self):
+        import sqlite3
+        cbot.TRADE_HIST_DB = "cbot_hist_test.db"
+        b = object.__new__(cbot.CoinBot) if hasattr(cbot, "CoinBot") else None
+        cls = next(v for v in vars(cbot).values() if isinstance(v, type) and hasattr(v, "_save_sell_history"))
+        b = object.__new__(cls); b.market_status = "normal"
+        b._init_trade_history_db() if hasattr(b, "_init_trade_history_db") else None
+        con = sqlite3.connect(cbot.TRADE_HIST_DB)
+        con.execute("CREATE TABLE IF NOT EXISTS trades (id INTEGER PRIMARY KEY AUTOINCREMENT, market TEXT, "
+                    "buy_price REAL, buy_time TEXT, sell_price REAL, sell_time TEXT, qty REAL, profit_rate REAL, "
+                    "profit_krw REAL, sell_reason TEXT, ai_score INTEGER, ai_reason TEXT, market_status TEXT, "
+                    "fear_greed INTEGER)")
+        con.execute("INSERT INTO trades (market, buy_price, buy_time, qty) VALUES ('KRW-NEAR', 1000, 'x', 10)")
+        con.commit(); con.close()
+        rec = []
+        cbot._master_record = lambda **k: rec.append(k)
+        try:
+            self.assertEqual(b._save_sell_history("KRW-NEAR", 1100, "목표1익절30%", sold_qty=3), 300)
+            self.assertEqual(b._save_sell_history("KRW-NEAR", 900, "손절", sold_qty=0), -700)
+        finally:
+            cbot._master_record = None
+        self.assertEqual([r["qty"] for r in rec], [3, 7])
+
+
+if __name__ == "__main__":
+    unittest.main()

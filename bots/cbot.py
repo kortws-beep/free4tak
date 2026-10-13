@@ -629,6 +629,7 @@ class CBot:
         반환: 실현 손익(원)
         """
         profit_krw = 0.0
+        rec_qty, buy_price = sold_qty, 0.0
         try:
             now  = datetime.datetime.now().isoformat(timespec="seconds")
             conn = _db_connect(TRADE_HIST_DB)
@@ -649,6 +650,7 @@ class CBot:
 
             if is_full_sell:
                 # 전량 매도 — 기존 행 업데이트
+                rec_qty    = total_qty   # ★ 10-13: master엔 sold_qty(=0, '전량' 표시)가 아니라 실제 수량
                 profit_krw = (sell_price - buy_price) * total_qty
                 conn.execute("""
                     UPDATE trades
@@ -679,13 +681,15 @@ class CBot:
         except Exception as e:
             print(f"⚠️ 매도이력 저장 오류: {e}")
         # ★ master_trades 기록
-        if _master_record:
+        # ★ 2026-10-13: 전량매도는 sold_qty=0으로 들어와 master에 qty 0·손익 0원으로 기록되던 버그
+        #   (성적표·세 봇 합산 손실 자동중단에서 cbot 손실이 빠졌음) — 실제 수량(rec_qty)으로.
+        if _master_record and rec_qty and buy_price:
             try:
                 _master_record(
                     bot_type="cbot", code=market,
                     stock_name=market,
                     buy_price=buy_price, sell_price=sell_price,
-                    qty=sold_qty,
+                    qty=rec_qty,
                     sell_reason=sell_reason,
                     market_status=self.market_status,
                 )
