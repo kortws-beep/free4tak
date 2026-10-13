@@ -114,7 +114,10 @@ def dip_status(date: str) -> dict:
     return {"held": held, "closed": closed}
 
 
-def cbot_paused() -> str:
+def cbot_paused(date: str = None) -> str:
+    """cbot 멈춤 상태 한 줄. ★ 10-13: cbot은 한도에 걸리면 멈췄다가 4시간 시장점검 뒤 재개할 수
+    있어(그 뒤엔 한도 절반만 더) — 재개됐으면 그렇다고 알려줌(예전엔 '오늘 멈춤'으로 오해)."""
+    date = date or datetime.date.today().isoformat()
     sp = _find("cbot_state.json")
     if not sp:
         return ""
@@ -124,6 +127,8 @@ def cbot_paused() -> str:
     except (OSError, ValueError):
         return ""
     if not st.get("paused"):
+        if st.get("loss_base_date") == date and st.get("loss_base"):
+            return "일손실 한도로 멈췄다가 시장점검 뒤 재개(오늘 한도 절반 더 잃으면 다시 멈춤)"
         return ""
     return "일손실 한도로 멈춤(4시간 점검 중)" if st.get("pause_reason") == "loss_limit" else "수동 일시중단 중"
 
@@ -169,10 +174,10 @@ def build(date: str = None, db: str = MASTER_DB) -> str:
     lim = " · ".join(f"{label} {_man(day[b]['krw'])}/{_man(LIMITS[b])}" for b, label in BOTS)
     L.append(f"🛡️ 일손실 한도 대비 {lim}")
     warn = []
+    cp = cbot_paused(date)
     for b, label in BOTS:
-        if day[b]["krw"] <= LIMITS[b]:
+        if day[b]["krw"] <= LIMITS[b] and not (b == "cbot" and cp):
             warn.append(f"{label} 일손실 한도 도달(오늘 신규매수 멈춤)")
-    cp = cbot_paused()
     if cp:
         warn.append(f"cbot {cp}")
     try:

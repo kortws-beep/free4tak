@@ -50,6 +50,17 @@ class Report(unittest.TestCase):
         self.assertIn("눌림목 보유 2", out); self.assertIn("XRP", out)
         self.assertIn("국면 42%", out); self.assertIn("내일 데이봇·sbot 매수금 절반", out)
 
+    def test_cbot_resumed_after_loss_limit(self):
+        with open("cbot_state.json", "w") as f:
+            json.dump({"paused": False, "loss_base": -152362, "loss_base_date": D}, f)
+        try:
+            out = E.build(D, DB)
+        finally:
+            with open("cbot_state.json", "w") as f:
+                json.dump({"paused": True, "pause_reason": "loss_limit",
+                           "dip": {"KRW-XRP": {"held": True}, "KRW-SOL": {"held": True}, "KRW-BTC": {}}}, f)
+        self.assertIn("cbot 일손실 한도로 멈췄다가 시장점검 뒤 재개", out)
+
 
 class OpenPositions(unittest.TestCase):
     def test_stale_rows_excluded(self):
