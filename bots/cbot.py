@@ -1674,13 +1674,14 @@ class CBot:
     # ============================================================
     def check_buy_signal(self, market: str) -> tuple:
         """반환: (매수 여부, 지표, 사유)"""
-        # ★ 야간 신규 매수 (23시~06시) — BTC +2% AND 탐욕 50 이상 둘 다 충족해야 허용
+        # ★ 야간 신규 매수 (23시~06시) — BTC +1% AND 탐욕 50 이상 둘 다 충족해야 허용
+        #   (2026-10-13 대장: +2%는 과도함, 다른 안전장치들이 있으니 +1%로 완화)
         if self._is_night():
-            btc_surge = self.btc_rate >= 2.0    # BTC +2% 이상 (기존 +1%)
+            btc_surge = self.btc_rate >= 1.0    # BTC +1% 이상
             greed_ok  = self.fear_greed >= 50
-            if not (btc_surge and greed_ok):    # OR → AND (둘 다 충족)
+            if not (btc_surge and greed_ok):    # 둘 다 충족해야 허용
                 reason = []
-                if not btc_surge: reason.append(f"BTC {self.btc_rate:+.1f}%<2%")
+                if not btc_surge: reason.append(f"BTC {self.btc_rate:+.1f}%<1%")
                 if not greed_ok:  reason.append(f"탐욕{self.fear_greed}<50")
                 return False, {}, f"야간 매수 금지 ({', '.join(reason)})"
             print(f"🌙 야간 특례 매수 허용 — BTC:{self.btc_rate:+.1f}% 탐욕:{self.fear_greed}")
