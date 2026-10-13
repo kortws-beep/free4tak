@@ -83,9 +83,17 @@ def bot_month(date: str, db: str = MASTER_DB) -> dict:
     return {b: (s or 0.0, n) for b, s, n in rows}
 
 
+STALE_DAYS = 2   # ★ 2026-10-13 — sbot에서 06월 매도분 4건이 master_positions에서 안 지워진 채
+                 #   몇 달째 남아있던 걸 발견(보유 6인데 10으로 집계됨). 봇은 매루프 갱신하므로
+                 #   실제 보유면 이렇게 오래 묵을 일이 없음 — 유령 행으로 보고 성적표에서 제외.
+
+
 def open_positions(db: str = MASTER_DB) -> dict:
+    cutoff = (datetime.datetime.now() - datetime.timedelta(days=STALE_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
     out = {}
-    for (bot,) in _q(db, "SELECT bot_type FROM master_positions"):
+    for bot, updated in _q(db, "SELECT bot_type, updated_at FROM master_positions"):
+        if (updated or "") < cutoff:
+            continue
         out[bot] = out.get(bot, 0) + 1
     return out
 
