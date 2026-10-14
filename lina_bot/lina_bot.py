@@ -1831,7 +1831,7 @@ async def before_evening_report_loop():
 
 
 # ★ 2026-10-14 시나리오1 — 투매일 반등 섹터 알림(intelligence/capitulation_alert.py)
-CAP_ALERT_HHMM, CAP_REMIND_HHMM = "1430", "0850"
+CAP_ALERT_HHMM, CAP_REMIND_HHMM = "1420", "0850"   # 전 종목 조회 약 4분 → 14:25쯤 알림
 _cap_alert_state = {"date": ""}
 
 

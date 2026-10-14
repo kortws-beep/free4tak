@@ -11,13 +11,12 @@ capitulation_alert.py — 투매일 반등 섹터 알림 (2026-10-14, 시나리�
 아니라 '조건이 왔다'는 알림. 비중 50%, 판단은 대장.
 
 리나가 하는 일:
-  14:30(거래일) — 거래대금 상위 400종목 장중 시세로 '오늘 20일 신저가' 비율 계산(전 종목 대신 400:
-                 한투 조회가 몰려 봇 주문을 방해하지 않게). 기준 이상이면 관심그룹별 대표주(장중 거래대금
-                 1~3등)의 오후반등(저가 대비 현재가)으로 줄 세워 알림.
+  14:20(거래일) — 전 종목(약 2,500) 장중 시세로 '오늘 20일 신저가' 비율 계산 — 초당 10건으로 천천히
+                 (한투 한도 절반, 봇 몫 남김) 약 4분 → 14:25쯤 알림. 기준 이상이면 관심그룹별 대표주(장중
+                 거래대금 1~3등)의 오후반등(저가 대비 현재가)으로 줄 세워 알림.
   다음 날 08:50 — 아침 규칙 다시 알림(시가가 어제 종가 밑이면 시가 정리, 아니면 +7% 지정가).
   !투매 — 언제든 지금 상태 점검(기준 미달이어도 숫자 보여줌).
-※ 기준(CAP_NL, 기본 40%)은 전 종목으로 검증한 값 — 상위 400종목 기준과 같은지는
-   capitulation_sector.py의 '상위400 신저가' 열로 맞춰보고 조정.
+※ 기준(CAP_NL, 기본 40%)은 전 종목으로 검증한 값 — 그래서 전 종목으로 계산(상위 400은 안 맞았음).
 """
 import os
 import re
@@ -31,7 +30,10 @@ THEME_DB = os.path.join(_BASE, "lina_bot", "kr_theme_finance.db")
 GROUPS_JSON = os.path.join(_BASE, "backtest", "data", "watch_groups.json")
 STATE = os.path.join(_BASE, "lina_bot", "cap_alert_state.json")
 CAP_NL = float(os.getenv("LINA_CAP_NL", "40"))
-UNIVERSE = 400
+# ★ 10-14: 처음엔 상위 400으로 했는데 맞춰보니 투매는 중소형주에서 나와 상위 400 비율이 훨씬 낮음
+#   (05-29 전 종목 46.9% vs 상위400 13.2% — 다음 날 대박이던 날을 놓침). 검증과 같게 전 종목(0)으로.
+#   조회 부담이 문제면 .env LINA_CAP_UNIVERSE=400 (기준도 같이 다시 맞춰야 함).
+UNIVERSE = int(os.getenv("LINA_CAP_UNIVERSE", "0"))
 LOOKBACK = 20
 LEADERS = 3
 TOP_GROUPS = 3
@@ -46,7 +48,7 @@ def excluded(name: str) -> bool:
 
 
 def load_universe(theme_db: str = THEME_DB, top: int = UNIVERSE, today: str = None) -> dict:
-    """{종목명: 직전 20거래일 최저가} — 마지막 거래일(오늘 제외) 거래대금 상위 top."""
+    """{종목명: 직전 20거래일 최저가} — 마지막 거래일(오늘 제외) 거래대금 상위 top(0이면 전 종목)."""
     today = today or datetime.date.today().isoformat()
     conn = sqlite3.connect(theme_db)
     try:
@@ -65,7 +67,9 @@ def load_universe(theme_db: str = THEME_DB, top: int = UNIVERSE, today: str = No
         lows[n] = min(lows.get(n, lo), lo)
         if d == dates[0]:
             val[n] = tv or 0
-    names = sorted((n for n in val if n in lows), key=lambda n: -val[n])[:top]
+    names = sorted((n for n in val if n in lows), key=lambda n: -val[n])
+    if top:
+        names = names[:top]
     return {n: lows[n] for n in names}
 
 
@@ -94,7 +98,7 @@ def load_groups(path: str = GROUPS_JSON) -> dict:
         return {g: [tuple(x) for x in v] for g, v in json.load(f).items()}
 
 
-def snapshot(api, codes, pause: float = 0.05) -> dict:
+def snapshot(api, codes, pause: float = 0.1) -> dict:
     """{코드: {"open","high","low","price","value","chg"}} — 한투 현재가. 실패한 종목은 빠짐."""
     import time
     out = {}
@@ -142,7 +146,7 @@ def format_alert(res: dict, nl: float = CAP_NL, forced: bool = False) -> str:
     hit = res["share"] >= nl
     head = ("🚨 **투매일 신호 — 반등 섹터 후보**" if hit
             else "📊 투매 점검 — 기준 미달" if forced else "")
-    L = [head, f"   상위 {res['n']}종목 중 오늘 20일 신저가 {res['share']:.0f}% (기준 {nl:.0f}%) · "
+    L = [head, f"   {res['n']}종목 중 오늘 20일 신저가 {res['share']:.0f}% (기준 {nl:.0f}%) · "
                f"시가→저가 {res['o2l']:+.1f}% · 저가→현재 {res['l2c']:+.1f}% · 등락 {res['chg']:+.1f}% (중앙값)"]
     if not hit and not forced:
         return ""
