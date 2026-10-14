@@ -12,7 +12,13 @@ rebound_case.py — 반등 선취매 사례 뜯어보기 (2026-10-13)
   3. 하락 구간 동안 이 종목이 빠진 폭(하락 직전 종가 대비, 종가·저가 기준)
   4. 장중 모양(분봉, 최근 2거래일 또는 --date): 저점 시각·깊이, 저점 뒤 15·30·60분 반등폭,
      +2%·+3% 반등에 걸린 시간 — "급격히 꺾여 올라온다"를 숫자로
+★ 여러 종목(10-14 대장): "하락 전 관심받던 넘들 — 1섹터 롯데에너지머티리얼즈·비나텍·삼성SDI,
+  2섹터 삼성전기·필옵틱스·켐트로닉스·RF머티리얼즈·대한광통신·오이솔루션 — 검증해보자"
+  → 종목마다 한 줄: 하락 전 1·3·20일 수익률, 하락 구간 낙폭, 바닥날(반등 전날) 장중 모양,
+    반등날 시가 갭·고가·종가(바닥날 종가 대비 = 오후 매수→다음 날) — 시장 중앙값, 기계식
+    '하락 직전날 상승률 상위 30'과 나란히(대장 기억을 규칙으로 대신할 수 있나)
 실행:  python backtest/rebound_case.py 엘앤에프 [--days 12] [--date 2026-10-13] [--no-api]
+       python backtest/rebound_case.py 롯데에너지머티리얼즈 비나텍 삼성SDI ... [--date 반등날]
 """
 import os
 import sys
@@ -143,14 +149,107 @@ def report(name: str, daily: dict, groups: dict, days: int = 12, minutes: dict =
     return "\n".join(L)
 
 
+def resolve(name: str, names) -> str:
+    """이름 그대로 없으면 포함·비슷한 이름으로(대장이 적은 '롯데에너지머트리얼' 같은 오타)."""
+    if name in names:
+        return name
+    import difflib
+    sub = [n for n in names if name in n or n in name]
+    if sub:
+        return min(sub, key=len)
+    m = difflib.get_close_matches(name, list(names), n=1, cutoff=0.6)
+    return m[0] if m else None
+
+
+def _row(rows: dict, dates: list, P: str, S: str, Bd: str, R: str) -> dict:
+    """한 종목 숫자 — rows {date: (o, h, l, c)}."""
+    i = dates.index(P)
+    def c(d):
+        return rows[d][3] if d in rows else None
+    def ret(a, b):
+        return (c(b) / c(a) - 1) * 100 if c(a) and c(b) else None
+    out = {"pre1": ret(dates[i - 1], P) if i >= 1 else None, "pre3": ret(dates[i - 3], P) if i >= 3 else None,
+           "pre20": ret(dates[i - LOOKBACK], P) if i >= LOOKBACK else None, "drop": ret(P, Bd)}
+    lows = [rows[d][2] for d in dates if S <= d <= Bd and d in rows]
+    out["low"] = (min(lows) / c(P) - 1) * 100 if lows and c(P) else None
+    if Bd in rows:
+        o, h, l, cl = rows[Bd]
+        out["b_o2l"], out["b_l2c"] = (l / o - 1) * 100, (cl / l - 1) * 100
+    if R in rows and c(Bd):
+        o, h, l, cl = rows[R]
+        out["gap"], out["high"], out["close"] = ((o / c(Bd) - 1) * 100, (h / c(Bd) - 1) * 100,
+                                                 (cl / c(Bd) - 1) * 100)
+    return out
+
+
+_COLS = (("pre1", "직전1일"), ("pre3", "직전3일"), ("pre20", "직전20일"), ("drop", "하락낙폭"), ("low", "최저"),
+         ("b_o2l", "바닥날 시→저"), ("b_l2c", "저→종"), ("gap", "반등날 시가"), ("high", "고가"), ("close", "종가"))
+
+
+def _line(label: str, r: dict) -> str:
+    f = lambda v: f"{v:+6.1f}" if v is not None else "     -"
+    return f"   {label:<12}" + " ".join(f(r.get(k)) for k, _ in _COLS)
+
+
+def _avg(rs: list) -> dict:
+    import statistics
+    out = {}
+    for k, _ in _COLS:
+        xs = [r[k] for r in rs if r.get(k) is not None]
+        out[k] = statistics.median(xs) if xs else None
+    return out
+
+
+def compare(names: list, daily: dict, rebound_day: str = None, top: int = 300) -> str:
+    table = rb.day_table(daily)
+    dates = sorted(table)
+    R = rebound_day if rebound_day in table else dates[-1]
+    Bd = dates[dates.index(R) - 1]
+    S = decline_start(table, dates, Bd)
+    P = dates[dates.index(S) - 1]
+    rows = {n: {r[0]: r[1:5] for r in rs} for n, rs in daily.items() if not rb.excluded(n)}
+    L = [f"🔍 하락 전 주목주 비교 — 하락 {S}~{Bd} (직전 {P}), 반등날 {R}",
+         "   (%, 반등날 시가·고가·종가는 바닥날 종가 대비 = 바닥날 오후 매수 → 다음 날)",
+         "   종목        " + " ".join(f"{h:>6}" for _, h in _COLS)]
+    picked = []
+    for n in names:
+        real = resolve(n, rows)
+        if not real:
+            L.append(f"   {n:<12} (일봉에서 못 찾음)")
+            continue
+        r = _row(rows[real], dates, P, S, Bd, R)
+        picked.append(r)
+        L.append(_line(real if real == n else f"{real}*", r))
+    val_at_p = {n: next((x[5] for x in daily[n] if x[0] == P), None) for n in rows}
+    universe = sorted((n for n, v in val_at_p.items() if v), key=lambda n: -val_at_p[n])[:top]
+    allr = {n: _row(rows[n], dates, P, S, Bd, R) for n in universe}
+    mech = sorted((n for n in universe if allr[n]["pre1"] is not None), key=lambda n: -allr[n]["pre1"])[:30]
+    L.append("   " + "-" * 80)
+    if picked:
+        L.append(_line("대장 선택", _avg(picked)))
+    L.append(_line("직전1일 상위30", _avg([allr[n] for n in mech])))
+    L.append(_line(f"시장(상위{top})", _avg(list(allr.values()))))
+    L.append("   * = 이름을 비슷한 이름으로 찾음 · 아래 3줄은 중앙값")
+    L.append(f"   직전1일 상위30: {', '.join(mech[:12])} …")
+    return "\n".join(L)
+
+
 def main():
     a = sys.argv[1:]
     if not a:
         print(__doc__)
         return
-    name = a[0]
+    names = []
+    for x in a:
+        if x.startswith("--"):
+            break
+        names.append(x)
     days = int(a[a.index("--days") + 1]) if "--days" in a else 12
     daily = sb.load_daily(rb.THEME_DB, days + LOOKBACK + 40)
+    if len(names) > 1:
+        print(compare(names, daily, a[a.index("--date") + 1] if "--date" in a else None))
+        return
+    name = names[0] if names else a[0]
     minutes = {}
     if "--no-api" not in a:
         import three_month_leader as tml
