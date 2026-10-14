@@ -1830,6 +1830,42 @@ async def before_evening_report_loop():
     await client.wait_until_ready()
 
 
+# ★ 2026-10-14 시나리오1 — 투매일 반등 섹터 알림(intelligence/capitulation_alert.py)
+CAP_ALERT_HHMM, CAP_REMIND_HHMM = "1430", "0850"
+_cap_alert_state = {"date": ""}
+
+
+@tasks.loop(minutes=1)
+async def capitulation_alert_loop():
+    kst_now = datetime.datetime.now(KST)
+    hhmm, today = kst_now.strftime("%H%M"), kst_now.strftime("%Y-%m-%d")
+    if not _is_trading_day() or hhmm not in (CAP_ALERT_HHMM, CAP_REMIND_HHMM):
+        return
+    try:
+        import capitulation_alert as ca
+        channel = await client.fetch_channel(REPORT_CHANNEL_ID)
+        if hhmm == CAP_REMIND_HHMM:
+            msg = await asyncio.to_thread(ca.morning_reminder)
+            if msg:
+                await send_safe_message(channel, msg)
+            return
+        if _cap_alert_state["date"] == today:
+            return
+        _cap_alert_state["date"] = today
+        from kis_api import KisAPI
+        msg = await asyncio.to_thread(ca.run, KisAPI())
+        if msg:
+            await send_safe_message(channel, msg)
+        print(f"✅ [투매알림] 점검 완료({'알림' if msg else '기준 미달'})")
+    except Exception as e:
+        print(f"⚠️ [투매알림] 오류: {e}")
+
+
+@capitulation_alert_loop.before_loop
+async def before_capitulation_alert_loop():
+    await client.wait_until_ready()
+
+
 _KIWOOM_POOL_SCAN_TIMES = {(9, 30), (12, 30), (15, 0)}
 _kiwoom_pool_scan_state = {"date": "", "done": set(), "retry_at": None, "retry_label": None}
 
@@ -2484,6 +2520,12 @@ async def on_ready():
     except Exception as e: print(f"⚠️ [에러] 통합 리스크 감시: {e}")
 
     try:
+        if not capitulation_alert_loop.is_running():
+            capitulation_alert_loop.start()
+        print(f"✅ [시스템] 투매일 반등 섹터 알림 ({CAP_ALERT_HHMM[:2]}:{CAP_ALERT_HHMM[2:]}, 아침 {CAP_REMIND_HHMM[:2]}:{CAP_REMIND_HHMM[2:]}) 가동 성공!")
+    except Exception as e: print(f"⚠️ [에러] 투매일 알림: {e}")
+
+    try:
         if not evening_report_loop.is_running():
             evening_report_loop.start()
         print(f"✅ [시스템] 저녁 봇 성적표 ({EVENING_REPORT_HHMM[:2]}:{EVENING_REPORT_HHMM[2:]}, 거래일) 가동 성공!")
@@ -2655,6 +2697,17 @@ async def on_message(message):
         return
 
     # ── !성적표 — 세 봇 오늘 성적 (2026-10-12) ──
+    if message.content.strip() == "!투매":
+        async with message.channel.typing():
+            try:
+                import capitulation_alert as ca
+                from kis_api import KisAPI
+                msg = await asyncio.to_thread(ca.run, KisAPI(), ca.CAP_NL, True)
+                await send_safe_message(message.channel, msg)
+            except Exception as e:
+                await send_safe_message(message.channel, f"❌ 투매 점검 오류: {e}")
+        return
+
     if message.content.strip() == "!성적표":
         try:
             import evening_report
