@@ -29,6 +29,7 @@ class Alert(unittest.TestCase):
         c.commit(); c.close()
         u = CA.load_universe(db, top=1, today="2026-09-26")
         self.assertEqual(u, {"큰거": 105})                       # 최근 20일(6~25일) 최저, ETF 제외
+        self.assertEqual(CA.load_universe(db, top=0, today="2026-09-26"), {"큰거": 105, "작은거": 50})  # 0 = 전 종목
 
     def test_evaluate_and_format(self):
         univ = {f"s{k}": 100 for k in range(10)}
