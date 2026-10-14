@@ -41,6 +41,7 @@ if _CORE_DIR not in _sys.path:
 
 # ★ 2026-10-03: !리나등록 자연어버전("등록 종목명")의 이름→코드 변환용.
 from candidate_pool import get_stock_code, get_stock_name
+import manual_autosell as autosell   # ★ 2026-10-14 리나등록 자동 익절
 
 # 환경 변수 및 모델 세팅
 DISCORD_TOKEN = os.getenv("DISCORD_BOT_TOKEN_N")
@@ -186,7 +187,7 @@ def _log_manual_watch(event: str, code: str, w: dict, sell_price: float = None,
 
 
 async def _register_manual_watch(channel, code: str, buy_price: float = None,
-                                  name_override: str = None):
+                                  name_override: str = None, qty: int = None):
     """!리나등록/자연어("등록 종목명 [평단가]") 공용 등록 로직.
     ★ 2026-10-03 대장 지정 — 분할매수를 하기 때문에 중간 금액으로는
     등록 못 함(최종 매수 완료 후에 등록). 그래서 "매수금액" 대신
@@ -225,18 +226,21 @@ async def _register_manual_watch(channel, code: str, buy_price: float = None,
             watches = _load_manual_watches()
             watches[code] = {
                 "name": name, "entry_price": buy_price, "peak_price": None,
-                "last_alert_peak": 0,
+                "last_alert_peak": 0, "stage": 0, "qty": qty, "qty0": qty,
                 "registered_at": datetime.datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S"),
             }
             _save_manual_watches(watches)
             _log_manual_watch("register", code, watches[code])
+            # ★ 2026-10-14 대장 — 등록 종목은 리나가 직접 익절(lina_bot/manual_autosell.py)
+            md = {"paper": "🧪 연습 모드(주문 안 나감, 알림만)", "live": "💰 실제 매도(키움 시장가)",
+                  "off": "🔔 알림만"}[autosell.mode()]
             await send_safe_message(
                 channel,
-                f"✅ {name}({code}) 등록 완료 — 평단가 {buy_price:,.0f}원\n"
-                f"   +{MANUAL_WATCH_TAKE_PROFIT_PCT}% 찍으면 트레일링 추적 시작, "
-                f"고점대비 -{MANUAL_WATCH_TRAILING_STOP_PCT_TIGHT}%(고점+{MANUAL_WATCH_TRAILING_STOP_WIDEN_PCT}% "
-                f"초과시 -{MANUAL_WATCH_TRAILING_STOP_PCT}%) 밀리면 알려줄게(계속 감시).\n"
-                f"   현재 등록: {len(watches)}종목(`등록현황`으로 확인) — 해제는 `!리나등록해제 {code}` 또는 `해제 {name}`"
+                f"✅ {name}({code}) 등록 완료 — 평단가 {buy_price:,.0f}원"
+                + (f" · {qty}주" if qty else " · 수량 미입력(실제 매도 땐 키움 매도가능수량 전부)") + "\n"
+                f"   +{autosell.START_PCT:.0f}% 찍으면 추적 → 고점 -{autosell.TRAIL1_PCT:.0f}%면 전량 매도, "
+                f"+{autosell.TP1_PCT:.0f}%에 30% 익절 → 이후 고점 -{autosell.TRAIL2_PCT:.0f}%면 나머지 매도 [{md}]\n"
+                f"   손절은 대장이 직접. 현재 등록: {len(watches)}종목(`등록현황`) — 해제는 `해제 {name}`"
             )
         except Exception as e:
             await send_safe_message(channel, f"❌ 등록 오류: {e}")
@@ -1363,8 +1367,8 @@ async def _build_momentum_picks(session: str) -> str:
 @tasks.loop(minutes=1)
 async def manual_watch_trailing_loop():
     """!리나등록으로 등록된 종목의 트레일링스탑을 매분 체크.
-    ★ 매도 실행은 절대 안 함(키움 주문 API 자체가 없음) — 조건
-    충족시 알림만 보냄.
+    ★ 2026-10-14 — 예전엔 알림만 보냈지만 이제 manual_autosell 규칙대로 리나가 직접 익절
+    (LINA_AUTOSELL=live일 때만 키움 실제 주문, 기본 paper는 연습 알림).
     ★ 2026-10-03 대장 지정 — "내가 차트보고 매도 안하면 계속 감시체계로
     가자": 알림 보냈다고 등록을 자동 해제하지 않고 계속 추적한다.
     대신 같은 고점에서 매분 똑같은 알림이 스팸처럼 반복되지 않도록,
@@ -1386,6 +1390,10 @@ async def manual_watch_trailing_loop():
         from kis_api import KisAPI
         api = KisAPI()
         channel = await client.fetch_channel(REPORT_CHANNEL_ID)
+        kiwoom = None
+        if autosell.mode() == "live":
+            from kiwoom_api import KiwoomAPI
+            kiwoom = KiwoomAPI()
     except Exception as e:
         print(f"⚠️ [리나등록 추적] 초기화 오류: {e}")
         return
@@ -1408,52 +1416,22 @@ async def manual_watch_trailing_loop():
             if price <= 0:
                 continue
 
-            entry = w["entry_price"]
-            # ★ rate(가격기준)는 트레일링 발동/정지 "판단"에만 사용 — 차트가
-            #   보여주는 실제 가격움직임 기준이어야 함. 알림 문구에 보여줄
-            #   때만 net_rate(수수료+세금 차감한 체감 수익률)로 바꿔치기.
-            rate = (price - entry) / entry * 100
-            net_rate = rate - MANUAL_WATCH_FEE_DRAG_PCT
-
-            if w.get("peak_price") is not None:
-                if price > w["peak_price"]:
-                    w["peak_price"] = price
-                    changed_codes.add(code)
-                peak_rate = (w["peak_price"] - entry) / entry * 100
-                trail_pct = (MANUAL_WATCH_TRAILING_STOP_PCT
-                             if peak_rate > MANUAL_WATCH_TRAILING_STOP_WIDEN_PCT
-                             else MANUAL_WATCH_TRAILING_STOP_PCT_TIGHT)
-                trail_stop = w["peak_price"] * (1 - trail_pct / 100)
-                floor_price = entry * (1 + MANUAL_WATCH_MIN_LOCKED_PROFIT_PCT / 100)
-                trail_stop = max(trail_stop, floor_price)
-                # ★ 2026-10-06 — floor_price가 trail_pct 계산값보다 높아서
-                #   실제 매도선이 된 경우에도 메시지엔 그냥 trail_pct(1.5/
-                #   2.0%)를 그대로 찍어서, 실제 발동 지점(예: 평단+1%
-                #   바닥선)과 안 맞는 숫자가 표시되던 문제(형제 Opus
-                #   리뷰로 발견) — 고점 대비 실제 하락률을 역산해서 표시.
-                actual_drop_pct = ((w["peak_price"] - trail_stop) / w["peak_price"] * 100
-                                   if w["peak_price"] > 0 else trail_pct)
-                if price <= trail_stop and w["peak_price"] > w.get("last_alert_peak", 0):
-                    await send_safe_message(
-                        channel,
-                        f"🔔 **[리나등록] {w.get('name', code)}({code}) 매도 신호**\n"
-                        f"   고점 {w['peak_price']:,.0f}원 대비 -{actual_drop_pct:.1f}% "
-                        f"({price:,.0f}원, 총 {net_rate:+.2f}%) — 키움에서 매도 판단해줘.\n"
-                        f"   (계속 감시할게 — 신고점 찍고 또 밀리면 다시 알려줄게. "
-                        f"그만 지켜봐도 되면 `!리나등록해제 {code}`)"
-                    )
-                    w["last_alert_peak"] = w["peak_price"]
-                    changed_codes.add(code)
+            # ★ 2026-10-14 대장 — 예전엔 알림만(키움 주문 없음). 이제 규칙대로 리나가 직접 익절
+            #   (lina_bot/manual_autosell.py — +3% 추적, 고점-4% 전량 / +5% 30% → 고점-3% 나머지).
+            #   모드 LINA_AUTOSELL=paper(기본, 연습)/live/off.
+            md = autosell.mode()
+            res = await asyncio.to_thread(autosell.handle, code, w, price, kst_now.strftime("%H%M"), md,
+                                          kiwoom if md == "live" else None)
+            for m in res["msgs"]:
+                await send_safe_message(channel, m)
+            if res["deregister"]:
+                await _deregister_manual_watch(channel, code, res["sell_price"])
                 continue
-
-            if rate >= MANUAL_WATCH_TAKE_PROFIT_PCT:
-                w["peak_price"] = price
+            if res["changed"]:
                 changed_codes.add(code)
-                await send_safe_message(
-                    channel,
-                    f"📈 [리나등록] {w.get('name', code)}({code}) +{net_rate:.2f}% 도달 — "
-                    f"트레일링 추적 시작(고점 {price:,.0f}원, -{MANUAL_WATCH_TRAILING_STOP_PCT_TIGHT}% 밀리면 알려줄게)"
-                )
+            if res["sell_price"]:
+                # 실제 주문이 나갔으면 바로 저장 — 루프 끝 저장 전에 리나가 꺼지면 같은 30% 익절이 또 나감
+                _save_manual_watch_updates(watches, {code})
         except Exception as e:
             print(f"⚠️ [리나등록 추적] {code} 처리 중 예외(건너뜀): {e}")
             continue
@@ -2881,7 +2859,9 @@ async def on_message(message):
                     raw_rate = (price - entry) / entry * 100 if entry else 0
                     net_rate = raw_rate - MANUAL_WATCH_FEE_DRAG_PCT
                     emoji = "📈" if net_rate >= 0 else "📉"
-                    trail = f" (트레일링 고점 {w['peak_price']:,.0f})" if w.get("peak_price") else ""
+                    trail = f" (추적 고점 {w['peak_price']:,.0f})" if w.get("peak_price") else ""
+                    trail += {2: " · 30% 익절 완료", 3: " · 매도 완료(연습/알림)"}.get(w.get("stage"), "")
+                    trail += f" · {w['qty']}주" if w.get("qty") else ""
                     lines.append(f"   {emoji} {name}({code}) {net_rate:+.2f}% "
                                  f"| 평단가 {entry:,.0f} → 현재가 {price:,.0f}{trail}")
                 await send_safe_message(message.channel, "\n".join(lines))
@@ -2927,7 +2907,7 @@ async def on_message(message):
     if message.content.startswith("!리나등록") or message.content.startswith("등록 "):
         parts = message.content.split()
         if len(parts) < 2:
-            await send_safe_message(message.channel, "사용법: `!리나등록 종목코드 [평단가] [종목명]` 또는 `등록 종목명 [평단가]`\n"
+            await send_safe_message(message.channel, "사용법: `!리나등록 종목코드 [평단가] [수량주] [종목명]` 또는 `등록 종목명 [평단가] [100주]`\n"
                                      "평단가 생략하면 현재가로 등록해(분할매수 완료 후 평단가로 등록 권장).")
             return
         arg = parts[1].strip()
@@ -2939,15 +2919,23 @@ async def on_message(message):
             return
         buy_price = None
         name_override = None
-        if len(parts) >= 3:
+        # ★ 2026-10-14 — 수량("100주")은 어느 자리에 써도 인식(리나 자동 익절용)
+        qty = None
+        rest = []
+        for t in parts[2:]:
+            if re.fullmatch(r"[\d,]+주", t):
+                qty = int(t[:-1].replace(",", ""))
+            else:
+                rest.append(t)
+        if rest:
             # ★ 2026-10-06 — 매도가와 동일한 쉼표 파싱 버그(위 해제 참고).
             try:
-                buy_price = float(parts[2].replace(",", ""))
+                buy_price = float(rest[0].replace(",", ""))
             except ValueError:
-                await send_safe_message(message.channel, f"⚠️ 평단가 '{parts[2]}' 인식 실패 — 숫자만 입력해줘(현재가로 등록할게).")
-        if len(parts) >= 4:
-            name_override = parts[3].strip()
-        await _register_manual_watch(message.channel, code, buy_price, name_override)
+                await send_safe_message(message.channel, f"⚠️ 평단가 '{rest[0]}' 인식 실패 — 숫자만 입력해줘(현재가로 등록할게).")
+        if len(rest) >= 2:
+            name_override = rest[1].strip()
+        await _register_manual_watch(message.channel, code, buy_price, name_override, qty)
         return
 
     # ── !성과 (sbo2 매매 이력) ─────────────────────────────────

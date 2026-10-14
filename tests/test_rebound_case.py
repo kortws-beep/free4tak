@@ -39,5 +39,35 @@ class Case(unittest.TestCase):
         self.assertIn("일봉이 없어", C.report("없는종목", daily, {}))
 
 
+class Compare(unittest.TestCase):
+    def test_compare(self):
+        # 시장: 1~25일 상승, 26~28일 하락(바닥 28일), 29일 반등. '주도'는 25일에 +9%
+        dates = [f"2026-09-{i:02d}" for i in range(1, 30)]
+        daily = {}
+        for k in range(60):
+            p, rows = 100.0, []
+            for i, d in enumerate(dates):
+                o = p
+                p = p * (1.01 if i < 25 else 0.98 if i < 28 else 1.02)
+                rows.append((d, o, max(o, p) * 1.01, min(o, p) * 0.99, p, 1000 + k))
+            daily[f"종목{k}"] = rows
+        rows, p = [], 100.0
+        for i, d in enumerate(dates):
+            o = p
+            p = p * (1.09 if i == 24 else 1.0 if i < 25 else 0.95 if i < 28 else 1.08)
+            rows.append((d, o, max(o, p), min(o, p), p, 5000))
+        daily["롯데에너지머티리얼즈"] = rows
+        self.assertEqual(C.resolve("롯데에너지머트리얼", daily), "롯데에너지머티리얼즈")
+        self.assertIsNone(C.resolve("없는회사이름입니다", daily))
+        out = C.compare(["롯데에너지머트리얼", "없는회사"], daily, top=50)
+        self.assertIn("하락 2026-09-26~2026-09-28", out)
+        self.assertIn("롯데에너지머티리얼즈*", out)
+        self.assertIn("(일봉에서 못 찾음)", out)
+        self.assertIn("직전1일 상위30", out)
+        line = next(x for x in out.splitlines() if x.strip().startswith("롯데"))
+        self.assertIn("+9.0", line)                  # 직전1일
+        self.assertIn("+8.0", line)                  # 반등날 종가(바닥날 종가 대비)
+
+
 if __name__ == "__main__":
     unittest.main()

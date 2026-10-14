@@ -43,6 +43,13 @@ class Regime(unittest.TestCase):
         c = sqlite3.connect(LOG); c.execute("UPDATE market_regime SET breadth=77"); c.commit(); c.close()
         self.assertEqual(MR.latest(THEME, LOG), ("2026-09-25", 77.0))   # 같은 날짜면 다시 계산 안 함
         self.assertTrue(MR.is_strong(60.0)); self.assertFalse(MR.is_strong(49.9)); self.assertFalse(MR.is_strong(None))
+        # ★ 10-14: 수집 도중 계산된 값 — 그 뒤 종목이 더 들어오면(행 수 변화) 다시 계산
+        c = sqlite3.connect(THEME)
+        for k in range(60, 100):                     # 내리는 종목 40개 추가 수집
+            for i in range(25):
+                c.execute("INSERT INTO kr_stock_daily_data VALUES (?,?,?)", (f"2026-09-{i + 1:02d}", f"s{k}", 100 - i))
+        c.commit(); c.close()
+        self.assertEqual(MR.latest(THEME, LOG), ("2026-09-25", 36.0))
 
     def test_backfill_and_line(self):
         build(n_up=20, n_dn=40)

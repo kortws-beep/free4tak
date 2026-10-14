@@ -331,6 +331,52 @@ class KiwoomAPI:
             print(f"⚠️ kiwoom investor_trend 오류: {e}")
             return {}
 
+    # ============================================================
+    # 계좌 잔고·매도 (2026-10-14 — 리나등록 자동 익절, lina_bot/manual_autosell.py)
+    # ============================================================
+    def _post(self, path: str, api_id: str, body: dict) -> dict:
+        headers = {"authorization": f"Bearer {self.get_token()}", "api-id": api_id,
+                   "Content-Type": "application/json;charset=UTF-8"}
+        acnt = os.getenv("KIWOOM_CANO", "")
+        if acnt:
+            headers["acnt_no"] = acnt          # 루트 kiwoom.py 잔고 조회와 같은 방식
+        return requests.post(f"https://api.kiwoom.com/api/dostk/{path}", headers=headers,
+                             json=body, timeout=10).json()
+
+    def holdings(self) -> dict:
+        """{종목코드: {"qty": 보유, "avail": 매도가능, "name"}} — kt00018 계좌평가잔고. 실패하면 {}."""
+        try:
+            body = {"qry_tp": "2", "dmst_stex_tp": "KRX"}
+            if os.getenv("KIWOOM_CANO"):
+                body["acnt_no"] = os.getenv("KIWOOM_CANO")
+            res = self._post("acnt", "kt00018", body)
+            out = {}
+            for s in res.get("acnt_evlt_remn_indv_tot", []) or []:
+                code = str(s.get("stk_cd", "")).replace("A", "").strip()
+                def n(k):
+                    try:
+                        return int(str(s.get(k, "0")).replace(",", "").strip() or 0)
+                    except ValueError:
+                        return 0
+                qty = n("rmnd_qty")
+                avail = n("trde_able_qty") if s.get("trde_able_qty") not in (None, "") else qty
+                if code:
+                    out[code] = {"qty": qty, "avail": avail, "name": s.get("stk_nm", "")}
+            return out
+        except Exception as e:
+            print(f"⚠️ 키움 잔고 조회 오류: {e}")
+            return {}
+
+    def sell_market(self, code: str, qty: int) -> tuple:
+        """kt10001 주식 매도주문(시장가) → (성공, 메시지). return_code 0이면 접수."""
+        try:
+            res = self._post("ordr", "kt10001", {"dmst_stex_tp": "KRX", "stk_cd": code, "ord_qty": str(int(qty)),
+                                                 "ord_uv": "", "trde_tp": "3", "cond_uv": ""})
+            ok = str(res.get("return_code", "")) == "0"
+            return ok, (f"주문번호 {res.get('ord_no', '')}" if ok else str(res.get("return_msg", res))[:200])
+        except Exception as e:
+            return False, f"예외: {e}"
+
     async def get_watchlist_groups_ws(self) -> list:
         """
         키움 WebSocket으로 관심그룹 읽기.
