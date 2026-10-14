@@ -47,10 +47,13 @@ class CapSector(unittest.TestCase):
         self.assertAlmostEqual(sc[0]["aft"], 8.0, places=4)
         h = CS.hits(sc[0]["members"])
         self.assertEqual((h[3], h[5], h[7]), (100.0, 100.0, 100.0))
+        self.assertAlmostEqual(h["pnl5"], 5 - CS.COST, places=4)              # 고가 +9% → +5%에 체결
+        lo = CS.hits(sc[1]["members"])
+        self.assertAlmostEqual(lo["pnl5"], lo["close"] - CS.COST, places=4)   # 못 닿음 → 다음날 종가
         self.assertEqual(CS.hits(sc[1]["members"])[3], 0.0)
         out = CS.report(daily, groups, nl=30)
         self.assertIn("1등 [이차]", out); self.assertIn("꼴찌 [부품]", out)
-        self.assertIn("결합 1등", out)
+        self.assertIn("결합 1등", out); self.assertIn("평소 시장(투매일 아님)", out)
         self.assertIn("관심그룹(", CS.report(daily, {}, nl=30))
 
 
