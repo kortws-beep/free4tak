@@ -229,7 +229,17 @@ def compare(names: list, daily: dict, rebound_day: str = None, top: int = 300) -
         L.append(_line("대장 선택", _avg(picked)))
     L.append(_line("직전1일 상위30", _avg([allr[n] for n in mech])))
     L.append(_line(f"시장(상위{top})", _avg(list(allr.values()))))
-    L.append("   * = 이름을 비슷한 이름으로 찾음 · 아래 3줄은 중앙값")
+    # ★ 10-14 대장: "종가로 보면 안 돼, 장중 최고가로 봐야 의미가 있어" — 아침 상승에 파는 매매라
+    #   반등날 고가가 목표가에 닿았나(= 목표가 지정가 매도가 체결됐나)로 비교.
+    def hit(rs, t):
+        xs = [r["high"] for r in rs if r.get("high") is not None]
+        return f"{sum(x >= t for x in xs)}/{len(xs)}({sum(x >= t for x in xs) / len(xs) * 100:.0f}%)" if xs else "-"
+    L.append("   반등날 고가 목표 도달(바닥날 종가 대비) —   +3%        +5%        +7%")
+    for label, rs in (("대장 선택", picked), ("직전1일 상위30", [allr[n] for n in mech]),
+                      (f"시장(상위{top})", list(allr.values()))):
+        if rs:
+            L.append(f"   {label:<14}" + "".join(f"{hit(rs, t):>11}" for t in (3, 5, 7)))
+    L.append("   * = 이름을 비슷한 이름으로 찾음 · 위 3줄(대장 선택~시장)은 중앙값")
     L.append(f"   직전1일 상위30: {', '.join(mech[:12])} …")
     return "\n".join(L)
 
