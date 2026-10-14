@@ -249,10 +249,10 @@ FEAR_GREED_MIN   = 20
 # ★ 2026-08-18: -45,000원 → -150,000원 (사용자 요청, 시드 300만원의 5%).
 #   -45,000원은 초기 세팅(40만원 매수) 때 값이 08-07 매수금액 100만원
 #   증액 이후로도 그대로 남아있던 것 — 최근 실손절(-54,539원/-90,909원)이
-#   이미 단일 거래로 옛 한도를 넘어서고 있었음. 150,000원이면
-#   MAX_DAILY_LOSS(횟수 5회) 쪽이 실질적 제동장치가 되도록 여유를 둠.
+#   이미 단일 거래로 옛 한도를 넘어서고 있었음.
 DAILY_LOSS_LIMIT = -150_000     # 일일 손실 한도 (한도 내에서만 거래)
-MAX_DAILY_LOSS   = 5            # 당일 손절 최대 5회
+MAX_DAILY_LOSS   = 5            # ★ 2026-10-13: 매수 중단 게이트에서는 삭제(금액 한도로만 통일).
+                                 #   daily_loss_count 자체는 계속 세고 표시만 함, 더는 안 씀
 
 # ★ 2026-10-07 대장 결정 — 일손실 한도로 멈춘 뒤 "추세적 하락인지, 이벤트/뉴스성
 #   순간 급락인지" 4시간 뒤 시장을 보고 재개/유지를 정한다(예전: !c시작 전까지
@@ -1674,13 +1674,14 @@ class CBot:
     # ============================================================
     def check_buy_signal(self, market: str) -> tuple:
         """반환: (매수 여부, 지표, 사유)"""
-        # ★ 야간 신규 매수 (23시~06시) — BTC +2% AND 탐욕 50 이상 둘 다 충족해야 허용
+        # ★ 야간 신규 매수 (23시~06시) — BTC +1% AND 탐욕 50 이상 둘 다 충족해야 허용
+        #   (2026-10-13 대장: +2%는 과도함, 다른 안전장치들이 있으니 +1%로 완화)
         if self._is_night():
-            btc_surge = self.btc_rate >= 2.0    # BTC +2% 이상 (기존 +1%)
+            btc_surge = self.btc_rate >= 1.0    # BTC +1% 이상
             greed_ok  = self.fear_greed >= 50
-            if not (btc_surge and greed_ok):    # OR → AND (둘 다 충족)
+            if not (btc_surge and greed_ok):    # 둘 다 충족해야 허용
                 reason = []
-                if not btc_surge: reason.append(f"BTC {self.btc_rate:+.1f}%<2%")
+                if not btc_surge: reason.append(f"BTC {self.btc_rate:+.1f}%<1%")
                 if not greed_ok:  reason.append(f"탐욕{self.fear_greed}<50")
                 return False, {}, f"야간 매수 금지 ({', '.join(reason)})"
             print(f"🌙 야간 특례 매수 허용 — BTC:{self.btc_rate:+.1f}% 탐욕:{self.fear_greed}")
@@ -2820,10 +2821,11 @@ class CBot:
                             break
 
                 # ── 매수 로직 ─────────────────────────────────
+                # ★ 2026-10-13 대장 결정 — 손절 횟수 한도(MAX_DAILY_LOSS=5) 삭제: 이미 위에서
+                #   금액 한도(_loss_limit_hit, 4시간 점검식)가 돌고 있어 이중 제동이었고, 횟수
+                #   쪽은 paused 상태로 기록도 안 돼 성적표에 안 잡혔음(sbot과 동일 결정, 10-12).
                 if available_slots <= 0:
                     print("📦 포지션 FULL")
-                elif self.daily_loss_count >= MAX_DAILY_LOSS:
-                    print(f"🛑 당일 손절 {self.daily_loss_count}회 — 매수 중단")
                 elif self.fear_greed < FEAR_GREED_MIN and self.btc_rate < 0.0:
                     print(f"😱 극단공포({self.fear_greed}) — 매수 중단")
                 elif self.market_status == "weak":

@@ -51,6 +51,19 @@ class Regime(unittest.TestCase):
         c.commit(); c.close()
         self.assertEqual(MR.latest(THEME, LOG), ("2026-09-25", 36.0))
 
+    def test_value_update_without_row_count_change_triggers_recompute(self):
+        # ★ 2026-10-14(2차): collect_daily_data.py는 INSERT ... ON CONFLICT DO UPDATE라, 장중에
+        #   먼저 써진 임시 종가를 저녁 전체수집이 "값만" 덮어써도 행 수는 그대로임 — 행 수만 보던
+        #   예전 가드는 이 경우를 놓쳐 틀린 값이 하루 종일 안 풀리는 사고가 났음(10-14, 60%).
+        build()
+        self.assertEqual(MR.latest(THEME, LOG), ("2026-09-25", 60.0))
+        c = sqlite3.connect(THEME)
+        # 상승 종목 10개(s0~s9)의 마지막날 종가만 급락시킴(행 추가 없음 — UPDATE만)
+        c.executemany("UPDATE kr_stock_daily_data SET close_price=10 WHERE date='2026-09-25' AND stock_name=?",
+                      [(f"s{k}",) for k in range(10)])
+        c.commit(); c.close()
+        self.assertEqual(MR.latest(THEME, LOG), ("2026-09-25", 26 / 60 * 100))
+
     def test_backfill_and_line(self):
         build(n_up=20, n_dn=40)
         MR.save(MR.compute(THEME, ["2026-09-23", "2026-09-24", "2026-09-25"]), LOG)

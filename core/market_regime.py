@@ -59,16 +59,27 @@ def _table(conn):
     # ★ 2026-10-14: 계산할 때 그날 일봉 행 수 — 수집 도중(일부 종목만)에 계산된 값이 하루 종일
     #   고정되던 문제(10-14 29%→60%로 튐, 수집 중 성적표가 먼저 계산). 행 수가 바뀌면 다시 계산.
     conn.execute("CREATE TABLE IF NOT EXISTS market_regime_rows (date TEXT PRIMARY KEY, rows INTEGER)")
+    # ★ 2026-10-14(2차): collect_daily_data.py가 INSERT ... ON CONFLICT DO UPDATE라, 장중에
+    #   먼저 써진 임시 종가가 저녁 전체수집으로 "값만" 갱신되면 행 수는 안 변함 — 행 수 기준으로는
+    #   이 경우를 못 잡아서 10-14에 60%(틀림)가 그대로 안 풀린 사고 발생. 그날 종가 합계도 같이
+    #   저장해 값이 바뀌면(행 수는 그대로여도) 다시 계산하게 보강.
+    try:
+        conn.execute("ALTER TABLE market_regime_rows ADD COLUMN sig REAL")
+    except sqlite3.OperationalError:
+        pass
 
 
-def save(res: dict, log_db: str = LOG_DB, rows: dict = None) -> None:
+def save(res: dict, log_db: str = LOG_DB, rows: dict = None, sig: dict = None) -> None:
     conn = sqlite3.connect(log_db, timeout=10)
     try:
         _table(conn)
         conn.executemany("INSERT OR REPLACE INTO market_regime VALUES (?,?,?)",
                          [(d, round(p, 2), n) for d, (p, n) in res.items()])
         if rows:
-            conn.executemany("INSERT OR REPLACE INTO market_regime_rows VALUES (?,?)", list(rows.items()))
+            for d, n in rows.items():
+                conn.execute("INSERT INTO market_regime_rows (date, rows, sig) VALUES (?,?,?) "
+                             "ON CONFLICT(date) DO UPDATE SET rows=excluded.rows, sig=excluded.sig",
+                             (d, n, (sig or {}).get(d)))
         conn.commit()
     finally:
         conn.close()
@@ -88,16 +99,17 @@ def history(n: int = 10, log_db: str = LOG_DB) -> list:
         return []
 
 
-def _rows_at(date: str, log_db: str = LOG_DB):
+def _cache_sig_at(date: str, log_db: str = LOG_DB):
+    """(rows, sig) 캐시에 저장된 값 — 둘 중 하나라도 지금과 다르면 다시 계산해야 함."""
     try:
         conn = sqlite3.connect(log_db, timeout=10)
         try:
-            r = conn.execute("SELECT rows FROM market_regime_rows WHERE date=?", (date,)).fetchone()
+            r = conn.execute("SELECT rows, sig FROM market_regime_rows WHERE date=?", (date,)).fetchone()
         finally:
             conn.close()
-        return r[0] if r else None
+        return tuple(r) if r else (None, None)
     except sqlite3.OperationalError:
-        return None
+        return (None, None)
 
 
 def latest(theme_db: str = THEME_DB, log_db: str = LOG_DB):
@@ -108,15 +120,18 @@ def latest(theme_db: str = THEME_DB, log_db: str = LOG_DB):
         conn = sqlite3.connect(theme_db)
         try:
             last = conn.execute("SELECT MAX(date) FROM kr_stock_daily_data").fetchone()[0]
-            rows_now = conn.execute("SELECT COUNT(*) FROM kr_stock_daily_data WHERE date=?", (last,)).fetchone()[0]
+            rows_now, sig_now = conn.execute(
+                "SELECT COUNT(*), ROUND(SUM(close_price), 0) FROM kr_stock_daily_data "
+                "WHERE date=?", (last,)).fetchone()
         finally:
             conn.close()
         h = history(1, log_db)
-        if h and h[-1][0] == last and _rows_at(last, log_db) == rows_now:
+        cached_rows, cached_sig = _cache_sig_at(last, log_db)
+        if h and h[-1][0] == last and cached_rows == rows_now and cached_sig == sig_now:
             return h[-1]
         res = compute(theme_db)
         if res:
-            save(res, log_db, {last: rows_now})
+            save(res, log_db, {last: rows_now}, {last: sig_now})
             d = max(res)
             return d, res[d][0]
         return h[-1] if h else None
