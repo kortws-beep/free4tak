@@ -67,6 +67,9 @@ class Compare(unittest.TestCase):
         line = next(x for x in out.splitlines() if x.strip().startswith("롯데"))
         self.assertIn("+9.0", line)                  # 직전1일
         self.assertIn("+8.0", line)                  # 반등날 종가(바닥날 종가 대비)
+        self.assertIn("반등날 고가 목표 도달", out)
+        tgt = next(x for x in out.splitlines() if x.strip().startswith("대장 선택") and "/" in x)
+        self.assertIn("1/1(100%)", tgt)              # 고가 +8% → 3·5·7% 모두 도달
 
 
 if __name__ == "__main__":
