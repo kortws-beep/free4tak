@@ -56,14 +56,19 @@ def compute(theme_db: str = THEME_DB, dates: list = None, ma: int = MA) -> dict:
 
 def _table(conn):
     conn.execute("CREATE TABLE IF NOT EXISTS market_regime (date TEXT PRIMARY KEY, breadth REAL, n INTEGER)")
+    # ★ 2026-10-14: 계산할 때 그날 일봉 행 수 — 수집 도중(일부 종목만)에 계산된 값이 하루 종일
+    #   고정되던 문제(10-14 29%→60%로 튐, 수집 중 성적표가 먼저 계산). 행 수가 바뀌면 다시 계산.
+    conn.execute("CREATE TABLE IF NOT EXISTS market_regime_rows (date TEXT PRIMARY KEY, rows INTEGER)")
 
 
-def save(res: dict, log_db: str = LOG_DB) -> None:
+def save(res: dict, log_db: str = LOG_DB, rows: dict = None) -> None:
     conn = sqlite3.connect(log_db, timeout=10)
     try:
         _table(conn)
         conn.executemany("INSERT OR REPLACE INTO market_regime VALUES (?,?,?)",
                          [(d, round(p, 2), n) for d, (p, n) in res.items()])
+        if rows:
+            conn.executemany("INSERT OR REPLACE INTO market_regime_rows VALUES (?,?)", list(rows.items()))
         conn.commit()
     finally:
         conn.close()
@@ -83,6 +88,18 @@ def history(n: int = 10, log_db: str = LOG_DB) -> list:
         return []
 
 
+def _rows_at(date: str, log_db: str = LOG_DB):
+    try:
+        conn = sqlite3.connect(log_db, timeout=10)
+        try:
+            r = conn.execute("SELECT rows FROM market_regime_rows WHERE date=?", (date,)).fetchone()
+        finally:
+            conn.close()
+        return r[0] if r else None
+    except sqlite3.OperationalError:
+        return None
+
+
 def latest(theme_db: str = THEME_DB, log_db: str = LOG_DB):
     """(date, 비율%) — 기록에 최신 거래일이 없으면 계산해 기록. 실패하면 None."""
     if not os.path.exists(theme_db):          # sqlite가 빈 파일을 만들어 버리지 않게
@@ -91,14 +108,15 @@ def latest(theme_db: str = THEME_DB, log_db: str = LOG_DB):
         conn = sqlite3.connect(theme_db)
         try:
             last = conn.execute("SELECT MAX(date) FROM kr_stock_daily_data").fetchone()[0]
+            rows_now = conn.execute("SELECT COUNT(*) FROM kr_stock_daily_data WHERE date=?", (last,)).fetchone()[0]
         finally:
             conn.close()
         h = history(1, log_db)
-        if h and h[-1][0] == last:
+        if h and h[-1][0] == last and _rows_at(last, log_db) == rows_now:
             return h[-1]
         res = compute(theme_db)
         if res:
-            save(res, log_db)
+            save(res, log_db, {last: rows_now})
             d = max(res)
             return d, res[d][0]
         return h[-1] if h else None
