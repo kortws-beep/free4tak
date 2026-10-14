@@ -15,7 +15,30 @@ class Api:
     def get_market_data(self, c): return self.d.get(c)
 
 
+class MultiApi(Api):
+    def __init__(self, d, multi_ok=True):
+        super().__init__(d); self.multi_ok, self.multi_calls, self.singles = multi_ok, [], []
+    def get_multi_price(self, codes, pause=0.0):
+        self.multi_calls.append(len(codes))
+        q = {"open": 1, "high": 1, "low": 1, "price": 1, "value": 0, "chg": 0} if self.multi_ok else \
+            {"high": 1, "price": 1, "value": 0, "chg": 0, "low": 0, "open": 0}
+        return {c: dict(q) for c in codes if c != "000005"}
+    def get_market_data(self, c):
+        self.singles.append(c); return super().get_market_data(c)
+
+
 class Alert(unittest.TestCase):
+    def test_snapshot_multi(self):
+        codes = [f"{k:06d}" for k in range(65)]
+        one = {"000005": {"stck_prpr": "10", "stck_lwpr": "9", "stck_oprc": "9.5"}}
+        a = MultiApi(one)
+        s = CA.snapshot(a, codes, pause=0)
+        self.assertEqual(a.multi_calls, [65]); self.assertEqual(len(s), 65)
+        self.assertEqual(a.singles, ["000005"])                    # 복수시세에서 빠진 것만 한 종목씩
+        b = MultiApi(one, multi_ok=False)                          # 저가·시가 못 읽음 → 한 종목씩
+        s = CA.snapshot(b, codes, pause=0)
+        self.assertEqual(len(b.singles), 65); self.assertEqual(list(s), ["000005"])
+
     def test_universe(self):
         db = os.path.abspath("t.db")
         c = sqlite3.connect(db)

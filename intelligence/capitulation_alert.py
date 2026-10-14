@@ -11,9 +11,10 @@ capitulation_alert.py — 투매일 반등 섹터 알림 (2026-10-14, 시나리�
 아니라 '조건이 왔다'는 알림. 비중 50%, 판단은 대장.
 
 리나가 하는 일:
-  14:20(거래일) — 전 종목(약 2,500) 장중 시세로 '오늘 20일 신저가' 비율 계산 — 초당 10건으로 천천히
-                 (한투 한도 절반, 봇 몫 남김) 약 4분 → 14:25쯤 알림. 기준 이상이면 관심그룹별 대표주(장중
-                 거래대금 1~3등)의 오후반등(저가 대비 현재가)으로 줄 세워 알림.
+  15:40(거래일) — 장 마감 뒤 전 종목(약 2,500) 그날 시세로 '오늘 20일 신저가' 비율 계산(★ 10-14 대장:
+                 14:20 대신 장 끝나고 — 정확한 종가로 판단하고, 시간외 종가매매(15:40~16:00)는 종가 그대로
+                 체결이라 '바닥날 종가 매수' 검증과 똑같음). 멀티종목 시세(30개씩)로 1분 안쪽.
+                 기준 이상이면 관심그룹별 대표주(거래대금 1~3등)의 오후반등(저가 대비 종가)으로 줄 세워 알림.
   다음 날 08:50 — 아침 규칙 다시 알림(시가가 어제 종가 밑이면 시가 정리, 아니면 +7% 지정가).
   !투매 — 언제든 지금 상태 점검(기준 미달이어도 숫자 보여줌).
 ※ 기준(CAP_NL, 기본 40%)은 전 종목으로 검증한 값 — 그래서 전 종목으로 계산(상위 400은 안 맞았음).
@@ -98,21 +99,40 @@ def load_groups(path: str = GROUPS_JSON) -> dict:
         return {g: [tuple(x) for x in v] for g, v in json.load(f).items()}
 
 
+def _one(api, c):
+    d = api.get_market_data(c) or {}
+    try:
+        px = float(d.get("stck_prpr") or 0)
+        lo = float(d.get("stck_lwpr") or 0)
+        op = float(d.get("stck_oprc") or 0)
+        if px > 0 and lo > 0 and op > 0:
+            return {"open": op, "high": float(d.get("stck_hgpr") or px), "low": lo, "price": px,
+                    "value": float(d.get("acml_tr_pbmn") or 0), "chg": float(d.get("prdy_ctrt") or 0)}
+    except (TypeError, ValueError):
+        pass
+    return None
+
+
 def snapshot(api, codes, pause: float = 0.1) -> dict:
-    """{코드: {"open","high","low","price","value","chg"}} — 한투 현재가. 실패한 종목은 빠짐."""
+    """{코드: {"open","high","low","price","value","chg"}} — 한투 현재가. 실패한 종목은 빠짐.
+    ★ 10-14: 한 종목씩이면 2,500종목에 10분+ → 기존 복수시세(get_multi_price, 30개씩 — 주도주·단타 스캔이
+    쓰는 검증된 함수)로 먼저 받고, 저가·시가를 못 읽은 것만 한 종목씩 보충."""
     import time
+    codes = list(dict.fromkeys(codes))
     out = {}
-    for c in dict.fromkeys(codes):
-        d = api.get_market_data(c) or {}
-        try:
-            px = float(d.get("stck_prpr") or 0)
-            lo = float(d.get("stck_lwpr") or 0)
-            op = float(d.get("stck_oprc") or 0)
-            if px > 0 and lo > 0 and op > 0:
-                out[c] = {"open": op, "high": float(d.get("stck_hgpr") or px), "low": lo, "price": px,
-                          "value": float(d.get("acml_tr_pbmn") or 0), "chg": float(d.get("prdy_ctrt") or 0)}
-        except (TypeError, ValueError):
-            pass
+    multi = getattr(api, "get_multi_price", None)
+    if multi:
+        for c, q in (multi(codes, pause=pause) or {}).items():
+            if q.get("price", 0) > 0 and q.get("low", 0) > 0 and q.get("open", 0) > 0:
+                out[c] = {k: q.get(k, 0) for k in ("open", "high", "low", "price", "value", "chg")}
+        if codes and not out:
+            print("⚠️ [투매알림] 복수시세에서 저가·시가를 못 읽음 — 한 종목씩 조회로 전환(느림)")
+    for c in codes:
+        if c in out:
+            continue
+        r = _one(api, c)
+        if r:
+            out[c] = r
         time.sleep(pause)
     return out
 
@@ -154,7 +174,7 @@ def format_alert(res: dict, nl: float = CAP_NL, forced: bool = False) -> str:
         lead = " · ".join(f"{n} 저가대비 {a:+.1f}%(등락 {ch:+.1f}%)" for n, _, a, ch, _ in x["leaders"])
         L.append(f"   [{x['group']}] 오후반등 {x['aft']:+.1f}% — {lead}")
     if hit:
-        L.append("   📋 시나리오1: 종가 매수(비중 50%) → 내일 시가가 오늘 종가 밑이면 시가 정리, "
+        L.append("   📋 시나리오1: 시간외 종가(~16:00, 오늘 종가 그대로) 매수(비중 50%) → 내일 시가가 오늘 종가 밑이면 시가 정리, "
                  f"아니면 +{TP_PCT}% 지정가 · 못 닿으면 그날 정리")
         L.append("   ⚠️ 검증 거래당 +0.9% 수준(투매일 15일), 섹터 고르기 효과는 아직 불확실 — 판단은 대장. "
                  "하락장이 안 끝났으면(종가 음봉 계속) 비중 더 줄이기")
