@@ -375,6 +375,9 @@ class KisAPI:
                         "price":      price,
                         "chg":        num(it.get("prdy_ctrt")),
                         "high":       num(it.get("inter2_hgpr")),
+                        # ★ 2026-10-14 리나 투매 알림(20일 신저가·오후반등) — 저가·시가 추가
+                        "low":        num(it.get("inter2_lwpr")),
+                        "open":       num(it.get("inter2_oprc")),
                         "prev_close": num(it.get("inter2_prdy_clpr")),
                         "value":      num(it.get("acml_tr_pbmn")),
                         "volume":     num(it.get("acml_vol")),
