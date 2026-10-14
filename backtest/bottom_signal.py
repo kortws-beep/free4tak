@@ -39,18 +39,23 @@ COST = 0.003
 HORIZON = 5
 
 
-def new_low_share(daily: dict, n: int = 20) -> dict:
-    """{날짜: 20일 신저가(저가가 직전 n일 최저 이하) 종목 비율 %}."""
-    hit, tot = {}, {}
+def new_low_share(daily: dict, n: int = 20, top: int = None) -> dict:
+    """{날짜: 20일 신저가(저가가 직전 n일 최저 이하) 종목 비율 %}.
+    top: 전날 거래대금 상위 top 종목만(★ 10-14 리나 투매 알림이 장중 상위 400종목으로 계산 — 기준 맞춰보기용)."""
+    per = {}
     for name, rows in daily.items():
         if rb.excluded(name):
             continue
         for i in range(n, len(rows)):
-            d = rows[i][0]
-            tot[d] = tot.get(d, 0) + 1
-            if rows[i][3] <= min(r[3] for r in rows[i - n:i]):
-                hit[d] = hit.get(d, 0) + 1
-    return {d: hit.get(d, 0) / t * 100 for d, t in tot.items() if t >= 50}
+            hit = rows[i][3] <= min(r[3] for r in rows[i - n:i])
+            per.setdefault(rows[i][0], []).append((rows[i - 1][5] or 0, hit))
+    out = {}
+    for d, xs in per.items():
+        if top:
+            xs = sorted(xs, key=lambda x: -x[0])[:top]
+        if len(xs) >= 50:
+            out[d] = sum(h for _, h in xs) / len(xs) * 100
+    return out
 
 
 def tp_exit(c: float, nxt: list, tp: float = 0.05, sl: float = None, close_sl: bool = False,

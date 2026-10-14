@@ -129,6 +129,7 @@ def report(daily: dict, groups: dict, nl: float = 40.0, top_groups: int = 1, mar
     table = rb.day_table(daily)
     dates = sorted(table)
     lows = bs.new_low_share(daily)
+    lows400 = bs.new_low_share(daily, top=400)     # 리나 장중 알림 기준(상위 400) — 기준값 맞춰보기
     rows = {n: {r[0]: r[1:6] for r in rs} for n, rs in daily.items() if not rb.excluded(n)}
     days = cap_days(table, lows, nl)
     L = [f"🧭 투매일 섹터 고르기 검증 — 20일 신저가 {nl:.0f}%+ 투매일 {len(days)}일 · 바닥날 종가 매수 → 다음 날 "
@@ -156,7 +157,7 @@ def report(daily: dict, groups: dict, nl: float = 40.0, top_groups: int = 1, mar
         pools["시장"] += [(n, r) for n in mk for r in [stock_row(rows[n], P, Bd, R)] if r]
         best = sc[0]
         mem = ", ".join(f"{n} {r[2]:+.0f}%" for n, r in best["members"])
-        lines.append(f"   {Bd}→{R} 신저가 {lows[Bd]:4.1f}% · 1등 [{best['group']}] 오후반등 {best['aft']:+.1f}% "
+        lines.append(f"   {Bd}→{R} 신저가 {lows[Bd]:4.1f}%(상위400 {lows400.get(Bd, 0):4.1f}%) · 1등 [{best['group']}] 오후반등 {best['aft']:+.1f}% "
                      f"낙폭 {best['drop']:+.1f}% → 다음날 고가: {mem} · 꼴찌 [{sc[-1]['group']}]")
     # ★ 10-14: 투매일이 원래 변동이 커서 도달률이 높은 건지 — 평소(투매일 아닌 날) 시장과 비교
     capset, normal = set(days), []
