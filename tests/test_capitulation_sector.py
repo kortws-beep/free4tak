@@ -50,6 +50,12 @@ class CapSector(unittest.TestCase):
         self.assertAlmostEqual(h["pnl5"], 5 - CS.COST, places=4)              # 고가 +9% → +5%에 체결
         lo = CS.hits(sc[1]["members"])
         self.assertAlmostEqual(lo["pnl5"], lo["close"] - CS.COST, places=4)   # 못 닿음 → 다음날 종가
+        # (낙폭, 오후반등, 고가, 종가, 대금, 시가, 저가, 바닥날저가)
+        self.assertEqual(CS.exit_gap((0, 0, 9, -8, 0, -2, -9, -10), 5), -2)    # 갭하락 → 시가 정리
+        self.assertEqual(CS.exit_gap((0, 0, 9, -8, 0, 1, -9, -10), 5), 5)      # 갭업 → 익절
+        self.assertEqual(CS.exit_stop((0, 0, 9, -8, 0, 1, -11, -10), 5), -10)  # 바닥날 저가 깨짐 → 손절 먼저
+        self.assertEqual(CS.exit_stop((0, 0, 9, -8, 0, -12, -13, -10), 5), -12)  # 시가부터 아래 → 시가
+        self.assertEqual(CS.exit_stop((0, 0, 3, 2, 0, 1, -1, -10), 5), 2)      # 안 깨지고 못 닿음 → 종가
         self.assertEqual(CS.hits(sc[1]["members"])[3], 0.0)
         out = CS.report(daily, groups, nl=30)
         self.assertIn("1등 [이차]", out); self.assertIn("꼴찌 [부품]", out)

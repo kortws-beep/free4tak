@@ -43,13 +43,15 @@ def cap_days(table: dict, lows: dict, nl: float) -> list:
 
 
 def stock_row(rows: dict, P: str, Bd: str, R: str):
-    """rows {date: (o, h, l, c, val)} → (낙폭%, 오후반등%, 다음날 고가%, 다음날 종가%, 거래대금) 또는 None."""
+    """rows {date: (o, h, l, c, val)} → (낙폭%, 오후반등%, 다음날 고가%, 다음날 종가%, 거래대금,
+    다음날 시가%, 다음날 저가%, 바닥날 저가%) 또는 None. 다음날·바닥날 저가 %는 바닥날 종가(매수가) 대비."""
     if not all(d in rows for d in (P, Bd, R)) or not rows[P][3] or not rows[Bd][2]:
         return None
     o, h, l, c, val = rows[Bd]
     base = c
-    return ((c / rows[P][3] - 1) * 100, (c / l - 1) * 100,
-            (rows[R][1] / base - 1) * 100, (rows[R][3] / base - 1) * 100, val)
+    pct = lambda x: (x / base - 1) * 100
+    return ((c / rows[P][3] - 1) * 100, (c / l - 1) * 100, pct(rows[R][1]), pct(rows[R][3]), val,
+            pct(rows[R][0]), pct(rows[R][2]), pct(l))
 
 
 def score_groups(groups: dict, rows: dict, P: str, Bd: str, R: str) -> list:
@@ -88,7 +90,29 @@ def hits(rs: list) -> dict:
     for t in TARGETS:
         out[t] = sum(r[2] >= t for _, r in rs) / len(rs) * 100
         out[f"pnl{t}"] = statistics.mean((t if r[2] >= t else r[3]) for _, r in rs) - COST
+        # ★ 10-14: 못 닿은 종목이 종가에 평균 -8%로 끝나 이익을 다 까먹음 → 빠지는 규칙 두 가지
+        out[f"gap{t}"] = statistics.mean(exit_gap(r, t) for _, r in rs) - COST
+        out[f"stop{t}"] = statistics.mean(exit_stop(r, t) for _, r in rs) - COST
     return out
+
+
+def exit_gap(r, t: float) -> float:
+    """다음 날 시가가 매수가 아래로 시작하면 시가에 정리, 아니면 +t 지정가 익절·못 닿으면 종가."""
+    hi, cl, op = r[2], r[3], r[5]
+    if op < 0:
+        return op
+    return t if hi >= t else cl
+
+
+def exit_stop(r, t: float) -> float:
+    """바닥날 저가를 손절선 — 다음 날 그 아래로 가면 정리(시가부터 아래면 시가, 같은 날 익절선도 닿으면
+    손절 먼저로 불리하게). 아니면 +t 익절·못 닿으면 종가."""
+    hi, cl, op, lo, stop = r[2], r[3], r[5], r[6], r[7]
+    if op <= stop:
+        return op
+    if lo <= stop:
+        return stop
+    return t if hi >= t else cl
 
 
 def fmt(h: dict) -> str:
@@ -96,7 +120,9 @@ def fmt(h: dict) -> str:
         return "     0종목"
     return (f"{h['n']:>5}종목 · " + " · ".join(f"+{t}% {h[t]:3.0f}%" for t in TARGETS)
             + f" · 고가 중앙 {h['high']:+.1f}% · 다음날 종가 {h['close']:+.2f}%"
-            + f" · 손익(+5%익절/+7%익절, 못 닿으면 종가) {h['pnl5']:+.2f}% / {h['pnl7']:+.2f}%")
+            + f"\n{'':<16}손익(+5%/+7% 익절) 못 닿으면 종가 {h['pnl5']:+.2f}/{h['pnl7']:+.2f}% · "
+            f"시가가 매수가 밑이면 시가 정리 {h['gap5']:+.2f}/{h['gap7']:+.2f}% · "
+            f"바닥날 저가 손절 {h['stop5']:+.2f}/{h['stop7']:+.2f}%")
 
 
 def report(daily: dict, groups: dict, nl: float = 40.0, top_groups: int = 1, market_top: int = 300) -> str:
