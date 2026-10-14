@@ -76,13 +76,18 @@ def score_groups(groups: dict, rows: dict, P: str, Bd: str, R: str) -> list:
     return sorted(out, key=lambda x: (x["r_aft"] + x["r_drop"], x["r_aft"]))
 
 
+COST = 0.3     # % 왕복 수수료·세금·슬리피지
+
+
 def hits(rs: list) -> dict:
-    """rs [(name, row)] → 목표 도달률·다음날 종가 평균."""
+    """rs [(name, row)] → 목표 도달률·다음날 종가 평균 + 실제 손익(★ 10-14: 목표가 지정가 매도,
+    못 닿으면 다음 날 종가 매도 — 비용 차감 평균 %)."""
     if not rs:
         return {"n": 0}
     out = {"n": len(rs), "close": statistics.mean(r[3] for _, r in rs), "high": statistics.median(r[2] for _, r in rs)}
     for t in TARGETS:
         out[t] = sum(r[2] >= t for _, r in rs) / len(rs) * 100
+        out[f"pnl{t}"] = statistics.mean((t if r[2] >= t else r[3]) for _, r in rs) - COST
     return out
 
 
@@ -90,7 +95,8 @@ def fmt(h: dict) -> str:
     if not h["n"]:
         return "     0종목"
     return (f"{h['n']:>5}종목 · " + " · ".join(f"+{t}% {h[t]:3.0f}%" for t in TARGETS)
-            + f" · 고가 중앙 {h['high']:+.1f}% · 다음날 종가 평균 {h['close']:+.2f}%")
+            + f" · 고가 중앙 {h['high']:+.1f}% · 다음날 종가 {h['close']:+.2f}%"
+            + f" · 손익(+5%익절/+7%익절, 못 닿으면 종가) {h['pnl5']:+.2f}% / {h['pnl7']:+.2f}%")
 
 
 def report(daily: dict, groups: dict, nl: float = 40.0, top_groups: int = 1, market_top: int = 300) -> str:
@@ -126,7 +132,16 @@ def report(daily: dict, groups: dict, nl: float = 40.0, top_groups: int = 1, mar
         mem = ", ".join(f"{n} {r[2]:+.0f}%" for n, r in best["members"])
         lines.append(f"   {Bd}→{R} 신저가 {lows[Bd]:4.1f}% · 1등 [{best['group']}] 오후반등 {best['aft']:+.1f}% "
                      f"낙폭 {best['drop']:+.1f}% → 다음날 고가: {mem} · 꼴찌 [{sc[-1]['group']}]")
-    L.append("■ 1. 합계 (다음 날 고가가 바닥날 종가 대비 목표에 닿은 비율)")
+    # ★ 10-14: 투매일이 원래 변동이 커서 도달률이 높은 건지 — 평소(투매일 아닌 날) 시장과 비교
+    capset, normal = set(days), []
+    for i, d in enumerate(dates[1:-1], 1):
+        if d in capset:
+            continue
+        R, P = dates[i + 1], dates[i - 1]
+        mk = sorted((n for n in rows if d in rows[n]), key=lambda n: -(rows[n][d][4] or 0))[:market_top]
+        normal += [(n, r) for n in mk for r in [stock_row(rows[n], P, d, R)] if r]
+    pools["평소 시장(투매일 아님)"] = normal
+    L.append("■ 1. 합계 (다음 날 고가가 바닥날 종가 대비 목표에 닿은 비율 · 손익은 비용 0.3% 차감)")
     for k, rs in pools.items():
         L.append(f"   {k:<10} {fmt(hits(rs))}")
     L.append("■ 2. 투매일별 1등 그룹(결합)과 그 대표주 다음 날 고가")
