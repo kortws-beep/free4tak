@@ -75,14 +75,14 @@ class Alert(unittest.TestCase):
         snap["900001"] = {"open": 100, "high": 110, "low": 90, "price": 99, "value": 5, "chg": 2.0}
         snap["900002"] = {"open": 100, "high": 110, "low": 95, "price": 100, "value": 4, "chg": 1.0}
         snap["900003"] = {"open": 100, "high": 110, "low": 95, "price": 101, "value": 3, "chg": 1.0}
-        groups = {"이차": [("900001", "에이"), ("900002", "비"), ("900003", "씨")],
+        groups = {"이차_소재": [("900001", "에이"), ("900002", "비"), ("900003", "씨")],
                   "기타": [("000000", "s0"), ("000001", "s1"), ("000002", "s2")],
                   "new": [("900001", "에이"), ("000000", "s0"), ("000001", "s1")]}
         res = CA.evaluate(univ, snap, groups, code_of)
         self.assertEqual(res["share"], 60.0)
-        self.assertEqual([g["group"] for g in res["groups"]], ["이차", "기타"])   # new 제외, 오후반등 순
+        self.assertEqual([g["group"] for g in res["groups"]], ["이차_소재", "기타"])   # new 제외, 오후반등 순
         msg = CA.format_alert(res, nl=40)
-        self.assertIn("투매일 신호", msg); self.assertIn("[이차]", msg); self.assertIn("시가 정리", msg)
+        self.assertIn("투매일 신호", msg); self.assertIn("[이차\\_소재]", msg); self.assertIn("시가 정리", msg)
         self.assertEqual(CA.format_alert(res, nl=70), "")                       # 기준 미달 자동 → 조용히
         self.assertIn("기준 미달", CA.format_alert(res, nl=70, forced=True))
         st = os.path.abspath("st.json")
