@@ -178,7 +178,8 @@ def format_alert(res: dict, nl: float = CAP_NL, forced: bool = False) -> str:
         return ""
     for x in res["groups"][:TOP_GROUPS]:
         lead = " · ".join(f"{n} 저가대비 {a:+.1f}%(등락 {ch:+.1f}%)" for n, _, a, ch, _ in x["leaders"])
-        L.append(f"   [{x['group']}] 오후반등 {x['aft']:+.1f}% — {lead}")
+        g = x["group"].replace("_", "\\_")     # ★ 10-16: 디스코드가 _를 기울임으로 먹어 그룹명이 붙어 보였음
+        L.append(f"   [{g}] 오후반등 {x['aft']:+.1f}% — {lead}")
     if hit:
         L.append("   📋 시나리오1: 시간외 종가(~16:00, 오늘 종가 그대로) 매수(비중 50%) → 내일 시가가 오늘 종가 밑이면 시가 정리, "
                  f"아니면 +{TP_PCT}% 지정가 · 못 닿으면 그날 정리")
