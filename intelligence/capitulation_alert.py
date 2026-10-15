@@ -121,14 +121,20 @@ def snapshot(api, codes, pause: float = 0.1) -> dict:
     codes = list(dict.fromkeys(codes))
     out = {}
     multi = getattr(api, "get_multi_price", None)
+    answered = set()
     if multi:
-        for c, q in (multi(codes, pause=pause) or {}).items():
+        got = multi(codes, pause=pause) or {}
+        answered = set(got)
+        for c, q in got.items():
             if q.get("price", 0) > 0 and q.get("low", 0) > 0 and q.get("open", 0) > 0:
                 out[c] = {k: q.get(k, 0) for k in ("open", "high", "low", "price", "value", "chg")}
-        if codes and not out:
-            print("⚠️ [투매알림] 복수시세에서 저가·시가를 못 읽음 — 한 종목씩 조회로 전환(느림)")
+        # ★ 10-15: 장 전(07:20 !투매)엔 복수시세가 시가·저가 0으로 와서 '못 읽음'으로 보고 2,500종목을
+        #   한 종목씩 다시 받느라 10분+ 돌았음(받아도 장 전이라 0) → 응답은 왔는데 값이 0이면 보충 안 함.
+        if answered and not out:
+            print("⚠️ [투매알림] 복수시세에 오늘 시가·저가가 없음(장 시작 전?) — 보충 조회 안 함")
+            return {}
     for c in codes:
-        if c in out:
+        if c in out or c in answered:
             continue
         r = _one(api, c)
         if r:
@@ -208,12 +214,17 @@ def morning_reminder(path: str = STATE, today: str = None) -> str:
 
 
 def run(api, nl: float = CAP_NL, forced: bool = False) -> str:
-    """14:30 자동/!투매 수동 — 알림 문구(기준 미달 자동이면 빈 문자열)."""
+    """15:40 자동/!투매 수동 — 알림 문구(기준 미달 자동이면 빈 문자열)."""
+    if datetime.datetime.now().strftime("%H%M") < "0900":
+        return ("⏰ 장 시작 전이라 오늘 시세(시가·저가)가 없어 — `!투매`는 09:00 이후에.\n"
+                "   어제 결과는 서버에서 `python backtest/bottom_signal.py`(마지막 줄 '최근 10거래일')로 봐줘.") if forced else ""
     univ = load_universe()
     groups = load_groups()
     code_of = name_code_map()
     codes = [code_of[n] for n in univ if n in code_of] + [c for ms in groups.values() for c, _ in ms]
     res = evaluate(univ, snapshot(api, codes), groups, code_of)
+    if not res["n"]:
+        return "⚠️ 오늘 시세를 못 받았어(장 시작 전이거나 한투 조회 실패) — 잠시 뒤 다시 `!투매`" if forced else ""
     msg = format_alert(res, nl, forced)
     if res["share"] >= nl:
         save_picks(res)
