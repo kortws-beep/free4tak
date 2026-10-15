@@ -35,9 +35,22 @@ class Alert(unittest.TestCase):
         s = CA.snapshot(a, codes, pause=0)
         self.assertEqual(a.multi_calls, [65]); self.assertEqual(len(s), 65)
         self.assertEqual(a.singles, ["000005"])                    # 복수시세에서 빠진 것만 한 종목씩
-        b = MultiApi(one, multi_ok=False)                          # 저가·시가 못 읽음 → 한 종목씩
+        b = MultiApi(one, multi_ok=False)                          # 응답은 왔는데 시가·저가 0(장 전) → 보충 안 함
         s = CA.snapshot(b, codes, pause=0)
-        self.assertEqual(len(b.singles), 65); self.assertEqual(list(s), ["000005"])
+        self.assertEqual(b.singles, []); self.assertEqual(s, {})
+
+    def test_before_open(self):
+        import datetime as _dt
+        class _D(_dt.datetime):
+            @classmethod
+            def now(cls, tz=None): return cls(2026, 10, 15, 7, 20)
+        old = CA.datetime.datetime
+        CA.datetime.datetime = _D
+        try:
+            self.assertIn("장 시작 전", CA.run(None, forced=True))
+            self.assertEqual(CA.run(None), "")
+        finally:
+            CA.datetime.datetime = old
 
     def test_universe(self):
         db = os.path.abspath("t.db")
