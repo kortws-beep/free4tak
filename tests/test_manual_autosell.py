@@ -82,6 +82,15 @@ class Handle(unittest.TestCase):
         r = A.handle("111111", z, 9800, "1000", "live", k3)
         self.assertIn("실패", r["msgs"][0]); self.assertEqual(z.get("stage"), 1)       # 실패하면 상태 그대로
 
+    def test_premarket_ignored(self):
+        x, k = w(), Kiwoom()
+        r = A.handle("111111", x, 10500, "0830", "live", k)          # 프리장 +5% — 무시
+        self.assertEqual((r["msgs"], x["peak_price"]), ([], None))
+        r = A.handle("111111", x, 9600, "0900", "live", k)           # 정규장 -4% 시작 — 추적 전이라 안 팜
+        self.assertEqual((r["msgs"], k.orders), ([], []))
+        r = A.handle("111111", x, 10500, "1730", "paper", k)         # 시간외도 무시
+        self.assertEqual(r["msgs"], [])
+
     def test_off_alert_only(self):
         x = w()
         A.handle("111111", x, 10300, "1000", "off")

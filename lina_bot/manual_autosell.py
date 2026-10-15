@@ -78,6 +78,11 @@ def handle(code: str, w: dict, price: float, hhmm: str, md: str, kiwoom=None) ->
     """한 종목 처리 → {"msgs": [...], "deregister": bool, "changed": bool, "sell_price": float|None}.
     kiwoom: holdings()/sell_market() 가진 객체(live 모드만)."""
     out = {"msgs": [], "deregister": False, "changed": False, "sell_price": None}
+    # ★ 10-16 대장: 프리장에서 산 종목은 정규장 기준으로 -3~-5%로 시작할 수 있음 — 프리장(NXT) 가격으로
+    #   +3% 추적을 시작해 고점을 잡아두면 정규장 시작하자마자 '고점 -4%'로 시가에 전량 팔릴 위험.
+    #   추적·판단 모두 정규장(09:00~15:20) 가격으로만.
+    if not in_session(hhmm):
+        return out
     name = w.get("name", code)
     before = (w.get("peak_price"), w.get("stage"))
     act = step(w, price)
@@ -109,8 +114,6 @@ def handle(code: str, w: dict, price: float, hhmm: str, md: str, kiwoom=None) ->
                            f"실제였으면 {qty or '전량'}{'주' if qty else ''} 매도했을 거야(주문 안 나감)")
         return out
     # live
-    if not in_session(hhmm):
-        return out                                  # 정규장에서만 — 다음 루프에 다시
     if kiwoom is None:
         out["msgs"].append(f"⚠️ [리나등록] {name}({code}) {act['reason']} — 키움 연결 없음, 주문 못 냄")
         return out
