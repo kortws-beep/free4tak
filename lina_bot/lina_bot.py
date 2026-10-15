@@ -237,7 +237,7 @@ async def _register_manual_watch(channel, code: str, buy_price: float = None,
             await send_safe_message(
                 channel,
                 f"✅ {name}({code}) 등록 완료 — 평단가 {buy_price:,.0f}원"
-                + (f" · {qty}주" if qty else " · 수량 미입력(실제 매도 땐 키움 매도가능수량 전부)") + "\n"
+                + (f" · {qty}주" if qty else " · ⚠️ 수량 미입력 — 실제 매도 모드에서도 주문 안 나가(알림만)") + "\n"
                 f"   +{autosell.START_PCT:.0f}% 찍으면 추적 → 고점 -{autosell.TRAIL1_PCT:.0f}%면 전량 매도, "
                 f"+{autosell.TP1_PCT:.0f}%에 30% 익절 → 이후 고점 -{autosell.TRAIL2_PCT:.0f}%면 나머지 매도 [{md}]\n"
                 f"   손절은 대장이 직접. 현재 등록: {len(watches)}종목(`등록현황`) — 해제는 `해제 {name}`"

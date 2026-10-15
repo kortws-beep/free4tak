@@ -15,7 +15,9 @@ manual_autosell.py — 리나등록 종목 자동 익절 (2026-10-14 대장 지�
   4. 30% 익절 뒤엔 고점 대비 -3% 밀리면 최종 익절 → 나머지 전부 매도
 모드(환경변수 LINA_AUTOSELL):
   paper(기본) — 실제 주문 없이 "지금이면 이렇게 팔았을 거야"만 알림(연습). 상태는 판 것처럼 진행
-  live        — 키움 시장가 매도(정규장 09:00~15:20만, 등록 수량과 키움 매도가능수량 중 작은 값)
+  live        — 키움 시장가 매도(정규장 09:00~15:20만, 등록 수량과 키움 매도가능수량 중 작은 값).
+                ★ 10-16: 키움 계좌에 대장 장기 보유 종목이 많아(SK증권 1,132주 등) 수량 없이 등록하면 '매도가능
+                수량 전부'가 팔릴 위험 → live에선 수량을 넣고 등록한 종목만 매도(없으면 경고만)
   off         — 매도 신호 알림만(예전 방식)
 """
 import os
@@ -112,9 +114,16 @@ def handle(code: str, w: dict, price: float, hhmm: str, md: str, kiwoom=None) ->
     if kiwoom is None:
         out["msgs"].append(f"⚠️ [리나등록] {name}({code}) {act['reason']} — 키움 연결 없음, 주문 못 냄")
         return out
+    if not w.get("qty0") and not w.get("qty"):
+        if not w.get("warned_no_qty"):
+            w["warned_no_qty"] = True
+            out["changed"] = True
+            out["msgs"].append(f"⚠️ [리나등록] {name}({code}) {act['reason']} — 등록 수량이 없어 실제 매도 안 함"
+                               f"(키움 계좌 다른 보유분까지 팔 수 있어서). 직접 판단하거나 `등록 {name} 평단가 N주`로 다시 등록")
+        return out
     held = (kiwoom.holdings() or {}).get(code, {})
     avail = int(held.get("avail", 0) or 0)
-    qty = min(qty, avail) if qty else avail
+    qty = min(qty, avail) if qty else 0
     if qty <= 0:
         if not w.get("warned_no_qty"):
             w["warned_no_qty"] = True

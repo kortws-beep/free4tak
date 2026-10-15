@@ -68,7 +68,11 @@ class Handle(unittest.TestCase):
         self.assertEqual(A.handle("111111", x, 10000, "1600", "live", k)["msgs"], [])   # 장 끝 — 다음에
         self.assertEqual(k.orders, [])
         r = A.handle("111111", x, 10000, "1000", "live", k)
-        self.assertEqual(k.orders, [("111111", 40)]); self.assertTrue(r["deregister"])  # 수량 모르면 매도가능 전부
+        self.assertEqual(k.orders, []); self.assertIn("등록 수량이 없어", r["msgs"][0])   # 수량 없으면 안 팜(10-16)
+        x2, k4 = w(qty=10), Kiwoom(avail=4)
+        A.handle("111111", x2, 10300, "1000", "live", k4)
+        A.handle("111111", x2, 9800, "1000", "live", k4)
+        self.assertEqual(k4.orders, [("111111", 4)])                                     # 등록 10주 > 잔고 4주 → 4주
         y, k2 = w(qty=100), Kiwoom(avail=0)
         A.handle("111111", y, 10300, "1000", "live", k2)
         r = A.handle("111111", y, 9800, "1000", "live", k2)
