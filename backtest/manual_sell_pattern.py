@@ -74,6 +74,11 @@ def enrich(trades: list, daily: dict) -> list:
             continue
         span = rows[i0:i1 + 1]
         t["day_lh"] = (rows[i1][3], rows[i1][2])
+        # ★ 10-17: 리나 일봉은 수정주가 — 그 뒤 무상증자·분할이 있으면 옛 가격이 낮아져 장부(실제 가격)와 단위가 다름
+        #   (티엘비 05-22: 판 115,800 vs 그날 일봉 50,586~57,929). 30% 넘게 어긋나면 일봉 지표는 비우고 점검 목록에만.
+        if not (rows[i1][3] * 0.7 <= t["sp"] <= rows[i1][2] * 1.3):
+            t["adj"] = True
+            continue
         t["peak"] = (max(r[2] for r in span) / t["bp"] - 1) * 100
         if i1 > 0:
             t["gap"] = (rows[i1][1] / rows[i1 - 1][4] - 1) * 100
@@ -134,7 +139,7 @@ def simulate(trades: list, rule, label: str) -> str:
 def report(trades: list, days: int) -> str:
     man = [t for t in trades if is_manual(t)]
     bot = [t for t in trades if not is_manual(t)]
-    cov = sum(1 for t in trades if t["peak"] is not None)
+    cov = sum(1 for t in trades if t["peak"] is not None)   # 수정주가로 어긋난 건 제외
     L = [f"🖐️ sbot 수동매도 vs 봇 매도 — 최근 {days}일, 매도 {len(trades)}건(수동 {len(man)} · 봇 {len(bot)}) · "
          f"일봉 맞춘 건 {cov}"]
     L.append(f"   수동 중 봇이 산 걸 대장이 판 것 {sum(1 for t in man if t.get('bot_bought'))}건(원래 매수시각으로 보유일 계산)"
@@ -170,7 +175,8 @@ def report(trades: list, days: int) -> str:
         L.append(simulate(bot, lambda o, pc, bp, hi, n, k=k, x=x: n == k + 1 and hi < bp * (1 + x / 100),
                           f"C. {k}거래일 안에 +{x}% 못 찍으면 정리"))
     odd = [t for t in trades if t.get("day_lh") and not (t["day_lh"][0] * 0.995 <= t["sp"] <= t["day_lh"][1] * 1.005)]
-    L.append(f"■ 데이터 점검 — 판 가격이 그날 저가~고가 밖인 매도 {len(odd)}건 (장전·시간외 체결이거나, 장부 매도가·일봉 종목이 틀림)")
+    L.append(f"■ 데이터 점검 — 판 가격이 그날 저가~고가 밖인 매도 {len(odd)}건 (장전·시간외 체결 / 30%↑ 어긋남 = 수정주가"
+             f"(무상증자·분할) → 일봉 지표에서 뺌 {sum(1 for t in trades if t.get('adj'))}건)")
     for t in odd[:15]:
         L.append(f"   {t['sell']:%m-%d %H:%M} {t['name']} {t['reason']} · 판 가격 {t['sp']:,.0f} · 매수가 {t['bp']:,.0f} · "
                  f"그날 저가~고가 {t['day_lh'][0]:,.0f}~{t['day_lh'][1]:,.0f}")
