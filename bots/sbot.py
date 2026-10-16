@@ -217,6 +217,11 @@ FLAT_BUY_MIN_RATIO = 0.5
 #   전 종목 20일선 위 비율이 50% 미만이면 매수금 절반. 마지막 슬롯(가용현금 전부)도 목표금액
 #   한도를 먼저 건 뒤 절반. 끄려면 .env에 SBOT_WEAK_MARKET_RATIO=1
 WEAK_MARKET_RATIO = float(os.getenv("SBOT_WEAK_MARKET_RATIO", "0.5") or 0.5)
+# ★ 2026-10-17 대장 결정(backtest/situation_classifier.py, 산 날=전날 종가 국면 기준 97건): 전날 하락장(국면<35%)
+#   매수 49건 PF0.08 -321.6만, 전날 투매(리나 15:40 신저가≥40%) 매수 25건 -38.7만 = sbot 손실(-362.8만) 거의 전부.
+#   → 그런 날은 신규매수 쉬기(보유분 매도·손절은 그대로). 끄려면 .env에 SBOT_PAUSE_BELOW=0
+PAUSE_BELOW_PCT = float(os.getenv("SBOT_PAUSE_BELOW", "35") or 0)
+CAP_STATE = os.path.join(_BASE, "lina_bot", "cap_alert_state.json")   # 리나 투매 알림이 그날 날짜·비율 저장
 
 # ── 통합 후보풀 슬롯 상수 ────────────────────────────────────
 # sbot 자체 소스(KIS new그룹/S7) + core/candidate_pool.py의 sbo2 원천
@@ -465,13 +470,32 @@ class SBot:
             cur = market_regime.latest()
             b = cur[1] if cur else None
             self._regime = (today, b)
+            self._pause_reason = self._down_market_reason(cur)
             if b is not None:
                 weak = WEAK_MARKET_RATIO < 1 and not market_regime.is_strong(b)
                 msg = (f"📏 시장 국면 {b:.0f}% ({cur[0]} 종가, 20일선 위 종목 비율) — "
-                       + (f"약한 장 → 매수금 {WEAK_MARKET_RATIO:.0%}" if weak else "정상 매수"))
+                       + (f"{self._pause_reason} → 오늘 신규매수 쉬기(보유분 매도는 그대로)" if self._pause_reason
+                          else f"약한 장 → 매수금 {WEAK_MARKET_RATIO:.0%}" if weak else "정상 매수"))
                 print(msg)
                 self._notify(msg)
         return self._regime[1]
+
+    @staticmethod
+    def _down_market_reason(cur, cap_state: str = None) -> str:
+        """전날(국면 기준일) 하락장·투매면 사유 문구, 아니면 "". 국면을 못 구하면 "" (막지 않음)."""
+        if PAUSE_BELOW_PCT <= 0 or not cur:
+            return ""
+        day, b = cur[0], cur[1]
+        if b is not None and b < PAUSE_BELOW_PCT:
+            return f"하락장(국면 {b:.0f}% < {PAUSE_BELOW_PCT:.0f}%)"
+        try:
+            with open(cap_state or CAP_STATE, encoding="utf-8") as f:
+                st = json.load(f)
+            if st.get("date") == day:
+                return f"전날 투매(신저가 {st.get('share', 0):.0f}%)"
+        except (OSError, ValueError):
+            pass
+        return ""
 
     def _regime_amount(self, amount: int) -> int:
         """약한 장이면 목표 슬롯금액 한도를 먼저 건 뒤 절반(마지막 슬롯·켈리 사이징 모두)."""
@@ -1342,6 +1366,11 @@ class SBot:
 
         if slots <= 0:
             print("📦 [SWING] 포지션 FULL")
+            return
+
+        self._market_breadth()
+        if getattr(self, "_pause_reason", ""):
+            print(f"🧭 [SWING] {self._pause_reason} — 신규매수 쉬기")
             return
 
         for cand in buyable:

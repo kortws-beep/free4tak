@@ -193,5 +193,38 @@ class SbotWeakMarket(unittest.TestCase):
             sbot.market_regime.latest = old
 
 
+class SbotPauseDownMarket(unittest.TestCase):
+    """2026-10-17 — 전날 하락장(국면<35%)·전날 투매(리나 15:40 기록)면 신규매수 쉬기."""
+    def test_reason(self):
+        import json as _j
+        R = sbot.SBot._down_market_reason
+        self.assertIn("하락장", R(("2026-10-16", 30.0), "없음.json"))
+        self.assertEqual(R(("2026-10-16", 40.0), "없음.json"), "")
+        self.assertEqual(R(None, "없음.json"), "")                     # 국면 못 구하면 막지 않음
+        with open("cap.json", "w", encoding="utf-8") as f:
+            _j.dump({"date": "2026-10-16", "share": 54.2}, f)
+        self.assertIn("전날 투매(신저가 54%)", R(("2026-10-16", 40.0), "cap.json"))
+        self.assertEqual(R(("2026-10-17", 40.0), "cap.json"), "")       # 투매 기록이 그 전날 것이 아니면 무시
+        old = sbot.PAUSE_BELOW_PCT
+        try:
+            sbot.PAUSE_BELOW_PCT = 0
+            self.assertEqual(R(("2026-10-16", 30.0), "cap.json"), "")   # .env로 끄기
+        finally:
+            sbot.PAUSE_BELOW_PCT = old
+
+    def test_buys_skipped(self):
+        old = sbot.market_regime.latest
+        try:
+            sbot.market_regime.latest = lambda: ("2026-10-16", 30.0)
+            b = object.__new__(sbot.SBot)
+            b.positions, b.peak_tracker, b.notes = {}, {}, []
+            b._notify = lambda m, critical=False: b.notes.append(m)
+            b.db = type("D", (), {"get_today_realized": lambda self: 0})()
+            b._execute_buys_unified([{"code": "X"}], "1000", 10_000_000)   # 후보를 보면 KeyError(grade) — 안 봐야 함
+            self.assertIn("신규매수 쉬기", b.notes[0])
+        finally:
+            sbot.market_regime.latest = old
+
+
 if __name__ == "__main__":
     unittest.main()
