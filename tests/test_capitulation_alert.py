@@ -83,14 +83,26 @@ class Alert(unittest.TestCase):
         self.assertEqual([g["group"] for g in res["groups"]], ["이차_소재", "기타"])   # new 제외, 오후반등 순
         msg = CA.format_alert(res, nl=40)
         self.assertIn("투매일 신호", msg); self.assertIn("[이차\\_소재]", msg); self.assertIn("시가 정리", msg)
+        self.assertIn("장 끝까지", msg); self.assertIn("09:45 전 50%", msg)
         self.assertEqual(CA.format_alert(res, nl=70), "")                       # 기준 미달 자동 → 조용히
         self.assertIn("기준 미달", CA.format_alert(res, nl=70, forced=True))
         st = os.path.abspath("st.json")
         CA.save_picks(res, st, today="2026-10-13")
         self.assertEqual(CA.morning_reminder(st, today="2026-10-13"), "")      # 같은 날은 안 보냄
         m = CA.morning_reminder(st, today="2026-10-14")
-        self.assertIn("에이", m); self.assertIn("시가에 정리", m)
+        self.assertIn("에이", m); self.assertIn("시가에 정리", m); self.assertNotIn("승부", m)
         self.assertEqual(CA.morning_reminder(st, today="2026-10-14"), "")      # 한 번만
+
+    def test_group_rank_median(self):
+        """한 종목만 튄 그룹(평균 1등)보다 고르게 오른 그룹이 위 — 중앙값 순위(대장 2번)."""
+        def q(low, price, v): return {"open": 100, "high": 110, "low": low, "price": price, "value": v, "chg": 0.0}
+        snap = {"100001": q(100, 130, 3), "100002": q(100, 101, 2), "100003": q(100, 101, 1),
+                "200001": q(100, 104, 3), "200002": q(100, 104, 2), "200003": q(100, 104, 1)}
+        groups = {"튐": [("100001", "a"), ("100002", "b"), ("100003", "c")],
+                  "고름": [("200001", "d"), ("200002", "e"), ("200003", "f")]}
+        res = CA.evaluate({"a": 1}, snap, groups, {"a": "100001"})
+        self.assertEqual([g["group"] for g in res["groups"]], ["고름", "튐"])
+        self.assertAlmostEqual(res["groups"][1]["aft"], 1.0)
 
     def test_snapshot(self):
         api = Api({"000001": {"stck_prpr": "100", "stck_lwpr": "95", "stck_oprc": "98", "stck_hgpr": "101",

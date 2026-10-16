@@ -161,8 +161,8 @@ def evaluate(univ: dict, snap: dict, groups: dict, code_of: dict) -> dict:
         if len(ms) < 3:
             continue
         lead = sorted(ms, key=lambda x: -x[2]["value"])[:LEADERS]
-        aft = statistics.mean((s["price"] / s["low"] - 1) * 100 for _, _, s in lead)
-        gs.append({"group": g, "aft": aft, "chg": statistics.mean(s["chg"] for _, _, s in lead),
+        aft = statistics.median((s["price"] / s["low"] - 1) * 100 for _, _, s in lead)   # ★ 10-17 대장 2번: 평균→중앙값(한 종목 튐 방지)
+        gs.append({"group": g, "aft": aft, "chg": statistics.median(s["chg"] for _, _, s in lead),
                    "leaders": [(n, c, (s["price"] / s["low"] - 1) * 100, s["chg"], s["price"]) for n, c, s in lead]})
     res["groups"] = sorted(gs, key=lambda x: -x["aft"])
     return res
@@ -182,7 +182,8 @@ def format_alert(res: dict, nl: float = CAP_NL, forced: bool = False) -> str:
         L.append(f"   [{g}] 오후반등 {x['aft']:+.1f}% — {lead}")
     if hit:
         L.append("   📋 시나리오1: 시간외 종가(~16:00, 오늘 종가 그대로) 매수(비중 50%) → 내일 시가가 오늘 종가 밑이면 시가 정리, "
-                 f"아니면 +{TP_PCT}% 지정가 · 못 닿으면 그날 정리")
+                 f"아니면 매수 직후 +{TP_PCT}% 지정가 걸어두고 장 끝까지 · 못 닿으면 종가 전 정리 "
+                 "(고점 시각: 09:45 전 50% · 13:30 뒤 19% — 오후에도 닿음)")
         L.append("   ⚠️ 검증 거래당 +0.9% 수준(투매일 15일), 섹터 고르기 효과는 아직 불확실 — 판단은 대장. "
                  "하락장이 안 끝났으면(종가 음봉 계속) 비중 더 줄이기")
     return "\n".join(L)
@@ -210,8 +211,8 @@ def morning_reminder(path: str = STATE, today: str = None) -> str:
     names = ", ".join(n for p in st.get("picks", []) for n, _ in p["leaders"])
     return (f"⏰ **어제({st['date'][5:]}) 투매일 알림 종목 — 아침 규칙**\n"
             f"   {names}\n"
-            f"   시가가 어제 종가 밑이면 시가에 정리 · 아니면 +{TP_PCT}% 지정가 걸고, 못 닿으면 오늘 안에 정리 "
-            "(대장: 09:45 전후까지가 승부)")
+            f"   시가가 어제 종가 밑이면 시가에 정리 · 아니면 +{TP_PCT}% 지정가 걸어두고 장 끝까지 기다렸다가, "
+            "못 닿으면 종가 전 정리 (고점 시각: 09:45 전 50% · 13:30 뒤 19%)")
 
 
 def run(api, nl: float = CAP_NL, forced: bool = False) -> str:
