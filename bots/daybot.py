@@ -327,6 +327,19 @@ def _read_state() -> dict:
     return read_state(BOT_STATE_FILE, default={})
 
 
+def _lina_daybot_watches() -> set:
+    """★ 2026-10-16 — 대장이 daybot 계좌에서 직접 사서 리나에 '데이봇'으로 등록한 종목(리나가 익절 관리).
+    daybot이 같은 종목을 또 사면 봇·리나가 같은 물량을 같이 관리하게 되므로 매수 후보에서 뺀다."""
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "lina_bot", "manual_watch_state.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            return {c for c, w in (json.load(f) or {}).items()
+                    if isinstance(w, dict) and w.get("account") == "daybot"}
+    except (OSError, ValueError):
+        return set()
+
+
 class DayBot:
 
     def __init__(self):
@@ -1353,6 +1366,7 @@ class DayBot:
                                    if p["bot_type"] != "daybot"}
             except Exception:
                 pass
+        held_elsewhere |= _lina_daybot_watches()
 
         # ★ 2026-10-01 대장 지정 — 기본 2슬롯 꽉 찼을 때만 매수가능금액을
         #   확인해서 3번째 보너스슬롯 오픈 여부 판단(매 스캔마다 1회, REST

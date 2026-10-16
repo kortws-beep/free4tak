@@ -186,6 +186,24 @@ class DaybotManualSellMaster(unittest.TestCase):
         self.assertEqual(got, [("A", 10, "수동매도"), ("B", 4, "수동일부매도")])
 
 
+class DaybotLinaWatches(unittest.TestCase):
+    def test_reads_only_daybot_account(self):
+        import json, os
+        path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(daybot.__file__))),
+                            "lina_bot", "manual_watch_state.json")
+        old = open(path, encoding="utf-8").read() if os.path.exists(path) else None
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump({"005930": {"account": "daybot"}, "003160": {"account": "kiwoom"}, "111111": {}}, f)
+            self.assertEqual(daybot._lina_daybot_watches(), {"005930"})
+        finally:
+            if old is None:
+                os.remove(path)
+            else:
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(old)
+
+
 class DaybotFirstTakeProfit(unittest.TestCase):
     """2026-10-12 — +5% 도달 때 30% 매도(트레일링 시작도 +5%), 나머지는 트레일링. 장부는 체결 확인 뒤."""
     def setUp(self):

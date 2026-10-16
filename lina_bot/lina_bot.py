@@ -187,7 +187,7 @@ def _log_manual_watch(event: str, code: str, w: dict, sell_price: float = None,
 
 
 async def _register_manual_watch(channel, code: str, buy_price: float = None,
-                                  name_override: str = None, qty: int = None):
+                                  name_override: str = None, qty: int = None, account: str = "kiwoom"):
     """!리나등록/자연어("등록 종목명 [평단가]") 공용 등록 로직.
     ★ 2026-10-03 대장 지정 — 분할매수를 하기 때문에 중간 금액으로는
     등록 못 함(최종 매수 완료 후에 등록). 그래서 "매수금액" 대신
@@ -223,9 +223,18 @@ async def _register_manual_watch(channel, code: str, buy_price: float = None,
                 )
                 return
 
+            # ★ 2026-10-16 — "데이봇" 계좌 등록: daybot이 이미 들고 있는 종목은 막음(봇·리나 이중 매도 방지)
+            if account == "daybot":
+                try:
+                    import master_db
+                    if code in {p["code"] for p in master_db.get_all_positions() if p["bot_type"] == "daybot"}:
+                        await send_safe_message(channel, f"❌ {name}({code})는 daybot이 산 종목이야 — daybot 규칙으로 관리 중이라 등록 안 해.")
+                        return
+                except Exception as e:
+                    print(f"⚠️ [리나등록] daybot 보유 확인 실패: {e}")
             watches = _load_manual_watches()
             watches[code] = {
-                "name": name, "entry_price": buy_price, "peak_price": None,
+                "name": name, "entry_price": buy_price, "peak_price": None, "account": account,
                 "last_alert_peak": 0, "stage": 0, "qty": qty, "qty0": qty,
                 "registered_at": datetime.datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S"),
             }
@@ -234,9 +243,10 @@ async def _register_manual_watch(channel, code: str, buy_price: float = None,
             # ★ 2026-10-14 대장 — 등록 종목은 리나가 직접 익절(lina_bot/manual_autosell.py)
             md = {"paper": "🧪 연습 모드(주문 안 나감, 알림만)", "live": "💰 실제 매도(키움 시장가)",
                   "off": "🔔 알림만"}[autosell.mode()]
+            acct = "한투 데이봇 계좌" if account == "daybot" else "키움"
             await send_safe_message(
                 channel,
-                f"✅ {name}({code}) 등록 완료 — 평단가 {buy_price:,.0f}원"
+                f"✅ {name}({code}) 등록 완료 [{acct}] — 평단가 {buy_price:,.0f}원"
                 + (f" · {qty}주" if qty else " · ⚠️ 수량 미입력 — 실제 매도 모드에서도 주문 안 나가(알림만)") + "\n"
                 f"   +{autosell.START_PCT:.0f}% 찍으면 추적 → 고점 -{autosell.TRAIL1_PCT:.0f}%면 전량 매도, "
                 f"+{autosell.TP1_PCT:.0f}%에 30% 익절 → 이후 고점 -{autosell.TRAIL2_PCT:.0f}%면 나머지 매도 [{md}]\n"
@@ -1390,10 +1400,10 @@ async def manual_watch_trailing_loop():
         from kis_api import KisAPI
         api = KisAPI()
         channel = await client.fetch_channel(REPORT_CHANNEL_ID)
-        kiwoom = None
+        brokers = {}
         if autosell.mode() == "live":
             from kiwoom_api import KiwoomAPI
-            kiwoom = KiwoomAPI()
+            brokers = {"kiwoom": KiwoomAPI(), "daybot": autosell.KisBroker(api)}
     except Exception as e:
         print(f"⚠️ [리나등록 추적] 초기화 오류: {e}")
         return
@@ -1421,7 +1431,7 @@ async def manual_watch_trailing_loop():
             #   모드 LINA_AUTOSELL=paper(기본, 연습)/live/off.
             md = autosell.mode()
             res = await asyncio.to_thread(autosell.handle, code, w, price, kst_now.strftime("%H%M"), md,
-                                          kiwoom if md == "live" else None)
+                                          brokers.get(w.get("account", "kiwoom")) if md == "live" else None)
             for m in res["msgs"]:
                 await send_safe_message(channel, m)
             if res["deregister"]:
@@ -2915,6 +2925,7 @@ async def on_message(message):
                     trail = f" (추적 고점 {w['peak_price']:,.0f})" if w.get("peak_price") else ""
                     trail += {2: " · 30% 익절 완료", 3: " · 매도 완료(연습/알림)"}.get(w.get("stage"), "")
                     trail += f" · {w['qty']}주" if w.get("qty") else ""
+                    trail += " · [데이봇 계좌]" if w.get("account") == "daybot" else ""
                     lines.append(f"   {emoji} {name}({code}) {net_rate:+.2f}% "
                                  f"| 평단가 {entry:,.0f} → 현재가 {price:,.0f}{trail}")
                 await send_safe_message(message.channel, "\n".join(lines))
@@ -2960,7 +2971,8 @@ async def on_message(message):
     if message.content.startswith("!리나등록") or message.content.startswith("등록 "):
         parts = message.content.split()
         if len(parts) < 2:
-            await send_safe_message(message.channel, "사용법: `!리나등록 종목코드 [평단가] [수량주] [종목명]` 또는 `등록 종목명 [평단가] [100주]`\n"
+            await send_safe_message(message.channel, "사용법: `!리나등록 종목코드 [평단가] [수량주] [종목명]` 또는 `등록 종목명 [평단가] [100주] [d]`\n"
+                                     "(끝에 `d`를 붙이면 한투 daybot 계좌에서 매도, 없으면 키움 — 예: `등록 삼성전자 223000 10주 d`)\n"
                                      "평단가 생략하면 현재가로 등록해(분할매수 완료 후 평단가로 등록 권장).")
             return
         arg = parts[1].strip()
@@ -2974,10 +2986,13 @@ async def on_message(message):
         name_override = None
         # ★ 2026-10-14 — 수량("100주")은 어느 자리에 써도 인식(리나 자동 익절용)
         qty = None
+        account = "kiwoom"
         rest = []
         for t in parts[2:]:
             if re.fullmatch(r"[\d,]+주", t):
                 qty = int(t[:-1].replace(",", ""))
+            elif t.lower() in ("d", "데이봇", "daybot", "한투"):   # ★ 10-16 대장: 짧게 d/D
+                account = "daybot"            # ★ 10-16 daybot 계좌에서 대장이 직접 산 종목
             else:
                 rest.append(t)
         if rest:
@@ -2988,7 +3003,7 @@ async def on_message(message):
                 await send_safe_message(message.channel, f"⚠️ 평단가 '{rest[0]}' 인식 실패 — 숫자만 입력해줘(현재가로 등록할게).")
         if len(rest) >= 2:
             name_override = rest[1].strip()
-        await _register_manual_watch(message.channel, code, buy_price, name_override, qty)
+        await _register_manual_watch(message.channel, code, buy_price, name_override, qty, account)
         return
 
     # ── !성과 (sbo2 매매 이력) ─────────────────────────────────
