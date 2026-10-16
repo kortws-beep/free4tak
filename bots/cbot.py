@@ -245,6 +245,9 @@ AI_SCORE_AVOID_MAX = 44
 # ── 시장 / 리스크 ───────────────────────────────────────────
 BTC_WEAK_THRESH  = -2.0
 BTC_STOP_THRESH  = -4.0
+# ★ 2026-10-17 대장 결정(backtest/cbot_regime_review.py 90일 95건): 매수 시점 비트 24시간(롤링) -1% 이하면
+#   30건 -28.7만(앞·뒤 절반 둘 다 손해) → 신규 매수 쉬기. btc_rate(업비트 전일 09시 대비)와 달리 지금부터 24시간 전 대비.
+BTC_24H_MIN      = -1.0
 FEAR_GREED_MIN   = 20
 # ★ 2026-08-18: -45,000원 → -150,000원 (사용자 요청, 시드 300만원의 5%).
 #   -45,000원은 초기 세팅(40만원 매수) 때 값이 08-07 매수금액 100만원
@@ -405,6 +408,7 @@ class CBot:
         # ── 시장 상태 ─────────────────────────────────────
         self.market_status = "normal"
         self.btc_rate      = 0.0
+        self.btc_24h       = None   # 비트 24시간(롤링) 등락 % — 조회 실패면 None(막지 않음)
         self.fear_greed    = 50
         self.us10y         = 0.0  # ★ 美국채10년 금리(%)
         self.us10y_chg     = 0.0  # 전일대비 %p 변화
@@ -1178,6 +1182,27 @@ class CBot:
             print(f"⚠️ BTC 시세 오류: {e}")
         finally:
             self._last_market_check = time.time()
+        self._update_btc_24h()
+
+    def _update_btc_24h(self):
+        """비트 24시간 롤링 등락 — 10분봉 145개(최신→과거)의 맨 끝 종가 = 약 24시간 전.
+        -1% 아래로 들어가거나 회복할 때 한 번씩 알림. 실패하면 기존값 유지."""
+        try:
+            res = self.session.get(f"{BASE_URL}/candles/minutes/10",
+                                   params={"market": "KRW-BTC", "count": 145}, timeout=5).json()
+            if not isinstance(res, list) or len(res) < 145:
+                return
+            now_p, ago_p = safe_float(res[0].get("trade_price")), safe_float(res[-1].get("trade_price"))
+            if not now_p or not ago_p:
+                return
+            prev, self.btc_24h = self.btc_24h, (now_p / ago_p - 1) * 100
+            was = prev is not None and prev < BTC_24H_MIN
+            if self.btc_24h < BTC_24H_MIN and not was:
+                self.notify(f"📉 비트 24시간 {self.btc_24h:+.2f}% (기준 {BTC_24H_MIN:+.0f}% 미만) → 신규 매수 쉬기")
+            elif self.btc_24h >= BTC_24H_MIN and was:
+                self.notify(f"📈 비트 24시간 {self.btc_24h:+.2f}% 회복 → 신규 매수 재개")
+        except Exception as e:
+            print(f"⚠️ 비트 24시간 조회 오류: {e} — 기존값 유지")
 
     def _get_alt_market_status(self, market: str) -> str:
         """
@@ -1697,6 +1722,8 @@ class CBot:
         candle_rate = ind["candle_rate"]
 
         # 시장 상태 필터
+        if self.btc_24h is not None and self.btc_24h < BTC_24H_MIN:
+            return False, ind, f"비트 24시간 {self.btc_24h:+.2f}% < {BTC_24H_MIN:+.0f}%"
         if self.market_status == "stop":
             return False, ind, f"BTC 중단 ({self.btc_rate:+.2f}%)"
         # ★ BTC 약세 시 알트 자체 상태 확인 (디커플링 대응)
@@ -2131,7 +2158,8 @@ class CBot:
                 f"현재:{current:,.0f} ≤ 손절:{stop_price:,.0f} | 시장:{self.market_status}",
                 critical=True,
             )
-            if self.sell(market, qty, f"손절({rate:+.2%})",
+            # ★ 10-17: 손절선이 매수가 위로 올라간 뒤 걸린 건 이익 — '손절'로 적으면 성적표 손절 수가 부풀려짐
+            if self.sell(market, qty, f"{'손절' if rate < 0 else '보호선'}({rate:+.2%})",
                          sell_price=current, force_all=True):
                 if rate < 0:
                     self.daily_loss_count += 1
@@ -2830,6 +2858,8 @@ class CBot:
                     print(f"😱 극단공포({self.fear_greed}) — 매수 중단")
                 elif self.market_status == "weak":
                     print(f"⚠️ BTC 약세({self.btc_rate:+.2f}%) — 매수 중단")
+                elif self.btc_24h is not None and self.btc_24h < BTC_24H_MIN:
+                    print(f"📉 비트 24시간 {self.btc_24h:+.2f}% — 매수 쉬기")
                 else:
                     for market in self.coin_pool:
                         if available_slots <= 0:

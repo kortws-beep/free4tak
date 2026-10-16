@@ -319,7 +319,7 @@ class PerformanceAnalyzer:
             elif "2차익절" in reason: key = "2차익절"
             elif "3차익절" in reason: key = "3차익절"
             elif "트레일링" in reason: key = "트레일링"
-            elif "본절"    in reason: key = "본절보호"
+            elif "본절"    in reason or "보호선" in reason: key = "본절보호"
             elif "손절"    in reason: key = "손절"
             elif "즉시매도" in reason: key = "즉시매도(수동)"
             else:                     key = "기타"

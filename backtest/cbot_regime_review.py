@@ -50,7 +50,10 @@ def load_trades(trade_db: str, days: int) -> list:
         if any(w in (why or "") for w in LOSS_WORDS):
             x["loss_exit"] = True
         x["last"] = max(x["last"] or st, st)
-    return [x for x in g.values() if not x["open"] and x["last"]]
+    done = [x for x in g.values() if not x["open"] and x["last"]]
+    for x in done:      # 올려둔 손절선에 걸린 이익 매도는 손절 아님 — 실제 손실 난 것만
+        x["loss_exit"] = x["loss_exit"] and x["krw"] < 0
+    return done
 
 
 class BtcTicks:

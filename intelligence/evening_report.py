@@ -66,7 +66,7 @@ def bot_day(date: str, db: str = MASTER_DB) -> dict:
         o["n"] += 1
         o["krw"] += krw
         o["win" if krw > 0 else "loss"] += 1
-        if any(w in (reason or "") for w in STOP_WORDS):
+        if krw < 0 and any(w in (reason or "") for w in STOP_WORDS):   # ★ 10-17: 이익 난 '손절'(올린 손절선)은 손절 아님
             o["stops"] += 1
         label = (name or code, rate or 0.0)
         if o["best"] is None or (rate or 0) > o["best"][1]:
