@@ -90,5 +90,30 @@ class Extra(unittest.TestCase):
         self.assertIn("미수 13,926 · 반대매매 805(5.9%) · 신용 327,499", r)
 
 
+class Morning(unittest.TestCase):
+    def test_line(self):
+        import sqlite3
+        db = os.path.abspath("m.db")
+        conn = sqlite3.connect(db)
+        M._table(conn)
+        conn.executemany("INSERT INTO kofia_funds VALUES (?,?,?,?,?,?,?)", [
+            ("2026-10-13", 1, 0, 0, 1241525, 59350, 5.6), ("2026-10-14", 1, 0, 0, 1357473, 89336, 7.2),
+            ("2026-10-15", 1, 0, 0, 1392561, 80498, 5.9)])
+        conn.executemany("INSERT INTO kofia_credit VALUES (?,?,?,?,?,?,?,?,?)", [
+            ("2026-10-12", 34288699, 0, 0, 0, 0, 0, 0, 0), ("2026-10-15", 32749897, 0, 0, 0, 0, 0, 0, 0)])
+        conn.executemany("INSERT INTO market_investor VALUES (?,?,?,?,?)", [
+            ("2026-10-16", "KOSPI", 0, 3637, 0), ("2026-10-16", "FUT", 0, -9540, 0)])
+        conn.commit(); conn.close()
+        line = M.morning_line(db)
+        self.assertIn("미수 13,926억(↑)", line); self.assertIn("최근 정점 10-14 893억", line)
+        self.assertIn("신용 32.7조(20일 고점 대비 -4.5%)", line); self.assertIn("미수 증가 중", line)
+        self.assertIn("코스피 현물 +3,637 · 선물 -9,540", line)
+        conn = sqlite3.connect(db)
+        conn.execute("INSERT INTO kofia_funds VALUES ('2026-10-16',1,0,0,1200000,40000,3.3)")
+        conn.commit(); conn.close()
+        self.assertIn("반대매매 정점 지나 꺾임", M.morning_line(db))
+        self.assertEqual(M.morning_line(os.path.abspath("empty.db")), "")
+
+
 if __name__ == "__main__":
     unittest.main()

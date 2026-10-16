@@ -2151,6 +2151,14 @@ async def daily_morning_report():
                 regime_line = await asyncio.to_thread(market_regime.format_line)
             except Exception as e:
                 regime_line = f"📏 시장 국면: 계산 실패({e})"
+            # ★ 2026-10-17 대장 — 강제 물량(미수·반대매매·신용)·외국인 현물/선물 한 줄(intelligence/market_flow.py)
+            try:
+                import market_flow
+                flow_line = await asyncio.to_thread(market_flow.morning_line)
+                if flow_line:
+                    regime_line += "\n" + flow_line
+            except Exception as e:
+                print(f"⚠️ [브리핑] 금투협 줄 오류: {e}")
             await send_safe_message(channel, f"☀️ **[대장! 07시 30분 융합 마스터 전략 브리핑이야]** ☀️\n"
                                              f"{regime_line}\n\n{reply_text}")
             print(f"✅ [디버그] 07시 30분 4합 통합 융합 마스터 브리핑 전송 완료!")

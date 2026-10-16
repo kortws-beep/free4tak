@@ -380,6 +380,49 @@ def save_extra(fut, funds: list, credit: list, date: str, db: str = LOG_DB):
         conn.close()
 
 
+def morning_line(db: str = LOG_DB) -> str:
+    """★ 10-17 대장 — 07:30 브리핑 한 줄: 강제 물량(미수·반대매매·신용)이 남았나 + 외국인 현물·선물.
+    turning_point.py: 반대매매 정점이 바닥 ±1거래일 안 5/8구간. 미수는 사고 3일째 아침 반대매매로 나오므로
+    미수 잔고가 늘고 있으면 2~3일 뒤 물량이 남은 것."""
+    try:
+        conn = sqlite3.connect(db, timeout=10)
+        try:
+            _table(conn)
+            funds = conn.execute("SELECT date, misu, forced, forced_pct FROM kofia_funds "
+                                 "WHERE misu IS NOT NULL ORDER BY date DESC LIMIT 10").fetchall()
+            credit = conn.execute("SELECT date, credit FROM kofia_credit WHERE credit IS NOT NULL "
+                                  "ORDER BY date DESC LIMIT 20").fetchall()
+            inv = conn.execute("SELECT date, market, foreign_ FROM market_investor WHERE date=(SELECT MAX(date) "
+                               "FROM market_investor)").fetchall()
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return ""
+    if len(funds) < 2:
+        return ""
+    (d, misu, forced, pct), (_, misu_prev, _, _) = funds[0], funds[1]
+    peak = max(funds, key=lambda r: r[2] or 0)
+    trend = "↑" if misu > misu_prev else "↓" if misu < misu_prev else "→"
+    s = (f"💳 금투협({d[5:]}) 미수 {misu / 100:,.0f}억({trend}) · 반대매매 {forced / 100:,.0f}억({pct:.1f}%, "
+         f"최근 정점 {peak[0][5:]} {peak[2] / 100:,.0f}억)")
+    if credit:
+        hi = max(c for _, c in credit)
+        s += f" · 신용 {credit[0][1] / 1e6:,.1f}조(20일 고점 대비 {(credit[0][1] / hi - 1) * 100:+.1f}%)"
+    if misu > misu_prev:
+        verdict = "미수 증가 중 → 2~3일 뒤 반대매매 물량 남음"
+    elif peak[0] != d and forced <= peak[2] * 0.6:
+        verdict = "반대매매 정점 지나 꺾임 → 강제 물량 정리 쪽"
+    else:
+        verdict = "강제 물량 정리 진행 중"
+    s += f" → {verdict}"
+    fx = {m: f for _, m, f in inv}
+    if inv and any(fx.get(m) is not None for m in ("KOSPI", "FUT")):
+        parts = [f"{lab} {fx[m]:+,.0f}" for m, lab in (("KOSPI", "코스피 현물"), ("KOSDAQ", "코스닥 현물"), ("FUT", "선물"))
+                 if fx.get(m) is not None]
+        s += f"\n🌏 외국인({inv[0][0][5:]}) " + " · ".join(parts)
+    return s
+
+
 def show_raw(db: str = LOG_DB) -> str:
     """가장 최근 원문(투자자·프로그램·상승하락) — 필드 이름 확인용."""
     conn = sqlite3.connect(db, timeout=10)
