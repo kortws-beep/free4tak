@@ -140,6 +140,21 @@ def _wkey(code: str, account: str = "kiwoom") -> str:
     return f"{code}@d" if account == "daybot" else code
 
 
+_ACCT_TOKENS = {"k": "kiwoom", "키움": "kiwoom", "d": "daybot", "데이봇": "daybot", "daybot": "daybot", "한투": "daybot"}
+
+
+def _split_account(tokens: list) -> tuple:
+    """★ 10-16 대장: 계좌 구분자 필수 — K(키움)/D(데이봇). (계좌 또는 None, 나머지 토큰)."""
+    acct, rest = None, []
+    for t in tokens:
+        a = _ACCT_TOKENS.get(t.lower())
+        if a:
+            acct = a
+        else:
+            rest.append(t)
+    return acct, rest
+
+
 def _wcode(key: str, w: dict) -> str:
     return w.get("code") or key.split("@")[0]
 
@@ -2968,7 +2983,7 @@ async def on_message(message):
             or message.content.startswith("등록해제")):
         parts = message.content.split()
         if len(parts) < 2:
-            await send_safe_message(message.channel, "사용법: `!리나등록해제 종목코드 [매도가]` 또는 `해제 종목명 [매도가]`")
+            await send_safe_message(message.channel, "사용법: `해제 종목명 [매도가] [K|D]` — 두 계좌에 다 있으면 K/D 필수")
             return
         arg = parts[1].strip()
         # ★ 2026-10-06 — 종목코드는 항상 6자리인데 앞자리 0이 빠진 5자리
@@ -2980,10 +2995,17 @@ async def on_message(message):
             await send_safe_message(message.channel, f"❌ '{arg}' 종목코드를 못 찾았어.")
             return
         sell_price = None
-        # ★ 2026-10-16 — 데이봇 계좌 등록 해제는 끝에 d (`해제 삼성전자 d` / `해제 삼성전자 230000 d`)
-        if any(t.lower() in ("d", "데이봇", "daybot", "한투") for t in parts[2:]):
-            code = _wkey(code, "daybot")
-            parts = parts[:2] + [t for t in parts[2:] if t.lower() not in ("d", "데이봇", "daybot", "한투")]
+        # ★ 2026-10-16 — 계좌 구분자 K/D. 없으면 등록이 하나뿐일 때만 그걸, 둘 다면 물어봄
+        acct, toks = _split_account(parts[2:])
+        parts = parts[:2] + toks
+        if acct:
+            code = _wkey(code, acct)
+        else:
+            _w = _load_manual_watches()
+            if code in _w and f"{code}@d" in _w:
+                await send_safe_message(message.channel, f"❓ {arg}는 키움·데이봇 둘 다 등록돼 있어 — "
+                                                         f"`해제 {arg} K` 또는 `해제 {arg} D`")
+                return
         if len(parts) >= 3:
             # ★ 2026-10-06 — "71,500"처럼 쉼표 들어간 가격을 float()에
             #   그대로 넣으면 ValueError가 나서 매도가 자체가 조용히
@@ -3001,8 +3023,8 @@ async def on_message(message):
     if message.content.startswith("!리나등록") or message.content.startswith("등록 "):
         parts = message.content.split()
         if len(parts) < 2:
-            await send_safe_message(message.channel, "사용법: `!리나등록 종목코드 [평단가] [수량주] [종목명]` 또는 `등록 종목명 [평단가] [100주] [d]`\n"
-                                     "(끝에 `d`를 붙이면 한투 daybot 계좌에서 매도, 없으면 키움 — 예: `등록 삼성전자 223000 10주 d`)\n"
+            await send_safe_message(message.channel, "사용법: `등록 종목명 평단가 수량주 K|D` (K=키움, D=데이봇·한투)\n"
+                                     "   예: `등록 삼성전자 226176 17주 K` / `등록 삼성전자 225875 8주 D`\n"
                                      "평단가 생략하면 현재가로 등록해(분할매수 완료 후 평단가로 등록 권장).")
             return
         arg = parts[1].strip()
@@ -3016,13 +3038,15 @@ async def on_message(message):
         name_override = None
         # ★ 2026-10-14 — 수량("100주")은 어느 자리에 써도 인식(리나 자동 익절용)
         qty = None
-        account = "kiwoom"
+        account, toks = _split_account(parts[2:])
+        if not account:
+            await send_safe_message(message.channel, "❓ 계좌를 붙여줘 — 끝에 `K`(키움) 또는 `D`(데이봇·한투)\n"
+                                                     "   예: `등록 삼성전자 226176 17주 K` / `등록 삼성전자 225875 8주 D`")
+            return
         rest = []
-        for t in parts[2:]:
+        for t in toks:
             if re.fullmatch(r"[\d,]+주", t):
                 qty = int(t[:-1].replace(",", ""))
-            elif t.lower() in ("d", "데이봇", "daybot", "한투"):   # ★ 10-16 대장: 짧게 d/D
-                account = "daybot"            # ★ 10-16 daybot 계좌에서 대장이 직접 산 종목
             else:
                 rest.append(t)
         if rest:

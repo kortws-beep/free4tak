@@ -27,6 +27,13 @@ class Keys(unittest.TestCase):
         self.assertEqual(ns["_wcode"]("005930@d", {}), "005930")
         self.assertEqual(ns["_wcode"]("x@d", {"code": "005930"}), "005930")
 
+    def test_split_account(self):
+        ns = _load({"_split_account"})
+        ns["_ACCT_TOKENS"] = {"k": "kiwoom", "키움": "kiwoom", "d": "daybot", "데이봇": "daybot", "daybot": "daybot", "한투": "daybot"}
+        self.assertEqual(ns["_split_account"](["226176", "17주", "K"]), ("kiwoom", ["226176", "17주"]))
+        self.assertEqual(ns["_split_account"](["225875", "8주", "d"]), ("daybot", ["225875", "8주"]))
+        self.assertEqual(ns["_split_account"](["225875", "8주"]), (None, ["225875", "8주"]))
+
     def test_migrate_legacy(self):
         ns = _load({"_load_manual_watches"})
         store = {"005930": {"account": "daybot", "qty": 8}, "003160": {"account": "kiwoom"}}
