@@ -107,6 +107,11 @@ def _table(conn):
     # ★ 10-17: 투자자·프로그램·상승하락 종목 수 원문 — 안쪽 필드 이름을 아직 몰라 파싱이 틀려도 데이터는 남게
     conn.execute("CREATE TABLE IF NOT EXISTS market_raw (date TEXT, idx TEXT, key TEXT, json TEXT, "
                  "PRIMARY KEY(date, idx, key))")
+    # ★ 10-17 원문 필드 확인 뒤: 프로그램 매매(차익·비차익·합계 억원), 상승·하락 종목 수
+    conn.execute("CREATE TABLE IF NOT EXISTS market_program (date TEXT, market TEXT, arb REAL, nonarb REAL, "
+                 "total REAL, PRIMARY KEY(date, market))")
+    conn.execute("CREATE TABLE IF NOT EXISTS market_updown (date TEXT, market TEXT, upper INTEGER, rise INTEGER, "
+                 "lower_ INTEGER, fall INTEGER, steady INTEGER, PRIMARY KEY(date, market))")
     conn.execute("CREATE TABLE IF NOT EXISTS market_index (date TEXT, idx TEXT, open REAL, high REAL, low REAL, "
                  "close REAL, chg REAL, PRIMARY KEY(date, idx))")
     conn.execute("CREATE TABLE IF NOT EXISTS market_investor (date TEXT, market TEXT, personal REAL, foreign_ REAL, "
@@ -187,6 +192,7 @@ def collect(backfill_days: int = 0, db: str = LOG_DB, get=_get_json) -> str:
             conn.commit()
         finally:
             conn.close()
+        rebuild_from_raw(db)
     return f"✅ 지수 일봉 {n1}행 · 투자자 동향 {n2}행 · 원문 {len(raw)}건({last}) 저장 ({db})"
 
 
@@ -198,9 +204,11 @@ def recent(n: int = 10, db: str = LOG_DB) -> str:
                            (n * 2,)).fetchall()
         inv = {(d, m): (p, f, i) for d, m, p, f, i in conn.execute(
             "SELECT date, market, personal, foreign_, institution FROM market_investor")}
+        prog = {(d, m): (a, na) for d, m, a, na in conn.execute("SELECT date, market, arb, nonarb FROM market_program")}
+        ud = {(d, m): (r, f) for d, m, r, f in conn.execute("SELECT date, market, rise, fall FROM market_updown")}
     finally:
         conn.close()
-    L = ["📈 최근 시장 (지수 종가·등락 / 외국인·기관·개인 순매수 억원)"]
+    L = ["📈 최근 시장 (지수 종가·등락 / 외국인·기관·개인 순매수 억원 / 프로그램 차익·비차익 억원 / 상승:하락 종목 수)"]
     by = {}
     for d, i, c, ch in idx:
         by.setdefault(d, {})[i] = (c, ch)
@@ -212,9 +220,52 @@ def recent(n: int = 10, db: str = LOG_DB) -> str:
             s = f"{i} {c:,.2f}({ch:+.2f}%)" if c is not None and ch is not None else f"{i} -"
             if v:
                 s += f" 외 {v[1]:+,.0f} 기 {v[2] or 0:+,.0f} 개 {v[0] or 0:+,.0f}"
+            pg = prog.get((d, i))
+            if pg:
+                s += f" · 프로그램 차익 {pg[0] or 0:+,.0f} 비차익 {pg[1] or 0:+,.0f}"
+            u = ud.get((d, i))
+            if u:
+                s += f" · 상승{u[0]}:하락{u[1]}"
             parts.append(s)
         L.append(f"   {d}  " + " · ".join(parts))
     return "\n".join(L)
+
+
+def parse_program(d: dict):
+    """{"bizdate","indexDifferenceReal"(차익),"indexBiDifferenceReal"(비차익),"indexTotalReal"} → (date, 차익, 비차익, 합계)."""
+    if not isinstance(d, dict):
+        return None
+    t = _num(d.get("indexTotalReal"))
+    return (_date(d.get("bizdate")), _num(d.get("indexDifferenceReal")), _num(d.get("indexBiDifferenceReal")), t) \
+        if t is not None else None
+
+
+def parse_updown(d: dict):
+    """{"upperCount","riseCount","lowerCount","fallCount","steadyCount"} → (상한, 상승, 하한, 하락, 보합)."""
+    if not isinstance(d, dict) or d.get("riseCount") is None:
+        return None
+    return tuple(int(_num(d.get(k)) or 0) for k in ("upperCount", "riseCount", "lowerCount", "fallCount", "steadyCount"))
+
+
+def rebuild_from_raw(db: str = LOG_DB) -> int:
+    """market_raw 원문 → market_program / market_updown 표(다시 돌려도 같은 결과)."""
+    conn = sqlite3.connect(db, timeout=10)
+    try:
+        _table(conn)
+        n = 0
+        for d, idx, key, js in conn.execute("SELECT date, idx, key, json FROM market_raw").fetchall():
+            v = json.loads(js)
+            if key == "programTrendInfo" and parse_program(v):
+                pd, a, na, t = parse_program(v)
+                conn.execute("INSERT OR REPLACE INTO market_program VALUES (?,?,?,?,?)", (pd or d, idx, a, na, t))
+                n += 1
+            elif key == "upDownStockInfo" and parse_updown(v):
+                conn.execute("INSERT OR REPLACE INTO market_updown VALUES (?,?,?,?,?,?,?)", (d, idx, *parse_updown(v)))
+                n += 1
+        conn.commit()
+        return n
+    finally:
+        conn.close()
 
 
 def show_raw(db: str = LOG_DB) -> str:

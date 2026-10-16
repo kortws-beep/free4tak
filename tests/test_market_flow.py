@@ -42,9 +42,15 @@ class Flow(unittest.TestCase):
         out = M.collect(120, db, get=get)
         self.assertIn("지수 일봉 4행", out); self.assertIn("투자자 동향 4행", out)
         self.assertEqual(M.show_raw(db), "(원문 없음)")              # INTEG엔 원문 키 없음
-        integ2 = dict(INTEG, programTrendInfo={"a": 1})
+        integ2 = dict(INTEG, programTrendInfo={"bizdate": "20261016", "indexDifferenceReal": "-1,709",
+                                               "indexBiDifferenceReal": "+5,994", "indexTotalReal": "+4,286"},
+                      upDownStockInfo={"upperCount": "2", "riseCount": "759", "lowerCount": "0", "fallCount": "135",
+                                       "steadyCount": "22"})
         M.collect(0, db, get=lambda u: PRICE if "/price" in u else integ2)
-        self.assertIn("KOSPI programTrendInfo] {\"a\": 1}", M.show_raw(db))
+        self.assertIn("KOSPI programTrendInfo]", M.show_raw(db))
+        r = M.recent(5, db)
+        self.assertIn("프로그램 차익 -1,709 비차익 +5,994", r); self.assertIn("상승759:하락135", r)
+        self.assertEqual(M.parse_program({"x": 1}), None); self.assertEqual(M.parse_updown({}), None)
         r = M.recent(5, db)
         self.assertIn("KOSPI 5,412.30(+2.00%) 외 +2,345", r)
 
