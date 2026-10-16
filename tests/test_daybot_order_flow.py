@@ -194,8 +194,9 @@ class DaybotLinaWatches(unittest.TestCase):
         old = open(path, encoding="utf-8").read() if os.path.exists(path) else None
         try:
             with open(path, "w", encoding="utf-8") as f:
-                json.dump({"005930": {"account": "daybot"}, "003160": {"account": "kiwoom"}, "111111": {}}, f)
-            self.assertEqual(daybot._lina_daybot_watches(), {"005930"})
+                json.dump({"005930@d": {"account": "daybot", "code": "005930"}, "005930": {"account": "kiwoom"},
+                           "000660": {"account": "daybot"}, "003160": {"account": "kiwoom"}, "111111": {}}, f)
+            self.assertEqual(daybot._lina_daybot_watches(), {"005930", "000660"})
         finally:
             if old is None:
                 os.remove(path)

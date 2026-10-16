@@ -134,9 +134,28 @@ MANUAL_WATCH_STATE_FILE = os.path.join(base_dir, "manual_watch_state.json")
 MANUAL_WATCH_FEE_DRAG_PCT = 0.224
 
 
+def _wkey(code: str, account: str = "kiwoom") -> str:
+    """★ 2026-10-16 — 같은 종목을 키움·데이봇 계좌에 따로 등록할 수 있게(예전엔 코드만 키라 '등록 삼성전자 … d'가
+    키움 삼성전자 등록을 덮어씀). 키움은 예전과 같은 '코드', 데이봇은 '코드@d'."""
+    return f"{code}@d" if account == "daybot" else code
+
+
+def _wcode(key: str, w: dict) -> str:
+    return w.get("code") or key.split("@")[0]
+
+
 def _load_manual_watches() -> dict:
     from common_utils import read_state
-    return read_state(MANUAL_WATCH_STATE_FILE, default={})
+    watches = read_state(MANUAL_WATCH_STATE_FILE, default={})
+    # ★ 2026-10-16 — 키 방식 바꾸기 전에 '코드' 키로 저장된 데이봇 계좌 등록을 '코드@d'로 옮김(한 번)
+    legacy = [k for k, w in watches.items() if "@" not in k and isinstance(w, dict) and w.get("account") == "daybot"]
+    if legacy:
+        for k in legacy:
+            w = watches.pop(k)
+            w.setdefault("code", k)
+            watches.setdefault(f"{k}@d", w)
+        _save_manual_watches(watches)
+    return watches
 
 
 def _save_manual_watches(watches: dict):
@@ -233,15 +252,16 @@ async def _register_manual_watch(channel, code: str, buy_price: float = None,
                 except Exception as e:
                     print(f"⚠️ [리나등록] daybot 보유 확인 실패: {e}")
             watches = _load_manual_watches()
-            watches[code] = {
-                "name": name, "entry_price": buy_price, "peak_price": None, "account": account,
+            key = _wkey(code, account)
+            watches[key] = {
+                "name": name, "entry_price": buy_price, "peak_price": None, "account": account, "code": code,
                 "last_alert_peak": 0, "stage": 0, "qty": qty, "qty0": qty,
                 "registered_at": datetime.datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S"),
             }
             _save_manual_watches(watches)
-            _log_manual_watch("register", code, watches[code])
+            _log_manual_watch("register", code, watches[key])
             # ★ 2026-10-14 대장 — 등록 종목은 리나가 직접 익절(lina_bot/manual_autosell.py)
-            md = {"paper": "🧪 연습 모드(주문 안 나감, 알림만)", "live": "💰 실제 매도(키움 시장가)",
+            md = {"paper": "🧪 연습 모드(주문 안 나감, 알림만)", "live": "💰 실제 매도(시장가)",
                   "off": "🔔 알림만"}[autosell.mode()]
             acct = "한투 데이봇 계좌" if account == "daybot" else "키움"
             await send_safe_message(
@@ -262,10 +282,14 @@ async def _deregister_manual_watch(channel, code: str, sell_price: float = None)
     "종목명 ±N% 수익실현"으로 보고(대장 지정 — 분할매도도 고려해 가격
     기준, 금액 기준 아님)."""
     watches = _load_manual_watches()
-    if code not in watches:
+    key = code
+    if key not in watches and "@" not in key and f"{key}@d" in watches:
+        key = f"{key}@d"              # 키움 등록이 없고 데이봇 등록만 있으면 그걸 해제
+    if key not in watches:
         await send_safe_message(channel, f"⚠️ {code}는 등록돼 있지 않아.")
         return
-    w = watches.pop(code)
+    w = watches.pop(key)
+    code = _wcode(key, w)
     name = w.get("name", code)
     _save_manual_watches(watches)
 
@@ -1409,7 +1433,8 @@ async def manual_watch_trailing_loop():
         return
 
     changed_codes = set()
-    for code, w in list(watches.items()):
+    for key, w in list(watches.items()):
+        code = _wcode(key, w)
         # ★ 2026-10-06 — 종목 하나 처리 중 생기는 예외(디스코드 전송
         #   오류/필드 누락 등)가 전체를 덮지 않도록 격리. discord.py의
         #   tasks.loop는 처리 안 된 예외가 새면 루프 자체를 영구 정지
@@ -1435,13 +1460,13 @@ async def manual_watch_trailing_loop():
             for m in res["msgs"]:
                 await send_safe_message(channel, m)
             if res["deregister"]:
-                await _deregister_manual_watch(channel, code, res["sell_price"])
+                await _deregister_manual_watch(channel, key, res["sell_price"])
                 continue
             if res["changed"]:
-                changed_codes.add(code)
+                changed_codes.add(key)
             if res["sell_price"]:
                 # 실제 주문이 나갔으면 바로 저장 — 루프 끝 저장 전에 리나가 꺼지면 같은 30% 익절이 또 나감
-                _save_manual_watch_updates(watches, {code})
+                _save_manual_watch_updates(watches, {key})
         except Exception as e:
             print(f"⚠️ [리나등록 추적] {code} 처리 중 예외(건너뜀): {e}")
             continue
@@ -2911,7 +2936,8 @@ async def on_message(message):
                 from kis_api import KisAPI
                 api = KisAPI()
                 lines = [f"📋 **리나등록 현황** ({len(watches)}종목)"]
-                for code, w in watches.items():
+                for key, w in watches.items():
+                    code  = _wcode(key, w)
                     name  = w.get("name", code)
                     entry = w.get("entry_price", 0)
                     # ★ 2026-10-06 — 동기 KIS 호출을 await 없이 직접 호출해
@@ -2954,6 +2980,10 @@ async def on_message(message):
             await send_safe_message(message.channel, f"❌ '{arg}' 종목코드를 못 찾았어.")
             return
         sell_price = None
+        # ★ 2026-10-16 — 데이봇 계좌 등록 해제는 끝에 d (`해제 삼성전자 d` / `해제 삼성전자 230000 d`)
+        if any(t.lower() in ("d", "데이봇", "daybot", "한투") for t in parts[2:]):
+            code = _wkey(code, "daybot")
+            parts = parts[:2] + [t for t in parts[2:] if t.lower() not in ("d", "데이봇", "daybot", "한투")]
         if len(parts) >= 3:
             # ★ 2026-10-06 — "71,500"처럼 쉼표 들어간 가격을 float()에
             #   그대로 넣으면 ValueError가 나서 매도가 자체가 조용히
