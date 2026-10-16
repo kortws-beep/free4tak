@@ -27,6 +27,8 @@ class Flow(unittest.TestCase):
         self.assertEqual(inv[0], ("2026-10-16", -1234.0, 2345.0, -1000.0))
         self.assertEqual(M.parse_investor_rows({"result": INTEG})[1][2], -7500.0)
         self.assertEqual(M.parse_investor_rows({"x": 1}), [])
+        one = {"dealTrendInfo": {"bizdate": "20261016", "personalValue": "-1", "foreignValue": "+2", "institutionalValue": "0"}}
+        self.assertEqual(M.parse_investor_rows(one), [("2026-10-16", -1.0, 2.0, 0.0)])
         self.assertEqual(M._date("2026-10-16T15:30:00+09:00"), "2026-10-16")
         self.assertIsNone(M._num("-"))
 
@@ -39,6 +41,10 @@ class Flow(unittest.TestCase):
             return INTEG
         out = M.collect(120, db, get=get)
         self.assertIn("지수 일봉 4행", out); self.assertIn("투자자 동향 4행", out)
+        self.assertEqual(M.show_raw(db), "(원문 없음)")              # INTEG엔 원문 키 없음
+        integ2 = dict(INTEG, programTrendInfo={"a": 1})
+        M.collect(0, db, get=lambda u: PRICE if "/price" in u else integ2)
+        self.assertIn("KOSPI programTrendInfo] {\"a\": 1}", M.show_raw(db))
         r = M.recent(5, db)
         self.assertIn("KOSPI 5,412.30(+2.00%) 외 +2,345", r)
 

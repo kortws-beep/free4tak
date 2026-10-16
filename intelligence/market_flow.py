@@ -14,6 +14,7 @@ market_flow.py — 지수 일봉 · 시장별 투자자 순매수 수집 (2026-1
 응답 형식을 이 환경에선 확인 못 해서 필드 이름이 달라도 최대한 읽고, 못 읽으면 응답 앞부분을 출력함
 (그걸 보내주면 맞춤).
 실행:  python intelligence/market_flow.py              (오늘까지 최신 수집 + 최근 상태 출력)
+       python intelligence/market_flow.py --raw        (최근 원문 — 투자자·프로그램·상승하락 필드 확인)
        python intelligence/market_flow.py --backfill 300   (지수 일봉 과거 300거래일 채우기)
 """
 import os
@@ -76,9 +77,13 @@ def parse_investor_rows(data) -> list:
     if isinstance(data, dict):
         boxes = [data] + [v for v in data.values() if isinstance(v, dict)]
         for box in boxes:
-            for key in ("dealTrendInfos", "investorTrend", "dealTrends", "investorDealTrends"):
-                if isinstance(box.get(key), list):
-                    rows = box[key]
+            for key in ("dealTrendInfos", "dealTrendInfo", "investorTrend", "dealTrends", "investorDealTrends"):
+                v = box.get(key)
+                if isinstance(v, list):
+                    rows = v
+                    break
+                if isinstance(v, dict):          # ★ 10-17 실제 응답: dealTrendInfo(단수, 하루치 묶음)
+                    rows = [v]
                     break
             if rows:
                 break
@@ -95,7 +100,13 @@ def parse_investor_rows(data) -> list:
     return out
 
 
+RAW_KEYS = ("dealTrendInfo", "programTrendInfo", "upDownStockInfo")
+
+
 def _table(conn):
+    # ★ 10-17: 투자자·프로그램·상승하락 종목 수 원문 — 안쪽 필드 이름을 아직 몰라 파싱이 틀려도 데이터는 남게
+    conn.execute("CREATE TABLE IF NOT EXISTS market_raw (date TEXT, idx TEXT, key TEXT, json TEXT, "
+                 "PRIMARY KEY(date, idx, key))")
     conn.execute("CREATE TABLE IF NOT EXISTS market_index (date TEXT, idx TEXT, open REAL, high REAL, low REAL, "
                  "close REAL, chg REAL, PRIMARY KEY(date, idx))")
     conn.execute("CREATE TABLE IF NOT EXISTS market_investor (date TEXT, market TEXT, personal REAL, foreign_ REAL, "
@@ -144,25 +155,39 @@ def fetch_index(idx: str, pages: int = 1, page_size: int = 60, get=_get_json) ->
     return out
 
 
-def fetch_investor(idx: str, get=_get_json) -> list:
+def fetch_investor(idx: str, get=_get_json, raw: list = None) -> list:
     try:
         data = get(f"https://m.stock.naver.com/api/index/{idx}/integration")
     except Exception as e:
         print(f"⚠️ {idx} 투자자 동향 조회 실패: {e}")
         return []
+    if raw is not None and isinstance(data, dict):
+        for k in RAW_KEYS:
+            if data.get(k) is not None:
+                raw.append((idx, k, json.dumps(data[k], ensure_ascii=False)))
     rows = parse_investor_rows(data)
     if not rows:
-        keys = list(data.keys())[:20] if isinstance(data, dict) else type(data).__name__
-        print(f"⚠️ {idx} 투자자 동향을 못 읽음 — 응답 키: {keys} · 앞부분: {json.dumps(data, ensure_ascii=False)[:400]}")
+        part = data.get("dealTrendInfo") if isinstance(data, dict) and data.get("dealTrendInfo") else data
+        print(f"⚠️ {idx} 투자자 동향을 못 읽음 — dealTrendInfo: {json.dumps(part, ensure_ascii=False)[:600]}")
     return rows
 
 
 def collect(backfill_days: int = 0, db: str = LOG_DB, get=_get_json) -> str:
     pages = max(1, -(-backfill_days // 60)) if backfill_days else 1
     idx_rows = {i: fetch_index(i, pages, get=get) for i in INDEXES}
-    inv_rows = {i: fetch_investor(i, get=get) for i in INDEXES}
+    raw = []
+    inv_rows = {i: fetch_investor(i, get=get, raw=raw) for i in INDEXES}
     n1, n2 = save(idx_rows, inv_rows, db)
-    return f"✅ 지수 일봉 {n1}행 · 투자자 동향 {n2}행 저장 ({db})"
+    last = max((r[0] for rows in idx_rows.values() for r in rows), default="")
+    if raw and last:
+        conn = sqlite3.connect(db, timeout=10)
+        try:
+            _table(conn)
+            conn.executemany("INSERT OR REPLACE INTO market_raw VALUES (?,?,?,?)", [(last, i, k, j) for i, k, j in raw])
+            conn.commit()
+        finally:
+            conn.close()
+    return f"✅ 지수 일봉 {n1}행 · 투자자 동향 {n2}행 · 원문 {len(raw)}건({last}) 저장 ({db})"
 
 
 def recent(n: int = 10, db: str = LOG_DB) -> str:
@@ -192,8 +217,23 @@ def recent(n: int = 10, db: str = LOG_DB) -> str:
     return "\n".join(L)
 
 
+def show_raw(db: str = LOG_DB) -> str:
+    """가장 최근 원문(투자자·프로그램·상승하락) — 필드 이름 확인용."""
+    conn = sqlite3.connect(db, timeout=10)
+    try:
+        _table(conn)
+        rows = conn.execute("SELECT date, idx, key, json FROM market_raw WHERE date=(SELECT MAX(date) FROM market_raw)"
+                            ).fetchall()
+    finally:
+        conn.close()
+    return "\n".join(f"[{d} {i} {k}] {j[:700]}" for d, i, k, j in rows) or "(원문 없음)"
+
+
 if __name__ == "__main__":
     a = sys.argv[1:]
+    if "--raw" in a:
+        print(show_raw())
+        sys.exit(0)
     bf = int(a[a.index("--backfill") + 1]) if "--backfill" in a else 0
     print(collect(bf))
     print(recent())
