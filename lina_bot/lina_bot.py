@@ -285,7 +285,7 @@ async def _register_manual_watch(channel, code: str, buy_price: float = None,
                 + (f" · {qty}주" if qty else " · ⚠️ 수량 미입력 — 실제 매도 모드에서도 주문 안 나가(알림만)") + "\n"
                 f"   +{autosell.START_PCT:.0f}% 찍으면 추적 → 고점 -{autosell.TRAIL1_PCT:.0f}%면 전량 매도, "
                 f"+{autosell.TP1_PCT:.0f}%에 30% 익절 → 이후 고점 -{autosell.TRAIL2_PCT:.0f}%면 나머지 매도 [{md}]\n"
-                f"   손절은 대장이 직접. 현재 등록: {len(watches)}종목(`등록현황`) — 해제는 `해제 {name}`"
+                f"   손절은 대장이 직접. 현재 등록: {len(watches)}종목(`등록현황`) — 해제는 `해제 {name} {'D' if account == 'daybot' else 'K'}`"
             )
         except Exception as e:
             await send_safe_message(channel, f"❌ 등록 오류: {e}")
@@ -2966,7 +2966,7 @@ async def on_message(message):
                     trail = f" (추적 고점 {w['peak_price']:,.0f})" if w.get("peak_price") else ""
                     trail += {2: " · 30% 익절 완료", 3: " · 매도 완료(연습/알림)"}.get(w.get("stage"), "")
                     trail += f" · {w['qty']}주" if w.get("qty") else ""
-                    trail += " · [데이봇 계좌]" if w.get("account") == "daybot" else ""
+                    trail += " · [데이봇 계좌]" if w.get("account") == "daybot" else " · [키움]"
                     lines.append(f"   {emoji} {name}({code}) {net_rate:+.2f}% "
                                  f"| 평단가 {entry:,.0f} → 현재가 {price:,.0f}{trail}")
                 await send_safe_message(message.channel, "\n".join(lines))
