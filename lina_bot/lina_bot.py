@@ -2971,8 +2971,8 @@ async def on_message(message):
     if message.content.startswith("!리나등록") or message.content.startswith("등록 "):
         parts = message.content.split()
         if len(parts) < 2:
-            await send_safe_message(message.channel, "사용법: `!리나등록 종목코드 [평단가] [수량주] [종목명]` 또는 `등록 종목명 [평단가] [100주] [데이봇]`\n"
-                                     "(끝에 `데이봇`을 붙이면 한투 daybot 계좌에서 매도, 없으면 키움)\n"
+            await send_safe_message(message.channel, "사용법: `!리나등록 종목코드 [평단가] [수량주] [종목명]` 또는 `등록 종목명 [평단가] [100주] [d]`\n"
+                                     "(끝에 `d`를 붙이면 한투 daybot 계좌에서 매도, 없으면 키움 — 예: `등록 삼성전자 223000 10주 d`)\n"
                                      "평단가 생략하면 현재가로 등록해(분할매수 완료 후 평단가로 등록 권장).")
             return
         arg = parts[1].strip()
@@ -2991,7 +2991,7 @@ async def on_message(message):
         for t in parts[2:]:
             if re.fullmatch(r"[\d,]+주", t):
                 qty = int(t[:-1].replace(",", ""))
-            elif t in ("데이봇", "daybot", "한투"):
+            elif t.lower() in ("d", "데이봇", "daybot", "한투"):   # ★ 10-16 대장: 짧게 d/D
                 account = "daybot"            # ★ 10-16 daybot 계좌에서 대장이 직접 산 종목
             else:
                 rest.append(t)
