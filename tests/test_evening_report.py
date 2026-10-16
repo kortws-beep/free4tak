@@ -30,6 +30,7 @@ class Report(unittest.TestCase):
         trade("daybot", "나", 10000, 10300, 100, "트레일링청산")
         trade("sbot", "다", 10000, 7000, 200, "손절")                     # -60만 → 한도 초과
         trade("cbot", "KRW-ETH", 100, 105, 1000, "익절")
+        trade("cbot", "KRW-XRP", 100, 101, 1000, "손절(+1.00%)")          # 올린 손절선 = 이익 → 손절 아님
         trade("daybot", "옛날", 10000, 11000, 10, "익절", day=D[:8] + "01" if D[8:] != "01" else D)
         with open("cbot_state.json", "w") as f:
             json.dump({"paused": True, "pause_reason": "loss_limit",
@@ -40,6 +41,7 @@ class Report(unittest.TestCase):
         self.assertEqual((day["daybot"]["n"], day["daybot"]["win"], day["daybot"]["stops"]), (2, 1, 1))
         self.assertAlmostEqual(day["daybot"]["krw"], -35_000 + 30_000)
         self.assertEqual(day["sbot"]["worst"][0], "다")
+        self.assertEqual((day["cbot"]["n"], day["cbot"]["stops"]), (2, 0))
         self.assertEqual(E.bot_month(D, DB)["daybot"][1], 3 if D[8:] != "01" else 3)
 
     def test_build(self):
