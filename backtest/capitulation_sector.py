@@ -66,7 +66,7 @@ def score_groups(groups: dict, rows: dict, P: str, Bd: str, R: str) -> list:
             continue
         lead = sorted(rs, key=lambda x: -x[1][4])[:LEADERS]
         out.append({"group": g, "drop": statistics.mean(r[0] for _, r in lead),
-                    "aft": statistics.mean(r[1] for _, r in lead), "members": lead})
+                    "aft": statistics.median(r[1] for _, r in lead), "members": lead})
     if not out:
         return out
     by_aft = sorted(out, key=lambda x: -x["aft"])
