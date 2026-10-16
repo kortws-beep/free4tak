@@ -1922,7 +1922,8 @@ async def market_flow_loop():
         return
     try:
         import market_flow
-        print(await asyncio.to_thread(market_flow.collect))
+        from kis_api import KisAPI
+        print(await asyncio.to_thread(market_flow.collect, 0, market_flow.LOG_DB, market_flow._get_json, KisAPI()))
     except Exception as e:
         print(f"⚠️ [시장흐름 수집] 오류: {e}")
 

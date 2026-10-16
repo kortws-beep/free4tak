@@ -39,14 +39,14 @@ class Flow(unittest.TestCase):
             if "/price" in url:
                 return PRICE if "page=1" in url else []
             return INTEG
-        out = M.collect(120, db, get=get)
-        self.assertIn("지수 일봉 4행", out); self.assertIn("투자자 동향 4행", out)
+        out = M.collect(120, db, get=get, post=lambda b: {})
+        self.assertIn("지수 일봉 4행", out); self.assertIn("투자자 동향 6행", out)     # KOSPI·KOSDAQ·FUT
         self.assertEqual(M.show_raw(db), "(원문 없음)")              # INTEG엔 원문 키 없음
         integ2 = dict(INTEG, programTrendInfo={"bizdate": "20261016", "indexDifferenceReal": "-1,709",
                                                "indexBiDifferenceReal": "+5,994", "indexTotalReal": "+4,286"},
                       upDownStockInfo={"upperCount": "2", "riseCount": "759", "lowerCount": "0", "fallCount": "135",
                                        "steadyCount": "22"})
-        M.collect(0, db, get=lambda u: PRICE if "/price" in u else integ2)
+        M.collect(0, db, get=lambda u: PRICE if "/price" in u else integ2, post=lambda b: {})
         self.assertIn("KOSPI programTrendInfo]", M.show_raw(db))
         r = M.recent(5, db)
         self.assertIn("프로그램 차익 -1,709 비차익 +5,994", r); self.assertIn("상승759:하락135", r)
@@ -57,6 +57,37 @@ class Flow(unittest.TestCase):
     def test_bad_response_prints(self):
         self.assertEqual(M.fetch_index("KOSPI", get=lambda u: {"weird": 1}), [])
         self.assertEqual(M.fetch_investor("KOSPI", get=lambda u: {"weird": 1}), [])
+
+
+FUT_RES = {"output1": {"hts_kor_isnm": "F 202612", "futs_prpr": "881.05", "basis": "3.74", "hts_thpr": "881.90",
+                       "dprt": "-0.10", "hts_otst_stpl_qty": "148415", "otst_stpl_qty_icdc": "-6004"}}
+FUNDS = {"ds1": [{"TMPV1": "20261015", "TMPV2": 96912122, "TMPV3": 37644385, "TMPV4": 107748834,
+                  "TMPV5": 1392561, "TMPV6": 80498, "TMPV7": 5.9}]}
+CREDIT = {"ds1": [{"TMPV1": "20261015", "TMPV2": 32749897, "TMPV3": 25532078, "TMPV4": 7217819, "TMPV5": 26124,
+                   "TMPV6": 21544, "TMPV7": 4581, "TMPV8": 0, "TMPV9": 26963273}]}
+
+
+class Extra(unittest.TestCase):
+    def test_futures_kofia(self):
+        self.assertEqual(M.parse_futures(FUT_RES), ("F 202612", 881.05, 3.74, 881.9, -0.1, 148415.0, -6004.0))
+        self.assertIsNone(M.parse_futures({"output1": {}}))
+        self.assertEqual(M.parse_kofia(FUNDS, M.KOFIA_FUNDS_COLS)[0][:7],
+                         ("2026-10-15", 96912122.0, 37644385.0, 107748834.0, 1392561.0, 80498.0, 5.9))
+        db = os.path.abspath("x.db")
+        post = lambda body: FUNDS if body["dmSearch"]["OBJ_NM"] == M.KOFIA_FUNDS else CREDIT
+
+        class Api:
+            base_url, token, appkey, secret = "u", "t", "a", "s"
+        old = M.fetch_futures
+        M.fetch_futures = lambda api: M.parse_futures(FUT_RES)
+        try:
+            out = M.collect(0, db, get=lambda u: PRICE if "/price" in u else INTEG, api=Api(), post=post)
+        finally:
+            M.fetch_futures = old
+        self.assertIn("선물 1행", out); self.assertIn("증시자금 1행", out); self.assertIn("신용 1행", out)
+        r = M.recent(5, db)
+        self.assertIn("선물 베이시스 +3.74 · 괴리율 -0.10% · 미결제 148,415(-6,004)", r)
+        self.assertIn("미수 13,926 · 반대매매 805(5.9%) · 신용 327,499", r)
 
 
 if __name__ == "__main__":

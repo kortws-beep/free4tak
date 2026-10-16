@@ -9,7 +9,12 @@ market_flow.py — 지수 일봉 · 시장별 투자자 순매수 수집 (2026-1
 쓰는 경로)로 두 가지를 리나 로그 DB(three_month_leader_log.db)에 쌓는다.
   · market_index  — 코스피·코스닥 일봉(시가·고가·저가·종가·등락률). --backfill로 과거도 채움
   · market_investor — 시장별 개인·외국인·기관 순매수(억원, 최근 며칠치가 API에 나옴 → 매일 모으면 쌓임)
-다음 단계(형식 확인 필요): 선물 베이시스·외국인 선물 순매수, 금투협 미수 반대매매·신용 잔고.
+★ 10-17 2단계(probe_sources.py로 형식 확인):
+  · market_futures — 한투 코스피200 선물 최근월물(101000): 가격·베이시스·이론가·괴리율·미결제약정(증감)
+  · 선물 투자자 — 네이버 FUT integration의 dealTrendInfo → market_investor(market='FUT')
+  · kofia_funds  — 금투협 증시자금(STATSCU0100000060BO): 투자자예탁금·파생예수금·RP·미수금·실제 반대매매·비중(%)
+  · kofia_credit — 금투협 신용공여 잔고(STATSCU0100000070BO): 신용융자(전체·유가·코스닥)·대주·예탁증권담보융자
+  금투협 금액 단위 백만원, 하루 늦게 올라옴.
 
 응답 형식을 이 환경에선 확인 못 해서 필드 이름이 달라도 최대한 읽고, 못 읽으면 응답 앞부분을 출력함
 (그걸 보내주면 맞춤).
@@ -26,6 +31,9 @@ import sqlite3
 _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LOG_DB = os.path.join(_BASE, "lina_bot", "three_month_leader_log.db")
 INDEXES = ("KOSPI", "KOSDAQ")
+INVESTOR_MARKETS = ("KOSPI", "KOSDAQ", "FUT")          # FUT = 코스피200 선물(외국인 선물 순매수)
+KOFIA_URL = "https://freesis.kofia.or.kr/meta/getMetaDataList.do"
+KOFIA_FUNDS, KOFIA_CREDIT = "STATSCU0100000060BO", "STATSCU0100000070BO"
 UA = {"User-Agent": "Mozilla/5.0"}
 
 
@@ -112,6 +120,12 @@ def _table(conn):
                  "total REAL, PRIMARY KEY(date, market))")
     conn.execute("CREATE TABLE IF NOT EXISTS market_updown (date TEXT, market TEXT, upper INTEGER, rise INTEGER, "
                  "lower_ INTEGER, fall INTEGER, steady INTEGER, PRIMARY KEY(date, market))")
+    conn.execute("CREATE TABLE IF NOT EXISTS market_futures (date TEXT PRIMARY KEY, name TEXT, price REAL, basis REAL, "
+                 "theory REAL, dprt REAL, oi REAL, oi_chg REAL)")
+    conn.execute("CREATE TABLE IF NOT EXISTS kofia_funds (date TEXT PRIMARY KEY, deposit REAL, deriv_deposit REAL, "
+                 "rp REAL, misu REAL, forced REAL, forced_pct REAL)")
+    conn.execute("CREATE TABLE IF NOT EXISTS kofia_credit (date TEXT PRIMARY KEY, credit REAL, credit_kospi REAL, "
+                 "credit_kosdaq REAL, short REAL, short_kospi REAL, short_kosdaq REAL, ipo_loan REAL, pledge REAL)")
     conn.execute("CREATE TABLE IF NOT EXISTS market_index (date TEXT, idx TEXT, open REAL, high REAL, low REAL, "
                  "close REAL, chg REAL, PRIMARY KEY(date, idx))")
     conn.execute("CREATE TABLE IF NOT EXISTS market_investor (date TEXT, market TEXT, personal REAL, foreign_ REAL, "
@@ -177,11 +191,11 @@ def fetch_investor(idx: str, get=_get_json, raw: list = None) -> list:
     return rows
 
 
-def collect(backfill_days: int = 0, db: str = LOG_DB, get=_get_json) -> str:
+def collect(backfill_days: int = 0, db: str = LOG_DB, get=_get_json, api=None, post=None) -> str:
     pages = max(1, -(-backfill_days // 60)) if backfill_days else 1
     idx_rows = {i: fetch_index(i, pages, get=get) for i in INDEXES}
     raw = []
-    inv_rows = {i: fetch_investor(i, get=get, raw=raw) for i in INDEXES}
+    inv_rows = {i: fetch_investor(i, get=get, raw=raw) for i in INVESTOR_MARKETS}
     n1, n2 = save(idx_rows, inv_rows, db)
     last = max((r[0] for rows in idx_rows.values() for r in rows), default="")
     if raw and last:
@@ -193,7 +207,12 @@ def collect(backfill_days: int = 0, db: str = LOG_DB, get=_get_json) -> str:
         finally:
             conn.close()
         rebuild_from_raw(db)
-    return f"✅ 지수 일봉 {n1}행 · 투자자 동향 {n2}행 · 원문 {len(raw)}건({last}) 저장 ({db})"
+    fut = fetch_futures(api) if api is not None else None
+    kd = backfill_days or 20
+    funds, credit = fetch_kofia(KOFIA_FUNDS, kd, post), fetch_kofia(KOFIA_CREDIT, kd, post)
+    save_extra(fut, funds, credit, last, db)
+    return (f"✅ 지수 일봉 {n1}행 · 투자자 동향 {n2}행 · 원문 {len(raw)}건({last}) · 선물 {'1' if fut else '0'}행 · "
+            f"금투협 증시자금 {len(funds)}행 · 신용 {len(credit)}행 저장 ({db})")
 
 
 def recent(n: int = 10, db: str = LOG_DB) -> str:
@@ -206,9 +225,25 @@ def recent(n: int = 10, db: str = LOG_DB) -> str:
             "SELECT date, market, personal, foreign_, institution FROM market_investor")}
         prog = {(d, m): (a, na) for d, m, a, na in conn.execute("SELECT date, market, arb, nonarb FROM market_program")}
         ud = {(d, m): (r, f) for d, m, r, f in conn.execute("SELECT date, market, rise, fall FROM market_updown")}
+        fut = {d: (b, dp, oi, oc) for d, b, dp, oi, oc in conn.execute(
+            "SELECT date, basis, dprt, oi, oi_chg FROM market_futures")}
+        funds = conn.execute("SELECT date, misu, forced, forced_pct, deposit FROM kofia_funds ORDER BY date DESC LIMIT ?",
+                             (n,)).fetchall()[::-1]
+        credit = {d: c for d, c in conn.execute("SELECT date, credit FROM kofia_credit")}
     finally:
         conn.close()
     L = ["📈 최근 시장 (지수 종가·등락 / 외국인·기관·개인 순매수 억원 / 프로그램 차익·비차익 억원 / 상승:하락 종목 수)"]
+    tail = []
+    for d, (b, dp, oi, oc) in sorted(fut.items())[-n:]:
+        fv = inv.get((d, "FUT"))
+        tail.append(f"   {d}  선물 베이시스 {b:+.2f} · 괴리율 {dp:+.2f}% · 미결제 {oi:,.0f}({oc:+,.0f})"
+                    + (f" · 선물 외국인 {fv[1]:+,.0f} 기관 {fv[2] or 0:+,.0f} 개인 {fv[0] or 0:+,.0f}" if fv else ""))
+    if funds:
+        tail.append("   💳 금투협(하루 늦음, 억원) — 미수금 · 실제 반대매매(미수 대비 %) · 신용융자 잔고 · 투자자예탁금")
+        for d, mi, fs, fp, dep in funds:
+            cr = credit.get(d)
+            tail.append(f"   {d}  미수 {mi / 100:,.0f} · 반대매매 {fs / 100:,.0f}({fp:.1f}%)"
+                        + (f" · 신용 {cr / 100:,.0f}" if cr else "") + f" · 예탁금 {dep / 100:,.0f}")
     by = {}
     for d, i, c, ch in idx:
         by.setdefault(d, {})[i] = (c, ch)
@@ -228,7 +263,7 @@ def recent(n: int = 10, db: str = LOG_DB) -> str:
                 s += f" · 상승{u[0]}:하락{u[1]}"
             parts.append(s)
         L.append(f"   {d}  " + " · ".join(parts))
-    return "\n".join(L)
+    return "\n".join(L + tail)
 
 
 def parse_program(d: dict):
@@ -268,6 +303,83 @@ def rebuild_from_raw(db: str = LOG_DB) -> int:
         conn.close()
 
 
+def parse_futures(res: dict):
+    """한투 선물 현재가(FHMIF10000000) → (이름, 가격, 베이시스, 이론가, 괴리율, 미결제, 미결제증감) 또는 None."""
+    o = (res or {}).get("output1") or {}
+    p = _num(o.get("futs_prpr"))
+    if not p:
+        return None
+    return (o.get("hts_kor_isnm", ""), p, _num(o.get("basis")), _num(o.get("hts_thpr")), _num(o.get("dprt")),
+            _num(o.get("hts_otst_stpl_qty")), _num(o.get("otst_stpl_qty_icdc")))
+
+
+def fetch_futures(api, code: str = "101000"):
+    """한투 코스피200 선물 최근월물 — 101000이 최근월물로 응답함(10-17 확인: F 202612)."""
+    try:
+        from kis_api import _get
+        url = f"{api.base_url}/uapi/domestic-futureoption/v1/quotations/inquire-price"
+        headers = {"authorization": f"Bearer {api.token}", "appkey": api.appkey, "appsecret": api.secret,
+                   "tr_id": "FHMIF10000000", "custtype": "P"}
+        res = _get(url, headers=headers, params={"FID_COND_MRKT_DIV_CODE": "F", "FID_INPUT_ISCD": code},
+                   timeout=10).json()
+    except Exception as e:
+        print(f"⚠️ 선물 현재가 조회 실패: {e}")
+        return None
+    r = parse_futures(res)
+    if not r:
+        print(f"⚠️ 선물 현재가를 못 읽음 — {json.dumps(res, ensure_ascii=False)[:300]}")
+    return r
+
+
+KOFIA_FUNDS_COLS = ("TMPV2", "TMPV3", "TMPV4", "TMPV5", "TMPV6", "TMPV7")     # 예탁금·파생예수금·RP·미수·반대매매·비중
+KOFIA_CREDIT_COLS = ("TMPV2", "TMPV3", "TMPV4", "TMPV5", "TMPV6", "TMPV7", "TMPV8", "TMPV9")
+
+
+def parse_kofia(data, cols) -> list:
+    """{"ds1":[{"TMPV1":"20261015","TMPV2":...}]} → [(date, *cols)]."""
+    out = []
+    for r in (data or {}).get("ds1") or []:
+        d = _date(r.get("TMPV1"))
+        if d:
+            out.append((d, *[_num(r.get(c)) for c in cols]))
+    return out
+
+
+def fetch_kofia(obj: str, days: int = 20, post=None) -> list:
+    import datetime
+    end = datetime.date.today()
+    start = end - datetime.timedelta(days=max(days, 7) * 7 // 5 + 5)      # 거래일 → 달력일 넉넉히
+    body = {"dmSearch": {"tmpV40": "1000000", "tmpV41": "1", "tmpV1": "D", "tmpV45": start.strftime("%Y%m%d"),
+                         "tmpV46": end.strftime("%Y%m%d"), "OBJ_NM": obj}}
+    try:
+        if post is None:
+            import requests
+            data = requests.post(KOFIA_URL, json=body, headers=dict(UA, **{"Content-Type": "application/json"}),
+                                 timeout=15).json()
+        else:
+            data = post(body)
+    except Exception as e:
+        print(f"⚠️ 금투협 {obj} 조회 실패: {e}")
+        return []
+    rows = parse_kofia(data, KOFIA_FUNDS_COLS if obj == KOFIA_FUNDS else KOFIA_CREDIT_COLS)
+    if not rows:
+        print(f"⚠️ 금투협 {obj}를 못 읽음 — {json.dumps(data, ensure_ascii=False)[:300]}")
+    return rows
+
+
+def save_extra(fut, funds: list, credit: list, date: str, db: str = LOG_DB):
+    conn = sqlite3.connect(db, timeout=10)
+    try:
+        _table(conn)
+        if fut and date:
+            conn.execute("INSERT OR REPLACE INTO market_futures VALUES (?,?,?,?,?,?,?,?)", (date, *fut))
+        conn.executemany("INSERT OR REPLACE INTO kofia_funds VALUES (?,?,?,?,?,?,?)", funds)
+        conn.executemany("INSERT OR REPLACE INTO kofia_credit VALUES (?,?,?,?,?,?,?,?,?)", credit)
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def show_raw(db: str = LOG_DB) -> str:
     """가장 최근 원문(투자자·프로그램·상승하락) — 필드 이름 확인용."""
     conn = sqlite3.connect(db, timeout=10)
@@ -286,5 +398,14 @@ if __name__ == "__main__":
         print(show_raw())
         sys.exit(0)
     bf = int(a[a.index("--backfill") + 1]) if "--backfill" in a else 0
-    print(collect(bf))
+    api = None
+    try:
+        sys.path.insert(0, os.path.join(_BASE, "core"))
+        from dotenv import load_dotenv
+        load_dotenv(os.path.join(_BASE, ".env"))
+        from kis_api import KisAPI
+        api = KisAPI()
+    except Exception as e:
+        print(f"⚠️ 한투 연결 실패(선물은 건너뜀): {e}")
+    print(collect(bf, api=api))
     print(recent())
