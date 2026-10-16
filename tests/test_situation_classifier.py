@@ -41,6 +41,18 @@ class Pnl(unittest.TestCase):
         self.assertEqual(set(out), {"상승장", "하락장"})
         self.assertEqual(out["상승장"]["net"], 10000)
 
+    def test_prev_day_labels_and_buy_date(self):
+        import sqlite3, tempfile
+        labs = {"2026-10-14": "박스권", "2026-10-15": "투매", "2026-10-16": "하락장"}
+        self.assertEqual(SC.prev_day_labels(labs), {"2026-10-15": "박스권", "2026-10-16": "투매"})
+        db = os.path.join(tempfile.mkdtemp(), "t.db")
+        c = sqlite3.connect(db)
+        c.execute("CREATE TABLE trades (buy_time TEXT, sell_time TEXT, buy_price REAL, sell_price REAL, qty INT, profit_rate REAL)")
+        c.execute("INSERT INTO trades VALUES ('2026-10-15 09:10', '2026-10-16 10:00', 100, 90, 10, -10)")
+        c.commit(); c.close()
+        self.assertEqual(SC.load_sells(db)[0][0], "2026-10-16")
+        self.assertEqual(SC.load_sells(db, "buy")[0][:2], ("2026-10-15", -100))
+
 
 if __name__ == "__main__":
     unittest.main()

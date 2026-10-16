@@ -59,14 +59,15 @@ def history(days: int = 300) -> dict:
     return {d: classify(breadth.get(d, (None, 0))[0], lows.get(d)) for d in dates}
 
 
-def load_sells(db: str) -> list:
+def load_sells(db: str, by: str = "sell") -> list:
     """[(date, profit_krw, profit_rate)] — 매도 완료 거래. daybot/sbot 로컬 DB엔 profit_krw가
     없어 (매도가-매수가)*수량으로 계산."""
     if not os.path.exists(db):
         return []
     conn = sqlite3.connect(db)
     try:
-        rows = conn.execute("SELECT substr(sell_time,1,10), buy_price, sell_price, qty, profit_rate "
+        col = "buy_time" if by == "buy" else "sell_time"
+        rows = conn.execute(f"SELECT substr({col},1,10), buy_price, sell_price, qty, profit_rate "
                             "FROM trades WHERE sell_time IS NOT NULL").fetchall()
     finally:
         conn.close()
@@ -84,6 +85,13 @@ def pnl_stats(rows: list) -> dict:
             "net": sum(k or 0 for _, k, _ in rows)}
 
 
+def prev_day_labels(labels: dict) -> dict:
+    """{날짜: 전 거래일 상황} — 매수 규칙은 아침에 전 거래일 종가 국면으로 판단하므로(market_regime.latest),
+    '산 날' 기준 분류는 그 전날 상황을 붙인다. (★ 10-17 오퍼스: 판 날 기준만으론 매수 쉬기 규칙 근거가 안 됨)"""
+    ds = sorted(labels)
+    return {d: labels[ds[i - 1]] for i, d in enumerate(ds) if i}
+
+
 def by_situation(sells: list, labels: dict) -> dict:
     out = {}
     for s in sells:
@@ -98,15 +106,16 @@ def report(days: int = 300) -> str:
     L = [f"🧭 상황 판별기 — 최근 {len(labels)}거래일 분류: "
          + " · ".join(f"{k} {sum(1 for v in labels.values() if v == k)}일" for k in order)]
     for bot, db in BOTS.items():
-        sells = load_sells(db)
-        stat = by_situation(sells, labels)
-        L.append(f"\n■ {bot} (매도 {len(sells)}건)")
-        for lab in order:
-            s = stat.get(lab)
-            if not s or not s["n"]:
-                continue
-            L.append(f"   {lab:<5} {s['n']:>3}건 · 승률{s['win_rate']:4.0f}% · PF{s['pf']:5.2f} · "
-                     f"순손익{s['net']:+,.0f}원")
+        for by, labs, title in (("sell", labels, "판 날 상황"), ("buy", prev_day_labels(labels), "산 날 상황(전날 종가 기준)")):
+            sells = load_sells(db, by)
+            stat = by_situation(sells, labs)
+            L.append(f"\n■ {bot} — {title} (매도 {len(sells)}건)")
+            for lab in order:
+                s = stat.get(lab)
+                if not s or not s["n"]:
+                    continue
+                L.append(f"   {lab:<5} {s['n']:>3}건 · 승률{s['win_rate']:4.0f}% · PF{s['pf']:5.2f} · "
+                         f"순손익{s['net']:+,.0f}원")
     return "\n".join(L)
 
 
