@@ -27,6 +27,13 @@ class TP(unittest.TestCase):
         x = T.describe(s, ep, lows, {s[29][0]: 12.0})
         self.assertEqual(x["cap_to_trough"], 1); self.assertTrue(x["retest"])
         self.assertAlmostEqual(x["dd"], -30.0)
+        forced = {s[27][0]: (300.0, 3.0), s[28][0]: (900.0, 7.2), s[30][0]: (400.0, 4.0)}
+        credit = {s[25][0]: 340000.0, s[29][0]: 323000.0}
+        x2 = T.describe(s, ep, lows, {}, forced, credit)
+        self.assertEqual((x2["forced_date"], x2["forced_to_trough"]), (s[28][0], 1))
+        self.assertAlmostEqual(x2["credit_chg"], -5.0)
+        self.assertIn("반대매매 정점", T.report(s, lows, {}, forced=forced, credit=credit))
+        self.assertIn("바닥 ±1거래일 안: 1/1", T.report(s, lows, {}, forced=forced, credit=credit))
         out = T.report(s, lows, {s[29][0]: 12.0})
         self.assertIn("최대 투매일", out); self.assertIn("저점 날 20일선 위 12%", out); self.assertIn("요약(끝난 1구간)", out)
 

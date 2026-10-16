@@ -44,6 +44,20 @@ def load_index(idx: str = "KOSPI", db: str = LOG_DB) -> list:
         conn.close()
 
 
+def load_kofia(db: str = LOG_DB) -> tuple:
+    """(반대매매 {date: (억원, 미수 대비 %)}, 신용융자 {date: 억원}) — intelligence/market_flow.py가 모은 금투협 데이터."""
+    conn = sqlite3.connect(db)
+    try:
+        forced = {d: (f / 100, p) for d, f, p in conn.execute(
+            "SELECT date, forced, forced_pct FROM kofia_funds WHERE forced IS NOT NULL")}
+        credit = {d: c / 100 for d, c in conn.execute("SELECT date, credit FROM kofia_credit WHERE credit IS NOT NULL")}
+        return forced, credit
+    except sqlite3.OperationalError:
+        return {}, {}
+    finally:
+        conn.close()
+
+
 def episodes(series: list, drop: float = 8.0, rebound: float = 8.0) -> list:
     """[{peak_i, trough_i, end_i or None}] — 20일 고점 대비 -drop% 진입 → 저점 대비 +rebound% 되돌림에서 끝."""
     out, i, n = [], LOOKBACK, len(series)
@@ -77,7 +91,7 @@ def fwd(closes: list, i: int, k: int):
     return (closes[i + k] / closes[i] - 1) * 100 if i + k < len(closes) else None
 
 
-def describe(series: list, ep: dict, lows: dict, breadth: dict) -> dict:
+def describe(series: list, ep: dict, lows: dict, breadth: dict, forced: dict = None, credit: dict = None) -> dict:
     dates = [d for d, _ in series]
     closes = [c for _, c in series]
     p, t, e = ep["peak_i"], ep["trough_i"], ep["end_i"]
@@ -91,7 +105,18 @@ def describe(series: list, ep: dict, lows: dict, breadth: dict) -> dict:
     if t + 1 < len(series):
         nxt = closes[t + 1:t + 11]
         retest = any(c <= closes[t] * 1.02 for c in nxt) if nxt else None
-    return {"peak": dates[p], "peak_c": closes[p], "trough": dates[t], "trough_c": closes[t],
+    # ★ 10-17 대장 가설 "미수·신용이 털려야 하락장 끝" — 반대매매 정점(고점~저점+5일)과 바닥 간격, 신용융자 감소폭
+    forced, credit = forced or {}, credit or {}
+    win = [k for k in range(p, min(len(series), t + 6)) if dates[k] in forced]
+    f_i = max(win, key=lambda k: forced[dates[k]][0]) if win else None
+    cp = next((credit[dates[k]] for k in range(p, t + 1) if dates[k] in credit), None)
+    ct = credit.get(dates[t])
+    extra = {"forced_date": dates[f_i] if f_i is not None else None,
+             "forced_amt": forced[dates[f_i]][0] if f_i is not None else None,
+             "forced_pct": forced[dates[f_i]][1] if f_i is not None else None,
+             "forced_to_trough": (t - f_i) if f_i is not None else None,
+             "credit_chg": (ct / cp - 1) * 100 if cp and ct else None}
+    return {**extra, "peak": dates[p], "peak_c": closes[p], "trough": dates[t], "trough_c": closes[t],
             "dd": (closes[t] / closes[p] - 1) * 100, "days": t - p, "end": dates[e] if e is not None else None,
             "cap": dates[cap_i], "cap_nl": lows.get(dates[cap_i], 0), "cap_to_trough": t - cap_i,
             "first_up": dates[first_up] if first_up is not None else None, "lower_after_up": lower_after_up,
@@ -99,7 +124,8 @@ def describe(series: list, ep: dict, lows: dict, breadth: dict) -> dict:
             "breadth": breadth.get(dates[t])}
 
 
-def report(series: list, lows: dict, breadth: dict, drop: float = 8.0, rebound: float = 8.0, idx: str = "KOSPI") -> str:
+def report(series: list, lows: dict, breadth: dict, drop: float = 8.0, rebound: float = 8.0, idx: str = "KOSPI",
+           forced: dict = None, credit: dict = None) -> str:
     if len(series) < LOOKBACK + 5:
         return "지수 일봉이 모자라 — 먼저 `python intelligence/market_flow.py --backfill 300`"
     eps = episodes(series, drop, rebound)
@@ -107,7 +133,7 @@ def report(series: list, lows: dict, breadth: dict, drop: float = 8.0, rebound: 
          f"저점 대비 +{rebound:.0f}% 되돌림에서 끝 · {len(eps)}구간"]
     f = lambda v, s="%": f"{v:+.1f}{s}" if v is not None else "-"
     for ep in eps:
-        x = describe(series, ep, lows, breadth)
+        x = describe(series, ep, lows, breadth, forced, credit)
         status = f"끝 {x['end']}" if x["end"] else "⏳ 진행 중"
         L.append(f"■ {x['peak']}({x['peak_c']:,.0f}) → 저점 {x['trough']}({x['trough_c']:,.0f}) {x['dd']:+.1f}% "
                  f"· {x['days']}거래일 · {status}")
@@ -122,12 +148,23 @@ def report(series: list, lows: dict, breadth: dict, drop: float = 8.0, rebound: 
         br = f" · 저점 날 20일선 위 {x['breadth']:.0f}%" if x["breadth"] is not None else ""
         L.append(f"   저점 뒤 5일 {f(x['f5'])} · 10일 {f(x['f10'])} · 20일 {f(x['f20'])} · "
                  f"10일 안 저점 재시험(+2% 안) {rt}{br}")
-    done = [describe(series, ep, lows, breadth) for ep in eps if ep["end_i"] is not None]
+        if x["forced_date"]:
+            g = x["forced_to_trough"]
+            gtxt = "저점 날" if g == 0 else f"저점 {g}거래일 전" if g > 0 else f"저점 {-g}거래일 뒤"
+            L.append(f"   💳 반대매매 정점 {x['forced_date']} {x['forced_amt']:,.0f}억(미수 대비 {x['forced_pct']:.1f}%) — {gtxt}"
+                     + (f" · 신용융자 고점→저점 {x['credit_chg']:+.1f}%" if x["credit_chg"] is not None else ""))
+    done = [describe(series, ep, lows, breadth, forced, credit) for ep in eps if ep["end_i"] is not None]
     if done:
         same = sum(1 for x in done if x["cap_to_trough"] == 0)
         retest = sum(1 for x in done if x["retest"])
         L.append(f"■ 요약(끝난 {len(done)}구간): 최대 투매일 = 바닥 {same}번 · 바닥 뒤 10일 안 재시험 {retest}번 · "
                  f"첫 양봉 뒤 재하락 {sum(1 for x in done if x['lower_after_up'])}번")
+        fx = [x for x in done if x["forced_to_trough"] is not None]
+        if fx:
+            near = sum(1 for x in fx if abs(x["forced_to_trough"]) <= 1)
+            L.append(f"   💳 반대매매 정점이 바닥 ±1거래일 안: {near}/{len(fx)}구간 · 정점 비중 평균 "
+                     f"{sum(x['forced_pct'] for x in fx) / len(fx):.1f}% · 신용융자 감소 평균 "
+                     f"{sum(x['credit_chg'] for x in fx if x['credit_chg'] is not None) / max(1, sum(1 for x in fx if x['credit_chg'] is not None)):+.1f}%")
     return "\n".join(L)
 
 
@@ -137,4 +174,5 @@ if __name__ == "__main__":
     reb = float(a[a.index("--rebound") + 1]) if "--rebound" in a else 8.0
     idx = a[a.index("--idx") + 1] if "--idx" in a else "KOSPI"
     daily = sb.load_daily(rb.THEME_DB, 330)
-    print(report(load_index(idx), bs.new_low_share(daily), sb.market_breadth(daily), drop, reb, idx))
+    fo, cr = load_kofia()
+    print(report(load_index(idx), bs.new_low_share(daily), sb.market_breadth(daily), drop, reb, idx, fo, cr))
