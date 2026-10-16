@@ -111,8 +111,10 @@ def report(series: list, lows: dict, breadth: dict, drop: float = 8.0, rebound: 
         status = f"끝 {x['end']}" if x["end"] else "⏳ 진행 중"
         L.append(f"■ {x['peak']}({x['peak_c']:,.0f}) → 저점 {x['trough']}({x['trough_c']:,.0f}) {x['dd']:+.1f}% "
                  f"· {x['days']}거래일 · {status}")
-        L.append(f"   최대 투매일 {x['cap']} 신저가 {x['cap_nl']:.0f}% → 저점까지 {x['cap_to_trough']}거래일"
-                 + (" (투매일이 곧 바닥)" if x["cap_to_trough"] == 0 else "")
+        gap = x["cap_to_trough"]
+        when = ("저점까지 0거래일 (투매일이 곧 바닥)" if gap == 0 else f"저점까지 {gap}거래일" if gap > 0
+                else f"바닥 {-gap}거래일 뒤에 나옴(바닥 뒤 투매)")
+        L.append(f"   최대 투매일 {x['cap']} 신저가 {x['cap_nl']:.0f}% → {when}"
                  + f" · 그 뒤 첫 양봉 {x['first_up'] or '-'}"
                  + ("" if x["lower_after_up"] is None else
                     (" → 10일 안에 더 낮은 저점 나옴(재하락)" if x["lower_after_up"] else " → 더 낮은 저점 없음")))
