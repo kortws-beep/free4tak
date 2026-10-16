@@ -73,6 +73,7 @@ def enrich(trades: list, daily: dict) -> list:
         if not rows or i1 >= len(rows) or dates[i1] != sd:
             continue
         span = rows[i0:i1 + 1]
+        t["day_lh"] = (rows[i1][3], rows[i1][2])
         t["peak"] = (max(r[2] for r in span) / t["bp"] - 1) * 100
         if i1 > 0:
             t["gap"] = (rows[i1][1] / rows[i1 - 1][4] - 1) * 100
@@ -168,6 +169,11 @@ def report(trades: list, days: int) -> str:
     for k, x in ((2, 3), (3, 3), (5, 3), (3, 5)):
         L.append(simulate(bot, lambda o, pc, bp, hi, n, k=k, x=x: n == k + 1 and hi < bp * (1 + x / 100),
                           f"C. {k}거래일 안에 +{x}% 못 찍으면 정리"))
+    odd = [t for t in trades if t.get("day_lh") and not (t["day_lh"][0] * 0.995 <= t["sp"] <= t["day_lh"][1] * 1.005)]
+    L.append(f"■ 데이터 점검 — 판 가격이 그날 저가~고가 밖인 매도 {len(odd)}건 (장전·시간외 체결이거나, 장부 매도가·일봉 종목이 틀림)")
+    for t in odd[:15]:
+        L.append(f"   {t['sell']:%m-%d %H:%M} {t['name']} {t['reason']} · 판 가격 {t['sp']:,.0f} · 매수가 {t['bp']:,.0f} · "
+                 f"그날 저가~고가 {t['day_lh'][0]:,.0f}~{t['day_lh'][1]:,.0f}")
     L.append("   ※ 수동 17건은 표본이 작음 — 규칙 후보는 봇 매매 시뮬에서 나아지는 것만. 수동매도 가격은 봇이 감지한"
              " 시세라 실제 체결가와 조금 다를 수 있음")
     return "\n".join(L)

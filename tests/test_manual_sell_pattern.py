@@ -42,6 +42,10 @@ class Pattern(unittest.TestCase):
         out = M.simulate([self.bot], lambda o, pc, bp, hi, n: o >= pc * 1.03 and o > bp, "A")
         self.assertIn("바뀐 매도 1건(그중 나아짐 1)", out)     # 10-05 시가 106(갭 +3.9%)에 팔았으면 손절 대신 +6%
         msg = M.report([self.bot, self.man], 30)
+        self.assertIn("저가~고가 밖인 매도 0건", msg)
+        odd = tr("나", "2026-10-01 10:00:00", "2026-10-02 11:00:00", 100, 115, "익절8%달성30%")   # 그날 고가 110 위
+        M.enrich([odd], DAILY)
+        self.assertIn("익절8%달성30% · 판 가격 115 · 매수가 100 · 그날 저가~고가 107~110", M.report([odd], 30))
         self.assertIn("수동 1 · 봇 1", msg); self.assertIn("A. 시가 갭 +3%↑·수익 중: 바뀐 매도 1건", msg)
         self.assertIn("A. 시가 갭 +5%↑·수익 중: 바뀐 매도 0건", msg)
         self.assertEqual([r[2:] for r in self.bot["hold_rows"]], [(101, 1), (103, 2), (112, 3)])
