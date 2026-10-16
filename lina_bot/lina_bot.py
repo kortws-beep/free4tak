@@ -1911,6 +1911,27 @@ async def capitulation_alert_loop():
         print(f"⚠️ [투매알림] 오류: {e}")
 
 
+# ★ 2026-10-17 하락장 전환점 연구 — 지수 일봉·시장별 투자자 순매수 매일 수집(intelligence/market_flow.py)
+MARKET_FLOW_HHMM = "1830"
+
+
+@tasks.loop(minutes=1)
+async def market_flow_loop():
+    kst_now = datetime.datetime.now(KST)
+    if kst_now.strftime("%H%M") != MARKET_FLOW_HHMM or not _is_trading_day():
+        return
+    try:
+        import market_flow
+        print(await asyncio.to_thread(market_flow.collect))
+    except Exception as e:
+        print(f"⚠️ [시장흐름 수집] 오류: {e}")
+
+
+@market_flow_loop.before_loop
+async def before_market_flow_loop():
+    await client.wait_until_ready()
+
+
 @capitulation_alert_loop.before_loop
 async def before_capitulation_alert_loop():
     await client.wait_until_ready()
@@ -2568,6 +2589,12 @@ async def on_ready():
             risk_watch_loop.start()
         print("✅ [시스템] 세 봇 합산 손실 자동중단 감시 (1분 주기) 가동 성공!")
     except Exception as e: print(f"⚠️ [에러] 통합 리스크 감시: {e}")
+
+    try:
+        if not market_flow_loop.is_running():
+            market_flow_loop.start()
+        print(f"✅ [시스템] 지수·투자자 흐름 수집 ({MARKET_FLOW_HHMM[:2]}:{MARKET_FLOW_HHMM[2:]}, 거래일) 가동 성공!")
+    except Exception as e: print(f"⚠️ [에러] 시장흐름 수집: {e}")
 
     try:
         if not capitulation_alert_loop.is_running():
