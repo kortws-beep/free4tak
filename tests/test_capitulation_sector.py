@@ -62,6 +62,17 @@ class CapSector(unittest.TestCase):
         self.assertIn("결합 1등", out); self.assertIn("평소 시장(투매일 아님)", out)
         self.assertIn("관심그룹(", CS.report(daily, {}, nl=30))
 
+    def test_aft_uses_median_not_skewed_by_one_outlier(self):
+        # ★ 2026-10-16(2차) — 평균이면 거래대금 1~3등 중 한 종목만 유독 세게 튀어도(대장 지적,
+        # 10-14 [우주] 한선엔지니어링류 사례) 그룹 점수가 부풀었음. 중앙값으로 바꿔 완화.
+        daily, groups, dates = mk()
+        daily["이차0"] = [  # 1등주만 오후반등 +40%로 튀게 교체
+            (d, o, h, l, (c if i != 28 else l * 1.40), v) for i, (d, o, h, l, c, v) in enumerate(daily["이차0"])]
+        rows = {n: {r[0]: r[1:6] for r in rs} for n, rs in daily.items()}
+        sc = CS.score_groups(groups, rows, dates[24], dates[28], dates[29])
+        grp = next(x for x in sc if x["group"] == "이차")
+        self.assertAlmostEqual(grp["aft"], 8.0, places=4)          # 평균이면 (40+8+8)/3=18.7 — 중앙값 8.0 유지
+
 
 if __name__ == "__main__":
     unittest.main()
