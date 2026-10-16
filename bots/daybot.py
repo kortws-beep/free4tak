@@ -334,7 +334,7 @@ def _lina_daybot_watches() -> set:
                         "lina_bot", "manual_watch_state.json")
     try:
         with open(path, encoding="utf-8") as f:
-            return {c for c, w in (json.load(f) or {}).items()
+            return {(w.get("code") or k.split("@")[0]) for k, w in (json.load(f) or {}).items()
                     if isinstance(w, dict) and w.get("account") == "daybot"}
     except (OSError, ValueError):
         return set()

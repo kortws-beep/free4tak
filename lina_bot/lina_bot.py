@@ -134,9 +134,43 @@ MANUAL_WATCH_STATE_FILE = os.path.join(base_dir, "manual_watch_state.json")
 MANUAL_WATCH_FEE_DRAG_PCT = 0.224
 
 
+def _wkey(code: str, account: str = "kiwoom") -> str:
+    """★ 2026-10-16 — 같은 종목을 키움·데이봇 계좌에 따로 등록할 수 있게(예전엔 코드만 키라 '등록 삼성전자 … d'가
+    키움 삼성전자 등록을 덮어씀). 키움은 예전과 같은 '코드', 데이봇은 '코드@d'."""
+    return f"{code}@d" if account == "daybot" else code
+
+
+_ACCT_TOKENS = {"k": "kiwoom", "키움": "kiwoom", "d": "daybot", "데이봇": "daybot", "daybot": "daybot", "한투": "daybot"}
+
+
+def _split_account(tokens: list) -> tuple:
+    """★ 10-16 대장: 계좌 구분자 필수 — K(키움)/D(데이봇). (계좌 또는 None, 나머지 토큰)."""
+    acct, rest = None, []
+    for t in tokens:
+        a = _ACCT_TOKENS.get(t.lower())
+        if a:
+            acct = a
+        else:
+            rest.append(t)
+    return acct, rest
+
+
+def _wcode(key: str, w: dict) -> str:
+    return w.get("code") or key.split("@")[0]
+
+
 def _load_manual_watches() -> dict:
     from common_utils import read_state
-    return read_state(MANUAL_WATCH_STATE_FILE, default={})
+    watches = read_state(MANUAL_WATCH_STATE_FILE, default={})
+    # ★ 2026-10-16 — 키 방식 바꾸기 전에 '코드' 키로 저장된 데이봇 계좌 등록을 '코드@d'로 옮김(한 번)
+    legacy = [k for k, w in watches.items() if "@" not in k and isinstance(w, dict) and w.get("account") == "daybot"]
+    if legacy:
+        for k in legacy:
+            w = watches.pop(k)
+            w.setdefault("code", k)
+            watches.setdefault(f"{k}@d", w)
+        _save_manual_watches(watches)
+    return watches
 
 
 def _save_manual_watches(watches: dict):
@@ -233,15 +267,16 @@ async def _register_manual_watch(channel, code: str, buy_price: float = None,
                 except Exception as e:
                     print(f"⚠️ [리나등록] daybot 보유 확인 실패: {e}")
             watches = _load_manual_watches()
-            watches[code] = {
-                "name": name, "entry_price": buy_price, "peak_price": None, "account": account,
+            key = _wkey(code, account)
+            watches[key] = {
+                "name": name, "entry_price": buy_price, "peak_price": None, "account": account, "code": code,
                 "last_alert_peak": 0, "stage": 0, "qty": qty, "qty0": qty,
                 "registered_at": datetime.datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S"),
             }
             _save_manual_watches(watches)
-            _log_manual_watch("register", code, watches[code])
+            _log_manual_watch("register", code, watches[key])
             # ★ 2026-10-14 대장 — 등록 종목은 리나가 직접 익절(lina_bot/manual_autosell.py)
-            md = {"paper": "🧪 연습 모드(주문 안 나감, 알림만)", "live": "💰 실제 매도(키움 시장가)",
+            md = {"paper": "🧪 연습 모드(주문 안 나감, 알림만)", "live": "💰 실제 매도(시장가)",
                   "off": "🔔 알림만"}[autosell.mode()]
             acct = "한투 데이봇 계좌" if account == "daybot" else "키움"
             await send_safe_message(
@@ -262,10 +297,14 @@ async def _deregister_manual_watch(channel, code: str, sell_price: float = None)
     "종목명 ±N% 수익실현"으로 보고(대장 지정 — 분할매도도 고려해 가격
     기준, 금액 기준 아님)."""
     watches = _load_manual_watches()
-    if code not in watches:
+    key = code
+    if key not in watches and "@" not in key and f"{key}@d" in watches:
+        key = f"{key}@d"              # 키움 등록이 없고 데이봇 등록만 있으면 그걸 해제
+    if key not in watches:
         await send_safe_message(channel, f"⚠️ {code}는 등록돼 있지 않아.")
         return
-    w = watches.pop(code)
+    w = watches.pop(key)
+    code = _wcode(key, w)
     name = w.get("name", code)
     _save_manual_watches(watches)
 
@@ -1409,7 +1448,8 @@ async def manual_watch_trailing_loop():
         return
 
     changed_codes = set()
-    for code, w in list(watches.items()):
+    for key, w in list(watches.items()):
+        code = _wcode(key, w)
         # ★ 2026-10-06 — 종목 하나 처리 중 생기는 예외(디스코드 전송
         #   오류/필드 누락 등)가 전체를 덮지 않도록 격리. discord.py의
         #   tasks.loop는 처리 안 된 예외가 새면 루프 자체를 영구 정지
@@ -1435,13 +1475,13 @@ async def manual_watch_trailing_loop():
             for m in res["msgs"]:
                 await send_safe_message(channel, m)
             if res["deregister"]:
-                await _deregister_manual_watch(channel, code, res["sell_price"])
+                await _deregister_manual_watch(channel, key, res["sell_price"])
                 continue
             if res["changed"]:
-                changed_codes.add(code)
+                changed_codes.add(key)
             if res["sell_price"]:
                 # 실제 주문이 나갔으면 바로 저장 — 루프 끝 저장 전에 리나가 꺼지면 같은 30% 익절이 또 나감
-                _save_manual_watch_updates(watches, {code})
+                _save_manual_watch_updates(watches, {key})
         except Exception as e:
             print(f"⚠️ [리나등록 추적] {code} 처리 중 예외(건너뜀): {e}")
             continue
@@ -2911,7 +2951,8 @@ async def on_message(message):
                 from kis_api import KisAPI
                 api = KisAPI()
                 lines = [f"📋 **리나등록 현황** ({len(watches)}종목)"]
-                for code, w in watches.items():
+                for key, w in watches.items():
+                    code  = _wcode(key, w)
                     name  = w.get("name", code)
                     entry = w.get("entry_price", 0)
                     # ★ 2026-10-06 — 동기 KIS 호출을 await 없이 직접 호출해
@@ -2942,7 +2983,7 @@ async def on_message(message):
             or message.content.startswith("등록해제")):
         parts = message.content.split()
         if len(parts) < 2:
-            await send_safe_message(message.channel, "사용법: `!리나등록해제 종목코드 [매도가]` 또는 `해제 종목명 [매도가]`")
+            await send_safe_message(message.channel, "사용법: `해제 종목명 [매도가] [K|D]` — 두 계좌에 다 있으면 K/D 필수")
             return
         arg = parts[1].strip()
         # ★ 2026-10-06 — 종목코드는 항상 6자리인데 앞자리 0이 빠진 5자리
@@ -2954,6 +2995,17 @@ async def on_message(message):
             await send_safe_message(message.channel, f"❌ '{arg}' 종목코드를 못 찾았어.")
             return
         sell_price = None
+        # ★ 2026-10-16 — 계좌 구분자 K/D. 없으면 등록이 하나뿐일 때만 그걸, 둘 다면 물어봄
+        acct, toks = _split_account(parts[2:])
+        parts = parts[:2] + toks
+        if acct:
+            code = _wkey(code, acct)
+        else:
+            _w = _load_manual_watches()
+            if code in _w and f"{code}@d" in _w:
+                await send_safe_message(message.channel, f"❓ {arg}는 키움·데이봇 둘 다 등록돼 있어 — "
+                                                         f"`해제 {arg} K` 또는 `해제 {arg} D`")
+                return
         if len(parts) >= 3:
             # ★ 2026-10-06 — "71,500"처럼 쉼표 들어간 가격을 float()에
             #   그대로 넣으면 ValueError가 나서 매도가 자체가 조용히
@@ -2971,8 +3023,8 @@ async def on_message(message):
     if message.content.startswith("!리나등록") or message.content.startswith("등록 "):
         parts = message.content.split()
         if len(parts) < 2:
-            await send_safe_message(message.channel, "사용법: `!리나등록 종목코드 [평단가] [수량주] [종목명]` 또는 `등록 종목명 [평단가] [100주] [d]`\n"
-                                     "(끝에 `d`를 붙이면 한투 daybot 계좌에서 매도, 없으면 키움 — 예: `등록 삼성전자 223000 10주 d`)\n"
+            await send_safe_message(message.channel, "사용법: `등록 종목명 평단가 수량주 K|D` (K=키움, D=데이봇·한투)\n"
+                                     "   예: `등록 삼성전자 226176 17주 K` / `등록 삼성전자 225875 8주 D`\n"
                                      "평단가 생략하면 현재가로 등록해(분할매수 완료 후 평단가로 등록 권장).")
             return
         arg = parts[1].strip()
@@ -2986,13 +3038,15 @@ async def on_message(message):
         name_override = None
         # ★ 2026-10-14 — 수량("100주")은 어느 자리에 써도 인식(리나 자동 익절용)
         qty = None
-        account = "kiwoom"
+        account, toks = _split_account(parts[2:])
+        if not account:
+            await send_safe_message(message.channel, "❓ 계좌를 붙여줘 — 끝에 `K`(키움) 또는 `D`(데이봇·한투)\n"
+                                                     "   예: `등록 삼성전자 226176 17주 K` / `등록 삼성전자 225875 8주 D`")
+            return
         rest = []
-        for t in parts[2:]:
+        for t in toks:
             if re.fullmatch(r"[\d,]+주", t):
                 qty = int(t[:-1].replace(",", ""))
-            elif t.lower() in ("d", "데이봇", "daybot", "한투"):   # ★ 10-16 대장: 짧게 d/D
-                account = "daybot"            # ★ 10-16 daybot 계좌에서 대장이 직접 산 종목
             else:
                 rest.append(t)
         if rest:
