@@ -34,6 +34,28 @@ def is_manual(t: dict) -> bool:
     return "수동" in t["reason"]
 
 
+def fix_manual_buy_time(trades: list, db: str) -> list:
+    """수동매도는 save_manual_trade가 매수시각=감지시각으로 적어 보유 0일로 보임 — 봇이 산 원래 행(같은 종목,
+    아직 안 팔린 채 남은 것)이 있으면 그 매수시각으로 바꾼다. 대장이 직접 산 종목은 그대로(보유 0일)."""
+    import sqlite3
+    conn = sqlite3.connect(db)
+    try:
+        for t in trades:
+            if not is_manual(t) or not t.get("code"):
+                continue
+            row = conn.execute("SELECT buy_time FROM trades WHERE code=? AND sell_price IS NULL AND buy_time < ? "
+                               "ORDER BY buy_time DESC LIMIT 1", (t["code"], t["sell"].isoformat())).fetchone()
+            if row:
+                t["buy"] = srv.dr._dt(row[0])
+                t["hold"] = (t["sell"].date() - t["buy"].date()).days
+                t["bot_bought"] = True
+    except sqlite3.OperationalError:
+        pass
+    finally:
+        conn.close()
+    return trades
+
+
 def slot(t: dict) -> str:
     hm = t["sell"].strftime("%H%M")
     return ("장전" if hm < "0900" else "시가(~09:10)" if hm <= "0910" else "오전" if hm < "1200" else "오후")
@@ -59,7 +81,9 @@ def enrich(trades: list, daily: dict) -> list:
                 t[f"a{k}"] = (rows[i1 + k][4] / t["sp"] - 1) * 100
         # 시뮬레이션용: 산 다음 날 ~ 판 날(09:10 뒤에 팔았으면 그날 시가까지)의 (시가, 전날 종가)
         end = i1 + 1 if t["sell"].strftime("%H%M") > "0910" else i1
-        t["hold_rows"] = [(rows[j][1], rows[j - 1][4]) for j in range(max(i0 + 1, 1), end)]
+        # (시가, 전날 종가, 산 날~전날 최고가, 산 뒤 몇 거래일째)
+        t["hold_rows"] = [(rows[j][1], rows[j - 1][4], max(r[2] for r in rows[i0:j]), j - i0)
+                          for j in range(max(i0 + 1, 1), end)]
     return trades
 
 
@@ -90,11 +114,11 @@ def profile(label: str, ts: list) -> str:
 
 
 def simulate(trades: list, rule, label: str) -> str:
-    """rule(open, prev_close, bp) → True면 그 시가에 매도. 실제 매도보다 먼저 걸린 것만 바꿈."""
+    """rule(open, prev_close, bp, high_so_far, day_n) → True면 그 시가에 매도. 실제 매도보다 먼저 걸린 것만 바꿈."""
     base = sum(t["krw"] for t in trades)
     new, changed, better = 0.0, 0, 0
     for t in trades:
-        hit = next((o for o, pc in t["hold_rows"] if rule(o, pc, t["bp"])), None)
+        hit = next((o for o, pc, hi, n in t["hold_rows"] if rule(o, pc, t["bp"], hi, n)), None)
         if hit is None:
             new += t["krw"]
             continue
@@ -112,6 +136,8 @@ def report(trades: list, days: int) -> str:
     cov = sum(1 for t in trades if t["peak"] is not None)
     L = [f"🖐️ sbot 수동매도 vs 봇 매도 — 최근 {days}일, 매도 {len(trades)}건(수동 {len(man)} · 봇 {len(bot)}) · "
          f"일봉 맞춘 건 {cov}"]
+    L.append(f"   수동 중 봇이 산 걸 대장이 판 것 {sum(1 for t in man if t.get('bot_bought'))}건(원래 매수시각으로 보유일 계산)"
+             " · 나머지는 대장 직접 매수(보유일 모름)")
     L.append("■ 한눈에")
     L.append(profile("대장 수동", man))
     L.append(profile("봇 전체", bot))
@@ -129,13 +155,19 @@ def report(trades: list, days: int) -> str:
                  f"봇 {len(b)}건 {sum(t['krw'] for t in b) / 1e4:+,.1f}만")
     L.append("■ 수동매도 하나씩")
     for t in man:
-        L.append(f"   {t['sell']:%m-%d %H:%M} {t['name']} {_f(t['rate'])} · 보유 {t['hold']}일 · 최고 {_f(t['peak'])}"
+        L.append(f"   {t['sell']:%m-%d %H:%M} {t['name']} {_f(t['rate'])} · 보유 {t['hold']}일"
+                 f"{'(봇 매수)' if t.get('bot_bought') else ''} · 최고 {_f(t['peak'])}"
                  f" · 갭 {_f(t['gap'])} · 판 뒤 5일 {_f(t['a5'])}")
     L.append("■ 대장식 규칙을 봇 매매에 덮어씌우면 (보유 중 시가에 매도)")
     for g in (2, 3, 5):
-        L.append(simulate(bot, lambda o, pc, bp, g=g: o >= pc * (1 + g / 100) and o > bp, f"A. 시가 갭 +{g}%↑·수익 중"))
+        L.append(simulate(bot, lambda o, pc, bp, hi, n, g=g: o >= pc * (1 + g / 100) and o > bp,
+                          f"A. 시가 갭 +{g}%↑·수익 중"))
     for p in (3, 5, 8):
-        L.append(simulate(bot, lambda o, pc, bp, p=p: o >= bp * (1 + p / 100), f"B. 시가 수익 +{p}%↑"))
+        L.append(simulate(bot, lambda o, pc, bp, hi, n, p=p: o >= bp * (1 + p / 100), f"B. 시가 수익 +{p}%↑"))
+    # C. 시간 손절 — 산 뒤 k거래일 동안 고가가 +x%도 못 찍었으면 k+1일째 시가에 정리(안 오르는 종목 오래 안 들기)
+    for k, x in ((2, 3), (3, 3), (5, 3), (3, 5)):
+        L.append(simulate(bot, lambda o, pc, bp, hi, n, k=k, x=x: n == k + 1 and hi < bp * (1 + x / 100),
+                          f"C. {k}거래일 안에 +{x}% 못 찍으면 정리"))
     L.append("   ※ 수동 17건은 표본이 작음 — 규칙 후보는 봇 매매 시뮬에서 나아지는 것만. 수동매도 가격은 봇이 감지한"
              " 시세라 실제 체결가와 조금 다를 수 있음")
     return "\n".join(L)
@@ -143,5 +175,6 @@ def report(trades: list, days: int) -> str:
 
 if __name__ == "__main__":
     n = next((int(a) for a in sys.argv[1:] if a.isdigit()), 120)
-    trades = srv.load_trades(srv.dr._find("sbot_trade_history.db"), n)
+    db = srv.dr._find("sbot_trade_history.db")
+    trades = fix_manual_buy_time(srv.load_trades(db, n), db)
     print(report(enrich(trades, sb.load_daily(srv.THEME_DB, n + 40)), n))
