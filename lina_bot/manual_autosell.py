@@ -22,6 +22,24 @@ manual_autosell.py — 리나등록 종목 자동 익절 (2026-10-14 대장 지�
 """
 import os
 
+
+class KisBroker:
+    """★ 10-16 대장 — daybot 계좌(한투)에서 대장이 직접 산 종목도 리나 규칙으로 익절('등록 … 데이봇').
+    daybot이 산 종목은 daybot 규칙, 대장이 산 건 리나 규칙(손절 없음)의 이중 구조. KisAPI()는 기본이
+    daybot 계좌(KIS_CANO)."""
+    label = "한투(데이봇 계좌)"
+
+    def __init__(self, api):
+        self.api = api
+
+    def holdings(self) -> dict:
+        pos = self.api.get_current_positions(force=True) or {}
+        return {c: {"qty": int(p.get("qty", 0) or 0), "avail": int(p.get("qty", 0) or 0)} for c, p in pos.items()}
+
+    def sell_market(self, code: str, qty: int) -> tuple:
+        ok = self.api.sell(code, int(qty), price=0)
+        return bool(ok), ("접수" if ok else "주문 거부(한투)")
+
 START_PCT = 3.0
 TRAIL1_PCT = 4.0
 TP1_PCT = 5.0
@@ -114,15 +132,16 @@ def handle(code: str, w: dict, price: float, hhmm: str, md: str, kiwoom=None) ->
                            f"실제였으면 {qty or '전량'}{'주' if qty else ''} 매도했을 거야(주문 안 나감)")
         return out
     # live
+    label = getattr(kiwoom, "label", "키움")
     if kiwoom is None:
-        out["msgs"].append(f"⚠️ [리나등록] {name}({code}) {act['reason']} — 키움 연결 없음, 주문 못 냄")
+        out["msgs"].append(f"⚠️ [리나등록] {name}({code}) {act['reason']} — 계좌 연결 없음, 주문 못 냄")
         return out
     if not w.get("qty0") and not w.get("qty"):
         if not w.get("warned_no_qty"):
             w["warned_no_qty"] = True
             out["changed"] = True
             out["msgs"].append(f"⚠️ [리나등록] {name}({code}) {act['reason']} — 등록 수량이 없어 실제 매도 안 함"
-                               f"(키움 계좌 다른 보유분까지 팔 수 있어서). 직접 판단하거나 `등록 {name} 평단가 N주`로 다시 등록")
+                               f"(계좌의 다른 보유분까지 팔 수 있어서). 직접 판단하거나 `등록 {name} 평단가 N주`로 다시 등록")
         return out
     held = (kiwoom.holdings() or {}).get(code, {})
     avail = int(held.get("avail", 0) or 0)
@@ -131,7 +150,7 @@ def handle(code: str, w: dict, price: float, hhmm: str, md: str, kiwoom=None) ->
         if not w.get("warned_no_qty"):
             w["warned_no_qty"] = True
             out["changed"] = True
-            out["msgs"].append(f"⚠️ [리나등록] {name}({code}) {act['reason']} — 키움 매도가능수량 0, 주문 안 냄"
+            out["msgs"].append(f"⚠️ [리나등록] {name}({code}) {act['reason']} — {label} 매도가능수량 0, 주문 안 냄"
                                f"(이미 팔았으면 `해제 {name}`)")
         return out
     ok, msg = kiwoom.sell_market(code, qty)
@@ -143,7 +162,7 @@ def handle(code: str, w: dict, price: float, hhmm: str, md: str, kiwoom=None) ->
     out["sell_price"] = price
     if act["type"] == "final" or (w.get("qty") is not None and w["qty"] <= 0):
         out["deregister"] = True
-    out["msgs"].append(f"💰 [리나등록] {name}({code}) {act['reason']} — 키움 시장가 {qty}주 매도 주문 @{price:,.0f}원 부근"
+    out["msgs"].append(f"💰 [리나등록] {name}({code}) {act['reason']} — {label} 시장가 {qty}주 매도 주문 @{price:,.0f}원 부근"
                        + ("" if out["deregister"] else f" · 남은 {w.get('qty')}주 고점 -{TRAIL2_PCT:.0f}% 추적"))
     return out
 

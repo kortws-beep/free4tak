@@ -108,5 +108,22 @@ class Handle(unittest.TestCase):
                 os.environ["LINA_AUTOSELL"] = old
 
 
+class KisBrokerTest(unittest.TestCase):
+    """10-16 — daybot 계좌(한투)에서 대장이 산 종목도 리나 규칙으로."""
+    def test_broker_and_label(self):
+        class Api:
+            def __init__(self): self.sells = []
+            def get_current_positions(self, force=False): return {"111111": {"qty": 10, "entry_price": 1}}
+            def sell(self, code, qty, price=0): self.sells.append((code, qty, price)); return True
+        api = Api()
+        b = A.KisBroker(api)
+        self.assertEqual(b.holdings(), {"111111": {"qty": 10, "avail": 10}})
+        x = w(qty=10)
+        A.handle("111111", x, 10300, "1000", "live", b)
+        r = A.handle("111111", x, 10500, "1000", "live", b)
+        self.assertEqual(api.sells, [("111111", 3, 0)])                 # 30% = 3주, 시장가(price=0)
+        self.assertIn("한투(데이봇 계좌)", r["msgs"][0])
+
+
 if __name__ == "__main__":
     unittest.main()
