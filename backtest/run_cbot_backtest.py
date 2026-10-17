@@ -40,6 +40,7 @@ def get_cbot_scenarios(base: CBotBacktestConfig) -> list:
         {"name": "stage0조기익절(15%)", "config": {**base.__dict__, "enable_stage0_partial": True, "stage0_partial_threshold": 0.15}},
         {"name": "보호선 끔(10-18 전)", "config": {**base.__dict__, "enable_protect_line": False}},
         {"name": "장판단 끔(10-17 전)", "config": {**base.__dict__, "regime_mode": "none"}},
+        {"name": "펀딩비 필터 끔(10-18 전)", "config": {**base.__dict__, "funding_min": None}},
         {"name": "장판단 대장안70/30(-1%)", "config": {**base.__dict__, "regime_mode": "combo", "regime_min": -1.0}},
         {"name": "장판단 20일선위비율(<30%)", "config": {**base.__dict__, "regime_mode": "breadth", "regime_min": 30, "regime_ma": 120}},
     ]

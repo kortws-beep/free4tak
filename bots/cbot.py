@@ -253,6 +253,10 @@ BTC_STOP_THRESH  = -4.0
 # ★ 2026-10-17 대장 결정(backtest/cbot_regime_review.py 90일 95건): 매수 시점 비트 24시간(롤링) -1% 이하면
 #   30건 -28.7만(앞·뒤 절반 둘 다 손해) → 신규 매수 쉬기. btc_rate(업비트 전일 09시 대비)와 달리 지금부터 24시간 전 대비.
 BTC_24H_MIN      = -1.0
+# ★ 2026-10-18 대장 결정(backtest/cbot_global_review.py 120일 96건): 바이낸스 비트 펀딩비(직전 정산, %/8시간)가
+#   낮을수록 cbot 매수 성적 나쁨(낮은 1/3 승률 29% -61.7만, 앞·뒤 둘 다). A(비트 24시간) 통과분 위에서도 0.002~0.005% 전부 +.
+#   기본값 0.01%보다 한참 낮음 = 선물 쪽이 상승을 안 봄 → 신규 매수 쉬기. 조회 실패면 막지 않음.
+BTC_FUNDING_MIN  = 0.003
 FEAR_GREED_MIN   = 20
 # ★ 2026-08-18: -45,000원 → -150,000원 (사용자 요청, 시드 300만원의 5%).
 #   -45,000원은 초기 세팅(40만원 매수) 때 값이 08-07 매수금액 100만원
@@ -414,6 +418,7 @@ class CBot:
         self.market_status = "normal"
         self.btc_rate      = 0.0
         self.btc_24h       = None   # 비트 24시간(롤링) 등락 % — 조회 실패면 None(막지 않음)
+        self.btc_funding   = None   # 바이낸스 비트 펀딩비(직전 정산) %/8h — 조회 실패면 None(막지 않음)
         self.fear_greed    = 50
         self.us10y         = 0.0  # ★ 美국채10년 금리(%)
         self.us10y_chg     = 0.0  # 전일대비 %p 변화
@@ -1188,6 +1193,24 @@ class CBot:
         finally:
             self._last_market_check = time.time()
         self._update_btc_24h()
+        self._update_btc_funding()
+
+    def _update_btc_funding(self):
+        """바이낸스 비트 무기한선물 직전 정산 펀딩비(%/8h). 기준 아래로 들어가거나 회복할 때 한 번씩 알림. 실패하면 기존값 유지."""
+        try:
+            res = self.session.get("https://fapi.binance.com/fapi/v1/fundingRate",
+                                   params={"symbol": "BTCUSDT", "limit": 1}, timeout=5).json()
+            if not isinstance(res, list) or not res:
+                return
+            prev, self.btc_funding = self.btc_funding, safe_float(res[-1].get("fundingRate")) * 100
+            was = prev is not None and prev < BTC_FUNDING_MIN
+            if self.btc_funding < BTC_FUNDING_MIN and not was:
+                self.notify(f"🧊 비트 펀딩비 {self.btc_funding:+.4f}% (기준 {BTC_FUNDING_MIN}% 미만 — 선물 쪽 상승 기대 약함) "
+                            f"→ 신규 매수 쉬기")
+            elif self.btc_funding >= BTC_FUNDING_MIN and was:
+                self.notify(f"🔥 비트 펀딩비 {self.btc_funding:+.4f}% 회복 → 신규 매수 재개")
+        except Exception as e:
+            print(f"⚠️ 비트 펀딩비 조회 오류: {e} — 기존값 유지")
 
     def _update_btc_24h(self):
         """비트 24시간 롤링 등락 — 10분봉 145개(최신→과거)의 맨 끝 종가 = 약 24시간 전.
@@ -1729,6 +1752,8 @@ class CBot:
         # 시장 상태 필터
         if self.btc_24h is not None and self.btc_24h < BTC_24H_MIN:
             return False, ind, f"비트 24시간 {self.btc_24h:+.2f}% < {BTC_24H_MIN:+.0f}%"
+        if self.btc_funding is not None and self.btc_funding < BTC_FUNDING_MIN:
+            return False, ind, f"비트 펀딩비 {self.btc_funding:+.4f}% < {BTC_FUNDING_MIN}%"
         if self.market_status == "stop":
             return False, ind, f"BTC 중단 ({self.btc_rate:+.2f}%)"
         # ★ BTC 약세 시 알트 자체 상태 확인 (디커플링 대응)
@@ -2882,6 +2907,8 @@ class CBot:
                     print(f"⚠️ BTC 약세({self.btc_rate:+.2f}%) — 매수 중단")
                 elif self.btc_24h is not None and self.btc_24h < BTC_24H_MIN:
                     print(f"📉 비트 24시간 {self.btc_24h:+.2f}% — 매수 쉬기")
+                elif self.btc_funding is not None and self.btc_funding < BTC_FUNDING_MIN:
+                    print(f"🧊 비트 펀딩비 {self.btc_funding:+.4f}% — 매수 쉬기")
                 else:
                     for market in self.coin_pool:
                         if available_slots <= 0:

@@ -31,6 +31,7 @@ cbot.py 운영 로직(ATR 추세추종 + 25일기한 + 목표1 50%매도)을 그
   trades = engine.get_trades()
 """
 import os
+import bisect
 import sqlite3
 import datetime
 from dataclasses import dataclass, field, asdict
@@ -179,6 +180,10 @@ class CBotBacktestConfig:
     regime_mode: str  = "btc24"
     regime_min: float = -1.0
     regime_ma: int    = 120   # breadth용(4시간봉 120개 = 20일)
+
+    # ★ 2026-10-18: 실전 BTC_FUNDING_MIN 동기화 — 봉이 끝난 시점의 직전 정산 비트 펀딩비(%/8h)가 미만이면 신규 매수 쉬기.
+    #   None이면 끔. 데이터는 backtestc/coin_global.db(intelligence/coin_global.py, 2025-09~).
+    funding_min: Optional[float] = 0.003
 
     # ★ 2026-10-07: 위험 기준 매수금액 실험(대장 결정, 사후분석 근거) — 0이면 끔(실전 현행:
     #   항상 base_buy_amt). 켜면 매수금액 = min(base_buy_amt, risk_per_trade ÷ 손절폭)으로
@@ -622,10 +627,24 @@ class CBotBacktestEngine:
         s = ((px > ma) & valid).sum(axis=1) / valid.sum(axis=1).where(lambda v: v >= 50) * 100
         return s.dropna().to_dict()
 
+    def _load_funding(self) -> tuple:
+        if self.config.funding_min is None:
+            return [], []
+        gdb = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "backtestc", "coin_global.db")
+        if not os.path.exists(gdb):
+            print("⚠️ coin_global.db 없음 — 펀딩비 필터 끔")
+            return [], []
+        c = sqlite3.connect(gdb)
+        rows = c.execute("SELECT ts, rate*100 FROM funding WHERE symbol='BTCUSDT' ORDER BY ts").fetchall()
+        c.close()
+        return [pd.Timestamp(t) for t, _ in rows], [v for _, v in rows]
+
     def run(self):
         end_date = self.config.end_date or datetime.date.today().isoformat()
         regime = self._build_regime()
+        f_ts, f_v = self._load_funding()
         self.regime_blocked = 0
+        self.funding_blocked = 0
 
         all_dates = set()
         for market in self.config.codes:
@@ -687,6 +706,12 @@ class CBotBacktestEngine:
             if candidates and rv is not None and rv < self.config.regime_min:
                 self.regime_blocked += 1
                 candidates = []
+            if candidates and f_ts:
+                i = bisect.bisect_right(f_ts, ts + pd.Timedelta(hours=4)) - 1   # 봉 종가 시점에 알 수 있는 직전 정산
+                if i >= 0 and ts + pd.Timedelta(hours=4) - f_ts[i] <= pd.Timedelta(hours=9) \
+                        and f_v[i] < self.config.funding_min:
+                    self.funding_blocked += 1
+                    candidates = []
 
             # ★ 2026-08-30: 정체교체 — 슬롯이 꽉 찼고, 정체 후보 중 가장
             #   점수 낮은 것보다 실제로 더 점수 높은 대안이 대기 중일
