@@ -40,6 +40,7 @@ def get_cbot_scenarios(base: CBotBacktestConfig) -> list:
         {"name": "stage0조기익절(10%)", "config": {**base.__dict__, "enable_stage0_partial": True, "stage0_partial_threshold": 0.10}},
         {"name": "stage0조기익절(12%)", "config": {**base.__dict__, "enable_stage0_partial": True, "stage0_partial_threshold": 0.12}},
         {"name": "stage0조기익절(15%)", "config": {**base.__dict__, "enable_stage0_partial": True, "stage0_partial_threshold": 0.15}},
+        {"name": "보호선 끔(10-18 전)", "config": {**base.__dict__, "enable_protect_line": False}},
     ]
 
 

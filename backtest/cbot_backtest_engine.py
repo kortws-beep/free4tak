@@ -166,6 +166,11 @@ class CBotBacktestConfig:
     enable_stage0_partial: bool = True
     stage0_partial_threshold: float = 0.10
 
+    # ★ 2026-10-18: 실전 stage0 보호선(+3% 찍은 뒤 +0.3%면 전량) 동기화. 4시간봉이라 실전보다 거칠게 걸림.
+    enable_protect_line: bool = True
+    protect_arm_rate: float   = 0.03
+    protect_floor_rate: float = 0.003
+
     # ★ 2026-10-07: 위험 기준 매수금액 실험(대장 결정, 사후분석 근거) — 0이면 끔(실전 현행:
     #   항상 base_buy_amt). 켜면 매수금액 = min(base_buy_amt, risk_per_trade ÷ 손절폭)으로
     #   손절 한 번 손실을 대략 risk_per_trade원에 맞춘다(손절폭 = ATR×2, 없으면 폴백 7%).
@@ -490,6 +495,11 @@ class CBotBacktestEngine:
             if current <= effective_stop:
                 label = "stage0트레일링" if used_stage0_trail else "손절"
                 self._simulate_sell(market, qty, current, f"{label}({rate:+.2%})", date_str)
+                return
+            if (self.config.enable_protect_line
+                    and tracker["peak_rate"] >= self.config.protect_arm_rate
+                    and rate <= self.config.protect_floor_rate):
+                self._simulate_sell(market, qty, current, f"보호선({rate:+.2%})", date_str)
                 return
 
         # ②-1 보유기한 초과 (stage==0, 25일)

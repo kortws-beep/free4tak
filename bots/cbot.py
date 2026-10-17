@@ -202,6 +202,11 @@ STAGE0_PARTIAL_THRESHOLD = 0.10
 #   같이 '최소 수익확보'만 하고 나머지는 트레일링으로 더 끌고 감.
 FIRST_TP_RATIO = 0.30
 
+# ★ 2026-10-18 대장 결정: stage0 보호선 — 한 번 +3% 찍은 뒤 +0.3%까지 내려오면 전량 매도.
+#   cbot_exit_sim 120일: +4.3만, 앞·뒤 절반 둘 다 +(3.9·0.4). +2~5% 찍고 손실로 끝나던 구간 대응.
+PROTECT_ARM_RATE   = 0.03
+PROTECT_FLOOR_RATE = 0.003
+
 
 def first_tp_qty(qty: float, price: float, ratio: float = FIRST_TP_RATIO, min_amt: float = 5_000) -> float:
     """1차 익절 매도 수량 — 판 쪽·남는 쪽 모두 업비트 최소주문금액 이상일 때만, 아니면 0(매도 안 함)."""
@@ -2159,6 +2164,23 @@ class CBot:
                 critical=True,
             )
             # ★ 10-17: 손절선이 매수가 위로 올라간 뒤 걸린 건 이익 — '손절'로 적으면 성적표 손절 수가 부풀려짐
+            if self.sell(market, qty, f"{'손절' if rate < 0 else '보호선'}({rate:+.2%})",
+                         sell_price=current, force_all=True):
+                if rate < 0:
+                    self.daily_loss_count += 1
+                    _update_state(daily_loss=self.daily_loss_count)
+                self.peak_tracker.pop(market, None)
+                self._check_daily_loss_limit()
+            return
+
+        # ②-0 stage0 보호선 — +3% 찍은 뒤 +0.3%로 내려오면 전량 (홀드는 손절처럼 제외)
+        if (stage == 0 and not is_held
+                and tracker["peak_rate"] >= PROTECT_ARM_RATE and rate <= PROTECT_FLOOR_RATE):
+            self.notify(
+                f"🛡️ 보호선 매도 {market} | {rate:+.2%}\n"
+                f"최고 {tracker['peak_rate']:+.2%} 찍은 뒤 +{PROTECT_FLOOR_RATE:.1%} 아래로",
+                critical=True,
+            )
             if self.sell(market, qty, f"{'손절' if rate < 0 else '보호선'}({rate:+.2%})",
                          sell_price=current, force_all=True):
                 if rate < 0:
