@@ -171,6 +171,15 @@ class CBotBacktestConfig:
     protect_arm_rate: float   = 0.03
     protect_floor_rate: float = 0.003
 
+    # ★ 2026-10-18: 장 판단 필터 — 값이 regime_min 미만이면 신규 매수 쉬기(매도는 그대로, 값 없으면 막지 않음).
+    #   "btc24"  비트 24시간 등락(%)  ← 실전 BTC_24H_MIN=-1(10-17~)과 동기화한 기본값
+    #   "combo"  (비트+이더) 70% · (솔+리플) 30% 가중 24시간 등락(%)
+    #   "breadth" 원화 전 코인 중 종가가 regime_ma봉 평균 위인 비율(%) — 주식 '20일선 위 비율'의 코인판
+    #   "none"   끔
+    regime_mode: str  = "btc24"
+    regime_min: float = -1.0
+    regime_ma: int    = 120   # breadth용(4시간봉 120개 = 20일)
+
     # ★ 2026-10-07: 위험 기준 매수금액 실험(대장 결정, 사후분석 근거) — 0이면 끔(실전 현행:
     #   항상 base_buy_amt). 켜면 매수금액 = min(base_buy_amt, risk_per_trade ÷ 손절폭)으로
     #   손절 한 번 손실을 대략 risk_per_trade원에 맞춘다(손절폭 = ATR×2, 없으면 폴백 7%).
@@ -594,8 +603,29 @@ class CBotBacktestEngine:
     # ----------------------------------------------------------
     # 실행
     # ----------------------------------------------------------
+    def _build_regime(self) -> dict:
+        """{봉 시각: 장 판단 값} — 백테스터 관례대로 그 봉 종가 기준."""
+        mode = self.config.regime_mode
+        if mode == "none":
+            return {}
+        if mode in ("btc24", "combo"):
+            w = {"KRW-BTC": 1.0} if mode == "btc24" else \
+                {"KRW-BTC": .35, "KRW-ETH": .35, "KRW-SOL": .15, "KRW-XRP": .15}
+            parts = [self._load_ohlcv(m)["close"].pct_change(6, fill_method=None) * 100 * k for m, k in w.items()]
+            s = pd.concat(parts, axis=1).dropna().sum(axis=1)
+            return s.to_dict()
+        df = pd.read_sql("SELECT code, date, close FROM daily_ohlcv", self.conn)
+        px = df.pivot_table(index="date", columns="code", values="close")
+        px.index = pd.to_datetime(px.index)
+        ma = px.rolling(self.config.regime_ma, min_periods=self.config.regime_ma).mean()
+        valid = ma.notna()
+        s = ((px > ma) & valid).sum(axis=1) / valid.sum(axis=1).where(lambda v: v >= 50) * 100
+        return s.dropna().to_dict()
+
     def run(self):
         end_date = self.config.end_date or datetime.date.today().isoformat()
+        regime = self._build_regime()
+        self.regime_blocked = 0
 
         all_dates = set()
         for market in self.config.codes:
@@ -653,6 +683,10 @@ class CBotBacktestEngine:
                     candidates.append((score, market, ind))
 
             candidates.sort(reverse=True)
+            rv = regime.get(ts)
+            if candidates and rv is not None and rv < self.config.regime_min:
+                self.regime_blocked += 1
+                candidates = []
 
             # ★ 2026-08-30: 정체교체 — 슬롯이 꽉 찼고, 정체 후보 중 가장
             #   점수 낮은 것보다 실제로 더 점수 높은 대안이 대기 중일
