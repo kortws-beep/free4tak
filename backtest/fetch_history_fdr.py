@@ -51,11 +51,10 @@ CREATE TABLE IF NOT EXISTS daily_flow (
 );
 
 CREATE TABLE IF NOT EXISTS market_meta (
-    code         TEXT PRIMARY KEY,
-    name         TEXT,
-    market       TEXT,
-    listed_date  TEXT,
-    last_updated TEXT
+    date          TEXT PRIMARY KEY,
+    kospi         REAL DEFAULT 0,
+    kosdaq        REAL DEFAULT 0,
+    market_status TEXT DEFAULT 'normal'
 );
 
 CREATE INDEX IF NOT EXISTS idx_ohlcv_date ON daily_ohlcv(date);
@@ -235,6 +234,30 @@ def fetch_one(conn: sqlite3.Connection, code: str,
 
 
 # ============================================================
+# 시장 국면 (market_meta) — 코스피·코스닥 일간 등락(%)
+# ★ 2026-10-18: 05-18 이후 아무도 안 채워서 멈춰 있었음(16:30 build_sector_db도 0일치 처리) → 매일 이어 채움.
+#   status 기준은 기존 577일치에서 역산: 코스피 ≤-3% stop · ≤-1.5% weak · 그 외 normal.
+# ============================================================
+def update_market_meta(conn: sqlite3.Connection, end: str, fdr=None) -> int:
+    fdr = fdr or _import_fdr()
+    last = conn.execute("SELECT MAX(date) FROM market_meta").fetchone()[0] or "2024-01-01"
+    start = (datetime.date.fromisoformat(last) - datetime.timedelta(days=10)).isoformat()
+    chg = {}
+    for sym in ("KS11", "KQ11"):
+        s = fdr.DataReader(sym, start, end)["Close"].pct_change() * 100
+        chg[sym] = {d.strftime("%Y-%m-%d"): round(v, 2) for d, v in s.dropna().items()}
+    rows = []
+    for d in sorted(chg["KS11"]):
+        if d <= last or d not in chg["KQ11"]:
+            continue
+        k = chg["KS11"][d]
+        rows.append((d, k, chg["KQ11"][d], "stop" if k <= -3 else "weak" if k <= -1.5 else "normal"))
+    conn.executemany("INSERT OR REPLACE INTO market_meta (date, kospi, kosdaq, market_status) VALUES (?,?,?,?)", rows)
+    conn.commit()
+    return len(rows)
+
+
+# ============================================================
 # 메인
 # ============================================================
 def main():
@@ -291,6 +314,13 @@ def main():
 
     cur = conn.execute("SELECT COUNT(*) FROM daily_ohlcv")
     print(f"📊 OHLCV 총 {cur.fetchone()[0]:,}건")
+
+    try:
+        n = update_market_meta(conn, args.end, fdr)
+        mx = conn.execute("SELECT MAX(date) FROM market_meta").fetchone()[0]
+        print(f"🧭 시장 국면(market_meta) 새 {n}일 · 마지막 {mx}")
+    except Exception as e:
+        print(f"⚠️ market_meta 갱신 실패: {e}")
 
     # 샘플 출력
     sample = conn.execute(

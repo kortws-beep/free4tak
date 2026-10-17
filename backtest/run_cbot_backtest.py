@@ -6,11 +6,9 @@ run_cbot_backtest.py — 코인봇 백테스트 실행 진입점
   python3 run_cbot_backtest.py --start 2026-04-06 --end 2026-05-09
 
 [주의]
-  coin_backtest.db는 backtestc/fetch_coin_data.py를 수동으로 돌려야
-  갱신됨(자동 스케줄 없음, 2026-09-12 기준 12일 정체 발견해 수동 갱신함).
-  한 번 호출당 4시간봉 200개(약 33일치)만 가져오지만, 여러 번 누적
-  실행하면 DB 전체 기간은 그보다 길어짐 — 실제 사용 가능 기간은
-  daily_ohlcv 테이블의 MIN/MAX date로 직접 확인할 것.
+  coin_backtest.db는 backtestc/update_coin_data.py가 매일 09:05(cron) 마지막 봉부터
+  이어 받음(10-18~, 그 전엔 수동이라 09-12·10-18 두 번 한 달씩 멈췄었음).
+  사용 가능 기간은 daily_ohlcv의 MIN/MAX date로 확인.
 """
 import os
 import sys
@@ -178,7 +176,8 @@ def main():
         import sqlite3
         conn = sqlite3.connect(args.db)
         rows = conn.execute(
-            "SELECT DISTINCT code FROM daily_ohlcv LIMIT ?", (args.max_codes,)
+            # 처음 수집된 순서 — 10-18 (code,date) 고유색인 뒤 DISTINCT가 알파벳순으로 바뀌어 대상이 달라지는 것 방지
+            "SELECT code FROM daily_ohlcv GROUP BY code ORDER BY MIN(rowid) LIMIT ?", (args.max_codes,)
         ).fetchall()
         conn.close()
         codes = [r[0] for r in rows]
