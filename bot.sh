@@ -3,12 +3,13 @@
 # bot.sh — 영암9 봇 통합 관리 스크립트
 # ============================================================
 # 사용법:
-#   ./bot.sh start        # 전체 시작
-#   ./bot.sh stop         # 전체 정지
-#   ./bot.sh restart      # 전체 재시작
+#   ./bot.sh start [봇]   # 봇 이름 없거나 all이면 전체, 있으면 그 봇만
+#   ./bot.sh stop [봇]
+#   ./bot.sh restart [봇]
 #   ./bot.sh status       # 전체 상태
-#   ./bot.sh log nbot     # 단타봇 실시간 로그
+#   ./bot.sh log daybot   # 단타봇 실시간 로그
 #   ./bot.sh log all      # 전체 실시간 로그
+#   모르는 봇 이름(오타 등)은 아무것도 안 하고 에러 — 예전엔 전체로 처리돼 "stop Cbot"이 8개 다 멈췄음(10-18 수정)
 # ============================================================
 
 # ★ 2026-09-29: sbot×sbo2 통합(대장 결정)으로 sbo2 의도적 정지 — 전체
@@ -23,56 +24,70 @@
 #   그건 수동실행 잔재 프로세스 청소용이라 무해(systemctl 쪽은 이름이
 #   정확히 yeongam9-youtube-live라 정상 동작).
 BOTS="sbot cbot daybot kiki sector dashboard lina youtube-live"
+KNOWN="$BOTS sbo2"     # 개별 지정만 되는 서비스(전체 목록엔 없음)
+
+# start/stop/restart 대상: 이름 없음·all → 전체($BOTS), 아는 이름 → 그 봇만, 그 외 → 에러로 종료
+pick_targets() {
+  if [ -z "$1" ] || [ "$1" = "all" ]; then
+    TARGETS="$BOTS"; SCOPE="전체"
+  elif [[ " $KNOWN " == *" $1 "* ]]; then
+    TARGETS="$1"; SCOPE="$1"
+  else
+    echo "❌ 모르는 봇 이름: '$1' — 아무것도 안 했어요. 가능: $KNOWN (또는 all)"
+    exit 1
+  fi
+}
 
 case "$1" in
 
   start)
-    echo "🚀 영암9 전체 시작..."
-    sudo systemctl daemon-reload
-    # ★ 수동 실행된 좀비 프로세스 정리
-    for bot in $BOTS; do
-      pkill -f "${bot}.py" 2>/dev/null && echo "  🧹 ${bot} 좀비 프로세스 정리"
-    done
-    sleep 1
-    for bot in $BOTS; do
+    pick_targets "$2"
+    echo "🚀 영암9 ${SCOPE} 시작..."
+    [ "$SCOPE" = "전체" ] && sudo systemctl daemon-reload   # 비밀번호 필요 — 개별 시작 땐 생략
+    for bot in $TARGETS; do
+      if [ "$(systemctl is-active yeongam9-${bot} 2>/dev/null)" = "active" ]; then
+        echo "  ✔️  yeongam9-${bot} 이미 실행 중"
+        continue
+      fi
+      # ★ 수동 실행된 좀비 프로세스 정리 — 서비스가 꺼져 있을 때만(돌고 있는 봇을 죽이지 않게)
+      pkill -f "${bot}.py" 2>/dev/null && echo "  🧹 ${bot} 좀비 프로세스 정리" && sleep 1
       sudo systemctl start yeongam9-${bot}
-      echo "  ▶️  yeongam9-${bot} 시작"
       sleep 1
+      if [ "$(systemctl is-active yeongam9-${bot} 2>/dev/null)" = "active" ]; then
+        echo "  ▶️  yeongam9-${bot} 시작"
+      else
+        echo "  ❌ yeongam9-${bot} 시작 실패 (journalctl -u yeongam9-${bot} -n 20)"
+      fi
     done
     echo "✅ 완료"
     ;;
 
   stop)
-    if [ -n "$2" ] && echo "$BOTS" | grep -qw "$2"; then
-      echo "🛑 $2 정지..."
-      sudo systemctl stop yeongam9-$2
-      echo "  ⏹  yeongam9-$2 정지"
-    else
-      echo "🛑 영암9 전체 정지..."
-      for bot in $BOTS; do
-        sudo systemctl stop yeongam9-${bot}
-        echo "  ⏹  yeongam9-${bot} 정지"
-      done
-    fi
+    pick_targets "$2"
+    echo "🛑 영암9 ${SCOPE} 정지..."
+    for bot in $TARGETS; do
+      sudo systemctl stop yeongam9-${bot}
+      echo "  ⏹  yeongam9-${bot} 정지"
+    done
     echo "✅ 완료"
     ;;
 
   restart)
-    if [ -n "$2" ] && echo "$BOTS" | grep -qw "$2"; then
+    pick_targets "$2"
+    if [ "$SCOPE" = "전체" ]; then
+      echo "🔄 영암9 전체 재시작..."
+      "$0" stop all
+      sleep 3
+      "$0" start all
+    else
       echo "🔄 $2 재시작..."
       sudo systemctl restart yeongam9-$2
       sleep 2
-      status=$(systemctl is-active yeongam9-$2 2>/dev/null)
-      if [ "$status" = "active" ]; then
+      if [ "$(systemctl is-active yeongam9-$2 2>/dev/null)" = "active" ]; then
         echo "  ✅ $2 재시작 완료"
       else
-        echo "  ❌ $2 재시작 실패"
+        echo "  ❌ $2 재시작 실패 (journalctl -u yeongam9-$2 -n 20)"
       fi
-    else
-      echo "🔄 영암9 전체 재시작..."
-      $0 stop
-      sleep 3
-      $0 start
     fi
     ;;
 
@@ -175,11 +190,12 @@ case "$1" in
     esac
     ;;
   *)
-    echo "사용법: $0 {start|stop|restart|status|log [bot]|today [bot]|enable|disable|git [msg]|push}"
+    echo "사용법: $0 {start|stop|restart [bot]|status|log [bot]|today [bot]|enable|disable|git [msg]|push}"
     echo ""
-    echo "  start         — 전체 봇 시작"
-    echo "  stop          — 전체 봇 정지"
-    echo "  restart       — 전체 봇 재시작"
+    echo "  start [bot]   — 봇 시작 (이름 없거나 all이면 전체)"
+    echo "  stop [bot]    — 봇 정지 (이름 없거나 all이면 전체)"
+    echo "  restart [bot] — 봇 재시작 (이름 없거나 all이면 전체)"
+    echo "                  봇: $KNOWN"
     echo "  status        — 봇별 실행 상태"
     echo "  log [bot]     — 실시간 로그 (all/sbot/sbo2/cbot/daybot/kiki/lina)"
     echo "  today [bot]   — 오늘 로그"
