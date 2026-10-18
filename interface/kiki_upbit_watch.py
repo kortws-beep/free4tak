@@ -123,13 +123,10 @@ def check_notices(st: dict, fetch, now: datetime.datetime) -> list:
         if w:
             sched[aid] = {"title": a["title"], "start": w[0].isoformat(), "end": w[1].isoformat(),
                           "reminded": sched.get(aid, {}).get("reminded", False)}
-        if first and (not w or w[1] <= now):
-            continue
-        if w and w[1] <= now:
+        if (first and not w) or (w and w[0] <= now):     # 이미 시작한 점검은 상태 스위치(check_status)가 맡음
             continue
         when = fmt_window(w) if w else "시간은 공지 확인"
-        tag = "진행 중" if w and w[0] <= now else "예정"
-        out.append(f"📢 **업비트 서버 점검 {tag}** — {a['title']}\n🕒 {when}\n"
+        out.append(f"📢 **업비트 서버 점검 예정** — {a['title']}\n🕒 {when}\n"
                    f"그동안 업비트 전체 이용 불가 → cbot 매매·손절 멈춤\n{a.get('html_url', '')}".rstrip())
     st["notices_init"] = True
     for aid in [k for k, v in sched.items() if datetime.datetime.fromisoformat(v["end"]) < now - datetime.timedelta(days=7)]:

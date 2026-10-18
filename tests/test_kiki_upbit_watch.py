@@ -44,6 +44,12 @@ class Notices(unittest.TestCase):
         edited = art(2, "서버 점검 안내 (10/19 02:00 ~)", ver="2026-10-17T00:00:00Z")
         self.assertEqual(len(W.check_notices(st, notices(edited), now)), 1)   # 수정되면 다시
 
+    def test_started_window_left_to_status_switch(self):
+        st = {}
+        out = W.check_notices(st, notices(art(2, "서버 점검 안내")), datetime.datetime(2026, 10, 19, 6, 30))
+        self.assertEqual(out, [])                                             # 02:00에 이미 시작 → 공지로는 안 알림
+        self.assertIn("2", st["schedule"])
+
     def test_reminder_once_one_hour_before(self):
         st = {}
         W.check_notices(st, notices(art(2, "서버 점검 안내")), datetime.datetime(2026, 10, 16, 12))
