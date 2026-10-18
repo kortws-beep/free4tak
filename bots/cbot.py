@@ -1436,6 +1436,7 @@ class CBot:
         #   디스코드로 알림을 보내 사람이 알아챌 수 있게 한다.
         consecutive_fail = 0
         alerted = False
+        fail_since = None
         while not stop_event.is_set():
             try:
                 async with websockets.connect(
@@ -1445,8 +1446,14 @@ class CBot:
                 ) as ws:
                     await ws.send(subscribe_msg)
                     print(f"✅ WebSocket 연결됨 ({len(markets)}개)")
+                    # ★ 2026-10-19: 끊김 알림만 있고 복구 알림이 없어(업비트 정기점검 02~08시) 대장이 로그를 열어봐야 했음
+                    if alerted:
+                        mins = (time.time() - fail_since) / 60 if fail_since else 0
+                        self.notify(f"✅ 업비트 실시간 시세 복구 — 약 {mins:.0f}분 끊겼었어 "
+                                    f"({consecutive_fail}회 실패 뒤), 손절·익절 감시 다시 정상")
                     consecutive_fail = 0
                     alerted = False
+                    fail_since = None
                     while not stop_event.is_set():
                         try:
                             # ★ 2026-09-03: timeout=60이면 stop_event가 켜져도
@@ -1467,6 +1474,7 @@ class CBot:
                             break
             except Exception as e:
                 consecutive_fail += 1
+                fail_since = fail_since or time.time()
                 print(f"⚠️ WebSocket 재연결 중({consecutive_fail}회 연속): {e}")
                 if consecutive_fail >= 20 and not alerted:
                     alerted = True
