@@ -17,7 +17,9 @@ cbot 본체와 섞이지 않게:
   · cbot이 이미 들고 있는 코인은 이 주머니가 사지 않고, 반대로 이 주머니가 든
     코인은 cbot이 사지 않는다(같은 코인 잔고가 섞이면 평균단가가 엉킴)
   · 손익은 cbot 당일손익·일손실 한도와 별개(trades가 아닌 dip_trades 테이블)
-  · 아직 안 산 슬롯 몫(25만×빈 슬롯)은 cbot이 쓰지 못하게 남겨 둔다(reserved_krw)
+  · 빈 슬롯 몫(25만)은 지금가가 매수선 3% 이내로 다가온 코인만 cbot이 쓰지 못하게 남겨 둔다(reserved_krw)
+    ★ 10-18 대장: "눌림목은 언제 올지 모르니까" — 예전엔 빈 슬롯 전부 상시 예약이라 BTC가 매수선까지 -6.9%
+      남은 상태에서 25만이 묶여 cbot 매수(최저 50만)가 막혔음
 끄기: .env에 DIP_SLEEVE_ENABLED=0
 """
 import datetime
@@ -32,6 +34,7 @@ TP = 0.08
 MAX_HOLD = 20
 TREND_MA = 200
 FEE = 0.0005
+RESERVE_NEAR = 0.03         # 지금가 ≤ 매수선 × (1+3%)일 때만 그 슬롯 몫을 cbot에서 떼어 둠
 CANDLE_TTL = 600            # 일봉 10분 캐시
 MIN_ORDER = 5_000
 BASE_URL = "https://api.upbit.com/v1"
@@ -93,6 +96,7 @@ class DipSleeve:
         except Exception as e:
             print(f"⚠️ 눌림목 상태 복구 실패: {e}")
         self._candles = {}      # {market: (ts, rows)}
+        self._near = {}         # {market: 매수선 3% 이내라 예약 중인지} — step()이 매 루프 갱신
         self._init_db()
 
     # 상태 질의 — cbot 본체가 쓰는 것
@@ -103,10 +107,10 @@ class DipSleeve:
         return bool(self.state.get(market, {}).get("held"))
 
     def reserved_krw(self) -> int:
-        """아직 안 산 슬롯 몫 — cbot이 이만큼은 남겨 둔다."""
+        """매수선 근처(3% 이내)인 빈 슬롯 몫 — cbot이 이만큼은 남겨 둔다."""
         if not self.enabled:
             return 0
-        return SLOT_KRW * sum(1 for m in DIP_COINS if not self.holds(m))
+        return SLOT_KRW * sum(1 for m in DIP_COINS if not self.holds(m) and self._near.get(m))
 
     # DB
     def _init_db(self):
@@ -232,8 +236,12 @@ class DipSleeve:
                 line.append(f"{coin} 일봉부족")
                 continue
             act = decide(st, ctx, px)
+            cp = cbot_positions.get(m)
+            self._near[m] = (not st.get("held") and not st.get("blocked") and ctx["trend_ok"]
+                             and st.get("no_buy_day") != ctx["day"]
+                             and not (cp and cp.get("qty", 0) * px >= MIN_ORDER)
+                             and px <= ctx["trig"] * (1 + RESERVE_NEAR))
             if act == "buy":
-                cp = cbot_positions.get(m)
                 if cp and cp.get("qty", 0) * px >= MIN_ORDER:
                     line.append(f"{coin} 신호(cbot 보유중→패스)")
                     continue
@@ -258,7 +266,8 @@ class DipSleeve:
                 line.append(f"{coin} 새고점대기")
             else:
                 gap = (ctx["trig"] / px - 1) * 100        # 지금가에서 몇 % 더 빠지면 매수인지(음수)
-                line.append(f"{coin} {'추세X' if not ctx['trend_ok'] else f'매수까지 {gap:+.1f}%'}")
+                line.append(f"{coin} {'추세X' if not ctx['trend_ok'] else f'매수까지 {gap:+.1f}%'}"
+                            + (f"({SLOT_KRW // 10_000}만 맡아둠)" if self._near.get(m) else ""))
         print("🪤 눌림목 | " + " · ".join(line))
         if acted:
             self._save(self.state)

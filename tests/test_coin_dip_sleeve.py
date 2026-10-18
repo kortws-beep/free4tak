@@ -145,17 +145,31 @@ class Step(unittest.TestCase):
     def test_buy_skip_when_cbot_holds_and_paused(self):
         bot = FakeBot({m: 89.0 for m in D.DIP_COINS}, {})
         s, store = sleeve(bot)
-        self.assertEqual(s.reserved_krw(), 1_000_000)
+        self.assertEqual(s.reserved_krw(), 0)              # 아직 시세 판단 전 — 예약 없음
         acted = s.step({"KRW-BTC": {"qty": 1000, "current": 89}}, krw=600_000, allow_buy=True)
         self.assertTrue(acted)
         bought = [o["market"] for o in bot.orders]
         self.assertEqual(bought, ["KRW-ETH", "KRW-XRP"])   # BTC=본체 보유, SOL=잔고 부족(60만→25만×2)
         self.assertEqual(s.held(), {"KRW-ETH", "KRW-XRP"})
-        self.assertEqual(s.reserved_krw(), 500_000)
+        self.assertEqual(s.reserved_krw(), 250_000)         # SOL만(매수선 아래, 잔고부족) — BTC는 본체 보유라 안 맡음
         self.assertTrue(store["dip"]["KRW-ETH"]["held"])
         bot2 = FakeBot({m: 89.0 for m in D.DIP_COINS}, {})
         s2, _ = sleeve(bot2)
         self.assertFalse(s2.step({}, krw=2_000_000, allow_buy=False)); self.assertEqual(bot2.orders, [])
+
+    def test_reserve_only_near_trigger(self):
+        # 매수선 90 — 95(5.3% 위)면 안 맡음, 92(2.2% 위)면 맡음, 매수선 3% 경계 92.7
+        bot = FakeBot({m: 95.0 for m in D.DIP_COINS}, {})
+        s, _ = sleeve(bot)
+        s.step({}, krw=0, allow_buy=False)
+        self.assertEqual(s.reserved_krw(), 0)
+        bot.prices = {m: 92.0 for m in D.DIP_COINS}
+        s.step({}, krw=0, allow_buy=False)
+        self.assertEqual(s.reserved_krw(), 1_000_000)
+        s.state["KRW-BTC"] = {"blocked": True, "exit_day": "2026-10-08"}   # 판 직후(새 고점 대기)는 살 수 없으니 안 맡음
+        s.step({}, krw=0, allow_buy=False)
+        self.assertEqual(s.reserved_krw(), 750_000)
+        self.assertEqual(bot.orders, [])
 
     def test_take_profit_sells_full_balance_and_logs(self):
         bot = FakeBot({"KRW-ETH": 98.0}, {"ETH": {"balance": 2500.0, "avg_buy_price": 90.0}})

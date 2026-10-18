@@ -29,7 +29,7 @@ class _Sess:
 
 def mk(now, ago, n=145):
     b = object.__new__(cbot.CBot)
-    b.session, b.btc_24h, b.notes = _Sess(now, ago, n), None, []
+    b.session, b.btc_24h, b.btc_funding, b.notes = _Sess(now, ago, n), None, None, []
     b.notify = lambda m, **k: b.notes.append(m)
     b.market_status, b.fear_greed, b.btc_rate = "normal", 50, 0.0
     b._is_night = lambda: False
@@ -63,6 +63,41 @@ class Btc24(unittest.TestCase):
         ok, _, why = b.check_buy_signal("KRW-A")
         self.assertIn("BTC 중단", why)
         b.btc_24h = -0.5
+        self.assertIn("BTC 중단", b.check_buy_signal("KRW-A")[2])
+
+
+class _FundSess:
+    def __init__(self, rate): self.rate, self.params = rate, None
+    def get(self, url, params=None, timeout=None):
+        self.params = params
+        if self.rate is None:
+            raise ConnectionError("down")
+        return _Resp([{"symbol": "BTCUSDT", "fundingRate": str(self.rate)}])
+
+
+class Funding(unittest.TestCase):
+    """10-18 대장 결정 — 바이낸스 비트 펀딩비(직전 정산) 0.003%/8h 미만이면 신규 매수 쉬기."""
+    def test_update_notify_and_fail_keeps(self):
+        b = mk(0, 0); b.session = _FundSess(0.00002)          # 0.002%
+        b._update_btc_funding()
+        self.assertAlmostEqual(b.btc_funding, 0.002)
+        self.assertEqual(b.session.params, {"symbol": "BTCUSDT", "limit": 1})
+        b._update_btc_funding()
+        self.assertEqual(len(b.notes), 1); self.assertIn("쉬기", b.notes[0])   # 들어갈 때 한 번만
+        b.session.rate = 0.0001                                # 0.01% 회복
+        b._update_btc_funding()
+        self.assertIn("재개", b.notes[-1])
+        b.session.rate = None                                  # 조회 실패 → 기존값 유지
+        b._update_btc_funding()
+        self.assertAlmostEqual(b.btc_funding, 0.01)
+
+    def test_buy_gate(self):
+        b = mk(0, 0); b.btc_funding = 0.0025
+        ok, _, why = b.check_buy_signal("KRW-A")
+        self.assertFalse(ok); self.assertIn("펀딩비", why)
+        b.btc_funding, b.market_status = None, "stop"         # 값 없으면 막지 않음
+        self.assertIn("BTC 중단", b.check_buy_signal("KRW-A")[2])
+        b.btc_funding = 0.004
         self.assertIn("BTC 중단", b.check_buy_signal("KRW-A")[2])
 
 
