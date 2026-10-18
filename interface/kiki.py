@@ -137,6 +137,7 @@ from kiki_monitor import (
     proactive_insight_provider,
     proactive_daily_review,
 )
+from kiki_upbit_watch import upbit_maintenance_watcher
 
 
 load_dotenv()
@@ -1006,6 +1007,7 @@ async def on_ready():
     asyncio.ensure_future(proactive_watch_monitor())
     asyncio.ensure_future(proactive_insight_provider())
     asyncio.ensure_future(proactive_daily_review())
+    asyncio.ensure_future(upbit_maintenance_watcher(bot, CHANNEL_ID))   # ★ 10-19 업비트 점검 미리/시작/끝 알림
 
     ch = bot.get_channel(CHANNEL_ID)
     if ch:

@@ -17,3 +17,7 @@ lina_bot/*_state.json
 lina_bot/xxx.py
 lina_bot/*.db
 logs/
+
+# 키키 업비트 점검 알림 상태(런타임)
+kiki_upbit_watch.json
+kiki_upbit_watch.json.tmp
