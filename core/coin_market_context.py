@@ -120,6 +120,28 @@ def fetch_headlines(session, hours: float = 6, limit: int = 6) -> list:
     return items[:limit]
 
 
+def translate_headlines(llm, model: str, headlines: list) -> list:
+    """해외 뉴스 제목을 한국어로(10-19 대장: '한글로 해줘'). 한 번 호출, 실패·개수 불일치면 원문 그대로."""
+    titles = [t for _, t, _ in headlines]
+    if llm is None or not titles:
+        return titles
+    prompt = ("아래 코인 관련 해외 뉴스 제목을 자연스러운 한국어로 번역해. 같은 번호·같은 순서로 "
+              "'번호. 번역' 형식만 한 줄씩 답해(설명 금지). 코인 이름·고유명사는 한국에서 쓰는 표기로.\n"
+              + "\n".join(f"{i}. {t}" for i, t in enumerate(titles, 1)))
+    try:
+        res = llm.messages.create(model=model, max_tokens=800, messages=[{"role": "user", "content": prompt}])
+        text = "".join(getattr(b, "text", "") for b in getattr(res, "content", []))
+        got = {}
+        for line in text.splitlines():
+            m = re.match(r"\s*(\d+)[.)]\s*(.+)", line)
+            if m:
+                got[int(m.group(1))] = m.group(2).strip()
+        return [got.get(i, t) for i, t in enumerate(titles, 1)]
+    except Exception as e:
+        print(f"⚠️ 뉴스 제목 번역 실패: {e}")
+        return titles
+
+
 def ai_judgement(llm, model: str, summary: str, headlines: list) -> str:
     """가격 숫자 + 헤드라인으로 '이벤트성 순간 급락 vs 추세적 하락' 한 줄(참고용)."""
     if llm is None:

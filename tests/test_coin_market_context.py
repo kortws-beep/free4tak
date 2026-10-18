@@ -44,6 +44,20 @@ class Ctx(unittest.TestCase):
         self.assertEqual(C.ai_judgement(llm, "m", "BTC -3%", []), "이벤트성 순간 급락으로 보임")
         self.assertEqual(C.ai_judgement(None, "m", "x", []), "")
 
+    def test_translate_headlines(self):
+        heads = [(dt.datetime(2026, 10, 18, 18, 30), "The White House's crypto chief departs", "CD"),
+                 (dt.datetime(2026, 10, 18, 16, 0), "Latvia eyes crypto tax payments", "CD")]
+        reply = "1. 백악관 암호화폐 책임자 사임\n2. 라트비아, 암호화폐 세금 납부 검토"
+        llm = types.SimpleNamespace(messages=types.SimpleNamespace(
+            create=lambda **k: types.SimpleNamespace(content=[types.SimpleNamespace(text=reply)])))
+        self.assertEqual(C.translate_headlines(llm, "m", heads), ["백악관 암호화폐 책임자 사임", "라트비아, 암호화폐 세금 납부 검토"])
+        half = types.SimpleNamespace(messages=types.SimpleNamespace(   # 한 줄만 번역되면 나머지는 원문
+            create=lambda **k: types.SimpleNamespace(content=[types.SimpleNamespace(text="1. 백악관 책임자 사임")])))
+        self.assertEqual(C.translate_headlines(half, "m", heads)[1], "Latvia eyes crypto tax payments")
+        boom = types.SimpleNamespace(messages=types.SimpleNamespace(create=lambda **k: 1 / 0))
+        self.assertEqual(C.translate_headlines(boom, "m", heads)[0], "The White House's crypto chief departs")
+        self.assertEqual(C.translate_headlines(None, "m", heads)[0], "The White House's crypto chief departs")
+
 
 if __name__ == "__main__":
     unittest.main()

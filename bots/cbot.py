@@ -2432,7 +2432,9 @@ class CBot:
             detail += ("\n🏷️ 털린 코인 업비트 경보: " + (", ".join(flagged) if flagged else "없음(개별 이벤트 표시 없음)"))
         heads = cmc.fetch_headlines(self.session, hours=max(hours, 4) + 2)
         if heads:
-            detail += "\n📰 " + "\n📰 ".join(f"{t:%H:%M}UTC {title[:70]}" for t, title, _ in heads[:4])
+            ko = cmc.translate_headlines(getattr(self, "llm", None), getattr(self, "model", ""), heads[:4])
+            kst = datetime.timedelta(hours=9)
+            detail += "\n📰 " + "\n📰 ".join(f"{t + kst:%H:%M} {title[:70]}" for (t, _, _), title in zip(heads[:4], ko))
         ai = cmc.ai_judgement(getattr(self, "llm", None), getattr(self, "model", ""),
                               detail.splitlines()[0], heads)
         if ai:
