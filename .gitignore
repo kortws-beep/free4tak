@@ -21,3 +21,7 @@ logs/
 # 키키 업비트 점검 알림 상태(런타임)
 kiki_upbit_watch.json
 kiki_upbit_watch.json.tmp
+
+# 장중 하락 확대 감지 상태(런타임)
+intraday_guard.json
+intraday_guard.json.tmp

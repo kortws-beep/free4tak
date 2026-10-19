@@ -77,6 +77,7 @@ from sbot_db       import SwingDB
 from risk_manager  import RiskManager
 import candidate_pool as _cpool   # sbot×sbo2 통합 — 모멘텀/추세/완화/유튜브 소스
 import market_regime              # ★ 2026-10-12 시장 국면(20일선 위 종목 비율)
+from intraday_guard import IntradayGuard   # ★ 2026-10-19 장중 하락 확대 감지
 try:
     from account_sync import sync_positions as _sync_positions
 except ImportError:
@@ -378,6 +379,7 @@ class SBot:
             acnt  =os.getenv("KIS_ACNT_PRDT_CD2"),
         )
         self.notifier  = Notifier(name="sbot")
+        self._intraday_guard = IntradayGuard(self.api)
         self.strategy  = SwingStrategy()
         self.ai        = SwingAnalyzer()
         self.db        = SwingDB()
@@ -1371,6 +1373,14 @@ class SBot:
         self._market_breadth()
         if getattr(self, "_pause_reason", ""):
             print(f"🧭 [SWING] {self._pause_reason} — 신규매수 쉬기")
+            return
+
+        # ★ 2026-10-19 대장 결정 — 장중 하락 확대 감지(core/intraday_guard.py)가 켜지면 그날 남은 시간 신규매수 쉬기
+        guard, new = self._intraday_guard.check(today_str(), now_t)
+        if guard:
+            print(f"📉 [SWING] {guard} — 신규매수 쉬기")
+            if new:
+                self._notify(f"📉 {guard} → 오늘 남은 시간 신규매수 쉬기(보유분 매도·손절은 그대로)", critical=True)
             return
 
         for cand in buyable:
