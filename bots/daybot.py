@@ -184,6 +184,10 @@ NEW_BUY_END_TIME = os.getenv("DAYBOT_NEW_BUY_END", "0940").strip() or "0940"
 #   장에선 추격매수가 본전~손실 → 그런 날은 매수금 절반(멈추면 기회까지 놓쳐서 절반으로).
 #   끄려면 .env에 DAYBOT_WEAK_MARKET_RATIO=1
 WEAK_MARKET_RATIO = float(os.getenv("DAYBOT_WEAK_MARKET_RATIO", "0.5") or 0.5)
+# ★ 2026-10-19 대장 결정(SCENARIOS 6-1): 검색식 신호 전부·타점 조정·매도규칙 45개·섹터 눌림까지 하락장 2주 내내 마이너스,
+#   daybot 하락장 PF 0.40(산 날 기준) → sbot처럼 전날 국면 35% 미만이면 신규매수 쉬기. 후보는 '하락장쉬기'로 계속 기록
+#   (상승장 오면 다시 검증용), 보유분 매도는 그대로. 끄려면 .env에 DAYBOT_PAUSE_BELOW=0
+PAUSE_BELOW_PCT = float(os.getenv("DAYBOT_PAUSE_BELOW", "35") or 0)
 # ★ 2026-10-12 대장 결정 — 시드 300만 기준 일손실 한도 -15만(5%). 오늘 실현손익이 이 아래면
 #   그날 신규매수만 멈춤(보유 종목 손절·트레일링은 계속), 다음 날 자동 해제. 너무 작게 잡으면
 #   민감하게 멈춰 기회를 놓친다는 대장 판단으로 5%.
@@ -612,11 +616,18 @@ class DayBot:
             self._regime = (today, b)
             if b is not None:
                 msg = (f"📏 [daybot] 시장 국면 {b:.0f}% ({cur[0]} 종가, 20일선 위 종목 비율) — "
-                       + ("정상 매수" if market_regime.is_strong(b) or WEAK_MARKET_RATIO >= 1
+                       + (f"하락장(< {PAUSE_BELOW_PCT:.0f}%) → 오늘 신규매수 쉬기(후보 기록·보유분 매도는 그대로)"
+                          if self._down_market(b)
+                          else "정상 매수" if market_regime.is_strong(b) or WEAK_MARKET_RATIO >= 1
                           else f"약한 장 → 매수금 {WEAK_MARKET_RATIO:.0%}"))
                 print(msg)
                 self._scan_notifier.send(msg, critical=False)  # ★ 2026-10-08 대장 지정 — 산야로
         return self._regime[1]
+
+    @staticmethod
+    def _down_market(breadth) -> bool:
+        """전날 국면이 하락장 기준 미만이면 True — 국면을 못 구했거나 기준 0(끔)이면 막지 않음."""
+        return PAUSE_BELOW_PCT > 0 and breadth is not None and breadth < PAUSE_BELOW_PCT
 
     def _do_buy(self, code: str, name: str, price: float, source_tier: str,
                 is_last_slot: bool = False) -> bool:
@@ -1448,6 +1459,13 @@ class DayBot:
                 self.db.log_candidate(code, self._name(code), tier, price, chg,
                                        ask_bid_ratio=hoga.get("ask_bid_ratio", 0),
                                        skip_reason="호가비율미달",
+                                       raw_market_data=mdata, raw_hoga_data=hoga)
+                continue
+            if self._down_market(self._market_breadth()):
+                print(f"⏭️ [daybot] {code} 패스 — 하락장 쉬기(국면 {self._regime[1]:.0f}% < {PAUSE_BELOW_PCT:.0f}%)")
+                self.db.log_candidate(code, self._name(code), tier, price, chg,
+                                       ask_bid_ratio=hoga.get("ask_bid_ratio", 0),
+                                       skip_reason="하락장쉬기",
                                        raw_market_data=mdata, raw_hoga_data=hoga)
                 continue
             self.db.log_candidate(code, self._name(code), tier, price, chg,

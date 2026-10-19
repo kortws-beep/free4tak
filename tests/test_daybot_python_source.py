@@ -79,6 +79,7 @@ class NewBuyCutoff(unittest.TestCase):
         b.db = type("D", (), {"log_candidate": lambda self, *a, **k: None,
                               "get_today_realized": lambda self: 0})()
         b._do_buy = lambda code, name, price, tier, **k: bought.append(code)
+        b._market_breadth = lambda: None          # 국면 모름 → 하락장 쉬기 안 걸림(10-19)
         return b
 
     def test_no_buy_after_cutoff(self):
@@ -94,6 +95,27 @@ class NewBuyCutoff(unittest.TestCase):
             self._scan_bot(bought)._run_candidate_scan_and_maybe_buy()
             self.assertEqual(bought, [])
             self.assertEqual(daybot.NEW_BUY_END_TIME, "0940")
+        finally:
+            daybot.now_hhmm, daybot.get_all_positions = old
+
+    def test_down_market_skips_buy_but_logs(self):
+        # 10-19 대장 결정 — 전날 국면 35% 미만이면 신규매수 쉬기, 후보는 '하락장쉬기'로 기록
+        old = daybot.now_hhmm, daybot.get_all_positions
+        daybot.get_all_positions = None
+        try:
+            daybot.now_hhmm = lambda: "0930"
+            bought, logged = [], []
+            b = self._scan_bot(bought)
+            b._market_breadth = lambda: 24.4
+            b._regime = ("2026-10-19", 24.4)
+            b.db = type("D", (), {"log_candidate": lambda self, *a, **k: logged.append(k.get("skip_reason")),
+                                  "get_today_realized": lambda self: 0})()
+            b._run_candidate_scan_and_maybe_buy()
+            self.assertEqual(bought, [])
+            self.assertIn("하락장쉬기", logged)
+            b._market_breadth = lambda: 40.0
+            b._run_candidate_scan_and_maybe_buy()
+            self.assertEqual(bought, ["111110"])
         finally:
             daybot.now_hhmm, daybot.get_all_positions = old
 
