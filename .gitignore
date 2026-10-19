@@ -25,3 +25,7 @@ kiki_upbit_watch.json.tmp
 # 장중 하락 확대 감지 상태(런타임)
 intraday_guard.json
 intraday_guard.json.tmp
+
+# sbot 탈출 감시 상태(런타임)
+sbot_exit_watch.json
+sbot_exit_watch.json.tmp
