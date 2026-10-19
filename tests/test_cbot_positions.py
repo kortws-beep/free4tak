@@ -103,6 +103,12 @@ class CbotMinBuy(unittest.TestCase):
         amt, why, stop = self._plan(400_000, 10**9)                            # 현금 40만
         self.assertEqual((amt, stop), (0, True)); self.assertIn("가용현금", why)
         self.assertEqual(self._plan(700_000, 10**9, last=True)[0], 686_000)    # 마지막 슬롯 잔액
+        # 10-19 대장 — 마지막 슬롯은 현금이 50만 밑이어도 남은 금액으로 삼(손절폭 축소로 밑이 된 건 여전히 안 삼)
+        self.assertEqual(self._plan(460_927, 10**9, last=True), (451_708, "", False))
+        amt, why, _ = self._plan(460_927, 300_000, last=True)
+        self.assertEqual(amt, 0); self.assertIn("변동성", why)
+        self.assertEqual(self._plan(4_000, 10**9, last=True)[0], 0)            # 업비트 최소주문 미만은 못 삼
+        self.assertEqual(self._plan(460_927, 10**9, last=False)[0], 0)         # 마지막 슬롯 아니면 그대로 50만 최저
 
 
 class CbotLossLimitPause(unittest.TestCase):

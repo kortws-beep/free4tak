@@ -1634,15 +1634,18 @@ class CBot:
         amt = min(BUY_1ST_AMT, int(krw_cbot * 0.98)) if is_last_slot else BUY_1ST_AMT
         if krw_cbot < amt:                       # 눌림목 몫까지 쓰지 않게
             amt = int(krw_cbot * 0.98)
-        if amt < CBOT_MIN_BUY_AMT:               # 현금 부족 — 다음 코인도 같은 현금이라 루프 종료
+        # ★ 2026-10-19 대장: "최종 금액이 50만 이하라도 3슬롯이 안 찼으면 마지막 금액으로 매수" — 마지막 슬롯의
+        #   현금 부족만 업비트 최소주문까지 허용(손절폭 축소로 50만 밑이 된 건 10-09 결정대로 계속 안 삼)
+        floor = MIN_ORDER_AMT if is_last_slot else CBOT_MIN_BUY_AMT
+        if amt < floor:                          # 현금 부족 — 다음 코인도 같은 현금이라 루프 종료
             return 0, (f"가용현금 {krw_cbot:,.0f}원(눌림목 몫 제외) → {amt:,}원 < "
-                       f"최저 {CBOT_MIN_BUY_AMT:,}원"), True
+                       f"최저 {floor:,}원"), True
         full = amt
         amt = self._risk_sized_amount(market, amt)
         if amt < full:
             print(f"  📏 {market} 손절폭 기준 매수금액 {full:,}→{amt:,}원 "
                   f"(손절 1회 손실 약 {RISK_PER_TRADE:,}원)")
-        if amt < CBOT_MIN_BUY_AMT:               # 변동성이 커서 줄어든 것 — 다른 코인은 될 수 있음
+        if amt < full and amt < CBOT_MIN_BUY_AMT:   # 변동성이 커서 줄어든 것 — 다른 코인은 될 수 있음
             return 0, f"손절폭이 커서 {amt:,}원 < 최저 {CBOT_MIN_BUY_AMT:,}원(변동성 큼)", False
         return amt, "", False
 
