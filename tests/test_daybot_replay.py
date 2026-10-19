@@ -29,9 +29,22 @@ class Simulate(unittest.TestCase):
     def test_trailing_tight_and_floor(self):
         d = [("2026-10-08", [bar("091000", E), bar("091100", 10300, 10300, 10200),     # +3% → 트레일링 시작
                              bar("091200", 10250, 10350, 10200), bar("091300", 10100, 10150, 10100)])]
-        r = R.simulate(d, "091000", E, R.CURRENT)
+        old = R.Rule(tp=2.5, partial=0)                                                   # 10-12 전 규칙
+        r = R.simulate(d, "091000", E, old)
         self.assertEqual(r["reason"], "트레일링")
         self.assertAlmostEqual(r["ret"], 10150 * (1 - R.SLIP) / 10000 - 1 - R.COST)   # max(10350×0.985, 10100)=10194.75 > 고가 10150
+        self.assertEqual(R.simulate(d, "091000", E, R.CURRENT)["reason"], "보유중")       # 현행(+5%)은 +3%로 시작 안 함
+
+    def test_current_partial_then_trail(self):
+        # 10-12 실전: +5% 도달 때 30% 익절, 나머지는 고점 -2%(고점 수익 4.5% 초과라 넓은 폭)
+        d = [("2026-10-08", [bar("091000", E), bar("091100", 10500, 10500, 10400),
+                             bar("091200", 10650, 10700, 10600), bar("091300", 10450, 10480, 10400)])]
+        r = R.simulate(d, "091000", E, R.CURRENT)
+        self.assertEqual((r["reason"], r["exit_time"]), ("트레일링", "091300"))
+        tp_gain = 1.05 * (1 - R.SLIP) - 1
+        rest = 10480 * (1 - R.SLIP) / 10000 - 1                                           # max(10700×0.98, 10100)=10486 > 고가 10480
+        self.assertAlmostEqual(r["ret"], 0.3 * tp_gain + 0.7 * rest - R.COST)
+        self.assertIn("30%선익절", R.CURRENT.label())
 
     def test_hold_limit_and_grace(self):
         flat = [bar("090000", 9900), bar("100000", 9900)]

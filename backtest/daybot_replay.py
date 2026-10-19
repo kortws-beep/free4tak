@@ -44,7 +44,8 @@ OBS_TABLES = (("leader_obs", "주도주"), ("danta_obs", "단타000"), ("tml_obs
 @dataclass(frozen=True)
 class Rule:
     stop: float = -3.5          # 손절(%)
-    tp: float = 2.5             # 이만큼 오르면 트레일링 시작
+    tp: float = 5.0             # 이만큼 오르면 트레일링 시작(10-12 실전 2.5→5 동기화, 10-19)
+    partial: float = 0.3        # tp 도달 때 이 비율은 tp 가격에 바로 익절(10-12 실전 30%, 0=안 씀)
     tight: float = 1.5          # 고점 수익 widen_at 이하일 때 트레일링 폭
     wide: float = 2.0           # 그 위일 때 폭
     widen_at: float = 4.5
@@ -60,6 +61,7 @@ class Rule:
 
     def label(self) -> str:
         return (f"손절{self.stop:g} 트레일 +{self.tp:g}→{self.tight:g}/{self.wide:g}"
+                + (f" {self.partial:.0%}선익절" if self.partial else "")
                 + (f" 시초유예{self.grace}분" if self.grace else "")
                 + (f" {self.pm_from[:2]}시후+{self.pm_take:g}%정리" if self.pm_take else "")
                 + (f" {self.eod[:2]}:{self.eod[2:4]}당일청산" if self.eod else ""))
@@ -143,9 +145,13 @@ def simulate(days: list, entry_time: str, entry_price: float, rule: Rule) -> dic
     entry = entry_price * (1 + SLIP)
     stop_px = entry * (1 + rule.stop / 100)
     peak, held = None, 0
+    tp_gain = (1 + rule.tp / 100) * (1 - SLIP) - 1          # 부분익절분 수익(tp 가격 체결 가정)
 
     def done(d, t, px, reason):
-        return {"exit_date": d, "exit_time": t, "ret": px * (1 - SLIP) / entry - 1 - COST, "reason": reason}
+        gain = px * (1 - SLIP) / entry - 1
+        if peak is not None and rule.partial:
+            gain = rule.partial * tp_gain + (1 - rule.partial) * gain
+        return {"exit_date": d, "exit_time": t, "ret": gain - COST, "reason": reason}
     last = None
     for di, (d, bars) in enumerate(days):
         if di > 0:
@@ -436,7 +442,8 @@ def main():
     print("\n■ 2. 매도 규칙 비교 (같은 신호 전부, 100만씩)")
     grid = []
     for stop, (tp, tight, wide, widen), grace in itertools.product(
-            (-3.5, -4.5, -5.0, -6.0, -7.0), ((2.5, 1.5, 2.0, 4.5), (3.0, 2.0, 3.0, 6.0), (4.0, 2.5, 3.5, 8.0)),
+            (-3.5, -4.5, -5.0, -6.0, -7.0),
+            ((5.0, 1.5, 2.0, 4.5), (2.5, 1.5, 2.0, 4.5), (3.0, 2.0, 3.0, 6.0), (4.0, 2.5, 3.5, 8.0)),
             (0, 10)):
         rule = replace(CURRENT, stop=stop, tp=tp, tight=tight, wide=wide, widen_at=widen, grace=grace)
         res = base if rule == CURRENT else run_signals(store, signals, rule)
