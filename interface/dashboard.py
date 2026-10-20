@@ -18,6 +18,7 @@ dashboard.py — 영암9 통합 대시보드 (Flask + 모바일)
   - 긴급 전봇 중단/재개 버튼
   - 일일 손실 한도 설정
   - /lina — 리나 등록종목 모바일 보기 + 전량 매도/해제 버튼(PIN)(2026-10-20)
+  - /feed — 키키·리나·산야 메시지 모아보기(2026-10-20)
 ================================================================
 """
 import os
@@ -457,6 +458,19 @@ def api_lina_act():
     import lina_watch_view
     d = request.get_json(silent=True) or {}
     return jsonify(lina_watch_view.act(str(d.get("key", "")), str(d.get("action", "")), str(d.get("pin", ""))))
+
+
+@app.route("/feed")
+def feed_page():
+    """키키·리나·산야 메시지 모아보기(2026-10-20)"""
+    import discord_feed
+    return discord_feed.HTML
+
+
+@app.route("/api/feed")
+def api_feed():
+    import discord_feed
+    return jsonify(discord_feed.build())
 
 
 @app.route("/api/performance")
