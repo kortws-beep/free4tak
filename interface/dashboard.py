@@ -17,6 +17,7 @@ dashboard.py — 영암9 통합 대시보드 (Flask + 모바일)
   - sector_monitor 테마 TOP5
   - 긴급 전봇 중단/재개 버튼
   - 일일 손실 한도 설정
+  - /lina — 리나 등록종목 모바일 보기(2026-10-20)
 ================================================================
 """
 import os
@@ -435,6 +436,19 @@ def api_set_limit():
     limit = int(data.get("limit", 266000))
     ok    = set_daily_loss_limit(limit)
     return jsonify({"ok": ok, "msg": f"✅ 한도 {limit:,}원 설정 완료"})
+
+
+@app.route("/lina")
+def lina_page():
+    """리나 등록종목 모바일 보기(2026-10-20)"""
+    import lina_watch_view
+    return lina_watch_view.HTML
+
+
+@app.route("/api/lina")
+def api_lina():
+    import lina_watch_view
+    return jsonify(lina_watch_view.build())
 
 
 @app.route("/api/performance")
