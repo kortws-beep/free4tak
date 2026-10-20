@@ -269,6 +269,15 @@ BUY_SCORE_MIN    = 45             # 후보 최소 점수
 BUY_SCORE_ENTER  = 85             # 매수 진입 기준점 (★2026-09-19: 백테스트 재확인 — 75→85가 +28.71%→+41.58%로 뚜렷이 우수, 07/17에 이미 한번 올렸던 값이 어느 시점에 70으로 되돌아가있던 것 재수정)
 LOOP_SLEEP       = 60
 POOL_SIZE        = 100
+NEW_GROUP_NAMES  = ("new", "신규추천", "신규", "new추천")
+SUB_GROUP_NAMES  = ("sub", "서브", "고정")      # ★ 10-21 순환 섹터 대표 고정 그룹
+
+
+def merge_groups(new: list, sub: list) -> tuple:
+    """new 순서 그대로 + new에 없는 sub를 뒤에 → (풀 목록, sub에만 있는 종목 집합)."""
+    seen = set(new)
+    extra = [c for c in sub if c not in seen and not seen.add(c)]
+    return list(new) + extra, set(extra)
 # ★ 2026-09-03: 매수 직후 한투 잔고 정산지연 동안 수동매도 오판 방지
 #   (sbo2의 BUY_SYNC_GUARD_SEC와 동일 값/의도)
 BUY_SYNC_GUARD_SEC = 90
@@ -449,6 +458,7 @@ class SBot:
         self.market_rate       = 0.0
         self.daily_loss_count  = 0
         self.new_codes_list    = []
+        self.sub_codes         = set()
         self.code_tag_map      = {}   # {code: 검색식명} buy_tag 추적용
         self._last_market_check = 0
         self._last_megacap_check = 0
@@ -557,24 +567,28 @@ class SBot:
     # new 그룹 종목 조회
     # ============================================================
     def _load_new_codes(self):
-        """한투 관심그룹 'new'에서 신규 추천 종목 로딩"""
+        """한투 관심그룹 'new'(+ 'sub')에서 종목 로딩.
+        ★ 2026-10-21 대장: "NEW가 많아지면 버거우니 고정으로 둘 관심그룹을 하나 더 — SUB". 반도체가 쉴 때
+          도는 섹터(2차전지·조선·건설·화장품·금융) 대표주를 고정으로 두는 그룹(SCENARIOS 7-3). new와 똑같이
+          대우(풀·new 가산점), 매수 기록 태그만 'sub'로 구분(나중에 성적 따로 보려고). sub 그룹 없으면 new만."""
         hts_id = os.getenv("KIS_HTS_ID2", os.getenv("KIS_HTS_ID", ""))
         if not hts_id:
             return
         groups = self.api.get_watchlist_groups(hts_id)
-        target = next(
-            ((gc, gn) for gc, gn in groups.items()
-             if gn.lower() in ("new", "신규추천", "신규", "new추천")),
-            None,
-        )
-        if not target:
+        found = {kind: next(((gc, gn) for gc, gn in groups.items() if gn.lower() in names), None)
+                 for kind, names in (("new", NEW_GROUP_NAMES), ("sub", SUB_GROUP_NAMES))}
+        if not found["new"]:
             print("  ⚠️ 'new' 관심그룹 없음")
             return
-        grp_code, grp_name = target
-        print(f"  🆕 new그룹 발견: [{grp_code}]{grp_name}")
-        stocks = self.api.get_watchlist_stocks(grp_code, hts_id, self.code_name_map)
-        self.new_codes_list = [c for c, _ in stocks]
-        print(f"  🆕 new그룹 종목: {len(self.new_codes_list)}개")
+        loaded = {}
+        for kind, target in found.items():
+            if not target:
+                continue
+            grp_code, grp_name = target
+            stocks = self.api.get_watchlist_stocks(grp_code, hts_id, self.code_name_map)
+            loaded[kind] = [c for c, _ in stocks]
+            print(f"  🆕 {kind}그룹 [{grp_code}]{grp_name}: {len(loaded[kind])}개")
+        self.new_codes_list, self.sub_codes = merge_groups(loaded.get("new", []), loaded.get("sub", []))
 
     # ============================================================
     # 종목 풀 조회
@@ -592,7 +606,7 @@ class SBot:
             self._load_new_codes()
             for nc in self.new_codes_list:
                 if nc not in self.code_tag_map:
-                    self.code_tag_map[nc] = "expert"  # new그룹=전문가추천
+                    self.code_tag_map[nc] = "sub" if nc in self.sub_codes else "expert"  # new그룹=전문가추천
             result = self.new_codes_list[:POOL_SIZE]
             print(f"🎯 스윙 종목 풀(KIS new): {len(result)}개")
             return result
@@ -900,6 +914,7 @@ class SBot:
         self._tech_cache       = {}
         self._flow_cache       = {}
         self.new_codes_list    = []
+        self.sub_codes         = set()
         self.code_tag_map      = {}   # {code: 검색식명} buy_tag 추적용
         self.atr_cache         = {}
         self.api._mkt_cache    = {}

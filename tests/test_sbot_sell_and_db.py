@@ -226,5 +226,28 @@ class SbotPauseDownMarket(unittest.TestCase):
             sbot.market_regime.latest = old
 
 
+class SubGroup(unittest.TestCase):
+    """★ 10-21 관심그룹 SUB — new와 합치되 중복 빼고, sub에만 있는 종목은 따로 표시."""
+    def test_merge(self):
+        pool, only = sbot.merge_groups(["A", "B"], ["B", "C", "C", "D"])
+        self.assertEqual(pool, ["A", "B", "C", "D"]); self.assertEqual(only, {"C", "D"})
+        self.assertEqual(sbot.merge_groups(["A"], []), (["A"], set()))
+
+    def test_load_with_sub_group(self):
+        b = object.__new__(sbot.SBot)
+        b.code_name_map, b.new_codes_list, b.sub_codes = {}, [], set()
+
+        class Api:
+            def get_watchlist_groups(self, hts_id):
+                return {"001": "NEW", "002": "SUB", "003": "반도체"}
+
+            def get_watchlist_stocks(self, grp, hts_id, cmap):
+                return {"001": [("111111", "a"), ("222222", "b")], "002": [("222222", "b"), ("333333", "c")]}[grp]
+        b.api = Api()
+        os.environ["KIS_HTS_ID2"] = "x"
+        b._load_new_codes()
+        self.assertEqual(b.new_codes_list, ["111111", "222222", "333333"]); self.assertEqual(b.sub_codes, {"333333"})
+
+
 if __name__ == "__main__":
     unittest.main()
