@@ -127,6 +127,29 @@ def _step_scalp(w: dict, price: float, entry: float, rate: float):
     return None
 
 
+REGIME_RESUME = float(os.getenv("DAYBOT_PAUSE_BELOW", "35") or 35)
+
+
+def regime_turn_msg(watches: dict, date: str, breadth: float, prices: dict, resume: float = REGIME_RESUME):
+    """★ 10-20 대장: 단타는 봇이 쉬는 동안만 빌려 쓰는 돈 — 국면이 다시 resume% 이상이면 봇에게 시드를 돌려줘야
+    하니 애프터장이나 다음 날 09:10 전에 정리. 대장이 직접 판단·처리 → 알림만(주문 없음). 정리할 게 없으면 None."""
+    if breadth is None or breadth < resume:
+        return None
+    rows = []
+    for key, w in watches.items():
+        if not is_scalp(w) or w.get("stage", 0) >= 3:
+            continue
+        code = w.get("code") or key.split("@")[0]
+        px, entry = prices.get(code), w.get("entry_price") or 0
+        rate = f" ({(px / entry - 1) * 100:+.1f}%)" if px and entry else ""
+        rows.append(f"   ⚡ {w.get('name', code)}({code}) {w.get('qty') or '?'}주{rate}")
+    if not rows:
+        return None
+    return (f"🔄 **국면 전환 {breadth:.0f}%** ({date[5:]} 종가, 기준 {resume:g}%) — 다음 거래일부터 봇 신규매수 재개\n"
+            f"단타 종목 정리해서 봇에게 시드 돌려줘야 해(애프터장 또는 다음 날 09:10 전):\n" + "\n".join(rows)
+            + "\n   (알림만 — 주문은 안 나가. 다 팔면 `해제 종목명 D`)")
+
+
 def in_session(hhmm: str) -> bool:
     return SELL_START <= hhmm < SELL_END
 

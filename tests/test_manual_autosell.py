@@ -67,6 +67,16 @@ class Scalp(unittest.TestCase):
         self.assertEqual(k.orders, [("111111", 30)]); self.assertIn("트레일링", r["msgs"][0])
 
 
+class RegimeTurn(unittest.TestCase):
+    def test_alert_only_when_resumed_and_scalp_left(self):
+        ws = {"353200@d": dict(w(10), name="대덕전자", code="353200", mode="scalp"), "111111": w()}
+        self.assertIsNone(A.regime_turn_msg(ws, "2026-10-22", 30.0, {}, 35))           # 아직 하락장
+        m = A.regime_turn_msg(ws, "2026-10-22", 38.0, {"353200": 10120}, 35)
+        self.assertIn("국면 전환 38%", m); self.assertIn("대덕전자(353200) 10주 (+1.2%)", m)
+        self.assertNotIn("111111", m)                                                    # 일반 등록은 빼고
+        self.assertIsNone(A.regime_turn_msg({"111111": w()}, "2026-10-22", 38.0, {}, 35))
+
+
 class Handle(unittest.TestCase):
     def test_paper_never_orders(self):
         x, k = w(), Kiwoom()

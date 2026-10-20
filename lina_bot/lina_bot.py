@@ -1516,6 +1516,37 @@ async def manual_watch_trailing_loop():
         _save_manual_watch_updates(watches, changed_codes)
 
 
+@tasks.loop(minutes=10)
+async def scalp_regime_turn_loop():
+    """★ 10-21 대장: 국면이 다시 35% 이상으로 올라서면 단타 등록 종목 정리 알림(하루 한 번, 주문 없음).
+    국면은 저녁에 일봉이 들어오면(20:10 수집) 그날 종가로 새로 계산됨 → 18:00~23:50 사이 10분마다 확인."""
+    try:
+        kst_now = datetime.datetime.now(KST)
+        if not ("1800" <= kst_now.strftime("%H%M") <= "2350"):
+            return
+        watches = _load_manual_watches()
+        scalps = {k: w for k, w in watches.items() if autosell.is_scalp(w)}
+        if not scalps:
+            return
+        import market_regime
+        cur = await asyncio.to_thread(market_regime.latest)
+        if not cur or cur[0] == _SCALP_REGIME_STATE.get("date"):
+            return
+        from kis_api import KisAPI
+        codes = sorted({_wcode(k, w) for k, w in scalps.items()})
+        px = await asyncio.to_thread(KisAPI().get_multi_price, codes)
+        msg = autosell.regime_turn_msg(scalps, cur[0], cur[1], {c: v.get("price") for c, v in (px or {}).items()})
+        _SCALP_REGIME_STATE["date"] = cur[0]          # 국면이 그대로 낮아도 그날은 다시 안 봄
+        if msg:
+            channel = await client.fetch_channel(REPORT_CHANNEL_ID)
+            await send_safe_message(channel, msg)
+    except Exception as e:
+        print(f"⚠️ [단타 국면전환 알림] 오류: {e}")
+
+
+_SCALP_REGIME_STATE = {"date": None}
+
+
 @tasks.loop(minutes=1)
 async def daily_momentum_am_report():
     kst_now = datetime.datetime.now(KST)
@@ -2588,6 +2619,8 @@ async def on_ready():
     try:
         if not manual_watch_trailing_loop.is_running():
             manual_watch_trailing_loop.start()
+        if not scalp_regime_turn_loop.is_running():
+            scalp_regime_turn_loop.start()
         print("✅ [시스템] 리나등록 수동매수 트레일링 추적 (1분 주기) 가동 성공!")
     except Exception as e: print(f"⚠️ [에러] 리나등록 추적 스케줄러: {e}")
 
