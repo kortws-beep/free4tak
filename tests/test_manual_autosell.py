@@ -42,6 +42,31 @@ class Step(unittest.TestCase):
         self.assertEqual(A.step(x, 9980)["type"], "final")
 
 
+class Scalp(unittest.TestCase):
+    """★ 10-20 단타 — +2% 30% 익절 → 고점 -1.5%(고점 +4.5% 넘으면 -2%) 트레일링, 최소 +1%."""
+    def test_rules(self):
+        x = dict(w(), mode="scalp")
+        self.assertIsNone(A.step(x, 10190))                         # +1.9% — 아무것도
+        self.assertEqual(A.step(x, 10200)["type"], "partial")       # +2% 바로 30%
+        x["stage"] = 2
+        self.assertIsNone(A.step(x, 10300))
+        self.assertIsNone(A.step(x, 10150))                         # 고점 10300 -1.5% = 10145.5보다 위
+        self.assertEqual(A.step(x, 10140)["type"], "final")
+        y = dict(w(), mode="scalp", peak_price=10200, stage=2)
+        self.assertEqual(A.step(y, 10100)["type"], "final")         # 최소 +1%(10100) 지킴
+        self.assertAlmostEqual(A.scalp_line(10000, 10600), 10600 * 0.98)   # 고점 +6% → -2% 폭
+
+    def test_partial_order_failed_then_drop_sells_all(self):
+        x = dict(w(), mode="scalp")
+        A.step(x, 10250)                                            # 30% 신호(주문 실패 가정 — 단계 1 그대로)
+        self.assertEqual(A.step(x, 10050)["type"], "final")
+
+    def test_live_messages(self):
+        x, k = dict(w(), mode="scalp"), Kiwoom()
+        r = A.handle("111111", x, 10200, "1000", "live", k)
+        self.assertEqual(k.orders, [("111111", 30)]); self.assertIn("트레일링", r["msgs"][0])
+
+
 class Handle(unittest.TestCase):
     def test_paper_never_orders(self):
         x, k = w(), Kiwoom()

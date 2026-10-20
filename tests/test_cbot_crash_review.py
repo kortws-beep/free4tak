@@ -11,7 +11,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "backtest"))
 import cbot_crash_review as R  # noqa: E402
 
-T0 = dt.datetime.now().replace(microsecond=0) - dt.timedelta(days=1)
+T0 = (dt.datetime.now() - dt.timedelta(days=1)).replace(hour=12, minute=0, second=0, microsecond=0)   # 자정 근처에 돌리면 A·B 매도가 날짜를 넘어가 깨지던 것 방지
 
 
 def build():

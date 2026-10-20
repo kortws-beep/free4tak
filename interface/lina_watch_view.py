@@ -50,6 +50,20 @@ def row(key: str, w: dict, q: dict) -> dict:
     r["rate"] = (price / entry - 1) * 100
     if qty:
         r["pnl"] = (price - entry) * qty
+    if A.is_scalp(w):
+        r["account"] += "·단타"
+        if peak is None:
+            r["line"] = entry * (1 + A.SCALP_TP / 100)
+            r["gap"] = (r["line"] / price - 1) * 100
+            r["status"] = f"⚡단타 · +{A.SCALP_TP:g}%({r['line']:,.0f})에 30% 익절 → 나머지 트레일링"
+            return r
+        peak = max(float(peak), price)
+        r["line"] = A.scalp_line(entry, peak)
+        r["gap"] = (price / r["line"] - 1) * 100
+        r["near"] = r["gap"] <= NEAR_PCT
+        r["status"] = (f"⚡단타 {'30% 익절 뒤' if stage >= 2 else '+2% 도달'} · 고점 {peak:,.0f} → 매도선 {r['line']:,.0f}"
+                       f"(-{A.SCALP_WIDE if (peak / entry - 1) * 100 > A.SCALP_WIDEN_AT else A.SCALP_TIGHT:g}%, 최소 +{A.SCALP_FLOOR:g}%)")
+        return r
     if peak is None:
         r["line"] = entry * (1 + A.START_PCT / 100)
         r["gap"] = (r["line"] / price - 1) * 100

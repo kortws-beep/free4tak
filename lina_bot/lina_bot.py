@@ -155,6 +155,17 @@ def _split_account(tokens: list) -> tuple:
     return acct, rest
 
 
+def parse_scalp_args(tokens: list) -> tuple:
+    """★ 10-20 `단타 종목명 10주 [평단가]` 나머지 토큰 → (수량 또는 None, 평단가 또는 None)."""
+    qty = price = None
+    for t in tokens:
+        if re.fullmatch(r"[\d,]+주", t):
+            qty = int(t[:-1].replace(",", ""))
+        elif re.fullmatch(r"[\d,]+(\.\d+)?", t):
+            price = float(t.replace(",", ""))
+    return qty, price
+
+
 def _wcode(key: str, w: dict) -> str:
     return w.get("code") or key.split("@")[0]
 
@@ -221,7 +232,8 @@ def _log_manual_watch(event: str, code: str, w: dict, sell_price: float = None,
 
 
 async def _register_manual_watch(channel, code: str, buy_price: float = None,
-                                  name_override: str = None, qty: int = None, account: str = "kiwoom"):
+                                  name_override: str = None, qty: int = None, account: str = "kiwoom",
+                                  mode: str = None):
     """!리나등록/자연어("등록 종목명 [평단가]") 공용 등록 로직.
     ★ 2026-10-03 대장 지정 — 분할매수를 하기 때문에 중간 금액으로는
     등록 못 함(최종 매수 완료 후에 등록). 그래서 "매수금액" 대신
@@ -273,12 +285,22 @@ async def _register_manual_watch(channel, code: str, buy_price: float = None,
                 "last_alert_peak": 0, "stage": 0, "qty": qty, "qty0": qty,
                 "registered_at": datetime.datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S"),
             }
+            if mode:
+                watches[key]["mode"] = mode      # ★ 10-20 "scalp" = 단타(manual_autosell 참고)
             _save_manual_watches(watches)
             _log_manual_watch("register", code, watches[key])
             # ★ 2026-10-14 대장 — 등록 종목은 리나가 직접 익절(lina_bot/manual_autosell.py)
             md = {"paper": "🧪 연습 모드(주문 안 나감, 알림만)", "live": "💰 실제 매도(시장가)",
                   "off": "🔔 알림만"}[autosell.mode()]
             acct = "한투 데이봇 계좌" if account == "daybot" else "키움"
+            if mode == "scalp":
+                tp_px = buy_price * (1 + autosell.SCALP_TP / 100)
+                await send_safe_message(
+                    channel,
+                    f"⚡ {name}({code}) **단타** 등록 [{acct}] — 평단가 {buy_price:,.0f}원 · {qty}주\n"
+                    f"   +{autosell.SCALP_TP:g}%({tp_px:,.0f}원) 찍으면 30% 익절 → 나머지 {autosell.trail_desc(watches[key])} [{md}]\n"
+                    f"   손절은 대장이 직접. 해제는 `해제 {name} D`")
+                return
             await send_safe_message(
                 channel,
                 f"✅ {name}({code}) 등록 완료 [{acct}] — 평단가 {buy_price:,.0f}원"
@@ -3003,6 +3025,7 @@ async def on_message(message):
                     trail += {2: " · 30% 익절 완료", 3: " · 매도 완료(연습/알림)"}.get(w.get("stage"), "")
                     trail += f" · {w['qty']}주" if w.get("qty") else ""
                     trail += " · [데이봇 계좌]" if w.get("account") == "daybot" else " · [키움]"
+                    trail += " · ⚡단타" if autosell.is_scalp(w) else ""
                     lines.append(f"   {emoji} {name}({code}) {net_rate:+.2f}% "
                                  f"| 평단가 {entry:,.0f} → 현재가 {price:,.0f}{trail}")
                 await send_safe_message(message.channel, "\n".join(lines))
@@ -3054,6 +3077,36 @@ async def on_message(message):
             except ValueError:
                 await send_safe_message(message.channel, f"⚠️ 매도가 '{parts[2]}' 인식 실패 — 숫자만 입력해줘(평단가 없이 해제 처리할게).")
         await _deregister_manual_watch(message.channel, code, sell_price)
+        return
+
+    # ── 단타 등록 (★ 10-20 대장: "하락장 쉬는 날 남은 시드로 한 종목 — 작은 수익이라도 나면 팔기") ──
+    #   `단타 종목명 10주 [평단가]` — 한투 데이봇 계좌만. 평단가·수량은 계좌 잔고에서 가져옴(적으면 그 값).
+    #   (`!단타 종목명`은 단타000 판정 조회 — 위에서 먼저 처리, 이건 느낌표 없는 `단타 `만)
+    if message.content.startswith("단타 "):
+        parts = message.content.split()
+        if len(parts) < 2:
+            await send_safe_message(message.channel, "사용법: `단타 종목명 10주` (한투 데이봇 계좌 — 평단가는 잔고에서 가져와)")
+            return
+        arg = parts[1].strip()
+        code = arg.zfill(6) if arg.isdigit() else get_stock_code(arg)
+        if not code:
+            await send_safe_message(message.channel, f"❌ '{arg}' 종목코드를 못 찾았어.")
+            return
+        qty, price = parse_scalp_args(parts[2:])
+        try:
+            from kis_api import KisAPI
+            pos = (await asyncio.to_thread(KisAPI().get_current_positions, True) or {}).get(code)
+        except Exception as e:
+            pos = None
+            print(f"⚠️ [단타등록] 잔고 조회 실패: {e}")
+        if not pos and price is None:
+            await send_safe_message(message.channel, f"❌ 데이봇(한투) 계좌에 {arg}가 안 보여 — 사고 나서 다시 하거나 "
+                                                     f"`단타 {arg} 10주 평단가`처럼 평단가를 붙여줘.")
+            return
+        held = int((pos or {}).get("qty", 0) or 0)
+        qty = min(qty, held) if (qty and held) else (qty or held or None)
+        price = price or float(pos["entry_price"])
+        await _register_manual_watch(message.channel, code, price, None, qty, "daybot", mode="scalp")
         return
 
     if message.content.startswith("!리나등록") or message.content.startswith("등록 "):

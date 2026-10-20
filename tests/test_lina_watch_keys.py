@@ -34,6 +34,14 @@ class Keys(unittest.TestCase):
         self.assertEqual(ns["_split_account"](["225875", "8주", "d"]), ("daybot", ["225875", "8주"]))
         self.assertEqual(ns["_split_account"](["225875", "8주"]), (None, ["225875", "8주"]))
 
+    def test_parse_scalp_args(self):
+        ns = _load({"parse_scalp_args"})
+        import re
+        ns["re"] = re
+        self.assertEqual(ns["parse_scalp_args"](["10주"]), (10, None))
+        self.assertEqual(ns["parse_scalp_args"](["136,400", "1,000주"]), (1000, 136400.0))
+        self.assertEqual(ns["parse_scalp_args"]([]), (None, None))
+
     def test_migrate_legacy(self):
         ns = _load({"_load_manual_watches"})
         store = {"005930": {"account": "daybot", "qty": 8}, "003160": {"account": "kiwoom"}}

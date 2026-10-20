@@ -28,6 +28,13 @@ class Row(unittest.TestCase):
         self.assertEqual((r["code"], r["account"]), ("005930", "데이봇"))
         self.assertAlmostEqual(r["line"], 11000 * 0.97); self.assertIn("30% 익절 뒤", r["status"])
 
+    def test_scalp_rows(self):
+        r = V.row("1@d", {"name": "대덕전자", "account": "daybot", "mode": "scalp", "entry_price": 10000, "qty": 10}, {"price": 10100})
+        self.assertEqual(r["account"], "데이봇·단타"); self.assertEqual(round(r["line"]), 10200); self.assertIn("30% 익절", r["status"])
+        r = V.row("1@d", {"name": "대덕전자", "account": "daybot", "mode": "scalp", "entry_price": 10000, "peak_price": 10300,
+                          "stage": 2, "qty": 7}, {"price": 10180})
+        self.assertAlmostEqual(r["line"], 10300 * 0.985); self.assertTrue(r["near"])
+
     def test_no_price_or_qty(self):
         self.assertEqual(V.row("1", {"entry_price": 100}, {})["status"], "시세 없음")
         r = V.row("2", {"entry_price": 100, "qty": None}, {"price": 90})

@@ -19,6 +19,9 @@ manual_autosell.py — 리나등록 종목 자동 익절 (2026-10-14 대장 지�
                 ★ 10-16: 키움 계좌에 대장 장기 보유 종목이 많아(SK증권 1,132주 등) 수량 없이 등록하면 '매도가능
                 수량 전부'가 팔릴 위험 → live에선 수량을 넣고 등록한 종목만 매도(없으면 경고만)
   off         — 매도 신호 알림만(예전 방식)
+★ 10-20 대장: '단타' 등록(`단타 종목명 10주` — 한투 데이봇 계좌만) — 하락장 쉬는 날 대장이 고른 1종목을 짧게:
+  daybot 매도 로직 그대로 +2% 찍으면 30% 익절 → 나머지는 트레일링(고점 -1.5%, 고점 +4.5% 넘으면 -2%), 최소 +1%는 지킴.
+  손절은 대장 직접(다른 리나 등록과 같음).
 """
 import os
 
@@ -46,6 +49,25 @@ TP1_PCT = 5.0
 TP1_RATIO = 0.30
 TRAIL2_PCT = 3.0
 SELL_START, SELL_END = "0900", "1520"
+SCALP_TP = 2.0                       # 단타: 이만큼 오르면 30% 익절 + 트레일링 시작
+SCALP_TIGHT, SCALP_WIDE, SCALP_WIDEN_AT, SCALP_FLOOR = 1.5, 2.0, 4.5, 1.0     # daybot과 같은 트레일링 폭·최소 수익
+
+
+def is_scalp(w: dict) -> bool:
+    return w.get("mode") == "scalp"
+
+
+def scalp_line(entry: float, peak: float) -> float:
+    """단타 트레일링 매도선 — 고점 -1.5%(고점 +4.5% 넘으면 -2%), 그래도 평단 +1% 아래로는 안 내려감."""
+    trail = SCALP_WIDE if (peak / entry - 1) * 100 > SCALP_WIDEN_AT else SCALP_TIGHT
+    return max(peak * (1 - trail / 100), entry * (1 + SCALP_FLOOR / 100))
+
+
+def trail_desc(w: dict) -> str:
+    """30% 익절 뒤 나머지를 어떻게 지켜보는지(알림 문구용)."""
+    if is_scalp(w):
+        return f"고점 -{SCALP_TIGHT:g}% 트레일링(최소 +{SCALP_FLOOR:g}%)"
+    return f"고점 -{TRAIL2_PCT:.0f}%"
 
 
 def mode() -> str:
@@ -68,6 +90,8 @@ def step(w: dict, price: float):
     if entry <= 0 or price <= 0 or stage >= 3:
         return None
     rate = (price / entry - 1) * 100
+    if is_scalp(w):
+        return _step_scalp(w, price, entry, rate)
     if w.get("peak_price") is None:
         if rate >= START_PCT:
             w["peak_price"], w["stage"] = price, 1
@@ -85,6 +109,21 @@ def step(w: dict, price: float):
     elif w["stage"] == 2:
         if price <= peak * (1 - TRAIL2_PCT / 100):
             return {"type": "final", "reason": f"최종익절(고점 {peak:,.0f} -{TRAIL2_PCT:.0f}%, {rate:+.2f}%)"}
+    return None
+
+
+def _step_scalp(w: dict, price: float, entry: float, rate: float):
+    if w.get("peak_price") is None:
+        if rate < SCALP_TP:
+            return None
+        w["peak_price"], w["stage"] = price, 1
+    w["peak_price"] = max(w["peak_price"], price)
+    peak = w["peak_price"]
+    line = scalp_line(entry, peak)
+    if price <= line:
+        return {"type": "final", "reason": f"단타 트레일링(고점 {peak:,.0f} → {line:,.0f}, {rate:+.2f}%)"}
+    if w.get("stage", 1) == 1:      # 30% 익절 아직(주문 실패 땐 다음 루프에 다시)
+        return {"type": "partial", "reason": f"단타 +{SCALP_TP:g}% 30% 익절({rate:+.2f}%)"}
     return None
 
 
@@ -117,7 +156,7 @@ def handle(code: str, w: dict, price: float, hhmm: str, md: str, kiwoom=None) ->
         w["stage"] = 2
         out["changed"] = True
         out["msgs"].append(f"🎯 [리나등록] {name}({code}) {act['reason']} — 수량 {remain or '모름'}이라 "
-                           f"30%는 건너뛰고 고점 -{TRAIL2_PCT:.0f}% 최종 익절로 전환")
+                           f"30%는 건너뛰고 {trail_desc(w)} 최종 익절로 전환")
         return out
     if md == "off":
         _advance(w, act, qty)
@@ -163,7 +202,7 @@ def handle(code: str, w: dict, price: float, hhmm: str, md: str, kiwoom=None) ->
     if act["type"] == "final" or (w.get("qty") is not None and w["qty"] <= 0):
         out["deregister"] = True
     out["msgs"].append(f"💰 [리나등록] {name}({code}) {act['reason']} — {label} 시장가 {qty}주 매도 주문 @{price:,.0f}원 부근"
-                       + ("" if out["deregister"] else f" · 남은 {w.get('qty')}주 고점 -{TRAIL2_PCT:.0f}% 추적"))
+                       + ("" if out["deregister"] else f" · 남은 {w.get('qty')}주 {trail_desc(w)} 추적"))
     return out
 
 
