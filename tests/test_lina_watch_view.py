@@ -36,5 +36,61 @@ class Row(unittest.TestCase):
         self.assertEqual((s["count"], s["pnl"]), (2, 20)); self.assertAlmostEqual(s["rate"], 10.0)
 
 
+class FakeBroker:
+    label = "키움"
+
+    def __init__(self, avail=10, ok=True):
+        self.avail, self.ok, self.sold = avail, ok, []
+
+    def holdings(self):
+        return {"052710": {"qty": self.avail, "avail": self.avail}}
+
+    def sell_market(self, code, qty):
+        self.sold.append((code, qty))
+        return self.ok, "주문번호 1" if self.ok else "거부"
+
+
+class Act(unittest.TestCase):
+    def setUp(self):
+        import json
+        V.STATE = os.path.join(_tmp.name, "manual_watch_state.json")
+        with open(V.STATE, "w", encoding="utf-8") as f:
+            json.dump({"052710": {"name": "아모텍", "entry_price": 100, "qty": 5},
+                       "005930@d": {"name": "삼성전자", "code": "005930", "account": "daybot", "entry_price": 100}}, f)
+        os.environ["DASHBOARD_PIN"] = "1234"
+        self.sent = []
+        V._notify, V._log = self.sent.append, lambda *a: None
+
+    def keys(self):
+        from common_utils import read_state
+        return set(read_state(V.STATE, default={}))
+
+    def test_pin_and_session_guard(self):
+        b = {"kiwoom": FakeBroker()}
+        self.assertFalse(V.act("052710", "sell", "0000", "1000", b)["ok"])
+        self.assertIn("정규장", V.act("052710", "sell", "1234", "1525", b)["msg"])
+        self.assertEqual(b["kiwoom"].sold, [])
+
+    def test_sell_all_then_deregister(self):
+        b = {"kiwoom": FakeBroker(avail=10)}
+        r = V.act("052710", "sell", "1234", "1000", b)
+        self.assertTrue(r["ok"]); self.assertEqual(b["kiwoom"].sold, [("052710", 5)])   # 등록 수량만(장기보유분 보호)
+        self.assertNotIn("052710", self.keys()); self.assertIn("대시보드 매도", self.sent[-1])
+        self.assertIn("이미 해제", V.act("052710", "sell", "1234", "1000", b)["msg"])     # 두 번 눌러도 한 번만
+
+    def test_limited_by_avail_and_failed_order_keeps_watch(self):
+        self.assertEqual(V.act("052710", "sell", "1234", "1000", {"kiwoom": FakeBroker(avail=3, ok=False)})["ok"], False)
+        self.assertIn("052710", self.keys())
+        b = {"kiwoom": FakeBroker(avail=3)}
+        V.act("052710", "sell", "1234", "1000", b)
+        self.assertEqual(b["kiwoom"].sold, [("052710", 3)]); self.assertIn("3주만", self.sent[-1])
+
+    def test_no_registered_qty_refuses_release_works(self):
+        b = {"daybot": FakeBroker()}
+        self.assertIn("등록 수량이 없어", V.act("005930@d", "sell", "1234", "1000", b)["msg"])
+        self.assertTrue(V.act("005930@d", "release", "1234", "1000", b)["ok"])
+        self.assertEqual(self.keys(), {"052710"}); self.assertEqual(b["daybot"].sold, [])
+
+
 if __name__ == "__main__":
     unittest.main()

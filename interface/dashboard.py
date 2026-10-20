@@ -17,7 +17,7 @@ dashboard.py — 영암9 통합 대시보드 (Flask + 모바일)
   - sector_monitor 테마 TOP5
   - 긴급 전봇 중단/재개 버튼
   - 일일 손실 한도 설정
-  - /lina — 리나 등록종목 모바일 보기(2026-10-20)
+  - /lina — 리나 등록종목 모바일 보기 + 전량 매도/해제 버튼(PIN)(2026-10-20)
 ================================================================
 """
 import os
@@ -449,6 +449,14 @@ def lina_page():
 def api_lina():
     import lina_watch_view
     return jsonify(lina_watch_view.build())
+
+
+@app.route("/api/lina/act", methods=["POST"])
+def api_lina_act():
+    """리나 등록종목 [전량 매도]/[해제만] — PIN 필요(2026-10-20)"""
+    import lina_watch_view
+    d = request.get_json(silent=True) or {}
+    return jsonify(lina_watch_view.act(str(d.get("key", "")), str(d.get("action", "")), str(d.get("pin", ""))))
 
 
 @app.route("/api/performance")
