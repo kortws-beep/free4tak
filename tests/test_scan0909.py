@@ -35,7 +35,13 @@ class Checks(unittest.TestCase):
     def test_bars_fail(self):
         today = [bar("090000", 1005, 100, 1e8), bar("090100", 1006, 100, 1.5e8), bar("090200", 1010, 50, 1.6e8)]
         f = " ".join(S.bar_checks(today, [], 1000)["fails"])
-        self.assertIn("A첫분봉", f); self.assertIn("D1분대금", f); self.assertIn("E거래량", f)
+        self.assertNotIn("A첫분봉", f)                                  # ★ 10-22 A는 기록만(키움과 대조 전)
+        self.assertIn("D1분대금", f); self.assertIn("E거래량", f)
+        S.A_STRICT = True
+        try:
+            self.assertIn("A첫분봉", " ".join(S.bar_checks(today, [], 1000)["fails"]))
+        finally:
+            S.A_STRICT = False
 
 
 if __name__ == "__main__":

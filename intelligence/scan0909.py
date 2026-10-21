@@ -34,6 +34,10 @@ E_VOL_RATIO_MIN = 100.0               # 지금 1분봉 거래량 / 직전 60봉 
 F_STRENGTH_MIN, F_STRENGTH_MAX = 100.0, 1000.0
 G_CAP_MIN_EOK = 700
 AVG_BARS = 60
+# ★ 10-22: 키움이 10-21 마감 무렵 잡은 3종목(알멕·두산테스나·우리로)은 첫 분봉이 전부 양봉(0.0/+2.65/+0.48%)이었는데도
+#   떴음 → 키움의 '!A'는 첫 1분 동안만 의미가 있는 듯(그 뒤엔 A가 거짓 취급). 확실해질 때까지 A는 기록만(거르지 않음),
+#   키움 결과(kiwoom_cond_log)와 첫분봉 등락(obs0909.first_rate)을 대조해서 정함.
+A_STRICT = False
 NEW_SHARES_PER_SCAN = 40              # 상장주식수 첫 조회는 한 번에 이만큼만(한투 초당 한도 나눠 쓰기)
 DEEP_CHECK_MAX = 40                   # 체결·분봉 조회까지 가는 종목 수 상한(거래대금 큰 순)
 
@@ -60,7 +64,7 @@ def bar_checks(today_bars: list, prev_bars: list, day_open: float) -> dict:
     first, cur = t[0], t[-1]
     fails = []
     first_rate = (first["price"] / day_open - 1) * 100 if day_open else 0.0
-    if first_rate >= 0:
+    if A_STRICT and first_rate >= 0:
         fails.append(f"A첫분봉 {first_rate:+.2f}%(음봉 아님)")
     prev_acml = t[-2]["acml_value"] if len(t) >= 2 else 0.0
     value_1m = max(cur["acml_value"] - prev_acml, 0.0) if cur["acml_value"] else cur["price"] * cur["volume"]
