@@ -19,6 +19,7 @@ dashboard.py — 영암9 통합 대시보드 (Flask + 모바일)
   - 일일 손실 한도 설정
   - /lina — 리나 등록종목 모바일 보기 + 전량 매도/해제 버튼(PIN)(2026-10-20)
   - /feed — 키키·리나·산야 메시지 모아보기(2026-10-20)
+  - /bots — 봇 기능 지도 + 변경 이력(docs/CHANGELOG_KO.md)(2026-10-22) · 세 화면 위쪽 탭으로 오감
 ================================================================
 """
 import os
@@ -443,7 +444,8 @@ def api_set_limit():
 def lina_page():
     """리나 등록종목 모바일 보기(2026-10-20)"""
     import lina_watch_view
-    return lina_watch_view.HTML
+    import bot_overview
+    return lina_watch_view.HTML.replace("<body>", "<body>" + bot_overview.NAV, 1)
 
 
 @app.route("/api/lina")
@@ -464,7 +466,21 @@ def api_lina_act():
 def feed_page():
     """키키·리나·산야 메시지 모아보기(2026-10-20)"""
     import discord_feed
-    return discord_feed.HTML
+    import bot_overview
+    return discord_feed.HTML.replace("<body>", "<body>" + bot_overview.NAV, 1)
+
+
+@app.route("/bots")
+def bots_page():
+    """봇 기능 지도 + 변경 이력(2026-10-22)"""
+    import bot_overview
+    return bot_overview.HTML
+
+
+@app.route("/api/bots")
+def api_bots():
+    import bot_overview
+    return jsonify(bot_overview.build())
 
 
 @app.route("/api/feed")

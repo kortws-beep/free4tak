@@ -135,7 +135,7 @@ HTML = """<!DOCTYPE html>
  .tx{font-size:14px;white-space:pre-wrap;word-break:break-word;line-height:1.45}
  .tx.cut{max-height:4.4em;overflow:hidden}.more{color:var(--sub);font-size:12px;margin-top:2px}
 </style></head><body>
-<h1>🗂️ 봇 메시지 모아보기</h1><div class="sub"><span id="at">불러오는 중…</span> · <a href="lina">📋 리나 등록종목</a></div>
+<h1>🗂️ 봇 메시지 모아보기</h1><div class="sub"><span id="at">불러오는 중…</span></div>
 <div class="bar" id="bots"></div><div class="bar" id="cats"></div>
 <div id="list"></div>
 <script>

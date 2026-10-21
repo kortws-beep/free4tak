@@ -230,7 +230,7 @@ HTML = """<!DOCTYPE html>
  .btns .sell{background:#3b1d22;border-color:#7f1d1d;color:#fecaca;font-weight:700}
  .bar{height:4px;background:var(--bd);border-radius:2px;margin-top:6px;overflow:hidden}.bar i{display:block;height:100%;background:var(--warn)}
 </style></head><body>
-<h1>📋 리나 등록종목</h1><div class="sub"><span id="at">불러오는 중…</span> · <a href="feed" style="color:var(--sub)">🗂️ 메시지 모아보기</a></div>
+<h1>📋 리나 등록종목</h1><div class="sub"><span id="at">불러오는 중…</span></div>
 <div class="top"><div><div class="sub">평가손익(수량 입력 종목)</div><div class="big" id="pnl">-</div></div>
 <div style="text-align:right"><div class="sub" id="mode"></div><div class="sub" id="cnt"></div></div></div>
 <div id="list"></div>
