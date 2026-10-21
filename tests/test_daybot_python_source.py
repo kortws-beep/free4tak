@@ -40,7 +40,7 @@ class PythonSource(unittest.TestCase):
     def test_read_recent_passes(self):
         hits, names, latest = daybot_db.python_scan_hits(NOW, build())
         self.assertEqual(hits, {"111110": ["주도주검색식3"], "444440": ["단타000"]})   # 오래된·탈락 제외
-        self.assertEqual(latest["3개월수급 당일주도주"], None)                          # 테이블 없음
+        self.assertNotIn("3개월수급 당일주도주", latest)                                # ★ 10-22 소스에서 뺌(090930으로 교체)
 
     def _bot(self):
         b = object.__new__(daybot.DayBot)
@@ -118,6 +118,37 @@ class NewBuyCutoff(unittest.TestCase):
             self.assertEqual(bought, ["111110"])
         finally:
             daybot.now_hhmm, daybot.get_all_positions = old
+
+
+class KiwoomOnly(unittest.TestCase):
+    """★ 10-22 파이썬판 모드에서도 파이썬판 없는 090930타점만 키움에 2분마다."""
+    def test_python_mode_asks_kiwoom_for_0909_only(self):
+        b = object.__new__(daybot.DayBot)
+        b.code_name_map, b._positions_lock, b._recent_tags, b._last_kiwoom_only = {}, threading.Lock(), {}, 0.0
+        asked = []
+
+        class K:
+            enabled = True
+            async def get_condition_codes(self, use_keywords=None, code_name_map=None, code_multi_tag_map=None,
+                                          cond_ok=None, max_retry=None, **kw):
+                asked.append((list(use_keywords), max_retry))
+                code_multi_tag_map["555550"] = [daybot.COND_0909]; code_name_map["555550"] = "타점C"
+                return ["555550"]
+            def reset_token(self): pass
+        b.kiwoom = K()
+        orig, daybot.SCAN_SOURCE = daybot.SCAN_SOURCE, "python"
+        orig_log, daybot.log_kiwoom_hits = daybot.log_kiwoom_hits, lambda *a, **k: None
+        orig_merge = daybot.DayBot._merge_python_hits
+        daybot.DayBot._merge_python_hits = lambda self, codes, tm, nm, ok: codes
+        try:
+            codes, tags = b._scan_conditions()
+            self.assertEqual(asked, [([daybot.COND_0909], 0)])
+            self.assertIn("555550", codes)
+            b._scan_conditions()                                    # 2분 안 됐으면 안 물어봄
+            self.assertEqual(len(asked), 1)
+        finally:
+            daybot.SCAN_SOURCE, daybot.log_kiwoom_hits = orig, orig_log
+            daybot.DayBot._merge_python_hits = orig_merge
 
 
 if __name__ == "__main__":

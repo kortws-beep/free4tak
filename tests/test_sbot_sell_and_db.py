@@ -249,5 +249,21 @@ class SubGroup(unittest.TestCase):
         self.assertEqual(b.new_codes_list, ["111111", "222222", "333333"]); self.assertEqual(b.sub_codes, {"333333"})
 
 
+class MarketStatusGate(unittest.TestCase):
+    """★ 10-22 장 상태 판단(코스피 -2% 약세·-4.5% 중단) 끔 — 상태는 늘 normal, 장 초반 급락 강제 중단도 안 함."""
+    def test_off_by_default(self):
+        self.assertFalse(sbot.MARKET_STATUS_GATE)
+        b = object.__new__(sbot.SBot)
+        b.market_status, b._notify = "normal", lambda *a, **k: None
+
+        class Api:
+            def get_market_index(self): return {"kospi": -5.0, "kosdaq": -6.0}
+        b.api = Api()
+        b._update_market_status()
+        self.assertEqual((b.market_status, b.market_rate), ("normal", -5.0))
+        b._prev_kospi = -3.5
+        self.assertFalse(b._check_opening_crash("0910"))
+
+
 if __name__ == "__main__":
     unittest.main()

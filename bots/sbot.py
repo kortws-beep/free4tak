@@ -325,6 +325,10 @@ EVENING_TOPUP_MIN_FILL_RATIO  = 0.7  # 목표금액의 70% 미만이면 "미달"
 # 약세장 방어
 MARKET_WEAK_THRESH = -2.0   # -1.5%→-2.0% 완화 (nbot과 통일)
 MARKET_STOP_THRESH = -4.5   # -3%→-4.5% 완화 (nbot과 통일)
+# ★ 2026-10-22 대장: "장 상태 판단(코스피 -2% 약세, -4.5% 매수 중단)은 없어도 될 듯" — 하락장 쉬기(국면)·장중 하락
+#   감지(intraday_guard)·일/합산 손실 한도가 대신함. 끄면 코스피 등락률은 화면에만 찍고 상태는 늘 normal
+#   (약세·중단 모드, 장 초반 급락 강제 중단, 중단 모드 반등매수 전부 안 씀). 다시 켜려면 .env SBOT_MARKET_STATUS_GATE=1
+MARKET_STATUS_GATE = os.getenv("SBOT_MARKET_STATUS_GATE", "0").strip() == "1"
 MAX_DAILY_LOSS     = 5      # RiskManager 생성 인자로만 남음 — 매수 중단에는 안 씀(2026-10-12 삭제)
 # ★ 2026-10-12 대장 결정 — 시드 1000만 기준 일손실 한도 -50만(5%). 오늘 실현손익이 이 아래면
 #   그날 신규매수만 멈춤(매도·손절은 계속), 다음 날 자동 해제(손절 횟수 한도와 달리 !시작 불필요).
@@ -524,7 +528,7 @@ class SBot:
     # ============================================================
     def _check_opening_crash(self, now_t: str) -> bool:
         """장 초반 급락 감지 (09:00~09:20, -3% 이하 + 계속 하락)."""
-        if now_t > "0920":
+        if not MARKET_STATUS_GATE or now_t > "0920":
             return False
         kospi = self.market_rate
         if kospi > -3.0:
@@ -550,7 +554,8 @@ class SBot:
         #   설정하는 곳이 없어 항상 0.0 → 폭락장에도 늘 "코스닥선방"으로 판정됐음
         self.kosdaq_rate = idx.get("kosdaq", 0.0)
 
-        if   kospi <= MARKET_STOP_THRESH: status = "stop"
+        if not MARKET_STATUS_GATE:        status = "normal"
+        elif kospi <= MARKET_STOP_THRESH: status = "stop"
         elif kospi <= MARKET_WEAK_THRESH: status = "weak"
         else:                             status = "normal"
 

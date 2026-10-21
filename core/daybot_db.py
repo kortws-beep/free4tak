@@ -65,7 +65,8 @@ def log_kiwoom_hits(code_multi_tag_map: dict, code_name_map: dict = None,
 PY_SOURCES = [
     ("leader_obs", "주도주검색식3", 5),
     ("danta_obs", "단타000", 3),
-    ("tml_obs", "3개월수급 당일주도주", 5),
+    # ★ 10-22 대장: 3개월수급 당일주도주 → 090930타점으로 교체(후보 0건). 090930은 파이썬판이 없어 데이봇이 키움에 직접 물어봄
+    # ("tml_obs", "3개월수급 당일주도주", 5),
 ]
 
 

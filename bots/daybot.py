@@ -275,7 +275,14 @@ EMPTY_BALANCE_TRUST_AFTER  = 3     # 보유중인데 잔고가 {}로 오면 API�
 #   "3개월수급 당일주도주"로 교체(대장이 새로 설계한 검색식 — 3~6개월
 #   전 거래 마른 소외주가 최근 3개월 내 2000억+ 수급유입 후 오늘 아침
 #   무릎자리(3~12%)에서 2차 시세 시작하는 종목 포착용).
-CONDITION_KEYWORDS = ["주도주검색식3", "단타000", "3개월수급 당일주도주"]
+# ★ 2026-10-22 대장: "3개월수급 당일주도주 대신 090930으로 시작 — 한 번도 검색된 적 없으니"(10-06~10-21 후보 0건 확인).
+#   090930타점 단독 히트는 단타000과 같은 맨 아래 순위(tier4), 다른 검색식과 겹치면 1순위(겹침). 3개월수급 전용 규칙
+#   (12시 마감·매집/설거지 필터)은 그 태그가 없으니 자동으로 안 걸림.
+COND_0909 = "090930타점 시가이탈 오전중저가이탈"
+CONDITION_KEYWORDS = ["주도주검색식3", "단타000", COND_0909]
+# 파이썬판이 없는 검색식 — DAYBOT_SCAN_SOURCE=python이어도 이것만 키움에 물어봄(키움 검색식별 1분 재조회 제한 → 2분 간격)
+KIWOOM_ONLY_KEYWORDS = [COND_0909]
+KIWOOM_ONLY_INTERVAL_SEC = 120
 # ★ 2026-10-07: 후보 소스 — 키움 조건검색 타임아웃이 잦아 파이썬판(리나가 계산·기록) 사용 준비.
 #   kiwoom   : 지금처럼 키움만 (기본값 — 대장이 대조 결과 보고 전환 결정)
 #   fallback : 키움 우선, 타임아웃 난 검색식만 파이썬판으로 채움
@@ -386,6 +393,7 @@ class DayBot:
         #   참고). 재시작시 휘발돼도 무방(겹침은 그날그날의 실시간 신호라
         #   영구 보존 불필요) — 상태파일에 저장 안 함.
         self._recent_tags: dict = {}
+        self._last_kiwoom_only = 0.0
         # ★ 2026-09-30 발견 — 키움 조건검색이 3개 조건 전부 타임아웃나면
         #   최악의 경우(조건당 최대 2회 재시도×65초, core/kiwoom_api.py)
         #   8분 가까이 걸릴 수 있는데, 이게 메인루프 안에서 동기 실행되고
@@ -1116,18 +1124,24 @@ class DayBot:
         use_kiwoom = SCAN_SOURCE != "python" and self.kiwoom.enabled
         if not use_kiwoom and SCAN_SOURCE == "kiwoom":
             return [], {}
+        keywords = CONDITION_KEYWORDS
+        # ★ 10-22 파이썬판 모드라도 파이썬판이 없는 검색식(090930타점)은 키움에 2분마다 따로 물어봄
+        if (SCAN_SOURCE == "python" and self.kiwoom.enabled and KIWOOM_ONLY_KEYWORDS
+                and time.time() - self._last_kiwoom_only >= KIWOOM_ONLY_INTERVAL_SEC):
+            use_kiwoom, keywords = True, KIWOOM_ONLY_KEYWORDS
+            self._last_kiwoom_only = time.time()
         scan_ok = False
         if use_kiwoom:
             loop = asyncio.new_event_loop()
             try:
                 codes = loop.run_until_complete(
                     self.kiwoom.get_condition_codes(
-                        use_keywords=CONDITION_KEYWORDS,
+                        use_keywords=keywords,
                         code_name_map=code_name_map,
                         code_multi_tag_map=code_multi_tag_map,
                         cond_ok=cond_ok,
                         # 파이썬판이 메워주는 모드면 재시도(65초씩 대기) 없이 한 번만
-                        max_retry=0 if SCAN_SOURCE in ("fallback", "union") else None,
+                        max_retry=0 if SCAN_SOURCE in ("fallback", "union", "python") else None,
                     )
                 )
                 scan_ok = True
@@ -1248,6 +1262,9 @@ class DayBot:
             elif tags == {"단타000"}:
                 tier4.append(code)
                 source_label[code] = "tier4_단타000"
+            elif tags == {COND_0909}:
+                tier4.append(code)
+                source_label[code] = "tier4_090930"
 
         tier5 = []
         for code in self._load_scout_tier3_picks():
