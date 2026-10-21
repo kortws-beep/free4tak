@@ -137,6 +137,8 @@ class DantaScanner:
         self.bars: dict = {}        # code → {(date,time): bar}
         self._pool = (0.0, {})
         self.diag: dict = {}        # 마지막 스캔의 종목별 판정 {code: (name, 설명)} — !단타 종목명 용
+        self.last_quotes: dict = {}
+        self.last_quotes_at = 0.0
         self.diag_time = ""
 
     # ── 데이터 준비 ──
@@ -205,6 +207,7 @@ class DantaScanner:
         today = now.strftime("%Y-%m-%d")
         pool = self.pool()
         quotes = self.api.get_multi_price(list(pool), pause=MULTI_PAUSE)
+        self.last_quotes, self.last_quotes_at = quotes, time.time()   # ★ 10-22 090930 파이썬판(scan0909)이 같은 시세를 재사용
         stage1, diag = [], {}
         missing = [c for c in pool if c not in quotes]
         for c in missing:

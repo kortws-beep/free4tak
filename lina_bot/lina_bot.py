@@ -1884,6 +1884,53 @@ async def danta_scan_watch():
         _DANTA_STATE["alerted"].update(r["code"] for r in hits)
     except Exception as e:
         print(f"⚠️ [단타000] 스캔 오류: {e}")
+    finally:
+        await _scan0909_after_danta(kst_now)      # 단타000 통과 종목이 없어 위에서 return해도 090930은 계산
+
+
+_S0909_STATE = {"date": "", "alerted": set(), "scanner": None}
+
+
+def _scan0909_sync(now):
+    import scan0909
+    import time
+    danta = _DANTA_STATE["scanner"]
+    if danta is None or time.time() - getattr(danta, "last_quotes_at", 0) > 90:
+        return None                               # 이번 분 단타000 시세가 없으면(조회 실패 등) 건너뜀
+    if _S0909_STATE["scanner"] is None:
+        _S0909_STATE["scanner"] = scan0909.Scan0909(_tml_api, danta)
+    out = _S0909_STATE["scanner"].scan(now, danta.last_quotes or None)
+    scan0909.log_scan(out, now)
+    return out
+
+
+async def _scan0909_after_danta(kst_now):
+    """★ 10-22 090930타점 파이썬판 — 단타000 감시가 받은 시세를 그대로 써서 바로 이어 계산(daybot 소스, 산야 알림)."""
+    try:
+        import scan0909
+        today = kst_now.strftime("%Y-%m-%d")
+        if _S0909_STATE["date"] != today:
+            _S0909_STATE.update(date=today, alerted=_alerted_today("obs0909", today))
+        out = await asyncio.to_thread(_scan0909_sync, kst_now)
+        if not out:
+            return
+        hits = [r for r in out["results"] if r["passed"] and r["code"] not in _S0909_STATE["alerted"]]
+        print(f"🎯 [090930] 1단계 {out['stage1']} → 정밀 {len(out['results'])} → 통과 "
+              f"{sum(r['passed'] for r in out['results'])}개 (신규 {len(hits)})")
+        if not hits:
+            return
+        import danta_scan
+        channel = await client.fetch_channel(SCAN_CHANNEL_ID)
+        await send_safe_message(
+            channel,
+            f"🎯 **[090930타점]** {kst_now.strftime('%H:%M')} — 시가 이탈 뒤 재돌파\n"
+            + "\n".join(scan0909.format_hit(r, danta_scan.overlap_today(r["code"], today, exclude=("obs0909",)))
+                        for r in hits)
+            + _scan_footer("🔗 = 오늘 주도주/단타000과 겹침")
+        )
+        _S0909_STATE["alerted"].update(r["code"] for r in hits)
+    except Exception as e:
+        print(f"⚠️ [090930] 스캔 오류: {e}")
 
 
 @danta_scan_watch.before_loop
