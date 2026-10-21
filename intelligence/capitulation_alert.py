@@ -18,6 +18,11 @@ capitulation_alert.py — 투매일 반등 섹터 알림 (2026-10-14, 시나리�
   다음 날 08:50 — 아침 규칙 다시 알림(시가가 어제 종가 밑이면 시가 정리, 아니면 +7% 지정가).
   !투매 — 언제든 지금 상태 점검(기준 미달이어도 숫자 보여줌).
 ※ 기준(CAP_NL, 기본 40%)은 전 종목으로 검증한 값 — 그래서 전 종목으로 계산(상위 400은 안 맞았음).
+★ 10-21 '바닥 재시험일' 알림(대장: "어제 종가에 들어갔으면 — 기준 정해서 종목 나오면 내가 수동으로 먼저, 성과 나오면 봇에"):
+  ① 직전 20거래일 안에 투매일(신저가 40%+) ② 그 뒤 코스피가 투매일 종가보다 +3% 넘게 반등했다가
+  ③ 오늘 다시 투매일 종가 ±2% 안으로 내려옴(오늘 하락) ④ 그런데 오늘 신저가 종목은 20% 미만(대부분 바닥 위)
+  → 관심그룹(한투 전체, new·SUB 포함) 중 투매일 저가 대비 가장 높이 버틴 종목(거래대금 30억↑) 5개 = 종가 매수 후보.
+  과거(2024-11~) 3번: 25-11-14 다음날 코스피 +1.9% · 25-11-28 -0.2% · 26-10-20 +3.3% — 표본 적어 '수동 시험' 단계.
 """
 import os
 import re
@@ -40,6 +45,9 @@ LEADERS = 3
 TOP_GROUPS = 3
 TP_PCT = 7
 NEW_GROUP_NAMES = ("new", "신규추천", "신규", "new추천")
+RETEST_NL = float(os.getenv("LINA_RETEST_NL", "20"))   # ④ 오늘 신저가 비율 이 % 미만
+RETEST_BAND, RETEST_BOUNCE = 2.0, 3.0                   # ③ 투매일 종가 ±2% · ② 그 사이 +3% 반등
+RETEST_PICKS, RETEST_MIN_VALUE = 5, 3e9                 # 후보 5개 · 오늘 거래대금 30억↑
 _EXCLUDE = ("KODEX", "TIGER", "KBSTAR", "ARIRANG", "HANARO", "KOSEF", "ACE ", "SOL ", "RISE ", "PLUS ",
             "ETN", "스팩", "레버리지", "인버스")
 
@@ -215,6 +223,111 @@ def morning_reminder(path: str = STATE, today: str = None) -> str:
             "못 닿으면 종가 전 정리 (고점 시각: 09:45 전 50% · 13:30 뒤 19%)")
 
 
+def daily_shares(theme_db: str = THEME_DB, today: str = None, days: int = LOOKBACK) -> list:
+    """[(날짜, 20일 신저가 비율%)] — 오늘 전 days 거래일, 오래된→최신. 일봉 DB(전 종목, ETF·우선주 제외)."""
+    today = today or datetime.date.today().isoformat()
+    conn = sqlite3.connect(theme_db)
+    try:
+        dates = [d for (d,) in conn.execute("SELECT DISTINCT date FROM kr_stock_daily_data WHERE date < ? "
+                                            "ORDER BY date DESC LIMIT ?", (today, days + LOOKBACK))][::-1]
+        if len(dates) <= LOOKBACK:
+            return []
+        rows = conn.execute("SELECT stock_name, date, low_price FROM kr_stock_daily_data WHERE date >= ? AND date < ? "
+                            "AND low_price > 0", (dates[0], today)).fetchall()
+    finally:
+        conn.close()
+    lows = {}
+    for n, d, lo in rows:
+        if not excluded(n):
+            lows.setdefault(n, {})[d] = lo
+    out = []
+    for i in range(LOOKBACK, len(dates)):
+        d, prev = dates[i], dates[i - LOOKBACK:i]
+        n = hit = 0
+        for m in lows.values():
+            if d not in m:
+                continue
+            past = [m[p] for p in prev if p in m]
+            if len(past) < 15:
+                continue
+            n += 1
+            hit += m[d] <= min(past)
+        if n:
+            out.append((d, hit / n * 100))
+    return out
+
+
+def retest_check(shares: list, kospi: dict, today_share: float, today: str) -> dict:
+    """바닥 재시험일인지 → {"ok", "cap", "cap_share", "gap", "bounce", "chg", "share", "why"}. 투매일이 없으면 None.
+    shares=[(날짜, 신저가%)] 오늘 전, kospi={날짜: 종가} 오늘 포함."""
+    caps = [(d, v) for d, v in shares if v >= CAP_NL]
+    if not caps or today not in kospi:
+        return None
+    cap, cap_share = caps[-1]
+    if cap not in kospi:
+        return None
+    days = sorted(d for d in kospi if d < today)
+    after = [kospi[d] for d in days if d > cap]
+    r = {"cap": cap, "cap_share": cap_share, "share": today_share,
+         "gap": (kospi[today] / kospi[cap] - 1) * 100,
+         "bounce": (max(after) / kospi[cap] - 1) * 100 if after else 0.0,
+         "chg": (kospi[today] / kospi[days[-1]] - 1) * 100 if days else 0.0}
+    why = [w for w, bad in (("반등 없었음", r["bounce"] < RETEST_BOUNCE),
+                            (f"지수가 투매일 종가 ±{RETEST_BAND:g}% 밖", abs(r["gap"]) > RETEST_BAND),
+                            ("오늘 하락 아님", r["chg"] >= 0),
+                            (f"신저가 {today_share:.0f}% ≥ {RETEST_NL:g}%", today_share >= RETEST_NL)) if bad]
+    r.update(ok=not why, why=why)
+    return r
+
+
+def retest_picks(cap: str, members: list, snap: dict, theme_db: str = THEME_DB, top: int = RETEST_PICKS) -> list:
+    """[(이름, 코드, 투매일 저가 대비 %, 오늘 등락)] — 관심종목 중 투매일 저가보다 가장 높이 버틴 순."""
+    conn = sqlite3.connect(theme_db)
+    try:
+        caplow = dict(conn.execute("SELECT stock_name, low_price FROM kr_stock_daily_data WHERE date=? AND low_price > 0",
+                                   (cap,)).fetchall())
+    finally:
+        conn.close()
+    out, seen = [], set()
+    for code, name in members:
+        q = snap.get(code)
+        if code in seen or not q or name not in caplow or excluded(name) or q.get("value", 0) < RETEST_MIN_VALUE:
+            continue
+        seen.add(code)
+        out.append((name, code, (q["price"] / caplow[name] - 1) * 100, q.get("chg", 0)))
+    return sorted(out, key=lambda x: -x[2])[:top]
+
+
+def format_retest(r: dict, picks: list, forced: bool = False) -> str:
+    if not r:
+        return "🔁 바닥 재시험 점검: 최근 20거래일 안에 투매일 없음" if forced else ""
+    head = (f"투매일 {r['cap'][5:]}(신저가 {r['cap_share']:.0f}%) 뒤 최고 +{r['bounce']:.1f}% 반등 → 오늘 투매일 종가 대비 "
+            f"{r['gap']:+.1f}% (오늘 {r['chg']:+.1f}%) · 오늘 신저가 {r['share']:.0f}%")
+    if not r["ok"]:
+        return f"🔁 바닥 재시험 점검: 해당 없음({', '.join(r['why'])})\n   {head}" if forced else ""
+    L = ["🔁 **바닥 재시험일 — 종가 매수 후보**(대장 수동 시험 단계)", f"   {head} — 지수는 바닥인데 종목 대부분은 안 깨짐"]
+    L += [f"   {i}. {n}({c}) 투매일 저가 대비 {h:+.1f}% · 오늘 {ch:+.1f}%" for i, (n, c, h, ch) in enumerate(picks, 1)] \
+        or ["   (관심종목 중 거래대금 30억↑ 후보 없음)"]
+    L.append("   📋 시간외 종가(~16:00) 매수 검토 · 과거 3번(25-11-14 다음날 코스피 +1.9% · 25-11-28 -0.2% · 26-10-20 +3.3%) — "
+             "판단·매매는 대장, 성과 쌓이면 봇 적용 검토")
+    return "\n".join(L)
+
+
+def _live_members(api) -> list:
+    """한투 관심그룹 전체(new·SUB 포함) 종목 [(코드, 이름)] — 실패하면 []."""
+    try:
+        import sector_watch
+        return [m for ms in sector_watch.load_groups(api, sector_watch.hts_id()).values() for m in ms]
+    except Exception as e:
+        print(f"⚠️ [재시험] 관심그룹 읽기 실패: {e}")
+        return []
+
+
+def _kospi_closes() -> dict:
+    import market_flow
+    return {d: c for d, _, _, _, c, _ in market_flow.fetch_index("KOSPI", 1, 40)}
+
+
 def run(api, nl: float = CAP_NL, forced: bool = False) -> str:
     """15:40 자동/!투매 수동 — 알림 문구(기준 미달 자동이면 빈 문자열)."""
     if datetime.datetime.now().strftime("%H%M") < "0900":
@@ -223,14 +336,24 @@ def run(api, nl: float = CAP_NL, forced: bool = False) -> str:
     univ = load_universe()
     groups = load_groups()
     code_of = name_code_map()
-    codes = [code_of[n] for n in univ if n in code_of] + [c for ms in groups.values() for c, _ in ms]
-    res = evaluate(univ, snapshot(api, codes), groups, code_of)
+    members = _live_members(api)
+    codes = [code_of[n] for n in univ if n in code_of] + [c for ms in groups.values() for c, _ in ms] + [c for c, _ in members]
+    snap = snapshot(api, codes)
+    res = evaluate(univ, snap, groups, code_of)
     if not res["n"]:
         return "⚠️ 오늘 시세를 못 받았어(장 시작 전이거나 한투 조회 실패) — 잠시 뒤 다시 `!투매`" if forced else ""
     msg = format_alert(res, nl, forced)
     if res["share"] >= nl:
         save_picks(res)
-    return msg
+    retest = ""
+    try:
+        today = datetime.date.today().isoformat()
+        r = retest_check(daily_shares(today=today), _kospi_closes(), res["share"], today)
+        picks = retest_picks(r["cap"], members or [m for ms in groups.values() for m in ms], snap) if r and r["ok"] else []
+        retest = format_retest(r, picks, forced)
+    except Exception as e:
+        print(f"⚠️ [재시험] 점검 실패: {e}")
+    return "\n\n".join(x for x in (msg, retest) if x)
 
 
 if __name__ == "__main__":

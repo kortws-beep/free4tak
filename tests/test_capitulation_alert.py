@@ -112,5 +112,37 @@ class Alert(unittest.TestCase):
         self.assertEqual(list(s), ["000001"]); self.assertEqual(s["000001"]["chg"], -1.5)
 
 
+class Retest(unittest.TestCase):
+    """★ 10-21 바닥 재시험일 — 투매일 뒤 +3% 반등했다가 투매일 종가 ±2%로 내려온 하락일, 신저가 20% 미만."""
+    def test_check(self):
+        shares = [("2026-10-13", 47.7), ("2026-10-14", 12.9), ("2026-10-15", 55.3), ("2026-10-16", 11.1), ("2026-10-19", 14.5)]
+        ks = {"2026-10-14": 6008.8, "2026-10-15": 5554.2, "2026-10-16": 5668.1, "2026-10-19": 5768.0, "2026-10-20": 5552.7}
+        r = CA.retest_check(shares, ks, 16.3, "2026-10-20")
+        self.assertTrue(r["ok"]); self.assertEqual(r["cap"], "2026-10-15"); self.assertAlmostEqual(r["bounce"], 3.85, 1)
+        self.assertIn("신저가 22%", CA.retest_check(shares, ks, 22.0, "2026-10-20")["why"][0])
+        ks2 = dict(ks, **{"2026-10-19": 5600.0})                          # 반등이 +3% 안 됨
+        self.assertIn("반등 없었음", CA.retest_check(shares, ks2, 10.0, "2026-10-20")["why"])
+        self.assertIsNone(CA.retest_check([("2026-10-19", 14.5)], ks, 10.0, "2026-10-20"))   # 투매일 없음
+        self.assertEqual(CA.format_retest(None, []), "")
+        self.assertIn("재시험일", CA.format_retest(r, [("A", "000001", 21.2, 0.5)]))
+
+    def test_daily_shares_and_picks(self):
+        db = os.path.abspath("r.db")
+        c = sqlite3.connect(db)
+        c.execute("CREATE TABLE kr_stock_daily_data (date TEXT, stock_name TEXT, low_price REAL)")
+        for i in range(22):
+            d = f"2026-09-{i + 1:02d}"
+            c.execute("INSERT INTO kr_stock_daily_data VALUES (?,?,?)", (d, "깨짐", 50 if i == 21 else 100 + i))
+            c.execute("INSERT INTO kr_stock_daily_data VALUES (?,?,?)", (d, "버팀", 100 + i))
+        c.commit(); c.close()
+        sh = CA.daily_shares(db, today="2026-09-23", days=2)
+        self.assertEqual([round(v) for _, v in sh], [0, 50])                # 22일: 깨짐만 20일 신저가
+        snap = {"000001": {"price": 130, "chg": 1, "value": 5e9}, "000002": {"price": 101, "chg": 0, "value": 5e9},
+                "000003": {"price": 200, "chg": 0, "value": 1e8}}
+        picks = CA.retest_picks("2026-09-22", [("000001", "버팀"), ("000002", "깨짐"), ("000003", "버팀")], snap, db)
+        self.assertEqual([p[0] for p in picks], ["깨짐", "버팀"])           # 깨짐 저가 50 → +102%, 버팀 121 → +7.4%
+        self.assertAlmostEqual(picks[1][2], (130 / 121 - 1) * 100)
+
+
 if __name__ == "__main__":
     unittest.main()
