@@ -38,9 +38,19 @@ class Keys(unittest.TestCase):
         ns = _load({"parse_scalp_args"})
         import re
         ns["re"] = re
-        self.assertEqual(ns["parse_scalp_args"](["10주"]), (10, None))
-        self.assertEqual(ns["parse_scalp_args"](["136,400", "1,000주"]), (1000, 136400.0))
-        self.assertEqual(ns["parse_scalp_args"]([]), (None, None))
+        self.assertEqual(ns["parse_scalp_args"](["10주"]), (10, None, None))
+        self.assertEqual(ns["parse_scalp_args"](["136,400", "1,000주"]), (1000, 136400.0, None))
+        self.assertEqual(ns["parse_scalp_args"]([]), (None, None, None))
+        self.assertEqual(ns["parse_scalp_args"](["100만"]), (None, None, 1000000))          # ★ 10-21 금액
+        self.assertEqual(ns["parse_scalp_args"](["150만원"]), (None, None, 1500000))
+        self.assertEqual(ns["parse_scalp_args"](["1,000,000원"]), (None, None, 1000000))
+
+    def test_scalp_order_amount(self):
+        ns = _load({"scalp_order_amount"})
+        f = ns["scalp_order_amount"]
+        amt = f(10, None, 243000, 500)                      # 지정가 243,500
+        self.assertEqual(int(amt / (243500 * 1.00015)), 10)  # KisAPI.buy()와 같은 계산 → 정확히 10주
+        self.assertEqual(f(None, 1000000, 243000, 500), 1000000)
 
     def test_migrate_legacy(self):
         ns = _load({"_load_manual_watches"})

@@ -156,14 +156,90 @@ def _split_account(tokens: list) -> tuple:
 
 
 def parse_scalp_args(tokens: list) -> tuple:
-    """★ 10-20 `단타 종목명 10주 [평단가]` 나머지 토큰 → (수량 또는 None, 평단가 또는 None)."""
-    qty = price = None
+    """★ 10-20 `단타 종목명 10주 [평단가]` / ★ 10-21 `단타 종목명 100만`(금액) 나머지 토큰
+    → (수량 또는 None, 평단가 또는 None, 금액 또는 None)."""
+    qty = price = amount = None
     for t in tokens:
         if re.fullmatch(r"[\d,]+주", t):
             qty = int(t[:-1].replace(",", ""))
+        elif re.fullmatch(r"[\d,]+만원?", t):
+            amount = int(t.rstrip("원")[:-1].replace(",", "")) * 10000
+        elif re.fullmatch(r"[\d,]+원", t):
+            amount = int(t[:-1].replace(",", ""))
         elif re.fullmatch(r"[\d,]+(\.\d+)?", t):
             price = float(t.replace(",", ""))
-    return qty, price
+    return qty, price, amount
+
+
+def scalp_order_amount(qty: int, amount: int, price: float, tick: int) -> int:
+    """★ 10-21 리나 단타 매수 — KisAPI.buy()는 금액을 받아 '현재가 +1호가' 지정가로 주수를 계산(수수료 0.015% 포함).
+    수량으로 주문하면 정확히 그 주수가 나오도록 금액을 맞춰 줌. 금액 주문이면 그대로."""
+    if qty:
+        limit = int(price / tick) * tick + tick
+        return int(qty * limit * 1.00015 + limit * 0.5)
+    return int(amount or 0)
+
+
+SCALP_FILL_WAIT_SEC = 60
+
+
+async def _scalp_buy(channel, code: str, arg: str, qty: int = None, amount: int = None):
+    """★ 10-21 리나 단타 매수 — 데이봇(한투) 계좌·시드로 현재가 +1호가 지정가 매수 → 체결 확인(최대 60초) →
+    체결된 수량·평단으로 단타 등록. 안 사지면 남은 주문 취소. 하락장 쉬는 날(봇이 안 사는 날)·정규장만."""
+    from kis_api import KisAPI
+    now = datetime.datetime.now(KST).strftime("%H%M")
+    if not ("0900" <= now < "1520"):
+        await send_safe_message(channel, "⏰ 리나 단타 매수는 정규장 09:00~15:20에만 해.")
+        return
+    try:
+        import market_regime
+        cur = await asyncio.to_thread(market_regime.latest)
+        resume = autosell.REGIME_RESUME
+        if cur and cur[1] is not None and cur[1] >= resume:
+            await send_safe_message(channel, f"🙅 국면 {cur[1]:.0f}%(≥{resume:g}%) — 봇이 데이봇 시드로 사는 날이라 리나는 안 사. "
+                                             f"직접 사고 `단타 {arg}`로 등록만 해줘.")
+            return
+    except Exception as e:
+        print(f"⚠️ [단타매수] 국면 확인 실패(계속 진행): {e}")
+    async with channel.typing():
+        api = KisAPI()
+        name = get_stock_name(code)
+        try:
+            import master_db
+            if code in {p["code"] for p in master_db.get_all_positions() if p["bot_type"] == "daybot"}:
+                await send_safe_message(channel, f"❌ {name}({code})는 daybot이 산 종목이야 — 안 사.")
+                return
+        except Exception as e:
+            print(f"⚠️ [단타매수] daybot 보유 확인 실패: {e}")
+        md = await asyncio.to_thread(api.get_market_data, code) or {}
+        px = float(md.get("stck_prpr", 0) or 0)
+        if px <= 0:
+            await send_safe_message(channel, f"❌ {name}({code}) 현재가 조회 실패 — 다시 해줘.")
+            return
+        order_amt = scalp_order_amount(qty, amount, px, api._hoga_tick(px))
+        before = int(((await asyncio.to_thread(api.get_current_positions, True) or {}).get(code) or {}).get("qty", 0) or 0)
+        ok, orgno, odno, oqty = await asyncio.to_thread(api.buy, code, px, order_amt, {code: name})
+        if not ok or oqty <= 0:
+            await send_safe_message(channel, f"🚨 {name}({code}) 단타 매수 주문 실패 — 주문가능금액·호가 확인해줘.")
+            return
+        await send_safe_message(channel, f"🛒 {name}({code}) {oqty}주 지정가 매수 주문(데이봇 시드, 현재가 {px:,.0f}원 +1호가) — 체결 확인 중…")
+        got, avg = 0, 0.0
+        for _ in range(SCALP_FILL_WAIT_SEC // 5):
+            await asyncio.sleep(5)
+            p = (await asyncio.to_thread(api.get_current_positions, True) or {}).get(code) or {}
+            got = int(p.get("qty", 0) or 0) - before
+            avg = float(p.get("entry_price", 0) or 0)
+            if got >= oqty:
+                break
+        if got < oqty:
+            cancelled = await asyncio.to_thread(api.cancel_order, orgno, odno, code, oqty - max(got, 0))
+            await send_safe_message(channel, f"⏳ {SCALP_FILL_WAIT_SEC}초 안에 {got}/{oqty}주만 체결 — 남은 주문 "
+                                             f"{'취소함' if cancelled else '취소 실패(HTS에서 확인해줘)'}.")
+        if got <= 0:
+            return
+        if before:
+            avg = px          # 원래 갖고 있던 게 섞이면 계좌 평단이 아니라 이번 매수가로
+        await _register_manual_watch(channel, code, avg, None, got, "daybot", mode="scalp")
 
 
 def _wcode(key: str, w: dict) -> str:
@@ -3125,16 +3201,21 @@ async def on_message(message):
         if not code:
             await send_safe_message(message.channel, f"❌ '{arg}' 종목코드를 못 찾았어.")
             return
-        qty, price = parse_scalp_args(parts[2:])
+        qty, price, amount = parse_scalp_args(parts[2:])
         try:
             from kis_api import KisAPI
             pos = (await asyncio.to_thread(KisAPI().get_current_positions, True) or {}).get(code)
         except Exception as e:
             pos = None
             print(f"⚠️ [단타등록] 잔고 조회 실패: {e}")
+        # ★ 10-21 대장: "단타 가온전선 하면 매수하고 등록" — 계좌에 없고 수량·금액이 있으면 리나가 데이봇 시드로 직접 매수
+        #   (현재가 +1호가 지정가, 확인 없이 바로). 이미 갖고 있으면 예전처럼 등록만.
+        if not pos and price is None and (qty or amount):
+            await _scalp_buy(message.channel, code, arg, qty, amount)
+            return
         if not pos and price is None:
-            await send_safe_message(message.channel, f"❌ 데이봇(한투) 계좌에 {arg}가 안 보여 — 사고 나서 다시 하거나 "
-                                                     f"`단타 {arg} 10주 평단가`처럼 평단가를 붙여줘.")
+            await send_safe_message(message.channel, f"❌ 데이봇(한투) 계좌에 {arg} 잔고가 없어 — `단타 {arg} 10주`나 "
+                                                     f"`단타 {arg} 100만`이면 리나가 사서 등록해.")
             return
         held = int((pos or {}).get("qty", 0) or 0)
         qty = min(qty, held) if (qty and held) else (qty or held or None)
