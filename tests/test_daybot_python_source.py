@@ -151,5 +151,12 @@ class KiwoomOnly(unittest.TestCase):
             daybot.DayBot._merge_python_hits = orig_merge
 
 
+class EarlyMin0909(unittest.TestCase):
+    def test_lower_bound(self):
+        self.assertEqual(daybot.early_min_change({daybot.COND_0909}), 1.0)
+        self.assertEqual(daybot.early_min_change({daybot.COND_0909, "주도주검색식3"}), 1.0)
+        self.assertEqual(daybot.early_min_change({"주도주검색식3"}), 3.0)
+
+
 if __name__ == "__main__":
     unittest.main()

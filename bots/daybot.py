@@ -224,6 +224,9 @@ HOGA_ASK_BID_RATIO_MIN = 3.0          # ★ 대장 지정 — 매도잔량이 �
 #   타게 둔다는 명시적 결정).
 EARLY_ENTRY_CUTOFF_TIME = "0940"
 EARLY_MIN_CHANGE_PCT = 3.0
+# ★ 10-22 대장: 090930타점은 시가를 깼다가 막 다시 넘은 순간이라 등락률이 '시가 갭'만큼만 — "지켜보니 다 +1%대로 뜬다"
+#   → 090930 태그가 붙은 후보만 09:40 전 하한 3% → 1% (상한 8%는 그대로)
+EARLY_MIN_CHANGE_PCT_0909 = 1.0
 EARLY_MAX_CHANGE_PCT = 8.0
 LATE_MAX_CHANGE_PCT  = 15.0
 
@@ -280,6 +283,11 @@ EMPTY_BALANCE_TRUST_AFTER  = 3     # 보유중인데 잔고가 {}로 오면 API�
 #   (12시 마감·매집/설거지 필터)은 그 태그가 없으니 자동으로 안 걸림.
 COND_0909 = "090930타점 시가이탈 오전중저가이탈"
 CONDITION_KEYWORDS = ["주도주검색식3", "단타000", COND_0909]
+def early_min_change(tags: set) -> float:
+    """09:40 전 등락률 하한 — 090930 태그가 있으면 1%, 아니면 3%."""
+    return EARLY_MIN_CHANGE_PCT_0909 if COND_0909 in tags else EARLY_MIN_CHANGE_PCT
+
+
 # 파이썬판이 없는 검색식 — DAYBOT_SCAN_SOURCE=python이어도 이것만 키움에 물어봄(키움 검색식별 1분 재조회 제한 → 2분 간격)
 KIWOOM_ONLY_KEYWORDS = [COND_0909]
 KIWOOM_ONLY_INTERVAL_SEC = 120
@@ -1434,9 +1442,10 @@ class DayBot:
             if price <= 0:
                 continue
             if now_hhmm() < EARLY_ENTRY_CUTOFF_TIME:
-                if not (EARLY_MIN_CHANGE_PCT <= chg <= EARLY_MAX_CHANGE_PCT):
+                lo = early_min_change(set(self._recent_tags.get(code, {}).keys()) or set(code_multi_tag_map.get(code, [])))
+                if not (lo <= chg <= EARLY_MAX_CHANGE_PCT):
                     print(f"⏭️ [daybot] {code} 패스 — 1차구간(09:40전) 등락률 {chg:+.2f}%"
-                          f"가 {EARLY_MIN_CHANGE_PCT}~{EARLY_MAX_CHANGE_PCT}% 범위 밖")
+                          f"가 {lo}~{EARLY_MAX_CHANGE_PCT}% 범위 밖")
                     self.db.log_candidate(code, self._name(code), tier, price, chg,
                                            skip_reason="등락률범위밖", raw_market_data=mdata)
                     continue
