@@ -5,18 +5,20 @@ scan0909.py — "090930타점 시가이탈 오전중저가이탈" 키움 조건�
 대장(10-22): daybot 소스를 3개월수급(후보 0건) → 090930으로 바꾸면서 조건식 원문을 줌.
 키움 원본 (!A and B and C and D and E and F and G):
   A 당일 첫 1분봉 등락률(첫분봉 시가 대비 종가) 0% 이상  → 앞에 '!'이라 "첫 1분봉이 음봉"이어야 통과(시가이탈)
-  B [일] 오늘 시가를 현재가가 상향돌파                    → 시가 밑으로 빠졌다가 다시 시가 위로
+  B [일] 오늘 시가를 현재가가 상향돌파                    → 키움 '돌파'는 봉 기준: 어제 봉은 종가 ≤ 시가(음봉),
+                                                             오늘은 현재가 > 시가(양봉 전환). ★ 10-22 대장이 장 전에 본 키움
+                                                             결과(알멕·두산테스나·우리로 = 10-20 음봉 → 10-21 양봉)로 확인
   C [일] 5일 이평 >= 20일 이평(오늘 봉 기준)
   D [1분] 거래대금 1억 이상(지금 1분봉)
   E [1분] 지금 1분봉 거래량 >= 직전 60개 1분봉 평균의 100%
   F 체결강도 100~1000%
   G 시가총액 700억 이상
 계산(한투 API, 리나 단타000 1분 감시에 붙어서 같은 시세를 재사용 — 추가 복수시세 조회 없음):
-  1단계 — 복수시세로 B 가능성(지금가 > 시가, 저가 < 시가)·대상제외(ETF·스팩·우선주 등) 거름
-  2단계 — 일봉 DB로 C(이평, 오늘은 지금가를 종가로) → 상장주식수로 G → 체결 1번으로 F
-  3단계 — 1분봉으로 A(오늘 첫 봉 종가 < 시가)·B(최근 3분 안에 시가 아래→위)·D·E. 아침엔 오늘 봉이 60개가 안 돼
-          전날 마지막 봉으로 채움(키움 60봉 평균과 같게).
-근사치: '상향돌파'는 1분 감시라 '최근 3분 안에 시가를 아래→위로'로 봄. 키움 결과(kiwoom_cond_log)와 대조하며 조정.
+  1단계 — 복수시세 + 일봉 DB로 B(어제 음봉 & 지금가 > 시가)·C(이평, 오늘은 지금가를 종가로)·대상제외
+  2단계 — 상장주식수로 G → 체결 1번으로 F
+  3단계 — 1분봉으로 A(오늘 첫 봉 종가 < 시가)·D·E. 아침엔 오늘 봉이 60개가 안 돼 전날 마지막 봉으로 채움.
+※ 장 전에 키움을 보면 '오늘 첫 분봉'이 아직 없어 A가 거짓 → !A가 참이 돼 어제 기준 종목이 뜸(장중 결과와 다름).
+  키움 결과(kiwoom_cond_log)와 대조하며 조정.
 """
 import datetime
 import sqlite3
@@ -31,7 +33,6 @@ D_VALUE_1M_MIN = 100_000_000          # 1분 거래대금 1억
 E_VOL_RATIO_MIN = 100.0               # 지금 1분봉 거래량 / 직전 60봉 평균 (%)
 F_STRENGTH_MIN, F_STRENGTH_MAX = 100.0, 1000.0
 G_CAP_MIN_EOK = 700
-CROSS_BARS = 3                        # B: 최근 이만큼의 1분봉 안에서 시가 아래 → 지금 위
 AVG_BARS = 60
 NEW_SHARES_PER_SCAN = 40              # 상장주식수 첫 조회는 한 번에 이만큼만(한투 초당 한도 나눠 쓰기)
 DEEP_CHECK_MAX = 40                   # 체결·분봉 조회까지 가는 종목 수 상한(거래대금 큰 순)
@@ -46,8 +47,13 @@ def ma_ok(closes: list, price: float) -> tuple:
     return ma5 >= ma20, ma5, ma20
 
 
+def cross_ok(prev_candle, price: float, day_open: float) -> bool:
+    """B: 키움 [일] '시가를 현재가가 상향돌파' — 어제 봉 종가 ≤ 시가, 오늘 현재가 > 시가. prev_candle = (시가, 종가)."""
+    return bool(prev_candle) and prev_candle[1] <= prev_candle[0] and price > day_open > 0
+
+
 def bar_checks(today_bars: list, prev_bars: list, day_open: float) -> dict:
-    """A·B·D·E 판정. bars = [{"time","price","volume","acml_value"}], today_bars는 오늘 정규장 봉(아무 순서)."""
+    """A·D·E 판정. bars = [{"time","price","volume","acml_value"}], today_bars는 오늘 정규장 봉(아무 순서)."""
     t = sorted(today_bars, key=lambda b: b["time"])
     if not t:
         return {"fails": ["분봉 없음"]}
@@ -56,10 +62,6 @@ def bar_checks(today_bars: list, prev_bars: list, day_open: float) -> dict:
     first_rate = (first["price"] / day_open - 1) * 100 if day_open else 0.0
     if first_rate >= 0:
         fails.append(f"A첫분봉 {first_rate:+.2f}%(음봉 아님)")
-    recent = t[-1 - CROSS_BARS:-1]
-    crossed = cur["price"] > day_open and any(b["price"] <= day_open for b in recent)
-    if not crossed:
-        fails.append("B시가 상향돌파 아님(최근 3분)")
     prev_acml = t[-2]["acml_value"] if len(t) >= 2 else 0.0
     value_1m = max(cur["acml_value"] - prev_acml, 0.0) if cur["acml_value"] else cur["price"] * cur["volume"]
     if value_1m < D_VALUE_1M_MIN:
@@ -78,6 +80,7 @@ class Scan0909:
     def __init__(self, api, danta):
         self.api, self.danta = api, danta
         self.closes: dict = {}        # 종목명 → 오늘 전 종가 19개 (날짜별 1번)
+        self.prev_candle: dict = {}   # 종목명 → 어제 (시가, 종가)
         self.closes_date = ""
         self.prev_date = ""
         self.first: dict = {}         # code → (날짜, 오늘 첫 분봉)
@@ -91,14 +94,16 @@ class Scan0909:
         try:
             dates = [d for (d,) in conn.execute("SELECT DISTINCT date FROM kr_stock_daily_data WHERE date < ? "
                                                 "ORDER BY date DESC LIMIT 19", (today,))][::-1]
-            rows = conn.execute("SELECT stock_name, date, close_price FROM kr_stock_daily_data WHERE date >= ? "
+            rows = conn.execute("SELECT stock_name, date, close_price, open_price FROM kr_stock_daily_data WHERE date >= ? "
                                 "AND date < ? AND close_price > 0 ORDER BY date", (dates[0], today)).fetchall() if dates else []
         finally:
             conn.close()
-        closes = {}
-        for n, _, c in rows:
+        closes, prev = {}, {}
+        for n, d, c, o in rows:
             closes.setdefault(n, []).append(c)
-        self.closes, self.closes_date = closes, today
+            if d == dates[-1]:
+                prev[n] = (o, c)
+        self.closes, self.prev_candle, self.closes_date = closes, prev, today
         self.prev_date = dates[-1].replace("-", "") if dates else ""
 
     def _today_bars(self, code: str, now: datetime.datetime) -> list:
@@ -149,8 +154,8 @@ class Scan0909:
         stage1 = []
         for code, q in quotes.items():
             name = pool.get(code) or q.get("name", code)
-            op, px, lo = q.get("open", 0), q.get("price", 0), q.get("low", 0)
-            if px <= 0 or op <= 0 or not (px > op and lo < op):
+            op, px = q.get("open", 0), q.get("price", 0)
+            if px <= 0 or op <= 0 or not cross_ok(self.prev_candle.get(name), px, op):
                 continue
             if leader_scan.excluded_by_name(code, name) or q.get("value", 0) < D_VALUE_1M_MIN:
                 continue
@@ -197,7 +202,7 @@ class Scan0909:
 def format_hit(r: dict, overlap: str = "") -> str:
     return (f"🎯 **{r['name']}**({r['code']}) {r['price']:,.0f}원 {r['chg']:+.2f}%"
             + (f"  🔗 {overlap}" if overlap else "") + "\n"
-            f"   시가 {r['open']:,.0f} 재돌파 · 첫분봉 {r['first_rate']:+.2f}% · 1분 대금 {r['value_1m'] / 1e8:.1f}억 · "
+            f"   어제 음봉 → 시가 {r['open']:,.0f} 위 · 첫분봉 {r['first_rate']:+.2f}% · 1분 대금 {r['value_1m'] / 1e8:.1f}억 · "
             f"거래량 {r['vol_ratio']:.0f}% · 체결강도 {r['strength']:.0f}% · 시총 {r['cap_eok']:,.0f}억")
 
 
