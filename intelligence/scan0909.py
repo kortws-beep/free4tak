@@ -38,6 +38,9 @@ AVG_BARS = 60
 #   떴음 → 키움의 '!A'는 첫 1분 동안만 의미가 있는 듯(그 뒤엔 A가 거짓 취급). 확실해질 때까지 A는 기록만(거르지 않음),
 #   키움 결과(kiwoom_cond_log)와 첫분봉 등락(obs0909.first_rate)을 대조해서 정함.
 A_STRICT = False
+# ★ 10-22 첫날: 키움(라온시큐어 1종목) vs 파이썬판(17종목) — 너무 느슨. 대장 "아침에 키움 결과 보고 맞추자, 오늘은 꺼두자"
+#   → 계산·기록(obs0909)은 계속, 산야 알림·daybot 소스(core/daybot_db.PY_SOURCES)는 맞출 때까지 끔
+ALERT = False
 NEW_SHARES_PER_SCAN = 40              # 상장주식수 첫 조회는 한 번에 이만큼만(한투 초당 한도 나눠 쓰기)
 DEEP_CHECK_MAX = 40                   # 체결·분봉 조회까지 가는 종목 수 상한(거래대금 큰 순)
 

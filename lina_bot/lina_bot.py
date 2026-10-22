@@ -1915,6 +1915,8 @@ async def _scan0909_after_danta(kst_now):
         if not out:
             return
         hits = [r for r in out["results"] if r["passed"] and r["code"] not in _S0909_STATE["alerted"]]
+        if not scan0909.ALERT:            # 키움과 맞출 때까지 기록만(10-22)
+            hits = []
         print(f"🎯 [090930] 1단계 {out['stage1']} → 정밀 {len(out['results'])} → 통과 "
               f"{sum(r['passed'] for r in out['results'])}개 (신규 {len(hits)})")
         if not hits:
