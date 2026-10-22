@@ -179,13 +179,25 @@ class SwingDB:
             profit_rate = ((sell_price - buy_price) / buy_price * 100
                            if buy_price else 0)
             conn = _connect()
-            conn.execute("""
-                INSERT INTO trades
-                    (code, stock_name, buy_price, buy_time, qty,
-                     sell_price, sell_time, profit_rate, sell_reason, buy_tag)
-                VALUES (?,?,?,?,?,?,?,?,?,?)
-            """, (code, stock_name, buy_price, now, qty,
-                  sell_price, now, round(profit_rate, 2), sell_reason, buy_tag))
+            # ★ 2026-10-22: 봇이 받아둔(재시작 때 'DB 누락 → 자동 추가') 열린 매수 행이 있으면 그 행을 닫는다 — 예전엔 새 행만
+            #   넣어서 열린 행이 '안 판 종목'으로 영영 남았음(대덕전자 10-22). 일부만 팔았으면 판 수량만 닫힌 행으로 떼어냄.
+            row = conn.execute("SELECT id, qty FROM trades WHERE code=? AND sell_price IS NULL ORDER BY id DESC LIMIT 1",
+                               (code,)).fetchone()
+            if row and (not qty or qty >= (row[1] or 0)):
+                conn.execute("""UPDATE trades SET stock_name=COALESCE(NULLIF(stock_name,''), ?), buy_price=?,
+                                sell_price=?, sell_time=?, profit_rate=?, sell_reason=?, buy_tag=COALESCE(buy_tag, ?)
+                                WHERE id=?""",
+                             (stock_name, buy_price, sell_price, now, round(profit_rate, 2), sell_reason, buy_tag, row[0]))
+            else:
+                conn.execute("""
+                    INSERT INTO trades
+                        (code, stock_name, buy_price, buy_time, qty,
+                         sell_price, sell_time, profit_rate, sell_reason, buy_tag)
+                    VALUES (?,?,?,?,?,?,?,?,?,?)
+                """, (code, stock_name, buy_price, now, qty,
+                      sell_price, now, round(profit_rate, 2), sell_reason, buy_tag))
+                if row:
+                    conn.execute("UPDATE trades SET qty=? WHERE id=?", ((row[1] or 0) - qty, row[0]))
             conn.commit(); conn.close()
             emoji = "✅" if profit_rate >= 0 else "❌"
             print(f"   {emoji} 수동거래 기록 {code} | {profit_rate:+.2f}% | {sell_reason}")

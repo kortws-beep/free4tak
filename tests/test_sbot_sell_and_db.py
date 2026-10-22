@@ -110,6 +110,20 @@ class SwingDBSecondBuy(unittest.TestCase):
                                      "and sell_price is null").fetchone()[0], 0)
         self.assertFalse(db.add_to_open_buy("NONE", 1, 1))
 
+    def test_manual_sell_closes_adopted_open_row(self):
+        """★ 10-22 대덕전자 — 재시작 때 받아둔 열린 행이 있으면 수동매도가 그 행을 닫음(유령 행 방지), 일부 매도는 떼어냄."""
+        db = sbot_db.SwingDB(); db.init_db()
+        con = sqlite3.connect(sbot_db.SBOT_HIST_DB)
+        con.execute("insert into trades (code, buy_price, buy_time, qty) values ('M', 100, 'x', 15)"); con.commit()
+        db.save_manual_trade("M", "엠", 100, 110, 15, "수동매도")
+        self.assertEqual(con.execute("select count(*), sum(sell_price is null) from trades where code='M'").fetchone(), (1, 0))
+        con.execute("insert into trades (code, buy_price, buy_time, qty) values ('P', 100, 'x', 10)"); con.commit()
+        db.save_manual_trade("P", "피", 100, 120, 4, "수동매도")
+        self.assertEqual(con.execute("select qty, sell_price from trades where code='P' order by id").fetchall(),
+                         [(6, None), (4, 120.0)])
+        db.save_manual_trade("N", "새것", 50, 55, 3, "수동매도")                  # 열린 행 없으면 예전처럼 새 행
+        self.assertEqual(con.execute("select qty, sell_price from trades where code='N'").fetchall(), [(3, 55.0)])
+
 
 class API:
     def __init__(self):
