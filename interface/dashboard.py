@@ -483,6 +483,13 @@ def api_bots():
     return jsonify(bot_overview.build())
 
 
+@app.route("/api/engines")
+def api_engines():
+    """엔진 대항전 — p=day|week|month (2026-10-24)"""
+    import engine_board
+    return jsonify(engine_board.board(request.args.get("p", "week")))
+
+
 @app.route("/api/feed")
 def api_feed():
     import discord_feed

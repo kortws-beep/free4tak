@@ -116,6 +116,7 @@ INVENTORY = [
             ("/lina 리나 등록종목 + 매도선 + 전량 매도·해제(PIN)", "2026-10-20"),
             ("/feed 키키·리나·산야 메시지 모아보기", "2026-10-20"),
             ("/bots 이 화면 — 기능 지도 + 변경 이력", "2026-10-22"),
+            ("/bots 🏁 엔진 대항전 — 봇별 '산 곳·판 이유'마다 손익 줄 세우기(오늘·이번 주·이번 달)", "2026-10-24"),
         ]),
         ("🗄️ 쌓는 데이터", [
             ("일봉 20:10 · 투자자 20:30 · FDR 시세/지수 20:40 · 섹터 DB 16:30 · 쏠림 지수 30분", ""),
@@ -212,19 +213,41 @@ HTML = """<!DOCTYPE html>
  .ch{background:var(--card);border:1px solid var(--bd);border-left:5px solid #64748b;border-radius:10px;padding:8px 10px;margin:6px 0;font-size:14px;line-height:1.45}
  .tg{font-size:11px;color:#fff;border-radius:8px;padding:0 6px;margin-right:6px}
  details{margin-top:14px}summary{color:var(--sub);font-size:13px;cursor:pointer}
+ .er{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:8px 10px;margin:6px 0}
+ .eh{display:flex;justify-content:space-between;font-size:14px}.eb{height:6px;border-radius:3px;margin-top:5px;background:var(--bd);overflow:hidden}
+ .eb i{display:block;height:100%}.es{font-size:12px;color:var(--sub);margin-top:3px}.tot{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0}
+ .tot span{font-size:12px;border:1px solid var(--bd);border-radius:8px;padding:3px 8px;background:var(--card)}
  .git{font-size:12px;color:var(--sub);padding:3px 0;border-bottom:1px dashed var(--bd)}.git b{color:var(--tx);font-weight:400}
 </style></head><body>
 """ + NAV + """
 <h1>🤖 봇 기능 지도</h1><div class="sub" id="at">불러오는 중…</div>
-<div class="tabs"><button id="t1" class="on" onclick="tab(1)">🗺️ 기능</button><button id="t2" onclick="tab(2)">📜 변경 이력</button></div>
+<div class="tabs"><button id="t1" class="on" onclick="tab(1)">🗺️ 기능</button><button id="t2" onclick="tab(2)">📜 변경 이력</button><button id="t3" onclick="tab(3)">🏁 엔진 대항전</button></div>
 <div id="p1"></div>
 <div id="p2" style="display:none"><div class="chips" id="cf"></div><div id="cl"></div>
  <details><summary>🛠️ 개발 기록(git, 최근 14일)</summary><div id="gl"></div></details></div>
+<div id="p3" style="display:none"><div class="chips" id="ep"></div><div class="sub" id="es"></div><div id="el"></div>
+ <div class="sub" style="margin-top:10px">sbot·daybot은 '산 곳', cbot은 '판 이유'별 · 금액은 매수·매도가 차이×수량(수수료 전) · 리나는 수량 기록이 없어 수익률만</div></div>
 <script>
 let D=null,fc='전체',openSet=new Set();
 try{openSet=new Set(JSON.parse(localStorage.getItem('bots_open')||'[]'));fc=localStorage.getItem('bots_fc')||'전체'}catch(e){}
 const esc=s=>s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
-function tab(n){[1,2].forEach(i=>{document.getElementById('p'+i).style.display=i==n?'':'none';document.getElementById('t'+i).classList.toggle('on',i==n)});try{localStorage.setItem('bots_tab',n)}catch(e){}}
+let ep='week';try{ep=localStorage.getItem('bots_ep')||'week'}catch(e){}
+const P={day:'오늘',week:'이번 주',month:'이번 달'};
+const won=n=>(n>0?'+':'')+Math.round(n).toLocaleString('ko-KR')+'원';
+async function loadE(){
+ document.getElementById('ep').innerHTML=Object.entries(P).map(([k,v])=>`<button class="chip ${ep==k?'on':''}" onclick="setE('${k}')">${v}</button>`).join('');
+ try{const E=await (await fetch('api/engines?p='+ep)).json();
+  const mx=Math.max(1,...E.rows.filter(r=>r.krw!=null).map(r=>Math.abs(r.krw)));
+  document.getElementById('es').innerHTML=`<div class="tot">${Object.entries(E.totals).map(([b,v])=>`<span>${({sbot:'🤖 sbot',daybot:'⚡ daybot',cbot:'🪙 cbot'})[b]||b} <b style="color:${v>=0?'#ef4444':'#4dabf7'}">${won(v)}</b></span>`).join('')}</div>${E.since} 이후 매도 기준`;
+  document.getElementById('el').innerHTML=E.rows.map((r,i)=>{const c=(r.krw??r.avg??0)>=0?'#ef4444':'#4dabf7';
+   const w=r.krw==null?0:Math.abs(r.krw)/mx*100;
+   return `<div class="er"><div class="eh"><span>${i+1}. ${r.bot_name} · <b>${esc(r.engine)}</b></span><b style="color:${c}">${r.krw==null?'-':won(r.krw)}</b></div>
+    <div class="eb"><i style="width:${w}%;background:${c}"></i></div>
+    <div class="es">${r.n}건 · 승 ${r.wins} · 평균 ${r.avg==null?'-':(r.avg>0?'+':'')+r.avg.toFixed(2)+'%'}</div></div>`}).join('')||'<div class="er">이 기간엔 매도 기록이 없어요</div>';
+ }catch(e){document.getElementById('el').innerHTML='<div class="er">⚠️ 불러오기 실패</div>'}
+}
+function setE(k){ep=k;try{localStorage.setItem('bots_ep',k)}catch(e){};loadE()}
+function tab(n){if(n==3)loadE();[1,2,3].forEach(i=>{document.getElementById('p'+i).style.display=i==n?'':'none';document.getElementById('t'+i).classList.toggle('on',i==n)});try{localStorage.setItem('bots_tab',n)}catch(e){}}
 function tog(id){openSet.has(id)?openSet.delete(id):openSet.add(id);try{localStorage.setItem('bots_open',JSON.stringify([...openSet]))}catch(e){};render()}
 function setF(t){fc=t;try{localStorage.setItem('bots_fc',t)}catch(e){};render()}
 function render(){
