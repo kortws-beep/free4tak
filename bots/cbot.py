@@ -311,6 +311,16 @@ TICK_DB        = "coin_price_ticks.db"   # ★ 2026-08-17: 실시간 시세틱 �
 #   선호 심리를 코인뉴스만으로 못 잡을 때 보조 참고용으로 프롬프트에 추가.
 MACRO_TTL = 3600   # 1시간 캐시(국채/금은 일봉 기준이라 자주 안 바뀜)
 
+def px_round(x: float) -> float:
+    """★ 2026-10-24 손절·목표가 반올림 — 예전엔 전부 round(…, 0)(원 단위)라 3~4원짜리 코인(ANIME 등)은 목표가가
+    현재가와 같아져 매 루프 '목표 달성'이 반복(stage 27까지 오름), 30% 익절도 +0.25%에 나감. 가격대에 맞는 자릿수로."""
+    if x >= 1000:
+        return round(x, 0)
+    if x >= 10:
+        return round(x, 2)
+    return round(x, 4)
+
+
 # ★ 2026-08-17: 급락감지 재설계 — 기존엔 4시간봉 직전 완결봉 등락률(최대
 #   4시간+5분 캐시만큼 지연된 정보)로 판단해서, 이미 다 지나간 급락에
 #   뒤늦게 물려 -5% 기준인데 실제론 -7~-11%에 손절되는 경우가 잦았음
@@ -594,7 +604,7 @@ class CBot:
             while buf and buf[0][0] < cutoff:
                 buf.popleft()
 
-    def _check_recent_crash(self, market: str, current: float, atr_val: float) -> tuple:
+    def _check_recent_crash(self, market: str, current: float, atr_val: float, peak_since_entry: float = 0.0) -> tuple:
         """최근 CRASH_WINDOW_SEC(10분) 내 고점 대비 하락폭을 ATR 배수로
         판단. 4시간봉 대신 실시간가라서 지연이 없고, ATR 배수라서 코인별
         변동성에 맞게 스케일됨(고정 %보다 정교).
@@ -609,6 +619,11 @@ class CBot:
         if atr_val <= 0:
             return False, 0.0
         window_high = max(p for _, p in snapshot)
+        # ★ 2026-10-24: 산 뒤의 고점만 — 예전엔 10분 창에 '사기 전' 고점이 들어가서, 눌림에 사면 사자마자 급락감지로
+        #   팔고(수익이면 재매수 금지도 안 걸려) 또 사는 헛바퀴가 돌았음(10-24 QUID 1분 새 3번, SLX 등 수수료만 나감).
+        #   peak_since_entry = 매수 뒤 기록한 최고가(peak_tracker) — 10분 창 고점과 둘 중 낮은 쪽을 씀.
+        if peak_since_entry and peak_since_entry > 0:
+            window_high = min(window_high, peak_since_entry)
         if window_high <= 0:
             return False, 0.0
         drop = window_high - current
@@ -2120,12 +2135,12 @@ class CBot:
             atr_rate = self.get_atr_rate(market)
             if atr_rate > 0:
                 atr_val  = entry * atr_rate
-                stop     = round(entry - atr_val * ATR_STOP_MULT, 0)
-                target1  = round(entry + atr_val * ATR_TARGET_MULT, 0)
+                stop     = px_round(entry - atr_val * ATR_STOP_MULT)
+                target1  = px_round(entry + atr_val * ATR_TARGET_MULT)
             else:
                 atr_val  = entry * abs(FALLBACK_STOP) / ATR_STOP_MULT
-                stop     = round(entry * (1 + FALLBACK_STOP), 0)
-                target1  = round(entry * (1 + FALLBACK_TARGET), 0)
+                stop     = px_round(entry * (1 + FALLBACK_STOP))
+                target1  = px_round(entry * (1 + FALLBACK_TARGET))
             import datetime as _dt
             existing = self.peak_tracker.get(market, {})
             self.peak_tracker[market] = {
@@ -2166,7 +2181,7 @@ class CBot:
         #   전량 손절되는 걸 막기 위해 특정 코인만 손절체크(급락감지 포함)를
         #   제외. 트레일링/목표달성 로직은 그대로 작동.
         is_held = tracker.get("hold", False)
-        is_crash, crash_rate = (False, 0.0) if is_held else self._check_recent_crash(market, current, atr_val)
+        is_crash, crash_rate = (False, 0.0) if is_held else self._check_recent_crash(market, current, atr_val, peak_price)
         if is_crash:
             self.notify(
                 f"💥 급락감지 즉시손절 {market}\n"
@@ -2286,8 +2301,8 @@ class CBot:
                 if self.sell(market, part_qty, f"stage0조기익절30%({rate:+.2%})",
                              sell_price=current, force_all=False):
                     print(f"💰 stage0 조기 30%매도 {market} | {part_qty:.6f}개 @ {current:,.0f}")
-                    new_stop   = round(entry + atr_val * ATR_RAISE_MULT, 0)
-                    new_target = round(current + atr_val * ATR_TARGET_MULT, 0)
+                    new_stop   = px_round(entry + atr_val * ATR_RAISE_MULT)
+                    new_target = px_round(current + atr_val * ATR_TARGET_MULT)
                     tracker["stop_price"]  = new_stop
                     tracker["target_next"] = new_target
                     tracker["stage"]       = 1
@@ -2312,8 +2327,8 @@ class CBot:
                     if self.sell(market, part_qty, f"목표1익절30%({rate:+.2%})",
                                  sell_price=current, force_all=False):
                         print(f"💰 목표1 30%매도 {market} | {part_qty:.6f}개 @ {current:,.0f}")
-                        new_stop   = round(entry + atr_val * ATR_RAISE_MULT, 0)
-                        new_target = round(current + atr_val * ATR_TARGET_MULT, 0)
+                        new_stop   = px_round(entry + atr_val * ATR_RAISE_MULT)
+                        new_target = px_round(current + atr_val * ATR_TARGET_MULT)
                         tracker["stop_price"]  = new_stop
                         tracker["target_next"] = new_target
                         tracker["stage"]       = 1
@@ -2326,7 +2341,7 @@ class CBot:
                         )
             else:
                 new_stop   = target_next
-                new_target = round(current + atr_val * ATR_TARGET_MULT, 0)
+                new_target = px_round(current + atr_val * ATR_TARGET_MULT)
                 tracker["stop_price"]  = new_stop
                 tracker["target_next"] = new_target
                 tracker["stage"]       = stage + 1

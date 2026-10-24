@@ -228,5 +228,26 @@ class CbotMasterRecordQty(unittest.TestCase):
         self.assertEqual([r["qty"] for r in rec], [3, 7])
 
 
+class Oct24Fixes(unittest.TestCase):
+    """★ 10-24 ① 급락감지는 산 뒤 고점만(사기 전 고점 때문에 사자마자 팔던 헛바퀴) ② 싼 코인 손절·목표가 반올림."""
+    def test_crash_ignores_pre_entry_high(self):
+        import threading, time
+        from collections import deque
+        b = object.__new__(cbot.CBot)
+        b._price_history_lock = threading.Lock()
+        now = time.time()
+        b._price_history = {"KRW-X": deque([(now - 300, 110.0), (now - 60, 100.0)])}   # 5분 전 110(사기 전), 지금 100에 매수
+        b._is_night = lambda: False
+        self.assertTrue(b._check_recent_crash("KRW-X", 100.0, 5.0)[0])                 # 예전 방식: 사자마자 급락감지
+        self.assertFalse(b._check_recent_crash("KRW-X", 100.0, 5.0, 100.5)[0])         # 산 뒤 고점 100.5 기준 → 아님
+        self.assertTrue(b._check_recent_crash("KRW-X", 94.0, 5.0, 100.5)[0])           # 산 뒤 고점에서 ATR 넘게 빠지면 감지
+
+    def test_px_round(self):
+        self.assertEqual(cbot.px_round(4.2349), 4.2349)
+        self.assertEqual(cbot.px_round(61.234), 61.23)
+        self.assertEqual(cbot.px_round(110975123.4), 110975123.0)
+        self.assertNotEqual(cbot.px_round(4.05 + 0.1 * 3), cbot.px_round(4.05))       # 목표가가 현재가와 같아지지 않음
+
+
 if __name__ == "__main__":
     unittest.main()
