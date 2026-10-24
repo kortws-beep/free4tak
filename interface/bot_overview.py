@@ -181,9 +181,16 @@ def build() -> dict:
     return {"bots": inventory(), "changes": changelog(), "git": git_log(), "targets": list(TARGETS)}
 
 
-NAV = """<nav class="nav"><a href="lina" data-p="lina">📋 리나</a><a href="feed" data-p="feed">🗂️ 메시지</a><a href="bots" data-p="bots">🤖 봇 기능</a></nav>
+def engines_html() -> str:
+    """★ 10-24 /engines — 엔진 대항전만 바로 여는 화면(같은 페이지에 대항전 탭을 처음부터 열어 둠)."""
+    return (HTML.replace("<title>봇 기능 지도</title>", "<title>엔진 대항전</title>")
+            .replace("<h1>🤖 봇 기능 지도</h1>", "<h1>🏁 엔진 대항전</h1>")
+            .replace("try{tab(+localStorage.getItem('bots_tab')||1)}catch(e){}", "tab(3);"))
+
+
+NAV = """<nav class="nav"><a href="lina" data-p="lina">📋 리나</a><a href="feed" data-p="feed">🗂️ 메시지</a><a href="bots" data-p="bots">🤖 봇 기능</a><a href="engines" data-p="engines">🏁 대항전</a></nav>
 <style>.nav{display:flex;gap:6px;margin:0 0 10px;position:sticky;top:0;background:var(--bg);padding:8px 0;z-index:5}
-.nav a{flex:1;text-align:center;padding:8px 4px;border-radius:10px;border:1px solid var(--bd,#2a2d3a);color:var(--sub,#94a3b8);
+.nav a{flex:1;text-align:center;padding:8px 2px;white-space:nowrap;border-radius:10px;border:1px solid var(--bd,#2a2d3a);color:var(--sub,#94a3b8);
 text-decoration:none;font-size:13px;background:var(--card,#1a1d27)}.nav a.on{color:var(--tx,#e2e8f0);border-color:var(--tx,#e2e8f0);font-weight:700}</style>
 <script>document.querySelectorAll('.nav a').forEach(a=>{if(location.pathname.endsWith('/'+a.dataset.p))a.classList.add('on')})</script>"""
 
@@ -221,7 +228,7 @@ HTML = """<!DOCTYPE html>
 </style></head><body>
 """ + NAV + """
 <h1>🤖 봇 기능 지도</h1><div class="sub" id="at">불러오는 중…</div>
-<div class="tabs"><button id="t1" class="on" onclick="tab(1)">🗺️ 기능</button><button id="t2" onclick="tab(2)">📜 변경 이력</button><button id="t3" onclick="tab(3)">🏁 엔진 대항전</button></div>
+<div class="tabs"><button id="t1" class="on" onclick="tab(1)">🗺️ 기능</button><button id="t2" onclick="tab(2)">📜 변경 이력</button><button id="t3" onclick="tab(3)">🏁 대항전</button></div>
 <div id="p1"></div>
 <div id="p2" style="display:none"><div class="chips" id="cf"></div><div id="cl"></div>
  <details><summary>🛠️ 개발 기록(git, 최근 14일)</summary><div id="gl"></div></details></div>

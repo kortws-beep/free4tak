@@ -31,8 +31,10 @@ class Overview(unittest.TestCase):
         self.assertTrue(c and all(x["target"] in B.TARGETS for x in c))          # 대상 이름 오타 방지
 
     def test_nav_links(self):
-        for p in ("lina", "feed", "bots"):
+        for p in ("lina", "feed", "bots", "engines"):
             self.assertIn(f'href="{p}"', B.NAV)
+        h = B.engines_html()
+        self.assertIn("tab(3);", h); self.assertIn("🏁 엔진 대항전</h1>", h)
 
 
 if __name__ == "__main__":

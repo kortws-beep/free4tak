@@ -483,6 +483,13 @@ def api_bots():
     return jsonify(bot_overview.build())
 
 
+@app.route("/engines")
+def engines_page():
+    """엔진 대항전 바로 보기(2026-10-24)"""
+    import bot_overview
+    return bot_overview.engines_html()
+
+
 @app.route("/api/engines")
 def api_engines():
     """엔진 대항전 — p=day|week|month (2026-10-24)"""
