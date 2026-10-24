@@ -313,6 +313,15 @@ TICK_DB        = "coin_price_ticks.db"   # ★ 2026-08-17: 실시간 시세틱 �
 #   선호 심리를 코인뉴스만으로 못 잡을 때 보조 참고용으로 프롬프트에 추가.
 MACRO_TTL = 3600   # 1시간 캐시(국채/금은 일봉 기준이라 자주 안 바뀜)
 
+def fmt_px(x) -> str:
+    """★ 2026-10-24 화면용 가격 — 예전엔 전부 정수(:,.0f / int())라 4.05원 손절이 '3', 4.374원 목표가 '4'로 보였음(ANIME)."""
+    try:
+        x = float(x)
+    except (TypeError, ValueError):
+        return str(x)
+    return f"{x:,.0f}" if x >= 1000 else f"{x:,.2f}" if x >= 10 else f"{x:,.4f}".rstrip("0").rstrip(".")
+
+
 def px_round(x: float) -> float:
     """★ 2026-10-24 손절·목표가 반올림 — 예전엔 전부 round(…, 0)(원 단위)라 3~4원짜리 코인(ANIME 등)은 목표가가
     현재가와 같아져 매 루프 '목표 달성'이 반복(stage 27까지 오름), 30% 익절도 +0.25%에 나감. 가격대에 맞는 자릿수로."""
@@ -2156,8 +2165,8 @@ class CBot:
                 "buy_date":    existing.get("buy_date", _dt.date.today().isoformat()),  # ★ 25일 기한
                 "hold":        existing.get("hold", False),  # ★ 홀드(손절체크 제외) 보존
             }
-            print(f"   📐 ATR 타점 {market} | 손절:{stop:,.0f} | "
-                  f"목표:{target1:,.0f} | ATR:{atr_rate:.2%}")
+            print(f"   📐 ATR 타점 {market} | 손절:{fmt_px(stop)} | "
+                  f"목표:{fmt_px(target1)} | ATR:{atr_rate:.2%}")
 
         tracker     = self.peak_tracker[market]
         stage       = tracker["stage"]
@@ -2213,7 +2222,7 @@ class CBot:
         if stage == 0 and current <= stop_price and not is_held:
             self.notify(
                 f"🛑 손절 {market} | {rate:+.2%}\n"
-                f"현재:{current:,.0f} ≤ 손절:{stop_price:,.0f} | 시장:{self.market_status}",
+                f"현재:{fmt_px(current)} ≤ 손절:{fmt_px(stop_price)} | 시장:{self.market_status}",
                 critical=True,
             )
             # ★ 10-17: 손절선이 매수가 위로 올라간 뒤 걸린 건 이익 — '손절'로 적으면 성적표 손절 수가 부풀려짐
@@ -2309,10 +2318,10 @@ class CBot:
                     tracker["target_next"] = new_target
                     tracker["stage"]       = 1
                     print(f"🎯 stage0 조기익절 {market} ({rate:+.2%}) | "
-                          f"손절↑:{new_stop:,.0f} | 새목표:{new_target:,.0f}")
+                          f"손절↑:{fmt_px(new_stop)} | 새목표:{fmt_px(new_target)}")
                     self.notify(
                         f"🎯 조기익절(목표1 전) {market} ({rate:+.2%}) — 30%매도\n"
-                        f"손절↑:{new_stop:,.0f} | 새목표:{new_target:,.0f}",
+                        f"손절↑:{fmt_px(new_stop)} | 새목표:{fmt_px(new_target)}",
                         critical=False,
                     )
             return
@@ -2335,10 +2344,10 @@ class CBot:
                         tracker["target_next"] = new_target
                         tracker["stage"]       = 1
                         print(f"🎯 목표가1 달성 {market} ({rate:+.2%}) | "
-                              f"손절↑:{new_stop:,.0f} | 새목표:{new_target:,.0f}")
+                              f"손절↑:{fmt_px(new_stop)} | 새목표:{fmt_px(new_target)}")
                         self.notify(
                             f"🎯 목표가1 달성 {market} ({rate:+.2%}) — 30%매도\n"
-                            f"손절↑:{new_stop:,.0f} | 새목표:{new_target:,.0f}",
+                            f"손절↑:{fmt_px(new_stop)} | 새목표:{fmt_px(new_target)}",
                             critical=False,
                         )
             else:
@@ -2348,10 +2357,10 @@ class CBot:
                 tracker["target_next"] = new_target
                 tracker["stage"]       = stage + 1
                 print(f"🎯 목표가{stage+1} 달성 {market} ({rate:+.2%}) | "
-                      f"손절↑:{new_stop:,.0f} | 새목표:{new_target:,.0f}")
+                      f"손절↑:{fmt_px(new_stop)} | 새목표:{fmt_px(new_target)}")
                 self.notify(
                     f"🎯 목표가{stage+1} 달성 {market} ({rate:+.2%})\n"
-                    f"손절↑:{new_stop:,.0f} | 새목표:{new_target:,.0f}",
+                    f"손절↑:{fmt_px(new_stop)} | 새목표:{fmt_px(new_target)}",
                     critical=False,
                 )
 
@@ -2807,7 +2816,7 @@ class CBot:
                             stop_p = peak_p - atr_val * ATR_TRAIL_MULT
                     print(
                         f"{hold_mark}{emoji} {market}{stage_tag} {rate:+.2f}% | "
-                        f"현재:{pos['current']:,} | 손절:{int(stop_p):,} 목표:{int(target_p):,}"
+                        f"현재:{fmt_px(pos['current'])} | 손절:{fmt_px(stop_p)} 목표:{fmt_px(target_p)}"
                     )
                 print(f"📈 평가손익: {total_profit:+,.0f}원")
 

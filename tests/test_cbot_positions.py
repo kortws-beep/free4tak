@@ -247,6 +247,8 @@ class Oct24Fixes(unittest.TestCase):
         self.assertEqual(cbot.px_round(61.234), 61.23)
         self.assertEqual(cbot.px_round(110975123.4), 110975123.0)
         self.assertNotEqual(cbot.px_round(4.05 + 0.1 * 3), cbot.px_round(4.05))       # 목표가가 현재가와 같아지지 않음
+        self.assertEqual((cbot.fmt_px(4.05), cbot.fmt_px(4.374), cbot.fmt_px(61.2), cbot.fmt_px(109400286.0)),
+                         ("4.05", "4.374", "61.20", "109,400,286"))
 
 
 if __name__ == "__main__":
