@@ -169,7 +169,7 @@ class CBotBacktestConfig:
 
     # ★ 2026-10-18: 실전 stage0 보호선(+3% 찍은 뒤 +0.3%면 전량) 동기화. 4시간봉이라 실전보다 거칠게 걸림.
     enable_protect_line: bool = True
-    protect_arm_rate: float   = 0.03
+    protect_arm_rate: float   = 0.025    # ★ 10-24 실전과 동기화(0.03 → 0.025)
     protect_floor_rate: float = 0.003
 
     # ★ 2026-10-18: 장 판단 필터 — 값이 regime_min 미만이면 신규 매수 쉬기(매도는 그대로, 값 없으면 막지 않음).
