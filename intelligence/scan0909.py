@@ -37,7 +37,7 @@ AVG_BARS = 60
 # ★ 10-22: 키움이 10-21 마감 무렵 잡은 3종목(알멕·두산테스나·우리로)은 첫 분봉이 전부 양봉(0.0/+2.65/+0.48%)이었는데도
 #   떴음 → 키움의 '!A'는 첫 1분 동안만 의미가 있는 듯(그 뒤엔 A가 거짓 취급). 확실해질 때까지 A는 기록만(거르지 않음),
 #   키움 결과(kiwoom_cond_log)와 첫분봉 등락(obs0909.first_rate)을 대조해서 정함.
-A_STRICT = False
+A_STRICT = True        # ★ 10-26: 키움 루닛 = 첫 분봉 음봉(-9%) → !A 엄격 적용(10-22 라온시큐어 예외는 NXT 첫 봉 차이로 추정)
 # ★ 10-22 첫날: 키움(라온시큐어 1종목) vs 파이썬판(17종목) — 너무 느슨. 대장 "아침에 키움 결과 보고 맞추자, 오늘은 꺼두자"
 #   → 계산·기록(obs0909)은 계속, 산야 알림·daybot 소스(core/daybot_db.PY_SOURCES)는 맞출 때까지 끔
 ALERT = False
@@ -54,9 +54,11 @@ def ma_ok(closes: list, price: float) -> tuple:
     return ma5 >= ma20, ma5, ma20
 
 
-def cross_ok(prev_candle, price: float, day_open: float) -> bool:
-    """B: 키움 [일] '시가를 현재가가 상향돌파' — 어제 봉 종가 ≤ 시가, 오늘 현재가 > 시가. prev_candle = (시가, 종가)."""
-    return bool(prev_candle) and prev_candle[1] <= prev_candle[0] and price > day_open > 0
+def cross_ok(day_low: float, price: float, day_open: float) -> bool:
+    """B: 키움 '시가를 현재가가 상향돌파' — 오늘 시가 밑으로 내려갔다가(저가 < 시가) 지금 시가 위(현재가 > 시가).
+    ★ 10-26 다시 바꿈: 10-22엔 '어제 음봉 → 오늘 양봉'으로 봤는데, 10-26 키움이 잡은 루닛은 어제(10-23) 양봉이었음
+      (10,930 → 11,240) → 일봉 해석은 틀림. 루닛: 첫 분봉 12,450 → 11,300(음봉) · 저가 12,150 → 지금 13,580(시가 위)."""
+    return day_open > 0 and day_low < day_open < price
 
 
 def bar_checks(today_bars: list, prev_bars: list, day_open: float) -> dict:
@@ -162,7 +164,7 @@ class Scan0909:
         for code, q in quotes.items():
             name = pool.get(code) or q.get("name", code)
             op, px = q.get("open", 0), q.get("price", 0)
-            if px <= 0 or op <= 0 or not cross_ok(self.prev_candle.get(name), px, op):
+            if px <= 0 or op <= 0 or not cross_ok(q.get("low", 0), px, op):
                 continue
             if leader_scan.excluded_by_name(code, name) or q.get("value", 0) < D_VALUE_1M_MIN:
                 continue
@@ -209,7 +211,7 @@ class Scan0909:
 def format_hit(r: dict, overlap: str = "") -> str:
     return (f"🎯 **{r['name']}**({r['code']}) {r['price']:,.0f}원 {r['chg']:+.2f}%"
             + (f"  🔗 {overlap}" if overlap else "") + "\n"
-            f"   어제 음봉 → 시가 {r['open']:,.0f} 위 · 첫분봉 {r['first_rate']:+.2f}% · 1분 대금 {r['value_1m'] / 1e8:.1f}억 · "
+            f"   시가 {r['open']:,.0f} 밑 → 다시 위 · 첫분봉 {r['first_rate']:+.2f}% · 1분 대금 {r['value_1m'] / 1e8:.1f}억 · "
             f"거래량 {r['vol_ratio']:.0f}% · 체결강도 {r['strength']:.0f}% · 시총 {r['cap_eok']:,.0f}억")
 
 

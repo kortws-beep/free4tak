@@ -18,11 +18,10 @@ class Checks(unittest.TestCase):
         self.assertFalse(S.ma_ok([120] * 15 + [100] * 4, 100)[0])
         self.assertFalse(S.ma_ok([100] * 10, 100)[0])                   # 일봉 부족
 
-    def test_cross(self):                                               # 10-21 알멕: 10-20 62,000→58,000 음봉, 시가 60,300
-        self.assertTrue(S.cross_ok((62000, 58000), 64900, 60300))
-        self.assertFalse(S.cross_ok((57000, 58000), 64900, 60300))     # 어제 양봉
-        self.assertFalse(S.cross_ok((62000, 58000), 60000, 60300))     # 지금 시가 아래
-        self.assertFalse(S.cross_ok(None, 64900, 60300))
+    def test_cross(self):                                               # 10-26 루닛: 시가 12,450 · 저가 12,150 · 지금 13,580
+        self.assertTrue(S.cross_ok(12150, 13580, 12450))
+        self.assertFalse(S.cross_ok(12500, 13580, 12450))              # 시가 밑으로 안 내려감
+        self.assertFalse(S.cross_ok(12150, 12400, 12450))              # 아직 시가 아래
 
     def test_bars_pass(self):
         today = [bar("090000", 990, 100, 1e8), bar("090100", 995, 100, 2e8), bar("090200", 998, 100, 3e8),
@@ -35,13 +34,7 @@ class Checks(unittest.TestCase):
     def test_bars_fail(self):
         today = [bar("090000", 1005, 100, 1e8), bar("090100", 1006, 100, 1.5e8), bar("090200", 1010, 50, 1.6e8)]
         f = " ".join(S.bar_checks(today, [], 1000)["fails"])
-        self.assertNotIn("A첫분봉", f)                                  # ★ 10-22 A는 기록만(키움과 대조 전)
-        self.assertIn("D1분대금", f); self.assertIn("E거래량", f)
-        S.A_STRICT = True
-        try:
-            self.assertIn("A첫분봉", " ".join(S.bar_checks(today, [], 1000)["fails"]))
-        finally:
-            S.A_STRICT = False
+        self.assertIn("A첫분봉", f); self.assertIn("D1분대금", f); self.assertIn("E거래량", f)
 
 
 if __name__ == "__main__":
