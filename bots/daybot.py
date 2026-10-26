@@ -188,6 +188,11 @@ WEAK_MARKET_RATIO = float(os.getenv("DAYBOT_WEAK_MARKET_RATIO", "0.5") or 0.5)
 #   daybot 하락장 PF 0.40(산 날 기준) → sbot처럼 전날 국면 35% 미만이면 신규매수 쉬기. 후보는 '하락장쉬기'로 계속 기록
 #   (상승장 오면 다시 검증용), 보유분 매도는 그대로. 끄려면 .env에 DAYBOT_PAUSE_BELOW=0
 PAUSE_BELOW_PCT = float(os.getenv("DAYBOT_PAUSE_BELOW", "35") or 0)
+# ★ 2026-10-26 대장 결정 — 너무 오래 쉬면 버그도 못 찾고 실전 데이터도 안 쌓임 → 하락장에도 1슬롯 50만은 봇이 운영.
+#   daybot 보유가 DOWN_SLOTS 미만일 때만 신규매수(들고 넘어간 종목 있으면 그날은 안 삼), 매수금은 DOWN_AMOUNT 고정.
+#   완전히 쉬려면 .env에 DAYBOT_DOWN_SLOTS=0
+DOWN_SLOTS = int(os.getenv("DAYBOT_DOWN_SLOTS", "1") or 0)
+DOWN_AMOUNT = int(os.getenv("DAYBOT_DOWN_AMOUNT", "500000") or 500000)
 # ★ 2026-10-12 대장 결정 — 시드 300만 기준 일손실 한도 -15만(5%). 오늘 실현손익이 이 아래면
 #   그날 신규매수만 멈춤(보유 종목 손절·트레일링은 계속), 다음 날 자동 해제. 너무 작게 잡으면
 #   민감하게 멈춰 기회를 놓친다는 대장 판단으로 5%.
@@ -279,7 +284,7 @@ EMPTY_BALANCE_TRUST_AFTER  = 3     # 보유중인데 잔고가 {}로 오면 API�
 #   전 거래 마른 소외주가 최근 3개월 내 2000억+ 수급유입 후 오늘 아침
 #   무릎자리(3~12%)에서 2차 시세 시작하는 종목 포착용).
 # ★ 2026-10-22 대장: "3개월수급 당일주도주 대신 090930으로 시작 — 한 번도 검색된 적 없으니"(10-06~10-21 후보 0건 확인).
-#   090930타점 단독 히트는 단타000과 같은 맨 아래 순위(tier4), 다른 검색식과 겹치면 1순위(겹침). 3개월수급 전용 규칙
+#   090930타점 단독 히트는 단타000과 같은 맨 아래 순위(tier4), 다른 검색식과 겹치면 1순위(겹침). (10-26: 단독 3개 동일 순위로) 3개월수급 전용 규칙
 #   (12시 마감·매집/설거지 필터)은 그 태그가 없으니 자동으로 안 걸림.
 COND_0909 = "090930타점 시가이탈 오전중저가이탈"
 CONDITION_KEYWORDS = ["주도주검색식3", "단타000", COND_0909]
@@ -632,7 +637,9 @@ class DayBot:
             self._regime = (today, b)
             if b is not None:
                 msg = (f"📏 [daybot] 시장 국면 {b:.0f}% ({cur[0]} 종가, 20일선 위 종목 비율) — "
-                       + (f"하락장(< {PAUSE_BELOW_PCT:.0f}%) → 오늘 신규매수 쉬기(후보 기록·보유분 매도는 그대로)"
+                       + ((f"하락장(< {PAUSE_BELOW_PCT:.0f}%) → 오늘 {DOWN_SLOTS}종목·{DOWN_AMOUNT // 10000}만만 운영(점검·데이터용)"
+                           if DOWN_SLOTS > 0 else
+                           f"하락장(< {PAUSE_BELOW_PCT:.0f}%) → 오늘 신규매수 쉬기(후보 기록·보유분 매도는 그대로)")
                           if self._down_market(b)
                           else "정상 매수" if market_regime.is_strong(b) or WEAK_MARKET_RATIO >= 1
                           else f"약한 장 → 매수금 {WEAK_MARKET_RATIO:.0%}"))
@@ -646,14 +653,16 @@ class DayBot:
         return PAUSE_BELOW_PCT > 0 and breadth is not None and breadth < PAUSE_BELOW_PCT
 
     def _do_buy(self, code: str, name: str, price: float, source_tier: str,
-                is_last_slot: bool = False) -> bool:
+                is_last_slot: bool = False, amount_cap: int = 0) -> bool:
         psbl_cash = self.api.get_psbl_order_cash(code, price)
         if psbl_cash < MIN_ANALYSIS_CASH:
             return False
         # ★ 2026-10-06 대장 지정 — 마지막 슬롯은 캡 없이 가용현금 최대까지.
         amount = psbl_cash if is_last_slot else min(BUY_AMT_PER_SLOT, psbl_cash)
         breadth = self._market_breadth()
-        if WEAK_MARKET_RATIO < 1 and breadth is not None and not market_regime.is_strong(breadth):
+        if amount_cap:                                   # ★ 10-26 하락장 1슬롯 — 고정 금액(약한 장 절반 안 곱함)
+            amount = min(amount_cap, psbl_cash)
+        elif WEAK_MARKET_RATIO < 1 and breadth is not None and not market_regime.is_strong(breadth):
             # ★ 2026-10-12 — 마지막 슬롯(가용현금 전부)에도 절반만 곱해 89.5만이 나갔음(상신이디피,
             #   대장 지적 "약한 장인데 89.5만"). 약한 장은 "종목당 100만 → 50만"이라 마지막 슬롯도
             #   100만 한도를 먼저 건 뒤 절반.
@@ -1170,7 +1179,10 @@ class DayBot:
             self.code_name_map.update(code_name_map)
 
         now_ts = time.time()
+        if not hasattr(self, "_first_seen"):
+            self._first_seen = {}
         for code, tags in code_multi_tag_map.items():
+            self._first_seen.setdefault(code, now_ts)   # ★ 10-26 동일 순위 안에선 먼저 잡힌 순
             bucket = self._recent_tags.setdefault(code, {})
             for tag in tags:
                 bucket[tag] = now_ts
@@ -1181,6 +1193,7 @@ class DayBot:
                     del bucket[tag]
             if not bucket:
                 del self._recent_tags[code]
+                self._first_seen.pop(code, None)
 
         return codes, code_multi_tag_map
 
@@ -1232,6 +1245,7 @@ class DayBot:
         수급 당일주도주 단독(★ 2026-10-05: 3개월수급도 주도주와 동급으로
         승격 — _check_spike_quality()와 10시 매수마감으로 품질 통제함)
         → 3순위 섹터 단독 → 4순위(마지막) 단타000 단독 → scout fallback
+        (★ 2026-10-26: 주도주·단타000·090930 단독은 모두 2순위 동급, 먼저 잡힌 순 — 섹터 단독·scout는 그 뒤)
         (최후, 후보고갈 방지용).
         ★ 10-02엔 단타000/090930타점 단독 히트를 아예 매수 안 했는데,
         이번에 "마지막 순위"로 재활성화 — 완전 배제가 아니라 우선순위
@@ -1245,6 +1259,8 @@ class DayBot:
 
         tier1, tier2, tier3, tier4 = [], [], [], []
         source_label = {}
+        # ★ 2026-10-26 대장 지정 — "겹침만 최우선, 주도주·단타000·090930은 동일선상(그래야 평가가 정확)".
+        #   단독 3개는 한 줄(tier2)에 두고 먼저 잡힌 순서로 — 검색식 조회 순서가 순위를 정하지 않게.
         for code in codes:
             tags = set(self._recent_tags.get(code, {}).keys()) or set(code_multi_tag_map.get(code, []))
             if code in sector_codes:
@@ -1268,11 +1284,13 @@ class DayBot:
                 tier3.append(code)
                 source_label[code] = "tier3_섹터"
             elif tags == {"단타000"}:
-                tier4.append(code)
-                source_label[code] = "tier4_단타000"
+                tier2.append(code)
+                source_label[code] = "tier2_단타000"
             elif tags == {COND_0909}:
-                tier4.append(code)
-                source_label[code] = "tier4_090930"
+                tier2.append(code)
+                source_label[code] = "tier2_090930"
+        first_seen = getattr(self, "_first_seen", {})
+        tier2.sort(key=lambda c: first_seen.get(c, float("inf")))
 
         tier5 = []
         for code in self._load_scout_tier3_picks():
@@ -1487,8 +1505,10 @@ class DayBot:
                                        skip_reason="호가비율미달",
                                        raw_market_data=mdata, raw_hoga_data=hoga)
                 continue
-            if self._down_market(self._market_breadth()):
-                print(f"⏭️ [daybot] {code} 패스 — 하락장 쉬기(국면 {self._regime[1]:.0f}% < {PAUSE_BELOW_PCT:.0f}%)")
+            down = self._down_market(self._market_breadth())
+            if down and len(self.positions) >= DOWN_SLOTS:   # ★ 10-26 하락장엔 DOWN_SLOTS개까지만(0이면 완전 쉬기)
+                print(f"⏭️ [daybot] {code} 패스 — 하락장 쉬기(국면 {self._regime[1]:.0f}% < {PAUSE_BELOW_PCT:.0f}%, "
+                      f"하락장 {DOWN_SLOTS}슬롯 찼음)")
                 self.db.log_candidate(code, self._name(code), tier, price, chg,
                                        ask_bid_ratio=hoga.get("ask_bid_ratio", 0),
                                        skip_reason="하락장쉬기",
@@ -1499,8 +1519,9 @@ class DayBot:
                                    bought=True, raw_market_data=mdata, raw_hoga_data=hoga)
             # ★ 2026-10-06 대장 지정 — 이 매수로 effective_max에 도달하면
             #   (마지막 슬롯) 금액 캡 없이 최대까지 매수.
-            is_last_slot = (len(self.positions) + 1 >= effective_max)
-            self._do_buy(code, self._name(code), price, tier, is_last_slot=is_last_slot)
+            is_last_slot = (len(self.positions) + 1 >= effective_max) and not down
+            self._do_buy(code, self._name(code), price, tier, is_last_slot=is_last_slot,
+                         amount_cap=DOWN_AMOUNT if down else 0)
 
     # ============================================================
     # 메인 루프

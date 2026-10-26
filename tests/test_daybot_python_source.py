@@ -100,24 +100,51 @@ class NewBuyCutoff(unittest.TestCase):
 
     def test_down_market_skips_buy_but_logs(self):
         # 10-19 대장 결정 — 전날 국면 35% 미만이면 신규매수 쉬기, 후보는 '하락장쉬기'로 기록
-        old = daybot.now_hhmm, daybot.get_all_positions
+        # 10-26 대장 결정 — 단, daybot 보유가 DOWN_SLOTS(1) 미만이면 DOWN_AMOUNT(50만)로 1종목은 운영
+        old = daybot.now_hhmm, daybot.get_all_positions, daybot.DOWN_SLOTS
         daybot.get_all_positions = None
         try:
             daybot.now_hhmm = lambda: "0930"
-            bought, logged = [], []
+            bought, logged, caps = [], [], []
             b = self._scan_bot(bought)
+            b._do_buy = lambda code, name, price, tier, **k: (bought.append(code), caps.append(k))
             b._market_breadth = lambda: 24.4
             b._regime = ("2026-10-19", 24.4)
             b.db = type("D", (), {"log_candidate": lambda self, *a, **k: logged.append(k.get("skip_reason")),
                                   "get_today_realized": lambda self: 0})()
+            b._run_candidate_scan_and_maybe_buy()                    # 빈 슬롯 → 50만 고정·마지막슬롯 아님
+            self.assertEqual(bought, ["111110"])
+            self.assertEqual(caps[-1], {"is_last_slot": False, "amount_cap": 500000})
+            bought.clear()
+            b.positions = {"999990": {}}                              # 들고 넘어간 종목 있으면 안 삼
             b._run_candidate_scan_and_maybe_buy()
             self.assertEqual(bought, [])
             self.assertIn("하락장쉬기", logged)
+            b.positions, daybot.DOWN_SLOTS = {}, 0                    # 0이면 예전처럼 완전 쉬기
+            b._run_candidate_scan_and_maybe_buy()
+            self.assertEqual(bought, [])
             b._market_breadth = lambda: 40.0
             b._run_candidate_scan_and_maybe_buy()
             self.assertEqual(bought, ["111110"])
+            self.assertEqual(caps[-1]["amount_cap"], 0)
         finally:
-            daybot.now_hhmm, daybot.get_all_positions = old
+            daybot.now_hhmm, daybot.get_all_positions, daybot.DOWN_SLOTS = old
+
+
+class EqualRank(unittest.TestCase):
+    """★ 10-26 대장 — 겹침만 최우선, 주도주·단타000·090930 단독은 동일선상(먼저 잡힌 순)."""
+    def test_overlap_first_then_singles_by_first_seen(self):
+        b = object.__new__(daybot.DayBot)
+        b._get_sector_rotation_boost_codes = lambda: set()
+        b._load_scout_tier3_picks = lambda: []
+        b._recent_tags = {}
+        b._first_seen = {"A": 30.0, "B": 10.0, "C": 20.0, "D": 40.0}
+        tags = {"A": ["주도주검색식3"], "B": [daybot.COND_0909], "C": ["단타000"],
+                "D": ["주도주검색식3", "단타000"]}
+        ranked, label = b._rank_candidates(["A", "B", "C", "D"], tags)
+        self.assertEqual(ranked, ["D", "B", "C", "A"])
+        self.assertEqual(label["B"], "tier2_090930")
+        self.assertEqual(label["C"], "tier2_단타000")
 
 
 class KiwoomOnly(unittest.TestCase):

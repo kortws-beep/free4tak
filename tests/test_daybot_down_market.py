@@ -36,7 +36,7 @@ class DownMarket(unittest.TestCase):
         b._regime, b._scan_notifier = (None, None), _Note()
         daybot.market_regime.latest = lambda: ("2026-10-16", 24.4)
         self.assertEqual(b._market_breadth(), 24.4)
-        self.assertIn("하락장", b._scan_notifier.msgs[0]); self.assertIn("신규매수 쉬기", b._scan_notifier.msgs[0])
+        self.assertIn("하락장", b._scan_notifier.msgs[0]); self.assertIn("1종목·50만만 운영", b._scan_notifier.msgs[0])  # 10-26 하락장 1슬롯
         b._regime = (None, None)
         daybot.market_regime.latest = lambda: ("2026-10-16", 42.0)
         b._market_breadth()
