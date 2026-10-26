@@ -1908,6 +1908,8 @@ async def _scan0909_after_danta(kst_now):
     """★ 10-22 090930타점 파이썬판 — 단타000 감시가 받은 시세를 그대로 써서 바로 이어 계산(daybot 소스, 산야 알림)."""
     try:
         import scan0909
+        if not (scan0909.SCAN_START <= kst_now.strftime("%H%M") < scan0909.SCAN_END):
+            return                                # 09:00~09:40만(10-26)
         today = kst_now.strftime("%Y-%m-%d")
         if _S0909_STATE["date"] != today:
             _S0909_STATE.update(date=today, alerted=_alerted_today("obs0909", today))
