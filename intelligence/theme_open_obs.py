@@ -57,20 +57,20 @@ def rank_themes(themes: dict, quotes: dict, min_members: int = MIN_MEMBERS) -> l
 
 
 def pre_top(themes: dict, quotes: dict, ranked: list) -> list:
-    """프리장 상위 PRE_TOP_THEMES개 테마의 등락 1~PRE_TOP_STOCKS위 → [(테마순위, 테마, 종목순위, 코드, 이름, 등락, 거래대금)]."""
+    """프리장 상위 PRE_TOP_THEMES개 테마의 등락 1~PRE_TOP_STOCKS위 → [(테마순위, 테마, 종목순위, 코드, 이름, 등락, 거래대금, 가격)]."""
     out = []
     for r, theme, *_ in ranked[:PRE_TOP_THEMES]:
         ms = sorted(((c, n) for c, n in themes[theme] if c in quotes), key=lambda x: -quotes[x[0]]["chg"])
         for k, (c, n) in enumerate(ms[:PRE_TOP_STOCKS], 1):
-            out.append((r, theme, k, c, n, quotes[c]["chg"], quotes[c].get("value", 0)))
+            out.append((r, theme, k, c, n, quotes[c]["chg"], quotes[c].get("value", 0), quotes[c].get("price", 0)))
     return out
 
 
 def save_pre_top(date: str, hhmm: str, rows: list, log_db: str = LOG_DB):
     conn = sqlite3.connect(log_db, timeout=30)
     conn.execute("CREATE TABLE IF NOT EXISTS theme_pre_top (date TEXT, time TEXT, theme_rank INTEGER, theme TEXT, "
-                 "stock_rank INTEGER, code TEXT, name TEXT, chg REAL, value REAL, PRIMARY KEY(date, time, theme, code))")
-    conn.executemany("INSERT OR REPLACE INTO theme_pre_top VALUES (?,?,?,?,?,?,?,?,?)",
+                 "stock_rank INTEGER, code TEXT, name TEXT, chg REAL, value REAL, price REAL, PRIMARY KEY(date, time, theme, code))")
+    conn.executemany("INSERT OR REPLACE INTO theme_pre_top VALUES (?,?,?,?,?,?,?,?,?,?)",
                      [(date, hhmm, *r) for r in rows])
     conn.commit()
     conn.close()
