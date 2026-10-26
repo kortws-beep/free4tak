@@ -339,11 +339,12 @@ class KisAPI:
         except Exception as e:
             print(f"⚠️ 체결강도 조회 오류 {code}: {e}"); return None
 
-    def get_multi_price(self, codes: list, pause: float = 0.0) -> dict:
+    def get_multi_price(self, codes: list, pause: float = 0.0, market: str = "J") -> dict:
         """관심종목 복수시세(FHKST11300006) — 한 번에 최대 30종목.
         ★ 2026-10-06 신규(주도주검색식3 파이썬판: 수백 종목 거래대금 순위를
           적은 호출로 계산). 반환: {code: {"price","chg","high","prev_close",
-          "value","volume","name"}} — 실패한 묶음은 빠진다."""
+          "value","volume","name"}} — 실패한 묶음은 빠진다.
+        ★ 2026-10-26 market: "J"=KRX(기본) · "NX"=NXT만(프리장 08:00~08:50 시세, NXT 안 되는 종목은 가격 0) · "UN"=통합."""
         url = f"{self.base_url}/uapi/domestic-stock/v1/quotations/intstock-multprice"
         headers = {"authorization": f"Bearer {self.token}",
                    "appkey": self.appkey, "appsecret": self.secret,
@@ -361,7 +362,7 @@ class KisAPI:
             chunk  = codes[i:i + 30]
             params = {}
             for k, c in enumerate(chunk, 1):
-                params[f"FID_COND_MRKT_DIV_CODE_{k}"] = "J"
+                params[f"FID_COND_MRKT_DIV_CODE_{k}"] = market
                 params[f"FID_INPUT_ISCD_{k}"] = c
             try:
                 res = _get(url, headers=headers, params=params, timeout=10).json()

@@ -32,6 +32,18 @@ class Theme(unittest.TestCase):
         got = sqlite3.connect("log.db").execute("SELECT rank, theme FROM theme_open_obs ORDER BY rank").fetchall()
         self.assertEqual(got, [(1, "2차전지"), (2, "로봇")])
 
+    def test_premarket_top_stocks(self):
+        # ★ 10-26 프리장 — NXT 종목만이라 3종목 테마도 순위, 상위 테마별 1~3위 종목 기록
+        themes = {"로봇": [("A", "가"), ("B", "나"), ("C", "다"), ("D", "라")], "전지": [("E", "마"), ("F", "바")]}
+        q = {"A": {"chg": 2.0}, "B": {"chg": 9.0, "value": 5e8}, "C": {"chg": 5.0}, "D": {"chg": 1.0},
+             "E": {"chg": 20.0}, "F": {"chg": 20.0}}
+        ranked = T.rank_themes(themes, q, T.PRE_MIN_MEMBERS)
+        self.assertEqual([r[1] for r in ranked], ["로봇"])                    # 전지는 2종목이라 빠짐
+        top = T.pre_top(themes, q, ranked)
+        self.assertEqual([(r[2], r[3]) for r in top], [(1, "B"), (2, "C"), (3, "A")])
+        T.save_pre_top("2026-10-27", "0845", top, "log.db")
+        self.assertEqual(sqlite3.connect("log.db").execute("SELECT COUNT(*) FROM theme_pre_top").fetchone()[0], 3)
+
 
 if __name__ == "__main__":
     unittest.main()

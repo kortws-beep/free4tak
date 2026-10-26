@@ -9,6 +9,9 @@ theme_open_obs.py — 장 초반 '오늘의 주도 테마' 기록 (2026-10-19, �
   테마 강도 = 시세 받은 소속 종목(5개 이상)의 전일 대비 등락률 평균 → 순위 1~30위 + 오른 종목 비율 + 대장(가장 많이 오른 종목)
 매매·봇 설정은 건드리지 않음. 휴장일이면 아무것도 안 함. 시세는 복수시세(KRX 기준, 프리장 NXT 가격은 안 잡힘).
 cron 평일 09:15·09:30·09:45.  실행:  venv/bin/python intelligence/theme_open_obs.py
+★ 2026-10-26 대장: "프리장(08~09시)에서 이미 그날 daybot 먹잇감 섹터가 움직인다 — 프리장에선 종목이 아니라 섹터를 잡고,
+  본장에서 그 섹터 1~3위를 후보로." → 09시 전에 돌면 NXT 프리장 시세(NXT 거래 종목만, 3종목 이상 테마)로 같은 순위를 남기고,
+  상위 10개 테마의 1~3위 종목도 theme_pre_top에 남김(나중에 본장 성적과 맞춰 보려고). cron 평일 08:30·08:45·08:55 추가.
 """
 import os
 import re
@@ -22,6 +25,7 @@ sys.path.insert(0, os.path.join(BASE, "intelligence"))
 THEME_DB = os.path.join(BASE, "lina_bot", "kr_theme_finance.db")
 LOG_DB = os.path.join(BASE, "lina_bot", "three_month_leader_log.db")
 TOP, MIN_MEMBERS = 30, 5
+PRE_MIN_MEMBERS, PRE_TOP_THEMES, PRE_TOP_STOCKS = 3, 10, 3
 
 
 def load_themes(theme_db: str = THEME_DB) -> dict:
@@ -37,12 +41,12 @@ def load_themes(theme_db: str = THEME_DB) -> dict:
     return out
 
 
-def rank_themes(themes: dict, quotes: dict) -> list:
+def rank_themes(themes: dict, quotes: dict, min_members: int = MIN_MEMBERS) -> list:
     """[(순위, 테마, 평균등락, 오른비율, 종목수, 대장, 대장등락)] 상위 TOP."""
     rows = []
     for theme, members in themes.items():
         q = [(n, quotes[c]["chg"]) for c, n in members if c in quotes]
-        if len(q) < MIN_MEMBERS:
+        if len(q) < min_members:
             continue
         avg = sum(ch for _, ch in q) / len(q)
         up = sum(1 for _, ch in q if ch > 0) / len(q) * 100
@@ -50,6 +54,26 @@ def rank_themes(themes: dict, quotes: dict) -> list:
         rows.append((avg, theme, up, len(q), lead[0], lead[1]))
     rows.sort(reverse=True)
     return [(i + 1, t, round(a, 2), round(u, 1), n, ln, round(lc, 2)) for i, (a, t, u, n, ln, lc) in enumerate(rows[:TOP])]
+
+
+def pre_top(themes: dict, quotes: dict, ranked: list) -> list:
+    """프리장 상위 PRE_TOP_THEMES개 테마의 등락 1~PRE_TOP_STOCKS위 → [(테마순위, 테마, 종목순위, 코드, 이름, 등락, 거래대금)]."""
+    out = []
+    for r, theme, *_ in ranked[:PRE_TOP_THEMES]:
+        ms = sorted(((c, n) for c, n in themes[theme] if c in quotes), key=lambda x: -quotes[x[0]]["chg"])
+        for k, (c, n) in enumerate(ms[:PRE_TOP_STOCKS], 1):
+            out.append((r, theme, k, c, n, quotes[c]["chg"], quotes[c].get("value", 0)))
+    return out
+
+
+def save_pre_top(date: str, hhmm: str, rows: list, log_db: str = LOG_DB):
+    conn = sqlite3.connect(log_db, timeout=30)
+    conn.execute("CREATE TABLE IF NOT EXISTS theme_pre_top (date TEXT, time TEXT, theme_rank INTEGER, theme TEXT, "
+                 "stock_rank INTEGER, code TEXT, name TEXT, chg REAL, value REAL, PRIMARY KEY(date, time, theme, code))")
+    conn.executemany("INSERT OR REPLACE INTO theme_pre_top VALUES (?,?,?,?,?,?,?,?,?)",
+                     [(date, hhmm, *r) for r in rows])
+    conn.commit()
+    conn.close()
 
 
 def save(date: str, hhmm: str, ranked: list, log_db: str = LOG_DB):
@@ -74,11 +98,18 @@ if __name__ == "__main__":
         sys.exit(0)
     themes = load_themes()
     codes = sorted({c for ms in themes.values() for c, _ in ms})
-    quotes = C.snapshot(api, codes, pause=0.15)            # 30개씩 복수시세 — 장중 다른 봇과 호출 한도 나눠 쓰니 천천히
-    ranked = rank_themes(themes, quotes)
+    pre = now.strftime("%H%M") < "0900"
+    if pre:   # ★ 10-26 프리장 — NXT 시세만(가격 0 = NXT 안 되는 종목은 뺌)
+        quotes = {c: q for c, q in api.get_multi_price(codes, pause=0.15, market="NX").items() if q.get("price", 0) > 0}
+        ranked = rank_themes(themes, quotes, PRE_MIN_MEMBERS)
+    else:
+        quotes = C.snapshot(api, codes, pause=0.15)        # 30개씩 복수시세 — 장중 다른 봇과 호출 한도 나눠 쓰니 천천히
+        ranked = rank_themes(themes, quotes)
     if not ranked:
         print(f"{now:%H:%M} 시세 부족 — 기록 안 함 ({len(quotes)}/{len(codes)}종목)")
         sys.exit(1)
     save(now.date().isoformat(), now.strftime("%H%M"), ranked)
+    if pre:
+        save_pre_top(now.date().isoformat(), now.strftime("%H%M"), pre_top(themes, quotes, ranked))
     print(f"{now:%Y-%m-%d %H:%M} 주도 테마 기록 {len(ranked)}개 (시세 {len(quotes)}/{len(codes)}종목) — "
           + " · ".join(f"{r}.{t}({a:+.1f}%)" for r, t, a, *_ in ranked[:5]))
