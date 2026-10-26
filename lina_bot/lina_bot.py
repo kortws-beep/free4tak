@@ -2076,6 +2076,14 @@ async def capitulation_alert_loop():
         channel = await client.fetch_channel(REPORT_CHANNEL_ID)
         if hhmm == CAP_REMIND_HHMM:
             msg = await asyncio.to_thread(ca.morning_reminder)
+            # ★ 2026-10-26 대장 — 아침 알림에 프리장 섹터(테마 1~3위와 그 테마 NXT 1~3위 종목)도 같이, 매일
+            try:
+                import theme_open_obs
+                pre = await asyncio.to_thread(theme_open_obs.premarket_message, today)
+            except Exception as e:
+                pre = ""
+                print(f"⚠️ [프리장 섹터] 오류: {e}")
+            msg = "\n\n".join(m for m in (msg, pre) if m)
             if msg:
                 await send_safe_message(channel, msg)
             return

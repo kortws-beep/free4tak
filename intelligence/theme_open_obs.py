@@ -76,6 +76,28 @@ def save_pre_top(date: str, hhmm: str, rows: list, log_db: str = LOG_DB):
     conn.close()
 
 
+def premarket_message(date: str, log_db: str = LOG_DB, n: int = 3) -> str:
+    """★ 10-26 대장 — 08:50 리나 아침 알림에 '프리장 섹터: 테마: 1~3위'. 그날 09시 전 마지막 기록으로, 없으면 ""."""
+    conn = sqlite3.connect(log_db, timeout=10)
+    try:
+        t = conn.execute("SELECT MAX(time) FROM theme_pre_top WHERE date=? AND time<'0900'", (date,)).fetchone()[0]
+        if not t:
+            return ""
+        heads = conn.execute("SELECT rank, theme, avg_chg, up_ratio, n FROM theme_open_obs WHERE date=? AND time=? "
+                             "AND rank<=? ORDER BY rank", (date, t, n)).fetchall()
+        lines = [f"🌅 **프리장 섹터** ({t[:2]}:{t[2:]} NXT 기준 · 본장 09:05에 프리장가 ±3% 안이면 '가는 섹터')"]
+        for rank, theme, avg, up, cnt in heads:
+            stocks = conn.execute("SELECT name, chg FROM theme_pre_top WHERE date=? AND time=? AND theme=? "
+                                  "ORDER BY stock_rank", (date, t, theme)).fetchall()
+            lines.append(f"   {rank}. **{theme}** {avg:+.1f}%(오른 비율 {up:.0f}%·{cnt}종목): "
+                         + " · ".join(f"{nm} {ch:+.1f}%" for nm, ch in stocks))
+        return "\n".join(lines) if heads else ""
+    except sqlite3.OperationalError:
+        return ""
+    finally:
+        conn.close()
+
+
 def save(date: str, hhmm: str, ranked: list, log_db: str = LOG_DB):
     conn = sqlite3.connect(log_db, timeout=30)
     conn.execute("CREATE TABLE IF NOT EXISTS theme_open_obs (date TEXT, time TEXT, rank INTEGER, theme TEXT, avg_chg REAL, "

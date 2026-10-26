@@ -43,6 +43,11 @@ class Theme(unittest.TestCase):
         self.assertEqual([(r[2], r[3]) for r in top], [(1, "B"), (2, "C"), (3, "A")])
         T.save_pre_top("2026-10-27", "0845", top, "log.db")
         self.assertEqual(sqlite3.connect("log.db").execute("SELECT COUNT(*) FROM theme_pre_top").fetchone()[0], 3)
+        T.save("2026-10-27", "0845", ranked, "log.db")
+        m = T.premarket_message("2026-10-27", "log.db")
+        self.assertIn("프리장 섹터", m); self.assertIn("08:45", m)
+        self.assertIn("**로봇** +4.2%", m); self.assertIn("나 +9.0% · 다 +5.0% · 가 +2.0%", m)
+        self.assertEqual(T.premarket_message("2026-10-28", "log.db"), "")      # 그날 기록 없으면 안 보냄
 
 
 if __name__ == "__main__":
