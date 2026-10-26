@@ -42,7 +42,8 @@ A_STRICT = True        # ★ 10-26: 키움 루닛 = 첫 분봉 음봉(-9%) → !
 #   → 계산·기록(obs0909)은 계속, 산야 알림·daybot 소스(core/daybot_db.PY_SOURCES)는 맞출 때까지 끔
 ALERT = False
 NEW_SHARES_PER_SCAN = 40              # 상장주식수 첫 조회는 한 번에 이만큼만(한투 초당 한도 나눠 쓰기)
-DEEP_CHECK_MAX = 40                   # 체결·분봉 조회까지 가는 종목 수 상한(거래대금 큰 순)
+DEEP_CHECK_MAX = 90                   # 체결·분봉 조회까지 가는 종목 수 상한(거래대금 큰 순) — ★ 10-26 40→90: 1단계 통과가 60개쯤인데
+                                      #   40개에서 잘려 거래대금 작은 드림씨아이에스(6.6억, 키움 포착)를 못 봤음
 
 
 def ma_ok(closes: list, price: float) -> tuple:
