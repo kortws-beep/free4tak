@@ -227,8 +227,9 @@ class SbotPauseDownMarket(unittest.TestCase):
             sbot.PAUSE_BELOW_PCT = old
 
     def test_buys_skipped(self):
-        old = sbot.market_regime.latest
+        old, old_slots = sbot.market_regime.latest, sbot.DOWN_SLOTS
         try:
+            sbot.DOWN_SLOTS = 0                                         # 10-27 하락장 1슬롯을 끈 경우 = 예전처럼 완전 쉬기
             sbot.market_regime.latest = lambda: ("2026-10-16", 30.0)
             b = object.__new__(sbot.SBot)
             b.positions, b.peak_tracker, b.notes = {}, {}, []
@@ -237,7 +238,36 @@ class SbotPauseDownMarket(unittest.TestCase):
             b._execute_buys_unified([{"code": "X"}], "1000", 10_000_000)   # 후보를 보면 KeyError(grade) — 안 봐야 함
             self.assertIn("신규매수 쉬기", b.notes[0])
         finally:
-            sbot.market_regime.latest = old
+            sbot.market_regime.latest, sbot.DOWN_SLOTS = old, old_slots
+
+    def test_down_slot(self):
+        # ★ 10-27 대장 — 하락장에도 1슬롯은 운영. 하락장에 산 종목(상태파일)이 아직 보유 중이면 안 삼, 팔렸으면 정리 후 다시 1자리
+        st = {"down_slot_codes": ["A"]}
+        old = sbot._read_state, sbot._update_state, sbot.market_regime.latest
+        try:
+            sbot._read_state = lambda: dict(st)
+            sbot._update_state = lambda **kw: st.update(kw)
+            sbot.market_regime.latest = lambda: ("2026-10-16", 30.0)
+            b = object.__new__(sbot.SBot)
+            b.positions, b.peak_tracker, b.notes = {"A": {}}, {}, []
+            b._notify = lambda m, critical=False: b.notes.append(m)
+            b.db = type("D", (), {"get_today_realized": lambda self: 0})()
+            self.assertEqual(b._down_slots_left(), 0)
+            b._execute_buys_unified([{"code": "X"}], "1000", 10_000_000)   # 슬롯 찼으면 후보를 안 봄
+            self.assertIn("1슬롯만 운영", b.notes[0])
+            b.positions = {}                                                # A가 팔림
+            self.assertEqual(b._down_slots_left(), 1)
+            self.assertEqual(st["down_slot_codes"], [])
+            b._regime = ("x", None)
+            sbot.market_regime.latest = lambda: ("2026-10-16", 30.0)
+            b._pause_reason = ""
+            b.market_status = "normal"
+            reached = []
+            b._intraday_guard = type("G", (), {"check": lambda self, d, t: (reached.append(t) or "멈춤", False)})()
+            b._execute_buys_unified([{"code": "X"}], "1000", 10_000_000)   # 자리가 있으면 하락장 관문을 지나 다음 점검까지 감
+            self.assertEqual(reached, ["1000"])
+        finally:
+            sbot._read_state, sbot._update_state, sbot.market_regime.latest = old
 
 
 class SubGroup(unittest.TestCase):

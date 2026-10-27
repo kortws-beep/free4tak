@@ -222,6 +222,10 @@ WEAK_MARKET_RATIO = float(os.getenv("SBOT_WEAK_MARKET_RATIO", "0.5") or 0.5)
 #   매수 49건 PF0.08 -321.6만, 전날 투매(리나 15:40 신저가≥40%) 매수 25건 -38.7만 = sbot 손실(-362.8만) 거의 전부.
 #   → 그런 날은 신규매수 쉬기(보유분 매도·손절은 그대로). 끄려면 .env에 SBOT_PAUSE_BELOW=0
 PAUSE_BELOW_PCT = float(os.getenv("SBOT_PAUSE_BELOW", "35") or 0)
+# ★ 2026-10-27 대장 결정 — 너무 오래 쉬면 분석·문제 찾기가 어려움 → 하락장(국면) 쉬는 날에도 1슬롯은 봇이 운영
+#   (daybot과 같은 취지). 하락장에 산 종목은 상태파일 down_slot_codes로 기억(재시작해도 유지), 그게 DOWN_SLOTS개 미만일 때만
+#   빈 슬롯에 매수 — 매수금은 평소처럼(약한 장 절반 포함). '전날 투매' 쉬기는 그대로. 완전히 쉬려면 .env에 SBOT_DOWN_SLOTS=0
+DOWN_SLOTS = int(os.getenv("SBOT_DOWN_SLOTS", "1") or 0)
 CAP_STATE = os.path.join(_BASE, "lina_bot", "cap_alert_state.json")   # 리나 투매 알림이 그날 날짜·비율 저장
 
 # ── 통합 후보풀 슬롯 상수 ────────────────────────────────────
@@ -490,7 +494,9 @@ class SBot:
             if b is not None:
                 weak = WEAK_MARKET_RATIO < 1 and not market_regime.is_strong(b)
                 msg = (f"📏 시장 국면 {b:.0f}% ({cur[0]} 종가, 20일선 위 종목 비율) — "
-                       + (f"{self._pause_reason} → 오늘 신규매수 쉬기(보유분 매도는 그대로)" if self._pause_reason
+                       + (f"{self._pause_reason} → 오늘 {DOWN_SLOTS}슬롯만 운영(점검·데이터용)"
+                          if self._pause_reason.startswith("하락장") and DOWN_SLOTS > 0
+                          else f"{self._pause_reason} → 오늘 신규매수 쉬기(보유분 매도는 그대로)" if self._pause_reason
                           else f"약한 장 → 매수금 {WEAK_MARKET_RATIO:.0%}" if weak else "정상 매수"))
                 print(msg)
                 self._notify(msg)
@@ -512,6 +518,14 @@ class SBot:
         except (OSError, ValueError):
             pass
         return ""
+
+    def _down_slots_left(self) -> int:
+        """하락장 1슬롯 — 하락장에 산 종목 중 아직 보유 중인 것만 남기고(팔렸으면 정리) 남은 자리 수."""
+        codes = _read_state().get("down_slot_codes", []) or []
+        live = [c for c in codes if c in self.positions]
+        if live != codes:
+            _update_state(down_slot_codes=live)
+        return DOWN_SLOTS - len(live)
 
     def _regime_amount(self, amount: int) -> int:
         """약한 장이면 목표 슬롯금액 한도를 먼저 건 뒤 절반(마지막 슬롯·켈리 사이징 모두)."""
@@ -1391,9 +1405,15 @@ class SBot:
             return
 
         self._market_breadth()
+        down_left = None
         if getattr(self, "_pause_reason", ""):
-            print(f"🧭 [SWING] {self._pause_reason} — 신규매수 쉬기")
-            return
+            down_left = self._down_slots_left() if self._pause_reason.startswith("하락장") else 0
+            if down_left <= 0:
+                print(f"🧭 [SWING] {self._pause_reason} — 신규매수 쉬기"
+                      + (f"(하락장 {DOWN_SLOTS}슬롯 찼음)" if DOWN_SLOTS > 0 and self._pause_reason.startswith("하락장") else ""))
+                return
+            print(f"🧭 [SWING] {self._pause_reason} — 하락장 {DOWN_SLOTS}슬롯 운영(남은 자리 {down_left})")
+            slots = min(slots, down_left)
 
         # ★ 2026-10-19 대장 결정 — 장중 하락 확대 감지(core/intraday_guard.py)가 켜지면 그날 남은 시간 신규매수 쉬기
         guard, new = self._intraday_guard.check(today_str(), now_t)
@@ -1511,6 +1531,8 @@ class SBot:
                 continue
             if not self._do_buy(code, cand["curr"], buy_amount):
                 continue
+            if down_left is not None:          # ★ 10-27 하락장 슬롯으로 산 종목 기억
+                _update_state(down_slot_codes=(_read_state().get("down_slot_codes", []) or []) + [code])
             # ★ 2026-10-06: 한 루프에서 여러 종목을 살 때 주문가능금액을 안 줄여서
             #   FLAT_BUY_MIN_RATIO(스크랩매수 방지) 체크가 두 번째부터 무력화됐음
             psbl_cash = max(0, psbl_cash - buy_amount)
