@@ -498,6 +498,11 @@ class DayBot:
                 if code not in real_pos:
                     self._notify(f"⚠️ {code} 재시작 시 계좌에 없음 — 포지션 제거", critical=False)
                     self.positions.pop(code, None)
+                elif (int(real_pos[code]["qty"]) > int(self.positions[code].get("qty", 0))
+                      and code not in self._sell_verify and code not in self._cancel_reconcile
+                      and code not in self._partial_verify):
+                    # ★ 10-27 — 꺼져 있는 동안(또는 재시작 직전) 대장이 더 산 수량도 평단·장부까지 맞춤(예전엔 수량만 바꿨음)
+                    self._adopt_manual_add(code, int(real_pos[code]["qty"]), float(real_pos[code].get("entry_price") or 0))
                 else:
                     self.positions[code]["qty"] = real_pos[code]["qty"]
 
