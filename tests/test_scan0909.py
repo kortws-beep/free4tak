@@ -23,6 +23,10 @@ class Checks(unittest.TestCase):
         self.assertFalse(S.cross_ok(12500, 13580, 12450))              # 시가 밑으로 안 내려감
         self.assertFalse(S.cross_ok(12150, 12400, 12450))              # 아직 시가 아래
 
+    def test_up(self):                                                  # 10-27 에브리봇 -2.18%(갭하락 뒤 시가 회복)는 키움에 없음
+        self.assertTrue(S.up_ok(0.47)); self.assertTrue(S.up_ok(0.0))   # 셀트리온 +0.47 · 드림씨아이에스 0.0
+        self.assertFalse(S.up_ok(-2.18))
+
     def test_bars_pass(self):
         today = [bar("090000", 990, 100, 1e8), bar("090100", 995, 100, 2e8), bar("090200", 998, 100, 3e8),
                  bar("090300", 1010, 300, 4.5e8)]                        # 시가 1000: 첫 봉 990(음봉) → 지금 1010 재돌파

@@ -57,6 +57,17 @@ def ma_ok(closes: list, price: float) -> tuple:
     return ma5 >= ma20, ma5, ma20
 
 
+# ★ 10-27 대장 "에브리봇 -2.95%가 왜 잡혀? 이상해" — 키움 포착 7종목(10-26 루닛·알멕·드림씨아이에스, 10-27 네오티스·셀트리온·
+#   카카오게임즈·휴젤)은 전부 등락률 0% 이상, 리나만 잡은 헛것은 갭하락 뒤 시가만 되찾은 마이너스 종목이 대부분
+#   (10-27 5개 중 3개, 10-26 7개 전부) → 원문엔 없지만 키움 결과상 '전일 종가 위'가 사실상 걸려 있음
+UP_MIN_CHG = 0.0
+
+
+def up_ok(chg: float) -> bool:
+    """등락률(전일 종가 대비) UP_MIN_CHG 이상."""
+    return chg >= UP_MIN_CHG
+
+
 def cross_ok(day_low: float, price: float, day_open: float) -> bool:
     """B: 키움 '시가를 현재가가 상향돌파' — 오늘 시가 밑으로 내려갔다가(저가 < 시가) 지금 시가 위(현재가 > 시가).
     ★ 10-26 다시 바꿈: 10-22엔 '어제 음봉 → 오늘 양봉'으로 봤는데, 10-26 키움이 잡은 루닛은 어제(10-23) 양봉이었음
@@ -167,7 +178,7 @@ class Scan0909:
         for code, q in quotes.items():
             name = pool.get(code) or q.get("name", code)
             op, px = q.get("open", 0), q.get("price", 0)
-            if px <= 0 or op <= 0 or not cross_ok(q.get("low", 0), px, op):
+            if px <= 0 or op <= 0 or not cross_ok(q.get("low", 0), px, op) or not up_ok(q.get("chg", 0.0)):
                 continue
             if leader_scan.excluded_by_name(code, name) or q.get("value", 0) < D_VALUE_1M_MIN:
                 continue
