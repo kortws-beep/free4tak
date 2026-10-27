@@ -43,5 +43,38 @@ class DownMarket(unittest.TestCase):
         self.assertIn("약한 장", b._scan_notifier.msgs[-1])
 
 
+class ManualAdd(unittest.TestCase):
+    """★ 10-27 대장이 daybot 한미반도체 2주에 1주 더 삼 → daybot이 3주·잔고 평단으로 같이 관리."""
+    def _bot(self):
+        import threading
+        b = object.__new__(daybot.DayBot)
+        b._positions_lock = threading.Lock()
+        b.positions = {"042700": {"qty": 2, "entry_price": 195300, "buy_ts": 0, "buy_tag": "tier2_주도주"}}
+        b._pending_orders, b._sell_verify, b._cancel_reconcile = {}, {}, {}
+        b.code_name_map, b.notes, b.updated = {"042700": "한미반도체"}, [], []
+        b._notify = lambda m, critical=False: b.notes.append(m)
+        b.db = type("D", (), {"update_open_buy": lambda s, code, qty, buy_price=None: b.updated.append((qty, buy_price))})()
+        return b
+
+    def test_adopt_added_qty(self):
+        old = daybot._master_upsert
+        daybot._master_upsert = None
+        try:
+            b = self._bot()
+            b._check_manual_sells({"042700": {"qty": 3, "entry_price": 195500}})
+            self.assertEqual((b.positions["042700"]["qty"], b.positions["042700"]["entry_price"]), (3, 195500))
+            self.assertEqual(b.updated, [(3, 195500)]); self.assertIn("2→3주", b.notes[0])
+            b = self._bot()
+            b._pending_orders["042700"] = ("o", "n", 1, False)                 # daybot 자기 주문이 걸려 있으면 안 건드림
+            b._check_manual_sells({"042700": {"qty": 3, "entry_price": 195500}})
+            self.assertEqual(b.positions["042700"]["qty"], 2)
+            b = self._bot()
+            b._partial_verify = {"042700": {"qty": 1}}                      # 1차익절 체결 확인 중(잔고가 커 보임)도 안 건드림
+            b._check_manual_sells({"042700": {"qty": 3, "entry_price": 195500}})
+            self.assertEqual(b.positions["042700"]["qty"], 2)
+        finally:
+            daybot._master_upsert = old
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1052,6 +1052,26 @@ class DayBot:
         except Exception as e:
             print(f"⚠️ master_db 기록 오류: {e}")
 
+    def _adopt_manual_add(self, code: str, real_qty: int, real_avg: float):
+        """★ 2026-10-27 대장 — "같이 관리해야 해": daybot 종목을 대장이 HTS로 더 사면(한미반도체 2주 → 3주)
+        예전엔 늘어난 수량을 몰라서 매도 때 daybot 수량만 팔고 대장 몫이 계좌에 남았음 → 잔고 수량·평단으로 맞춰 같이 관리.
+        daybot 자기 주문이 걸려 있으면(체결 대기·매도 확인·1차익절 확인·취소 정리) 호출부에서 건너뜀."""
+        with self._positions_lock:
+            pos = self.positions.get(code)
+            if not pos:
+                return
+            old_qty = int(pos.get("qty", 0))
+            avg = real_avg or pos.get("entry_price", 0)
+            pos["qty"], pos["entry_price"] = real_qty, avg
+        name = self._name(code)
+        self.db.update_open_buy(code, qty=real_qty, buy_price=avg)
+        if _master_upsert:
+            _master_upsert(bot_type="daybot", code=code, stock_name=name, entry_price=avg,
+                            current_price=avg, qty=real_qty, buy_tag=pos.get("buy_tag", ""))
+        print(f"🔍 [daybot] 수동 추가매수 감지: {code} {old_qty}→{real_qty}주, 평단 {avg:,.0f}원")
+        self._notify(f"➕ [daybot] {code}({name}) 대장 추가매수 반영 {old_qty}→{real_qty}주 · 평단 {avg:,.0f}원 "
+                     f"— 손절·트레일링을 {real_qty}주 전체에 적용")
+
     def _check_manual_sells(self, real_pos: dict):
         """★ 2026-10-01 대장 지정 — 대장이 HTS/MTS로 daybot 보유종목을
         직접 매도할 계획이라 sbot의 수동매도 감지 패턴을 이식(bots/sbot.py
@@ -1085,6 +1105,10 @@ class DayBot:
                         if code in self.positions:
                             self.positions[code]["qty"] = real_qty
                     print(f"🔍 [daybot] 수동 일부매도 감지: {code} {old_qty}→{real_qty}주")
+                elif (real_qty > old_qty and code not in self._pending_orders
+                      and code not in self._sell_verify and code not in self._cancel_reconcile
+                      and code not in getattr(self, "_partial_verify", {})):   # 1차익절 체결 확인 중이면 잔고가 커 보임
+                    self._adopt_manual_add(code, real_qty, float(real_pos[code].get("entry_price") or 0))
                 continue
             manual_sold.append(code)
         if not manual_sold:
