@@ -198,7 +198,8 @@ class SbotWeakMarket(unittest.TestCase):
             base = sbot.BUY_1ST_AMT_BASE
             self.assertEqual(self._bot(48.0)._regime_amount(base), base // 2)
             self.assertEqual(self._bot(48.0)._regime_amount(3_000_000), base // 2)   # 마지막 슬롯(현금 전부)
-            self.assertEqual(self._bot(48.0)._regime_amount(400_000), 200_000)        # 켈리로 작게 잡힌 경우
+            self.assertEqual(self._bot(48.0)._regime_amount(400_000), 400_000)        # 켈리로 작게 잡히면 그대로(한도만 원 시드 절반)
+            self.assertEqual(self._bot(48.0)._regime_amount(800_247), 800_247)        # ★ 10-28 대장이 80만 남김 → 80만 다 씀(예전 40만)
             self.assertEqual(self._bot(55.0)._regime_amount(3_000_000), 3_000_000)
             self.assertEqual(self._bot(None)._regime_amount(base), base)
             b = self._bot(48.0); b._regime_amount(base)

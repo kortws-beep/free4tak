@@ -560,10 +560,12 @@ class SBot:
         return DOWN_SLOTS - len(live)
 
     def _regime_amount(self, amount: int) -> int:
-        """약한 장이면 목표 슬롯금액 한도를 먼저 건 뒤 절반(마지막 슬롯·켈리 사이징 모두)."""
+        """약한 장이면 '원 시드(슬롯 금액 165만)의 절반'을 한도로(마지막 슬롯·켈리 사이징 모두).
+        ★ 2026-10-28 대장 — "일부러 165만의 반인 80만을 남긴 것, 원 시드 기준으로": 예전엔 min(현금, 165만)×0.5라
+        현금 80만이면 40만만 샀음(삼성E&A) → 이제 min(현금, 165만×0.5) = 80만."""
         b = self._market_breadth()
         if WEAK_MARKET_RATIO < 1 and b is not None and not market_regime.is_strong(b):
-            return int(min(amount, BUY_1ST_AMT_BASE) * WEAK_MARKET_RATIO)
+            return min(amount, int(BUY_1ST_AMT_BASE * WEAK_MARKET_RATIO))
         return amount
 
     def _name(self, code: str) -> str:
