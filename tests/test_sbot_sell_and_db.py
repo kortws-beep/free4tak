@@ -207,6 +207,22 @@ class SbotWeakMarket(unittest.TestCase):
             sbot.market_regime.latest = old
 
 
+class OpenUp(unittest.TestCase):
+    """★ 10-28 대장 추가매수(삼성E&A 6주 → 더 삼) — 장부 열린 행 수량·평단을 잔고 기준으로, 줄어든 경우는 안 건드림."""
+    def test_sync_open_up(self):
+        import sbot_db
+        db = sbot_db.SwingDB()
+        db.init_db()
+        db.save_buy(code="028050", buy_price=64000, qty=6, ai_score=0, ai_reason="", stock_name="삼성E&A", buy_tag="sub")
+        self.assertTrue(db.sync_open_up("028050", 12, 63500))
+        self.assertFalse(db.sync_open_up("028050", 12, 63500))           # 같으면 그대로
+        self.assertFalse(db.sync_open_up("028050", 5, 63500))            # 줄어든 건 다른 경로(수동 일부매도)
+        import sqlite3 as _sq
+        row = _sq.connect(sbot_db.SBOT_HIST_DB).execute(
+            "SELECT qty, buy_price FROM trades WHERE code='028050' AND sell_price IS NULL").fetchone()
+        self.assertEqual(row, (12, 63500))
+
+
 class PoolLiquidity(unittest.TestCase):
     """★ 10-28 대장 — 통합 4소스(모멘텀·추세·완화·유튜브)도 시총 3,000억·20일 평균 거래대금 30억 이상만(파로스아이바이오 763억·4억 사례)."""
     def test_reason(self):

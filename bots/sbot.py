@@ -2206,6 +2206,11 @@ class SBot:
                         _real_name = _pos.get("name", "")
                         if _real_name and _real_name != _code:
                             self.code_name_map[_code] = _real_name
+                        # ★ 2026-10-28 — 대장이 더 산 수량·평단을 장부에도(봇 주문 체결 대기·매수 직후 보호 중이면 건너뜀)
+                        if _code not in self._pending_orders and _code not in _guarded_codes:
+                            if self.db.sync_open_up(_code, int(_pos.get("qty", 0)), float(_pos.get("entry_price", 0) or 0)):
+                                self._notify(f"📝 {self._name(_code)}({_code}) 대장 추가매수 반영 — "
+                                             f"{int(_pos.get('qty', 0))}주 · 평단 {float(_pos.get('entry_price', 0)):,.0f}원")
                 psbl_cash      = self.api.get_psbl_order_cash("005930")
                 if psbl_cash <= 0:
                     psbl_cash = cash

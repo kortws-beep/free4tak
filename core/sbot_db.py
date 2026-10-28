@@ -123,6 +123,24 @@ class SwingDB:
             print(f"⚠️ 스윙 2차매수 합산 오류 {code}: {e}")
             return False
 
+    def sync_open_up(self, code: str, real_qty: int, real_avg: float) -> bool:
+        """★ 2026-10-28 — 대장이 HTS로 더 산 수량을 열린 매수 행에 반영(잔고 수량 > 장부 수량일 때만, 평단도 잔고 기준).
+        sbot 매매 판단은 원래 잔고 수량·평단을 매 루프 쓰는데, 장부만 예전 수량이라 팔 때 손익이 덜 기록됐음.
+        반영했으면 True."""
+        try:
+            conn = _connect()
+            row = conn.execute("SELECT id, qty FROM trades WHERE code=? AND sell_price IS NULL ORDER BY id DESC LIMIT 1",
+                               (code,)).fetchone()
+            if not row or real_qty <= (row[1] or 0):
+                conn.close(); return False
+            conn.execute("UPDATE trades SET qty=?, buy_price=? WHERE id=?", (real_qty, real_avg or None, row[0]))
+            conn.commit(); conn.close()
+            print(f"   📝 장부 수량 반영 {code}: {row[1]}→{real_qty}주 · 평단 {real_avg:,.0f}원(대장 추가매수)")
+            return True
+        except Exception as e:
+            print(f"⚠️ 장부 수량 반영 오류 {code}: {e}")
+            return False
+
     def save_sell(self, code: str, sell_price: float, sell_reason: str,
                   sold_qty: int = 0, stage_reached: int = 0):
         """전량/부분 매도 자동 처리"""
