@@ -25,7 +25,13 @@ sys.path.insert(0, os.path.join(BASE, "intelligence"))
 THEME_DB = os.path.join(BASE, "lina_bot", "kr_theme_finance.db")
 LOG_DB = os.path.join(BASE, "lina_bot", "three_month_leader_log.db")
 TOP, MIN_MEMBERS = 30, 5
-PRE_MIN_MEMBERS, PRE_TOP_THEMES, PRE_TOP_STOCKS = 3, 10, 3
+PRE_MIN_MEMBERS, PRE_TOP_THEMES, PRE_TOP_STOCKS = 5, 10, 3
+# ★ 2026-10-28 순위 방식 통일(대장 인포스탁 [0659] 캡처 3장 대조 + 10-27·28 프리장 대조):
+#   ① 테마 평균에서 가장 많이 오른 1종목은 뺌 — 나무가·엠씨넥스(카메라)·케이아이엔엑스·가비아(상한가) 같은 1~2종목이
+#      3종목짜리 테마(드론·데이터센터 등)를 1위로 끌어올리던 왜곡. 그런 테마의 1~3위 매수 가정은 대부분 손실·제자리,
+#      고르게 오른 반도체(소캠·CXL·DDR5)는 이틀 다 전부 +2.5% 먼저.
+#   ② 프리장은 NXT 안 되는 종목도 0%로 넣고 평균(인포스탁 방식 — 프리장 소캠 3.44% vs 인포스탁 3.32%), 테마는 5종목 이상만.
+TRIM_TOP = True
 
 
 def load_themes(theme_db: str = THEME_DB) -> dict:
@@ -41,14 +47,20 @@ def load_themes(theme_db: str = THEME_DB) -> dict:
     return out
 
 
-def rank_themes(themes: dict, quotes: dict, min_members: int = MIN_MEMBERS) -> list:
-    """[(순위, 테마, 평균등락, 오른비율, 종목수, 대장, 대장등락)] 상위 TOP."""
+def rank_themes(themes: dict, quotes: dict, min_members: int = MIN_MEMBERS, fill_zero: bool = False) -> list:
+    """[(순위, 테마, 평균등락, 오른비율, 종목수, 대장, 대장등락)] 상위 TOP.
+    fill_zero: 시세 없는 소속 종목을 0%로 넣음(프리장 — NXT 안 되는 종목). 평균은 TRIM_TOP이면 최고 1종목 뺌."""
     rows = []
     for theme, members in themes.items():
         q = [(n, quotes[c]["chg"]) for c, n in members if c in quotes]
-        if len(q) < min_members:
+        if fill_zero:
+            if len(members) < min_members or not q:
+                continue
+            q = q + [(n, 0.0) for c, n in members if c not in quotes]
+        elif len(q) < min_members:
             continue
-        avg = sum(ch for _, ch in q) / len(q)
+        chs = [ch for _, ch in q]
+        avg = (sum(chs) - max(chs)) / (len(chs) - 1) if TRIM_TOP and len(chs) >= 3 else sum(chs) / len(chs)
         up = sum(1 for _, ch in q if ch > 0) / len(q) * 100
         lead = max(q, key=lambda x: x[1])
         rows.append((avg, theme, up, len(q), lead[0], lead[1]))
@@ -123,7 +135,7 @@ if __name__ == "__main__":
     pre = now.strftime("%H%M") < "0900"
     if pre:   # ★ 10-26 프리장 — NXT 시세만(가격 0 = NXT 안 되는 종목은 뺌)
         quotes = {c: q for c, q in api.get_multi_price(codes, pause=0.15, market="NX").items() if q.get("price", 0) > 0}
-        ranked = rank_themes(themes, quotes, PRE_MIN_MEMBERS)
+        ranked = rank_themes(themes, quotes, PRE_MIN_MEMBERS, fill_zero=True)
     else:
         quotes = C.snapshot(api, codes, pause=0.15)        # 30개씩 복수시세 — 장중 다른 봇과 호출 한도 나눠 쓰니 천천히
         ranked = rank_themes(themes, quotes)
