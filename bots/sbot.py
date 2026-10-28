@@ -254,6 +254,38 @@ RANK_SCORE_FLOOR = {
     SLOT_KISNEW: 110,
     SLOT_S7:     110,
 }
+# ★ 2026-10-28 대장 결정 — 통합 4소스(모멘텀·추세·완화·유튜브)는 시총·거래대금 검사 없이 매수 후보로 와서
+#   파로스아이바이오(시총 763억, 하루 거래대금 1~3억)를 삼("전에도 천원짜리 거래량 적은 놈 사더만") — 추세 점수는 거래가
+#   마를수록 가산이라 오히려 이런 종목이 위로 옴. 관심그룹 기준(1조·100억)보다 낮춘 중간선(대장 3안)으로 매수 직전 검사.
+POOL_CAP_MIN_EOK = 3000       # 시총 3,000억 이상
+POOL_VALUE_MIN_EOK = 30       # 최근 20거래일 평균 거래대금 30억 이상
+POOL_GRADES = ("momentum", "trend", "light", "youtube")
+
+
+def pool_liquidity_reason(cap_eok: float, avg_value_eok) -> str:
+    """통합 4소스 후보 유동성 — 미달이면 사유 문구, 통과면 "". 평균 거래대금을 못 구하면(None) 막음."""
+    if cap_eok < POOL_CAP_MIN_EOK:
+        return f"시총 {cap_eok:,.0f}억 < {POOL_CAP_MIN_EOK:,}억"
+    if avg_value_eok is None:
+        return "20일 평균 거래대금 모름"
+    if avg_value_eok < POOL_VALUE_MIN_EOK:
+        return f"20일 평균 거래대금 {avg_value_eok:,.1f}억 < {POOL_VALUE_MIN_EOK}억"
+    return ""
+
+
+def avg_trade_value_eok(name: str, days: int = 20, db: str = None):
+    """리나 일봉 DB에서 최근 days거래일 평균 거래대금(억). 없으면 None."""
+    db = db or _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), "lina_bot", "kr_theme_finance.db")
+    try:
+        conn = _sqlite3.connect(db, timeout=5)
+        rows = conn.execute("SELECT trade_value FROM kr_stock_daily_data WHERE stock_name=? AND trade_value > 0 "
+                            "ORDER BY date DESC LIMIT ?", (name, days)).fetchall()
+        conn.close()
+    except Exception:
+        return None
+    return sum(r[0] for r in rows) / len(rows) / 1e8 if len(rows) >= 5 else None
+
+
 # ★ 1차 익절 후 슬롯 반환 보너스 적용 현금 하한선 — 기존 100만원에서
 #   50만원으로 완화(대장 지정 — 슬롯이 165만원으로 커진 것과 별개로
 #   적은 잔액도 기회를 놓치지 않게).
@@ -1490,6 +1522,12 @@ class SBot:
                 print(f"⏭️ [SWING] {code} 패스 — 주문 직전 현재가 조회 실패")
                 continue
             cand = dict(cand, curr=_fresh_px)
+            if grade in POOL_GRADES:
+                why = pool_liquidity_reason(safe_float(_fresh.get("hts_avls", 0)),
+                                            avg_trade_value_eok(cand.get("name") or self._name(code)))
+                if why:
+                    print(f"⏭️ [SWING] {code}({cand.get('name', '')}) 패스 — {why} [{grade}]")
+                    continue
 
             # ★ 1주도 못 사면 패스
             if buy_amount < cand["curr"]:

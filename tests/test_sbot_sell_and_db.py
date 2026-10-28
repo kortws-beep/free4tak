@@ -207,6 +207,27 @@ class SbotWeakMarket(unittest.TestCase):
             sbot.market_regime.latest = old
 
 
+class PoolLiquidity(unittest.TestCase):
+    """★ 10-28 대장 — 통합 4소스(모멘텀·추세·완화·유튜브)도 시총 3,000억·20일 평균 거래대금 30억 이상만(파로스아이바이오 763억·4억 사례)."""
+    def test_reason(self):
+        R = sbot.pool_liquidity_reason
+        self.assertIn("시총", R(763, 4.0))
+        self.assertIn("거래대금", R(5000, 4.0))
+        self.assertIn("모름", R(5000, None))
+        self.assertEqual(R(5000, 45.0), "")
+        self.assertEqual(sbot.POOL_GRADES, ("momentum", "trend", "light", "youtube"))
+
+    def test_avg_value(self):
+        import sqlite3 as _sq
+        c = _sq.connect("daily.db")
+        c.execute("CREATE TABLE kr_stock_daily_data (stock_name TEXT, date TEXT, trade_value INTEGER)")
+        c.executemany("INSERT INTO kr_stock_daily_data VALUES (?,?,?)",
+                      [("가", f"2026-10-{d:02d}", 4e8) for d in range(1, 25)] + [("나", "2026-10-01", 9e9)])
+        c.commit(); c.close()
+        self.assertAlmostEqual(sbot.avg_trade_value_eok("가", db="daily.db"), 4.0)
+        self.assertIsNone(sbot.avg_trade_value_eok("나", db="daily.db"))        # 5일 미만이면 모름
+
+
 class SbotPauseDownMarket(unittest.TestCase):
     """2026-10-17 — 전날 하락장(국면<35%)·전날 투매(리나 15:40 기록)면 신규매수 쉬기."""
     def test_reason(self):
