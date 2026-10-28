@@ -221,6 +221,15 @@ class OpenUp(unittest.TestCase):
         row = _sq.connect(sbot_db.SBOT_HIST_DB).execute(
             "SELECT qty, buy_price FROM trades WHERE code='028050' AND sell_price IS NULL").fetchone()
         self.assertEqual(row, (12, 63500))
+        # 열린 행이 두 줄(로보티즈 4주@345,500 + 1주@333,000 = 5주, 잔고도 5주)이면 안 건드림 — 합계로 비교
+        db.save_buy(code="108490", buy_price=345500, qty=4, ai_score=0, ai_reason="")
+        db.save_buy(code="108490", buy_price=333000, qty=1, ai_score=0, ai_reason="")
+        self.assertFalse(db.sync_open_up("108490", 5, 343000))
+        self.assertTrue(db.sync_open_up("108490", 7, 340000))            # 2주 더 → 마지막 행 3주, 전체 평단 340,000
+        rows = _sq.connect(sbot_db.SBOT_HIST_DB).execute(
+            "SELECT qty, buy_price FROM trades WHERE code='108490' AND sell_price IS NULL ORDER BY id").fetchall()
+        self.assertEqual([q for q, _ in rows], [4, 3])
+        self.assertAlmostEqual(sum(q * p for q, p in rows) / 7, 340000)
 
 
 class PoolLiquidity(unittest.TestCase):

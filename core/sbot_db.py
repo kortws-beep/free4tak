@@ -124,18 +124,25 @@ class SwingDB:
             return False
 
     def sync_open_up(self, code: str, real_qty: int, real_avg: float) -> bool:
-        """★ 2026-10-28 — 대장이 HTS로 더 산 수량을 열린 매수 행에 반영(잔고 수량 > 장부 수량일 때만, 평단도 잔고 기준).
+        """★ 2026-10-28 — 대장이 HTS로 더 산 수량을 열린 매수 행에 반영(잔고 수량 > 장부 열린 행 합계일 때만).
         sbot 매매 판단은 원래 잔고 수량·평단을 매 루프 쓰는데, 장부만 예전 수량이라 팔 때 손익이 덜 기록됐음.
+        열린 행이 여러 줄(로보티즈 4주+1주)이면 합계로 비교하고, 늘어난 만큼 마지막 행에 더해 전체 평단이 잔고 평단과 같아지게.
         반영했으면 True."""
         try:
             conn = _connect()
-            row = conn.execute("SELECT id, qty FROM trades WHERE code=? AND sell_price IS NULL ORDER BY id DESC LIMIT 1",
-                               (code,)).fetchone()
-            if not row or real_qty <= (row[1] or 0):
+            rows = conn.execute("SELECT id, qty, buy_price FROM trades WHERE code=? AND sell_price IS NULL ORDER BY id",
+                                (code,)).fetchall()
+            total = sum(r[1] or 0 for r in rows)
+            if not rows or real_qty <= total:
                 conn.close(); return False
-            conn.execute("UPDATE trades SET qty=?, buy_price=? WHERE id=?", (real_qty, real_avg or None, row[0]))
+            last_id, last_qty = rows[-1][0], (rows[-1][1] or 0) + (real_qty - total)
+            others = sum((r[1] or 0) * (r[2] or 0) for r in rows[:-1])
+            price = (real_avg * real_qty - others) / last_qty if real_avg else 0
+            if price <= 0:
+                price = real_avg or rows[-1][2]
+            conn.execute("UPDATE trades SET qty=?, buy_price=? WHERE id=?", (last_qty, price, last_id))
             conn.commit(); conn.close()
-            print(f"   📝 장부 수량 반영 {code}: {row[1]}→{real_qty}주 · 평단 {real_avg:,.0f}원(대장 추가매수)")
+            print(f"   📝 장부 수량 반영 {code}: {total}→{real_qty}주 · 평단 {real_avg:,.0f}원(대장 추가매수)")
             return True
         except Exception as e:
             print(f"⚠️ 장부 수량 반영 오류 {code}: {e}")
