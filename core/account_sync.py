@@ -24,6 +24,31 @@ import os
 from typing import Callable
 
 
+def recent_sales(api, codes: list, days: int = 3) -> dict:
+    """★ 2026-10-28 — 최근 days일 한투 실현손익에서 codes의 매도 → {code: (평균 매도가, 매도 수량)}. 조회 실패면 {}."""
+    import datetime as _dt
+    if not codes or not hasattr(api, "get_period_trade_profit"):
+        return {}
+    today = _dt.date.today()
+    try:
+        rows = api.get_period_trade_profit((today - _dt.timedelta(days=days)).strftime("%Y%m%d"),
+                                           today.strftime("%Y%m%d")).get("trades", [])
+    except Exception as e:
+        print(f"⚠️ 최근 매도 조회 실패: {e}")
+        return {}
+    acc = {}
+    for r in rows:
+        code = (r.get("pdno") or "").strip()
+        try:
+            q, p = int(float(r.get("sll_qty") or 0)), float(r.get("sll_pric") or 0)
+        except (TypeError, ValueError):
+            continue
+        if code in codes and q > 0 and p > 0:
+            tq, tv = acc.get(code, (0, 0.0))
+            acc[code] = (tq + q, tv + q * p)
+    return {c: (v / q, q) for c, (q, v) in acc.items()}
+
+
 def sync_positions(
     api,
     db_path: str,
@@ -78,8 +103,27 @@ def sync_positions(
 
     print(f"   DB 미매도: {len(db_pos)}종목 — {list(db_pos.keys())}")
 
-    # 3. 실계좌에 없는 DB 레코드 삭제
+    # 3. 실계좌에 없는 DB 레코드 — ★ 2026-10-28: 봇이 꺼진(재시작) 사이 대장이 판 것이면 삭제하지 말고 매도로 기록
+    #   (파로스아이바이오 -27,908원이 재시작과 겹쳐 '유령'으로 지워져 성적에서 빠졌음). 최근 3일 실현손익에 매도가 없을 때만 삭제.
     ghost_codes = [c for c in db_pos if c not in real_pos]
+    sold = recent_sales(api, ghost_codes)
+    if sold:
+        import datetime as _dt
+        now = _dt.datetime.now().isoformat(timespec="seconds")
+        try:
+            conn = sqlite3.connect(db_path, timeout=10)
+            for code, (price, _q) in sold.items():
+                for row_id, buy_price, _qty in db_pos[code]:
+                    rate = (price - buy_price) / buy_price * 100 if buy_price else 0
+                    conn.execute("UPDATE trades SET sell_price=?, sell_time=?, profit_rate=?, sell_reason=? WHERE id=?",
+                                 (price, now, rate, "수동매도(봇 꺼진 사이 감지)", row_id))
+                print(f"   📝 매도 기록: {code} @{price:,.0f} — 봇 꺼진 사이 매도(실현손익 조회로 확인)")
+            conn.commit()
+            conn.close()
+            notify_fn(f"📝 [{bot_type}] 봇 꺼진 사이 매도된 종목 기록: {', '.join(sold)}", critical=False)
+        except Exception as e:
+            print(f"⚠️ 매도 기록 실패: {e}")
+        ghost_codes = [c for c in ghost_codes if c not in sold]
     if ghost_codes:
         try:
             conn = sqlite3.connect(db_path, timeout=10)
