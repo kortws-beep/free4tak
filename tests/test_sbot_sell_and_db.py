@@ -231,6 +231,11 @@ class OpenUp(unittest.TestCase):
             "SELECT qty, buy_price FROM trades WHERE code='108490' AND sell_price IS NULL ORDER BY id").fetchall()
         self.assertEqual([q for q, _ in rows], [4, 3])
         self.assertAlmostEqual(sum(q * p for q, p in rows) / 7, 340000)
+        # ★ 10-29 장중 새로 산 종목(장부에 행 없음)은 '수동' 열린 행으로 추가
+        self.assertTrue(db.sync_open_up("328380", 40, 25000, name="비나텍"))
+        self.assertEqual(_sq.connect(sbot_db.SBOT_HIST_DB).execute(
+            "SELECT stock_name, qty, buy_price, buy_tag FROM trades WHERE code='328380' AND sell_price IS NULL").fetchone(),
+            ("비나텍", 40, 25000.0, "수동"))
 
 
 class PoolLiquidity(unittest.TestCase):

@@ -861,6 +861,10 @@ class SBot:
             if _master_remove:
                 _master_remove("sbot", code)
         else:
+            # ★ 10-29 — 부분 매도는 장부를 주문 때 줄여서, 체결 전 잔고가 장부보다 커 보임 → 그날은 '대장 매수 반영' 안 함
+            if not hasattr(self, "_partial_sell_day"):
+                self._partial_sell_day = {}
+            self._partial_sell_day[code] = today_str()
             # 부분 매도: 잔량만 갱신 (entry_price 유지)
             remain = held_qty - qty
             self.positions[code] = {
@@ -2209,9 +2213,11 @@ class SBot:
                         if _real_name and _real_name != _code:
                             self.code_name_map[_code] = _real_name
                         # ★ 2026-10-28 — 대장이 더 산 수량·평단을 장부에도(봇 주문 체결 대기·매수 직후 보호 중이면 건너뜀)
-                        if _code not in self._pending_orders and _code not in _guarded_codes:
-                            if self.db.sync_open_up(_code, int(_pos.get("qty", 0)), float(_pos.get("entry_price", 0) or 0)):
-                                self._notify(f"📝 {self._name(_code)}({_code}) 대장 추가매수 반영 — "
+                        if (_code not in self._pending_orders and _code not in _guarded_codes
+                                and getattr(self, "_partial_sell_day", {}).get(_code) != today_str()):
+                            if self.db.sync_open_up(_code, int(_pos.get("qty", 0)), float(_pos.get("entry_price", 0) or 0),
+                                                    name=_pos.get("name", "")):
+                                self._notify(f"📝 {self._name(_code)}({_code}) 대장 매수 반영 — "
                                              f"{int(_pos.get('qty', 0))}주 · 평단 {float(_pos.get('entry_price', 0)):,.0f}원")
                 psbl_cash      = self.api.get_psbl_order_cash("005930")
                 if psbl_cash <= 0:

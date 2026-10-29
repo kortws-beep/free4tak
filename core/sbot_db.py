@@ -123,7 +123,7 @@ class SwingDB:
             print(f"⚠️ 스윙 2차매수 합산 오류 {code}: {e}")
             return False
 
-    def sync_open_up(self, code: str, real_qty: int, real_avg: float) -> bool:
+    def sync_open_up(self, code: str, real_qty: int, real_avg: float, name: str = "") -> bool:
         """★ 2026-10-28 — 대장이 HTS로 더 산 수량을 열린 매수 행에 반영(잔고 수량 > 장부 열린 행 합계일 때만).
         sbot 매매 판단은 원래 잔고 수량·평단을 매 루프 쓰는데, 장부만 예전 수량이라 팔 때 손익이 덜 기록됐음.
         열린 행이 여러 줄(로보티즈 4주+1주)이면 합계로 비교하고, 늘어난 만큼 마지막 행에 더해 전체 평단이 잔고 평단과 같아지게.
@@ -133,7 +133,17 @@ class SwingDB:
             rows = conn.execute("SELECT id, qty, buy_price FROM trades WHERE code=? AND sell_price IS NULL ORDER BY id",
                                 (code,)).fetchall()
             total = sum(r[1] or 0 for r in rows)
-            if not rows or real_qty <= total:
+            if not rows:
+                # ★ 10-29 — 장중에 대장이 새로 산 종목(비나텍)은 재시작 때만 장부에 올라가서, 그 전에 sbot이 팔면 기록이 안 남았음
+                if real_qty <= 0 or not real_avg:
+                    conn.close(); return False
+                conn.execute("INSERT INTO trades (code, stock_name, buy_price, buy_time, qty, ai_score, ai_reason, buy_tag, grade) "
+                             "VALUES (?,?,?,?,?,0,'',?,?)",
+                             (code, name, real_avg, datetime.datetime.now().isoformat(timespec="seconds"), real_qty, "수동", "수동"))
+                conn.commit(); conn.close()
+                print(f"   📝 장부 추가 {code}: {real_qty}주 · 평단 {real_avg:,.0f}원(대장 매수)")
+                return True
+            if real_qty <= total:
                 conn.close(); return False
             last_id, last_qty = rows[-1][0], (rows[-1][1] or 0) + (real_qty - total)
             others = sum((r[1] or 0) * (r[2] or 0) for r in rows[:-1])
