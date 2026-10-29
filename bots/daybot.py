@@ -297,7 +297,11 @@ def early_min_change(tags: set) -> float:
 
 # 파이썬판이 없는 검색식 — DAYBOT_SCAN_SOURCE=python이어도 이것만 키움에 물어봄(키움 검색식별 1분 재조회 제한 → 2분 간격)
 KIWOOM_ONLY_KEYWORDS = [COND_0909]
-KIWOOM_ONLY_INTERVAL_SEC = 120
+KIWOOM_ONLY_INTERVAL_SEC = 115
+# ★ 2026-10-29 대장: 키움 090930을 매분 :04초에 묻고 있었음 → 조건 D(지금 1분봉 거래대금 1억)·E(거래량)가
+#   막 생긴 4초짜리 봉으로 판정돼 거의 항상 0개(10-29 동양고속·프로티나: HTS엔 떴는데 봇은 0개).
+#   1분봉이 거의 다 찬 매분 45~59초에만 물어봄(간격 115초 = 키움 1분 재조회 제한 + 루프 5초 틱 여유).
+KIWOOM_ONLY_MIN_SEC = 45
 # ★ 2026-10-07: 후보 소스 — 키움 조건검색 타임아웃이 잦아 파이썬판(리나가 계산·기록) 사용 준비.
 #   kiwoom   : 지금처럼 키움만 (기본값 — 대장이 대조 결과 보고 전환 결정)
 #   fallback : 키움 우선, 타임아웃 난 검색식만 파이썬판으로 채움
@@ -1174,8 +1178,7 @@ class DayBot:
             return [], {}
         keywords = CONDITION_KEYWORDS
         # ★ 10-22 파이썬판 모드라도 파이썬판이 없는 검색식(090930타점)은 키움에 2분마다 따로 물어봄
-        if (SCAN_SOURCE == "python" and self.kiwoom.enabled and KIWOOM_ONLY_KEYWORDS
-                and time.time() - self._last_kiwoom_only >= KIWOOM_ONLY_INTERVAL_SEC):
+        if self._kiwoom_only_due():
             use_kiwoom, keywords = True, KIWOOM_ONLY_KEYWORDS
             self._last_kiwoom_only = time.time()
         scan_ok = False
@@ -1227,6 +1230,12 @@ class DayBot:
                 self._first_seen.pop(code, None)
 
         return codes, code_multi_tag_map
+
+    def _kiwoom_only_due(self) -> bool:
+        """파이썬판 모드에서 키움 전용 검색식(090930)을 물을 차례인지 — 간격 + 매분 45초 이후(1분봉이 찬 뒤)."""
+        return (SCAN_SOURCE == "python" and self.kiwoom.enabled and bool(KIWOOM_ONLY_KEYWORDS)
+                and time.time() - self._last_kiwoom_only >= KIWOOM_ONLY_INTERVAL_SEC
+                and datetime.datetime.now().second >= KIWOOM_ONLY_MIN_SEC)
 
     def _merge_python_hits(self, codes: list, tag_map: dict, name_map: dict, cond_ok: set) -> list:
         """파이썬판 통과 종목을 키움 결과 형식으로 합침(SCAN_SOURCE에 따라).
@@ -1680,7 +1689,8 @@ class DayBot:
                         and len(self.positions) < MAX_POSITIONS
                         and BUY_START_TIME <= now_t <= SCAN_END_TIME
                         and now_t < NEW_BUY_END_TIME
-                        and time.time() - self._last_scan_ts >= SCAN_INTERVAL_SEC
+                        and (time.time() - self._last_scan_ts >= SCAN_INTERVAL_SEC
+                             or self._kiwoom_only_due())
                         and (self._scan_thread is None or not self._scan_thread.is_alive())):
                     self._last_scan_ts = time.time()
                     self._scan_thread = threading.Thread(

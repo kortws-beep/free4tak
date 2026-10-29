@@ -167,7 +167,12 @@ class KiwoomOnly(unittest.TestCase):
         orig_log, daybot.log_kiwoom_hits = daybot.log_kiwoom_hits, lambda *a, **k: None
         orig_merge = daybot.DayBot._merge_python_hits
         daybot.DayBot._merge_python_hits = lambda self, codes, tm, nm, ok: codes
+        orig_sec = daybot.KIWOOM_ONLY_MIN_SEC
         try:
+            daybot.KIWOOM_ONLY_MIN_SEC = 60                         # ★ 10-29 매분 45초 전이면(=절대 안 됨) 안 물어봄
+            b._scan_conditions()
+            self.assertEqual(asked, [])
+            daybot.KIWOOM_ONLY_MIN_SEC = 0
             codes, tags = b._scan_conditions()
             self.assertEqual(asked, [([daybot.COND_0909], 0)])
             self.assertIn("555550", codes)
@@ -176,6 +181,7 @@ class KiwoomOnly(unittest.TestCase):
         finally:
             daybot.SCAN_SOURCE, daybot.log_kiwoom_hits = orig, orig_log
             daybot.DayBot._merge_python_hits = orig_merge
+            daybot.KIWOOM_ONLY_MIN_SEC = orig_sec
 
 
 class EarlyMin0909(unittest.TestCase):
