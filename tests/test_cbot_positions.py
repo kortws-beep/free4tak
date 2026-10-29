@@ -251,5 +251,24 @@ class Oct24Fixes(unittest.TestCase):
                          ("4.05", "4.374", "61.20", "109,400,286"))
 
 
+class MonthlyWithDip(unittest.TestCase):
+    """★ 10-29 대장 — 콘솔 '📊 이번달 성과'에 눌림목 주머니 청산도 포함."""
+    def test_dip_included(self):
+        import datetime as _dt
+        import sqlite3 as _sq
+        m = _dt.date.today().strftime("%Y-%m")
+        c = _sq.connect(cbot.TRADE_HIST_DB)
+        c.execute("CREATE TABLE IF NOT EXISTS trades (profit_rate REAL, profit_krw REAL, sell_price REAL, ai_score INT, sell_time TEXT)")
+        c.execute("CREATE TABLE IF NOT EXISTS dip_trades (profit_rate REAL, profit_krw REAL, sell_price REAL, sell_time TEXT)")
+        c.execute("DELETE FROM trades"); c.execute("DELETE FROM dip_trades")
+        c.execute("INSERT INTO trades (profit_rate, profit_krw, sell_price, ai_score, sell_time) VALUES (5, 10000, 1, 70, ?)",
+                  (f"{m}-02T10:00",))
+        c.execute("INSERT INTO dip_trades (profit_rate, profit_krw, sell_price, sell_time) VALUES (-6.3, -15745, 1, ?)",
+                  (f"{m}-03T09:01",))
+        c.commit(); c.close()
+        perf = cbot.CBot._get_monthly_performance(object.__new__(cbot.CBot))
+        self.assertEqual((perf["total"], perf["total_krw"], perf["win_rate"]), (2, -5745, 50.0))
+
+
 if __name__ == "__main__":
     unittest.main()

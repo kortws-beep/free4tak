@@ -787,6 +787,13 @@ class CBot:
                 WHERE sell_price IS NOT NULL AND (ai_score IS NULL OR ai_score >= 0)
                   AND substr(sell_time, 1, 7) = ?
             """, (this_month,)).fetchall()
+            # ★ 2026-10-29 대장 — 눌림목 주머니 청산(ETH·XRP·SOL 20일 기한청산 -5.2만)도 이번달 성과에
+            try:
+                rows += conn.execute("SELECT profit_rate, profit_krw FROM dip_trades "
+                                     "WHERE sell_price IS NOT NULL AND substr(sell_time, 1, 7) = ?",
+                                     (this_month,)).fetchall()
+            except Exception:
+                pass                                   # 눌림목 표가 아직 없으면(첫 매수 전) 그대로
             conn.close()
             if not rows:
                 return None
