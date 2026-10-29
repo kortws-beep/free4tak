@@ -2642,7 +2642,7 @@ class CBot:
             f"🛡️ BTC약세:{BTC_WEAK_THRESH:.0f}% | 탐욕MIN:{FEAR_GREED_MIN} | "
             f"일손실:{DAILY_LOSS_LIMIT:,}원\n"
             + (f"🪤 눌림목 주머니: {'/'.join(m[4:] for m in dip.DIP_COINS)} 각 {dip.SLOT_KRW:,}원 | "
-               f"7일고가 -{dip.DIP:.0%}·200일선 위 매수 → +{dip.TP:.0%} 익절·손절없음·{dip.MAX_HOLD}일"
+               f"{dip.LOOKBACK}일고가 -{dip.DIP:.0%}·200일선 위 매수 → +{dip.TP:.0%} 익절·손절없음·{dip.MAX_HOLD}일"
                if self._dip.enabled else "🪤 눌림목 주머니: 꺼짐"),
             critical=True,
         )

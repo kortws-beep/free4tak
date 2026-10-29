@@ -20,6 +20,15 @@ import cbot  # noqa: E402
 
 cbot._master_record = cbot._master_upsert = cbot._master_remove = None
 
+# ★ 10-30 실전값은 60일-20%·15일 — 아래 판단 로직 테스트는 처음 만든 7일-10%·20일 숫자로 짜여 있어 그 값으로 고정
+LIVE_PARAMS = (D.LOOKBACK, D.DIP, D.MAX_HOLD)
+D.LOOKBACK, D.DIP, D.MAX_HOLD = 7, 0.10, 20
+
+
+class LiveParams(unittest.TestCase):
+    def test_live_params(self):
+        self.assertEqual(LIVE_PARAMS, (60, 0.20, 15))
+
 
 def rows(n_up=210, last_close=100.0, ref_high=100.0, today=("2026-10-08", 95, 96, 88, 89)):
     """완만히 오르는 210일(200일선 아래로 안 감) + 최근 7일 고가 ref_high + 오늘 봉."""

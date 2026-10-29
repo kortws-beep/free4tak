@@ -5,10 +5,10 @@ coin_dip_sleeve.py — cbot 안의 "고정 4종목 눌림목 매수" 별도 주�
 
 cbot에서 노는 현금 중 100만원(25만 × 4)을 BTC·ETH·XRP·SOL에 아래 규칙으로 굴린다.
 백테스트(backtest/dip_buy_backtest.py, 2023-10~2026-10) 최고 조합 그대로:
-  · 진입: 지금가 ≤ 직전 7일(완성된 일봉) 고가 × 0.90
+  · 진입: 지금가 ≤ 직전 60일(완성된 일봉) 고가 × 0.80   (★10-30 7일×0.90 → 60일×0.80)
           + 어제 종가가 200일 이평선 위(상승 추세 중 눌림만 — 떨어지는 칼 회피)
-  · 청산: +8% 익절 / 손절 없음 / 20일 보유하면 그날 종가 무렵(21일째 09시) 정리
-  · 판 뒤에는 새 7일 고가가 한 번 나와야 다시 산다(같은 하락에 반복 매수 방지)
+  · 청산: +8% 익절 / 손절 없음 / 15일 보유하면 그날 종가 무렵(16일째 09시) 정리   (★10-30 20일 → 15일)
+  · 판 뒤에는 새 60일 고가가 한 번 나와야 다시 산다(같은 하락에 반복 매수 방지)
   · 일봉 날짜는 업비트 기준(매일 09:00 KST 시작)
 
 cbot 본체와 섞이지 않게:
@@ -28,10 +28,13 @@ import time
 
 DIP_COINS = ["KRW-BTC", "KRW-ETH", "KRW-XRP", "KRW-SOL"]
 SLOT_KRW = 250_000
-LOOKBACK = 7
-DIP = 0.10
+# ★ 2026-10-30 대장: 1회차(10-09 ETH·XRP·SOL 동시매수 → 20일 기한 -5.2만) 뒤 백테스트(--widen --long) —
+#   7일-10%·20일(3년 +11.2만·낙폭 -13.5만, 최근 5개월 -1.2만) → 60일-20%·15일(3년 +28.3만·승률 86%·낙폭 -3.8만,
+#   최근 5개월 +1.1만). 30/60/90일 모두 -20%가 비슷하게 좋아서(우연 아님) 채택. "보너스니까 자주 안 나오는 게 맞다"
+LOOKBACK = 60
+DIP = 0.20
 TP = 0.08
-MAX_HOLD = 20
+MAX_HOLD = 15
 TREND_MA = 200
 FEE = 0.0005
 RESERVE_NEAR = 0.03         # 지금가 ≤ 매수선 × (1+3%)일 때만 그 슬롯 몫을 cbot에서 떼어 둠
@@ -284,7 +287,7 @@ class DipSleeve:
                          "buy_ts": time.time(), "row": rid, "ref": ctx["ref"]}
         self._save(self.state)
         self.bot.notify(f"🪤 [눌림목 매수] {m} | {SLOT_KRW:,}원 @ {px:,.0f}\n"
-                        f"7일고가 {ctx['ref']:,.0f} 대비 {(px / ctx['ref'] - 1) * 100:+.1f}% · 200일선 위 | "
+                        f"{LOOKBACK}일고가 {ctx['ref']:,.0f} 대비 {(px / ctx['ref'] - 1) * 100:+.1f}% · 200일선 위 | "
                         f"익절 +{TP:.0%}({px * (1 + TP):,.0f}) · 손절없음 · 최대 {MAX_HOLD}일", critical=True)
         return True
 
@@ -311,7 +314,7 @@ class DipSleeve:
         self._save(self.state)
         self.bot.notify(f"{'💰' if rate > 0 else '💔'} [눌림목 매도] {m} | {reason} | "
                         f"{rate * 100:+.2f}% ({krw:+,.0f}원) · 보유 {days}일\n"
-                        f"→ 새 7일 고가가 나오면 다시 대기", critical=True)
+                        f"→ 새 {LOOKBACK}일 고가가 나오면 다시 대기", critical=True)
         return True
 
     def summary(self) -> dict:
@@ -334,6 +337,6 @@ if __name__ == "__main__":
             print(f"{m} 일봉 부족({len(r)})")
             continue
         px = r[-1][4]
-        print(f"{m:<8} 현재 {px:>14,.1f} | 7일고가 {c['ref']:,.1f} → 매수선 {c['trig']:,.1f} "
+        print(f"{m:<8} 현재 {px:>14,.1f} | {LOOKBACK}일고가 {c['ref']:,.1f} → 매수선 {c['trig']:,.1f} "
               f"(매수까지 {(c['trig'] / px - 1) * 100:+.1f}%) | 200일선 {c['ma']:,.1f} "
               f"{'위 ✅' if c['trend_ok'] else '아래 ❌(매수 안 함)'}")
