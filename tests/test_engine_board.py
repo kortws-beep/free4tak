@@ -33,9 +33,12 @@ class Board(unittest.TestCase):
         c = sqlite3.connect(dbs["cbot"])
         c.execute("CREATE TABLE trades (sell_reason TEXT, profit_krw REAL, profit_rate REAL, sell_time TEXT)")
         c.executemany("INSERT INTO trades VALUES (?,?,?,?)", [("손절(-8%)", -80000, -8, "2026-10-22"), ("보호선(+0.3%)", 3000, 0.3, "2026-10-22")])
+        c.execute("CREATE TABLE dip_trades (profit_krw REAL, profit_rate REAL, sell_time TEXT)")   # ★ 10-29 눌림목 주머니도 cbot에
+        c.execute("INSERT INTO dip_trades VALUES (-15745, -6.3, '2026-10-23T09:01:03')")
         c.commit(); c.close()
         b = E.board("week", datetime.date(2026, 10, 24), dbs)
-        self.assertEqual(b["totals"], {"sbot": 50.0, "daybot": 50.0, "cbot": -77000.0})
+        self.assertEqual(b["totals"], {"sbot": 50.0, "daybot": 50.0, "cbot": -92745.0})
+        self.assertTrue(any(r["engine"] == "🪤 눌림목 주머니" for r in b["rows"]))
         self.assertEqual(b["rows"][0]["engine"], "보호선")                   # 금액 큰 순
         self.assertEqual(b["rows"][-1]["engine"], "손절")
         sub = next(r for r in b["rows"] if r["bot"] == "sbot" and r["engine"] == "SUB 고정석")

@@ -71,6 +71,9 @@ def collect(since: str, dbs: dict = None) -> list:
     for reason, krw, rate in _rows(dbs["cbot"], "SELECT sell_reason, profit_krw, profit_rate FROM trades "
                                                 "WHERE sell_time >= ?", (since,)):
         out.append(("cbot", cbot_engine(reason), krw, rate))
+    # ★ 10-29 대장 — 눌림목 주머니(ETH·XRP·SOL 20일 기한청산)도 cbot 성적에
+    for krw, rate in _rows(dbs["cbot"], "SELECT profit_krw, profit_rate FROM dip_trades WHERE sell_time >= ?", (since,)):
+        out.append(("cbot", "🪤 눌림목 주머니", krw, rate))
     for (rate,) in _rows(dbs["lina"], "SELECT profit_rate FROM manual_watch_log WHERE event='deregister' "
                                       "AND profit_rate IS NOT NULL AND ts >= ?", (since,)):
         out.append(("lina", "등록 해제(매도가 넣은 것만·수익률)", None, rate))

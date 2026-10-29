@@ -52,6 +52,22 @@ class Report(unittest.TestCase):
         self.assertIn("눌림목 보유 2", out); self.assertIn("XRP", out)
         self.assertIn("국면 42%", out); self.assertIn("내일 데이봇·sbot 매수금 절반", out)
 
+    def test_dip_in_month(self):
+        # ★ 10-29 대장 — 눌림목 주머니 청산(ETH·XRP·SOL 기한청산)도 cbot 이달 성과에 포함
+        c = sqlite3.connect("cbot_trade_history.db")
+        c.execute("CREATE TABLE IF NOT EXISTS dip_trades (id INTEGER PRIMARY KEY, market TEXT, sell_time TEXT, "
+                  "profit_rate REAL, profit_krw REAL, sell_reason TEXT)")
+        c.execute("DELETE FROM dip_trades")
+        c.executemany("INSERT INTO dip_trades (market, sell_time, profit_rate, profit_krw, sell_reason) VALUES (?,?,?,?,?)",
+                      [("KRW-ETH", f"{D}T09:01:03", -6.3, -15745, "기한20일"), ("KRW-SOL", f"{D}T09:01:06", -8.6, -21417, "기한20일")])
+        c.commit(); c.close()
+        try:
+            self.assertEqual(E.dip_month(D), (-37162, 2))
+            out = E.build(D, DB)
+            self.assertIn("cbot 이달에 포함", out); self.assertIn("이달 -3.7만(2건", out)
+        finally:
+            os.remove("cbot_trade_history.db")
+
     def test_cbot_resumed_after_loss_limit(self):
         with open("cbot_state.json", "w") as f:
             json.dump({"paused": False, "loss_base": -152362, "loss_base_date": D}, f)

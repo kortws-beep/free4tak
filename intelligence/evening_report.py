@@ -114,6 +114,14 @@ def dip_status(date: str) -> dict:
     return {"held": held, "closed": closed}
 
 
+def dip_month(date: str) -> tuple:
+    """★ 2026-10-29 대장 — 눌림목 주머니 청산(10-29 ETH·XRP·SOL 기한청산 -5.2만)이 이달 성과에 안 들어갔음 → (이달 합계, 건수)."""
+    rows = _q(_find("cbot_trade_history.db"), "SELECT SUM(profit_krw), COUNT(*) FROM dip_trades "
+              "WHERE date(sell_time) BETWEEN ? AND ?", date[:8] + "01", date)
+    s, n = rows[0] if rows else (0, 0)
+    return (s or 0.0, n or 0)
+
+
 def cbot_paused(date: str = None) -> str:
     """cbot 멈춤 상태 한 줄. ★ 10-13: cbot은 한도에 걸리면 멈췄다가 4시간 시장점검 뒤 재개할 수
     있어(그 뒤엔 한도 절반만 더) — 재개됐으면 그렇다고 알려줌(예전엔 '오늘 멈춤'으로 오해)."""
@@ -146,6 +154,10 @@ def build(date: str = None, db: str = MASTER_DB) -> str:
     dt = datetime.date.fromisoformat(date)
     wd = "월화수목금토일"[dt.weekday()]
     day, month, pos = bot_day(date, db), bot_month(date, db), open_positions(db)
+    dm = dip_month(date)
+    if dm[1]:   # cbot 이달에 눌림목 주머니 포함(줄은 아래 눌림목 줄에 따로 표시)
+        ck, cn = month.get("cbot", (0.0, 0))
+        month["cbot"] = (ck + dm[0], cn + dm[1])
     L = [f"🌙 **봇 성적표 — {dt:%m-%d}({wd})**"]
     try:
         import market_regime as mr
@@ -168,7 +180,8 @@ def build(date: str = None, db: str = MASTER_DB) -> str:
     dip = dip_status(date)
     dip_krw = sum(k or 0 for _, _, k, _ in dip["closed"])
     L.append(f"■ 눌림목 보유 {len(dip['held'])}" + (f"({'·'.join(dip['held'])})" if dip["held"] else "")
-             + (f" · 오늘 청산 {len(dip['closed'])}건 {_won(dip_krw)}" if dip["closed"] else ""))
+             + (f" · 오늘 청산 {len(dip['closed'])}건 {_won(dip_krw)}" if dip["closed"] else "")
+             + (f" · 이달 {_man(dm[0])}({dm[1]}건, cbot 이달에 포함)" if dm[1] else ""))
     L.append(f"■ 합계 오늘 실현 {_won(total + dip_krw)} · 이달 {_man(sum(v[0] for v in month.values()))}")
 
     lim = " · ".join(f"{label} {_man(day[b]['krw'])}/{_man(LIMITS[b])}" for b, label in BOTS)
