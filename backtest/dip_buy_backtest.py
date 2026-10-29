@@ -152,6 +152,8 @@ def main():
     ap.add_argument("--days", type=int, default=1095)
     ap.add_argument("--refresh", action="store_true")
     ap.add_argument("--v1", action="store_true", help="1차 규칙(추세필터·재진입대기 없음) 조합")
+    ap.add_argument("--widen", action="store_true",
+                    help="★10-30 대장: 1회차(10-09 3코인 동시매수→20일 기한 -6.9%%) 뒤 하락폭·기간 넓히기 조합")
     args = ap.parse_args()
     data = load(args.days, args.refresh)
     span = f"{data[COINS[0]][0][0]} ~ {data[COINS[0]][-1][0]}" if data[COINS[0]] else "-"
@@ -160,6 +162,9 @@ def main():
     if args.v1:
         grid = [(lb, dip, tp, sl, mh, 0, False) for lb, dip, tp, sl, mh in
                 itertools.product((7, 10), (0.10,), (0.05, 0.08, 0.12), (0.0, 0.08, 0.12), (10, 20))]
+    elif args.widen:   # 고점 기준 기간 × 하락폭 × 최대 보유일 (익절 +8%·손절 없음·MA200·재진입대기는 실전 그대로)
+        grid = [(lb, dip, 0.08, 0.0, mh, 200, True) for lb, dip, mh in
+                itertools.product((7, 10, 15), (0.10, 0.12, 0.15), (15, 20))]
     else:   # v2: 추세필터(없음/50일/200일) × 재진입대기 항상
         grid = [(lb, 0.10, tp, sl, 20, ma, True) for lb, ma, tp, sl in
                 itertools.product((7, 10), (0, 50, 200), (0.08, 0.12), (0.0, 0.12))]
