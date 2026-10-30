@@ -20,7 +20,8 @@ _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DAILY_DB = os.path.join(_BASE, "lina_bot", "kr_theme_finance.db")
 INDEX_DROP, DAY_DROP, FROM_HIGH = 2.0, 5.0, 10.0
 R60_MIN, VALUE_MIN_EOK = 30.0, 100.0
-START = "1430"
+# ★ 10-30 12:10 대장: "14:30분에 매수하면 종가배팅이 돼버려" → 장중 진입 규칙(지수 추이) 정할 때까지 멈춤(매수마감 15:20보다 늦게)
+START = "1530"
 TP_PCT = 3.0
 TAG = "dip_leader"
 
