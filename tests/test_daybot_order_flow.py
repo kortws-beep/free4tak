@@ -197,6 +197,7 @@ class DaybotLinaWatches(unittest.TestCase):
                 json.dump({"005930@d": {"account": "daybot", "code": "005930"}, "005930": {"account": "kiwoom"},
                            "000660": {"account": "daybot"}, "003160": {"account": "kiwoom"}, "111111": {}}, f)
             self.assertEqual(daybot._lina_daybot_watches(), {"005930", "000660"})
+            self.assertEqual(daybot._lina_all_watches(), {"005930", "000660", "003160", "111111"})
         finally:
             if old is None:
                 os.remove(path)

@@ -60,11 +60,11 @@ class DipEngineBuy(unittest.TestCase):
         return b
 
     def test_buy_on_index_down(self):
-        old = (daybot.dip_leader.universe, daybot.get_all_positions, daybot._lina_daybot_watches,
+        old = (daybot.dip_leader.universe, daybot.get_all_positions, daybot._lina_all_watches,
                daybot.dip_leader.index_status)
         daybot.dip_leader.universe = lambda today: {"A": {"name": "대덕전자", "value_eok": 1566, "r60": 42, "hi5": 140100},
                                                    "Z": {"name": "알멕", "value_eok": 9999, "r60": 96, "hi5": 80000}}
-        daybot.get_all_positions, daybot._lina_daybot_watches = None, lambda: set()
+        daybot.get_all_positions, daybot._lina_all_watches = None, lambda: set()
         old_w = daybot.dip_leader.watch_codes
         daybot.dip_leader.watch_codes = lambda api, h: {"A"}                  # ★ NEW·SUB엔 대덕전자만(알멕 없음)
         try:
@@ -77,8 +77,13 @@ class DipEngineBuy(unittest.TestCase):
             b = self._bot(None)
             b._run_dip_engine()
             self.assertEqual(b.bought, [])
+            daybot.dip_leader.index_status = lambda: {"kospi": (-5.2, 0.6), "kosdaq": (-4.4, 0.2)}
+            daybot._lina_all_watches = lambda: {"A"}                          # ★ 10-30 대장이 키움에 들고 리나 등록한 종목
+            b = self._bot(None)
+            b._run_dip_engine()
+            self.assertEqual(b.bought, [])
         finally:
-            (daybot.dip_leader.universe, daybot.get_all_positions, daybot._lina_daybot_watches,
+            (daybot.dip_leader.universe, daybot.get_all_positions, daybot._lina_all_watches,
              daybot.dip_leader.index_status) = old
             daybot.dip_leader.watch_codes = old_w
 

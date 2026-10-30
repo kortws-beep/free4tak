@@ -364,17 +364,24 @@ def _read_state() -> dict:
     return read_state(BOT_STATE_FILE, default={})
 
 
-def _lina_daybot_watches() -> set:
+def _lina_daybot_watches(all_accounts: bool = False) -> set:
     """★ 2026-10-16 — 대장이 daybot 계좌에서 직접 사서 리나에 '데이봇'으로 등록한 종목(리나가 익절 관리).
-    daybot이 같은 종목을 또 사면 봇·리나가 같은 물량을 같이 관리하게 되므로 매수 후보에서 뺀다."""
+    daybot이 같은 종목을 또 사면 봇·리나가 같은 물량을 같이 관리하게 되므로 매수 후보에서 뺀다.
+    all_accounts=True면 계좌 무관(키움 등) 리나 등록 종목 전부 — _lina_all_watches 참고."""
     path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                         "lina_bot", "manual_watch_state.json")
     try:
         with open(path, encoding="utf-8") as f:
             return {(w.get("code") or k.split("@")[0]) for k, w in (json.load(f) or {}).items()
-                    if isinstance(w, dict) and w.get("account") == "daybot"}
+                    if isinstance(w, dict) and (all_accounts or w.get("account") == "daybot")}
     except (OSError, ValueError):
         return set()
+
+
+def _lina_all_watches() -> set:
+    """★ 2026-10-30 대장 — 음봉 엔진은 대장이 다른 계좌(키움 등)에 들고 리나에 등록한 종목도 뺀다
+    ("흔들릴 때 두 배로 맞잖아" — 삼화콘덴서 키움 보유 중인데 음봉 대상 19종목에 들어 있었음)."""
+    return _lina_daybot_watches(all_accounts=True)
 
 
 class DayBot:
@@ -1500,7 +1507,7 @@ class DayBot:
         uni = self._dip_uni[1]
         if not uni:
             return
-        held = set(self.positions) | set(self.sold_today) | _lina_daybot_watches()
+        held = set(self.positions) | set(self.sold_today) | _lina_all_watches()
         if get_all_positions:
             try:
                 held |= {p["code"] for p in get_all_positions() if p["bot_type"] != "daybot"}
