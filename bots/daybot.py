@@ -1479,7 +1479,15 @@ class DayBot:
             except Exception as e:
                 print(f"⚠️ [daybot] 음봉 엔진 후보군 계산 오류: {e}")
                 self._dip_uni = (today, {})
-            print(f"🕯️ [daybot] 음봉 엔진 오늘 후보군 {len(self._dip_uni[1])}종목(60일 +30%↑·거래대금 100억↑)")
+            try:   # ★ 10-30 대장 — NEW·SUB 관심그룹과 겹치는 종목만(하루 한 번)
+                watch = dip_leader.watch_codes(self.api, os.getenv("KIS_HTS_ID2", os.getenv("KIS_HTS_ID", "")))
+            except Exception as e:
+                print(f"⚠️ [daybot] 음봉 엔진 관심그룹 조회 오류: {e}")
+                watch = set()
+            full = self._dip_uni[1]
+            self._dip_uni = (today, {c: u for c, u in full.items() if c in watch})
+            print(f"🕯️ [daybot] 음봉 엔진 오늘 후보군 {len(self._dip_uni[1])}종목(60일 +30%↑·거래대금 100억↑ {len(full)} ∩ "
+                  f"NEW·SUB {len(watch)})")
         uni = self._dip_uni[1]
         if not uni:
             return

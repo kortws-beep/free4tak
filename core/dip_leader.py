@@ -25,6 +25,9 @@ INDEX_DROP, DAY_DROP, FROM_HIGH = 2.0, 5.0, 10.0
 INDEX_REBOUND = 0.5            # 지수가 당일 저가 대비 +0.5% 반등하면 진입(대장)
 R60_MIN, VALUE_MIN_EOK = 30.0, 100.0
 START = "1000"                 # 장 초반 변동이 잦아든 뒤부터 매수마감(15:20)까지(종가배팅 아님)
+# ★ 10-30 12:20 대장: "대상 종목 중 우리 NEW나 SUB에 중복되는 놈만 — 알멕은 3일 연속 패대기(그런 놈은 안 됨). NEW·SUB는 심혈을
+#   기울여 모은 종목, 그냥 들고 가도 회복될 확률이 높은 녀석들" → 한투 관심그룹 NEW·SUB와 겹치는 종목만(sbot과 같은 그룹 이름)
+WATCH_GROUP_NAMES = ("new", "신규추천", "신규", "new추천", "sub", "서브", "고정")
 TP_PCT = 3.0
 TAG = "dip_leader"
 
@@ -57,6 +60,17 @@ def universe(today: str, db: str = DAILY_DB) -> dict:
         if r60 >= R60_MIN and value >= VALUE_MIN_EOK:
             out[code] = {"name": n, "value_eok": value, "r60": r60,
                          "hi5": max(s[d][1] for d in last5 if d in s)}
+    return out
+
+
+def watch_codes(api, hts_id: str) -> set:
+    """한투 관심그룹 NEW·SUB 종목 코드(대장이 고른 종목). 조회 실패면 빈 set(→ 음봉 엔진 안 삼)."""
+    if not hts_id:
+        return set()
+    out = set()
+    for gc, gn in (api.get_watchlist_groups(hts_id) or {}).items():
+        if (gn or "").lower() in WATCH_GROUP_NAMES:
+            out |= {c for c, _ in (api.get_watchlist_stocks(gc, hts_id) or [])}
     return out
 
 

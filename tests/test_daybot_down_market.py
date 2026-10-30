@@ -52,7 +52,9 @@ class DipEngineBuy(unittest.TestCase):
         b._notify = lambda m, critical=False: b.notes.append(m)
         b._daily_loss_hit = lambda: False
         b.db = type("D", (), {"log_candidate": lambda self, *a, **k: None})()
-        b.api = type("A", (), {"get_multi_price": lambda self, codes, pause=0: {"A": {"price": 116600, "chg": -15.6, "high": 0, "low": 115000}}})()
+        b.api = type("A", (), {"get_multi_price": lambda self, codes, pause=0: {
+            "A": {"price": 116600, "chg": -15.6, "high": 0, "low": 115000},
+            "Z": {"price": 40000, "chg": -17.5, "high": 0, "low": 37000}}})()     # 알멕이 반등은 더 크지만 NEW·SUB 아님
         self._st = idx
         b._do_buy = lambda code, name, price, tier, **k: (b.bought.append((code, tier, k.get("amount_cap"))), True)[1]
         return b
@@ -60,8 +62,11 @@ class DipEngineBuy(unittest.TestCase):
     def test_buy_on_index_down(self):
         old = (daybot.dip_leader.universe, daybot.get_all_positions, daybot._lina_daybot_watches,
                daybot.dip_leader.index_status)
-        daybot.dip_leader.universe = lambda today: {"A": {"name": "대덕전자", "value_eok": 1566, "r60": 42, "hi5": 140100}}
+        daybot.dip_leader.universe = lambda today: {"A": {"name": "대덕전자", "value_eok": 1566, "r60": 42, "hi5": 140100},
+                                                   "Z": {"name": "알멕", "value_eok": 9999, "r60": 96, "hi5": 80000}}
         daybot.get_all_positions, daybot._lina_daybot_watches = None, lambda: set()
+        old_w = daybot.dip_leader.watch_codes
+        daybot.dip_leader.watch_codes = lambda api, h: {"A"}                  # ★ NEW·SUB엔 대덕전자만(알멕 없음)
         try:
             daybot.dip_leader.index_status = lambda: {"kospi": (-5.2, 0.6), "kosdaq": (-4.4, 0.2)}   # 코스피 저가 대비 +0.6%
             b = self._bot(None)
@@ -75,6 +80,7 @@ class DipEngineBuy(unittest.TestCase):
         finally:
             (daybot.dip_leader.universe, daybot.get_all_positions, daybot._lina_daybot_watches,
              daybot.dip_leader.index_status) = old
+            daybot.dip_leader.watch_codes = old_w
 
 
 class ManualAdd(unittest.TestCase):

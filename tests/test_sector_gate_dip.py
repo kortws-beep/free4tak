@@ -65,6 +65,14 @@ class Dip(unittest.TestCase):
         self.assertAlmostEqual(got[0][5], 5.29, places=1)
         self.assertEqual(D.pick(uni, q, exclude={"B"})[0][0], "A")
 
+    def test_watch_codes(self):
+        # ★ 10-30 대장 — NEW·SUB 관심그룹 종목만(대소문자·이름 변형 허용), 다른 그룹은 제외
+        api = type("A", (), {"get_watchlist_groups": lambda self, h: {"011": "new", "030": "SUB", "001": "반도체_HBM"},
+                             "get_watchlist_stocks": lambda self, gc, h: {"011": [("A", "대덕전자")], "030": [("B", "현대건설")],
+                                                                          "001": [("C", "기타")]}[gc]})()
+        self.assertEqual(D.watch_codes(api, "id"), {"A", "B"})
+        self.assertEqual(D.watch_codes(api, ""), set())
+
     def test_universe(self):
         c = sqlite3.connect("daily.db")
         c.execute("CREATE TABLE kr_stock_daily_data (stock_name TEXT, date TEXT, close_price REAL, high_price REAL, trade_value REAL)")
