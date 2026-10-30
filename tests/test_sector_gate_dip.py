@@ -43,6 +43,23 @@ class Dip(unittest.TestCase):
         self.assertFalse(D.index_down({"kospi": -1.9, "kosdaq": -1.0}))
         self.assertFalse(D.index_down({"kospi": 0.0, "kosdaq": 0.0}))     # 조회 실패(0)는 하락 아님
 
+    def test_situation_1031(self):
+        # ★ 10-31 대장 — 장중 -2%↓ 찍었나(반등 무관) · 전날까지 연속하락 ≥1일 · 20일 고점 -15% 이내
+        self.assertTrue(D.index_hit({"kospi": (-1.0, 1.2), "kosdaq": (-4.5, 0.1)}))
+        self.assertTrue(D.index_hit({"kospi": (-0.9, 1.2)}))                # 지금 -0.9%여도 저가는 -2.1%
+        self.assertFalse(D.index_hit({"kospi": (-1.0, 0.5)}))
+        self.assertEqual(D.trend_tags([100] * 18 + [105, 104, 103])["streak"], 2)
+        self.assertAlmostEqual(D.trend_tags([100] * 18 + [105, 104, 103])["dd20"], -1.905, places=2)
+        rows = [{"date": f"2026-10-{d:02d}", "close": c} for d, c in zip(range(1, 23), [100] * 20 + [99, 98])]
+        api = type("A", (), {"get_daily_ohlc": lambda self, code, days=30: rows + [{"date": "2026-10-23", "close": 90}]})()
+        ok, why = D.situation(api, {"kospi": (-3.0, 0.5), "kosdaq": (-1.0, 0.1)}, "2026-10-23")
+        self.assertTrue(ok); self.assertIn("연속하락 2일", why)              # 오늘(10-23) 봉은 빼고
+        rows[-1]["close"] = 101
+        self.assertFalse(D.situation(api, {"kospi": (-3.0, 0.5)}, "2026-10-23")[0])   # 첫 하락날
+        rows[-1]["close"], rows[-2]["close"] = 80, 84
+        ok, why = D.situation(api, {"kospi": (-3.0, 0.5)}, "2026-10-23")
+        self.assertFalse(ok); self.assertIn("스윙 몫", why)                 # 20일 고점 -20%
+
     def test_index_ready(self):
         # ★ 10-30 대장 — 빠진 지수가 당일 저가 대비 +0.5% 반등해야(종가배팅 아님)
         self.assertTrue(D.index_ready({"kospi": (-5.4, 0.6), "kosdaq": (-4.5, 0.1)}))

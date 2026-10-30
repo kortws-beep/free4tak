@@ -44,11 +44,12 @@ class DownMarket(unittest.TestCase):
 
 
 class DipEngineBuy(unittest.TestCase):
-    """★ 10-30 음봉 엔진 — 지수 -2%↓면 후보 1순위를 하락장 슬롯 금액(50만)으로, 지수 괜찮으면 안 삼."""
+    """★ 10-30 음봉 엔진 — 지수 -2%↓면 후보 1순위를 음봉 슬롯 금액(50만)으로.
+    ★ 10-31 장중 -2%↓ 찍었으면 됨(반등 기다리지 않음, 14:30부터) · 첫 하락날/-15%↓ 무너진 장(situation)이면 안 삼."""
     def _bot(self, idx):
         b = object.__new__(daybot.DayBot)
         b.positions, b.sold_today, b.code_name_map, b.notes, b.bought = {}, {}, {}, [], []
-        b._last_dip_ts, b._dip_uni = 0.0, (None, {})
+        b._last_dip_ts, b._dip_uni, b._dip_sit = 0.0, (None, {}), ("", False, "")
         b._notify = lambda m, critical=False: b.notes.append(m)
         b._daily_loss_hit = lambda: False
         b.db = type("D", (), {"log_candidate": lambda self, *a, **k: None})()
@@ -60,32 +61,66 @@ class DipEngineBuy(unittest.TestCase):
         return b
 
     def test_buy_on_index_down(self):
-        old = (daybot.dip_leader.universe, daybot.get_all_positions, daybot._lina_all_watches,
-               daybot.dip_leader.index_status)
-        daybot.dip_leader.universe = lambda today: {"A": {"name": "대덕전자", "value_eok": 1566, "r60": 42, "hi5": 140100},
-                                                   "Z": {"name": "알멕", "value_eok": 9999, "r60": 96, "hi5": 80000}}
+        D = daybot.dip_leader
+        old = (D.universe, daybot.get_all_positions, daybot._lina_all_watches, D.index_status, D.watch_codes, D.situation)
+        D.universe = lambda today: {"A": {"name": "대덕전자", "value_eok": 1566, "r60": 42, "hi5": 140100},
+                                    "Z": {"name": "알멕", "value_eok": 9999, "r60": 96, "hi5": 80000}}
         daybot.get_all_positions, daybot._lina_all_watches = None, lambda: set()
-        old_w = daybot.dip_leader.watch_codes
-        daybot.dip_leader.watch_codes = lambda api, h: {"A"}                  # ★ NEW·SUB엔 대덕전자만(알멕 없음)
+        D.watch_codes = lambda api, h: {"A"}                                  # ★ NEW·SUB엔 대덕전자만(알멕 없음)
+        D.situation = lambda api, st, today: (True, "kospi 연속하락 2일")
         try:
-            daybot.dip_leader.index_status = lambda: {"kospi": (-5.2, 0.6), "kosdaq": (-4.4, 0.2)}   # 코스피 저가 대비 +0.6%
+            D.index_status = lambda: {"kospi": (-5.2, 0.2), "kosdaq": (-4.4, 0.1)}    # 반등 없어도 장중 -2%↓면
             b = self._bot(None)
             b._run_dip_engine()
-            self.assertEqual(b.bought, [("A", daybot.dip_leader.TAG, daybot.DOWN_AMOUNT)])
-            self.assertIn("음봉 엔진 매수", b.notes[0])
-            daybot.dip_leader.index_status = lambda: {"kospi": (-5.2, 0.2), "kosdaq": (-4.4, 0.1)}   # 아직 바닥 안 다짐
+            self.assertEqual(b.bought, [("A", D.TAG, daybot.DOWN_AMOUNT)])
+            self.assertIn("음봉 엔진 매수", b.notes[0]); self.assertIn("50% 익절", b.notes[0])
+            D.index_status = lambda: {"kospi": (-1.0, 0.5), "kosdaq": (-0.5, 0.2)}    # 저가도 -1.5%: 안 빠진 날
             b = self._bot(None)
             b._run_dip_engine()
             self.assertEqual(b.bought, [])
-            daybot.dip_leader.index_status = lambda: {"kospi": (-5.2, 0.6), "kosdaq": (-4.4, 0.2)}
+            D.index_status = lambda: {"kospi": (-5.2, 0.6), "kosdaq": (-4.4, 0.2)}
+            D.situation = lambda api, st, today: (False, "첫 하락날이라 안 삼")      # ★ 10-31
+            b = self._bot(None)
+            b._run_dip_engine()
+            self.assertEqual(b.bought, [])
+            D.situation = lambda api, st, today: (True, "")
             daybot._lina_all_watches = lambda: {"A"}                          # ★ 10-30 대장이 키움에 들고 리나 등록한 종목
             b = self._bot(None)
             b._run_dip_engine()
             self.assertEqual(b.bought, [])
         finally:
-            (daybot.dip_leader.universe, daybot.get_all_positions, daybot._lina_all_watches,
-             daybot.dip_leader.index_status) = old
-            daybot.dip_leader.watch_codes = old_w
+            (D.universe, daybot.get_all_positions, daybot._lina_all_watches, D.index_status, D.watch_codes, D.situation) = old
+
+
+class DipEngineExit(unittest.TestCase):
+    """★ 10-31 대장 — +5%에 50% → 나머지 고점 -5% 트레일링(본전 보호), 그 전 손절 -10%, 5거래일째 15:10 이후 정리."""
+    def _run(self, pos, price, hhmm="1300"):
+        b = object.__new__(daybot.DayBot)
+        b.positions = {"X": dict({"entry_price": 10000, "qty": 10, "buy_tag": daybot.dip_leader.TAG}, **pos)}
+        b.sold, b.partial = [], []
+        b._get_current_price = lambda code: price
+        b._do_sell = lambda code, qty, reason, cur: b.sold.append(reason)
+        def part(code, rate, cur, ratio=0, label=""):
+            b.partial.append((ratio, label)); b.positions[code]["partial_done"] = True; return True
+        b._do_partial_sell = part
+        old = daybot.now_hhmm
+        daybot.now_hhmm = lambda: hhmm
+        try:
+            b._check_all_positions_for_exit()
+        finally:
+            daybot.now_hhmm = old
+        return b
+
+    def test_rules(self):
+        self.assertEqual(self._run({}, 9600).sold, [])                       # -4%: 예전 -3.5% 손절선 아래지만 안 팜
+        self.assertIn("음봉손절", self._run({}, 8990).sold[0])                # -10.1%
+        b = self._run({}, 10520)                                              # +5.2% → 50%
+        self.assertEqual(b.partial, [(0.5, "음봉익절50%")]); self.assertEqual(b.sold, [])
+        self.assertEqual(self._run({"partial_done": True, "peak_price": 11000}, 10500).sold, [])        # 고점 -4.5%
+        self.assertIn("음봉트레일링", self._run({"partial_done": True, "peak_price": 11000}, 10440).sold[0])  # -5.1%
+        self.assertIn("음봉트레일링", self._run({"partial_done": True, "peak_price": 10300}, 10000).sold[0])  # 본전 보호
+        self.assertEqual(self._run({"held_trading_days": 4}, 9800, "1500").sold, [])
+        self.assertIn("음봉기한정리", self._run({"held_trading_days": 4}, 9800, "1511").sold[0])
 
 
 class ManualAdd(unittest.TestCase):

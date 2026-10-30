@@ -10,6 +10,13 @@ dip_leader.py — 데이봇 '음봉 엔진': 지수 급락일 중기 주도주 �
 대장 결정(10-30): 하락장 1슬롯과 공유(비어 있을 때만), +3% 닿으면 전량 매도·안 되면 데이봇 기존 규칙(손절 -3.5%·트레일링).
 ★ 10-30 12:10 대장: "14:30 매수는 종가배팅" → 장중 진입: "종합주가를 계속 체크하잖아 — 당일 최저가 대비 0.5% 반등 시 대상 종목 중
   당일 최저가 대비 가장 많이 오른 놈". (장중 진입은 아직 분봉 검증 전 — 실전으로 확인)
+★ 10-31 새벽 대장 결정(분봉 검증 backtest/dip_leader_minute.py·dip_situations_review.py, 117 하락일):
+  장중 반등 진입(현행)은 1년 -0.86%/건 — 시각 고정 10:00~14:00도 전부 마이너스, 14:30만 앞뒤 절반 모두 플러스.
+  상황: 지수 '첫 하락날'(전날까지 연속하락 0일)과 '20일 고점 -15%↓ 무너진 장'은 일관 마이너스(7월 -16→-31% 사례) → 그날은 안 삼.
+  → 켜지는 날: 지수(그날 더 빠진 코스피·코스닥) 장중 -2%↓ & 전날까지 연속하락 ≥1일 & 전날 종가가 20일 고점 -15% 이내.
+  → 14:30에 1종목. 매도: +5%에 50% 익절 → 나머지 고점 -5% 트레일링(본전 보호), 그 전엔 손절 -10%, 산 날 포함 5거래일째 장 끝 정리.
+    (대장: "단타는 짧은 수익·회전율, 일주일까지", "50만 들어가면 5만은 줄 생각", "본전 보호하고 도박하자")
+  D일 44건(14:30·전체): +5% 전량 +0.63%/건 → 50%+트레일 +0.94%/건(앞 +1.43·뒤 +0.44), 최악 -10.6%.
 여기는 계산만(주문은 daybot.py):
   universe(): 어제까지 일봉으로 '중기 주도주' 목록 {코드: {name, value_eok, r60, hi5}} — 하루 한 번
   index_status(): 네이버 지수(코스피·코스닥) 지금 등락·당일 저가 대비 반등
@@ -22,13 +29,16 @@ import sqlite3
 _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DAILY_DB = os.path.join(_BASE, "lina_bot", "kr_theme_finance.db")
 INDEX_DROP, DAY_DROP, FROM_HIGH = 2.0, 5.0, 10.0
-INDEX_REBOUND = 0.5            # 지수가 당일 저가 대비 +0.5% 반등하면 진입(대장)
+INDEX_REBOUND = 0.5            # (10-30 장중 진입용 — 10-31 14:30 진입으로 바꾸며 안 씀, index_ready 참고용)
 R60_MIN, VALUE_MIN_EOK = 30.0, 100.0
-START = "1000"                 # 장 초반 변동이 잦아든 뒤부터 매수마감(15:20)까지(종가배팅 아님)
+START = "1430"                 # ★ 10-31 14:30 진입(장중 반등·시각 고정 진입은 분봉 검증 마이너스)
+MIN_STREAK, MAX_DD20 = 1, 15.0  # ★ 10-31 지수 전날까지 연속하락 ≥1일 & 전날 종가 20일 고점 대비 -15% 이내
+INDEX_ETF = {"kospi": "069500", "kosdaq": "229200"}   # 지수 일봉 대용(KODEX 200·코스닥150)
+TP_RATIO, TRAIL_PCT, STOP_PCT, HOLD_DAYS = 0.5, 5.0, 10.0, 5
 # ★ 10-30 12:20 대장: "대상 종목 중 우리 NEW나 SUB에 중복되는 놈만 — 알멕은 3일 연속 패대기(그런 놈은 안 됨). NEW·SUB는 심혈을
 #   기울여 모은 종목, 그냥 들고 가도 회복될 확률이 높은 녀석들" → 한투 관심그룹 NEW·SUB와 겹치는 종목만(sbot과 같은 그룹 이름)
 WATCH_GROUP_NAMES = ("new", "신규추천", "신규", "new추천", "sub", "서브", "고정")
-TP_PCT = 3.0
+TP_PCT = 5.0
 TAG = "dip_leader"
 
 
@@ -102,6 +112,48 @@ def index_status(get=None) -> dict:
 def index_ready(st: dict) -> bool:
     """-INDEX_DROP%↓ 빠진 지수가 당일 저가 대비 +INDEX_REBOUND% 이상 반등했나."""
     return any(chg <= -INDEX_DROP and reb >= INDEX_REBOUND for chg, reb in st.values())
+
+
+def low_change(st: dict) -> dict:
+    """index_status 결과 → {지수: 당일 저가의 전일 대비 %}."""
+    return {k: ((1 + chg / 100) / (1 + reb / 100) - 1) * 100 for k, (chg, reb) in st.items()}
+
+
+def index_hit(st: dict) -> bool:
+    """★ 10-31 오늘 장중에 -INDEX_DROP%까지 빠진 지수가 있나(지금 반등했어도 됨)."""
+    return any(v <= -INDEX_DROP for v in low_change(st).values())
+
+
+def trend_tags(closes: list) -> dict:
+    """전날까지 종가(오래된→최신) → {"streak": 연속하락일수, "dd20": 20일 고점 대비 %}."""
+    streak = 0
+    for i in range(len(closes) - 1, 0, -1):
+        if closes[i] < closes[i - 1]:
+            streak += 1
+        else:
+            break
+    hi = max(closes[-20:]) if closes else 0
+    return {"streak": streak, "dd20": (closes[-1] / hi - 1) * 100 if hi else 0.0}
+
+
+def situation(api, st: dict, today: str):
+    """★ 10-31 그날 더 빠진 지수(장중 저가 기준)의 전날까지 추세 → (켤까?, 설명). 조회 실패면 (False, 사유) — 안 삼."""
+    lows = low_change(st)
+    if not lows:
+        return False, "지수 조회 실패"
+    key = min(lows, key=lows.get)
+    try:
+        rows = api.get_daily_ohlc(INDEX_ETF[key], days=30) or []
+    except Exception as e:
+        return False, f"{key} 일봉 조회 실패({e})"
+    closes = [r["close"] for r in sorted(rows, key=lambda r: r["date"]) if r.get("date") and r["date"] < today and r.get("close")]
+    if len(closes) < 21:
+        return False, f"{key} 일봉 부족({len(closes)})"
+    t = trend_tags(closes)
+    ok = t["streak"] >= MIN_STREAK and t["dd20"] > -MAX_DD20
+    why = (f"{key} 장중저가 {lows[key]:+.1f}% · 전날까지 연속하락 {t['streak']}일 · 20일고점 {t['dd20']:+.1f}%"
+           + ("" if ok else (" — 첫 하락날이라 안 삼" if t["streak"] < MIN_STREAK else f" — -{MAX_DD20:g}%↓ 무너진 장이라 안 삼(스윙 몫)")))
+    return ok, why
 
 
 def index_down(idx: dict) -> bool:

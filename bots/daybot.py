@@ -438,6 +438,7 @@ class DayBot:
         self._sector_gate = SectorGate()                       # ★ 10-30 하락장 슬롯 주도 섹터 관문
         self._dip_uni     = (None, {})                         # ★ 10-30 음봉 엔진 오늘 후보군(날짜, {코드: …})
         self._last_dip_ts = 0.0
+        self._dip_sit = ("", False, "")              # ★ 10-31 (날짜, 켤까, 설명)
         # ★ 스캔이 백그라운드 스레드로 도는 이상, self.positions에 키를
         #   추가/삭제하는 지점(_do_buy/_do_sell)과 그걸 통째로 직렬화하는
         #   _save_state()가 동시에 돌면 "dictionary changed size during
@@ -620,9 +621,10 @@ class DayBot:
             entry = pos["entry_price"]
             rate  = (current - entry) / entry * 100 if entry > 0 else 0
 
-            # ★ 10-30 음봉 엔진 종목 — +3% 닿으면 전량(대장 결정), 안 되면 아래 기존 규칙(손절 -3.5%·+5% 트레일링)
-            if pos.get("buy_tag") == dip_leader.TAG and rate >= dip_leader.TP_PCT:
-                self._do_sell(code, pos["qty"], f"음봉익절+{dip_leader.TP_PCT:g}%({rate:+.2f}%)", current)
+            # ★ 10-31 대장 결정 — 음봉 엔진 종목은 따로: +5%에 50% 익절 → 나머지 고점 -5% 트레일링(본전 보호),
+            #   그 전엔 손절 -10%, 산 날 포함 5거래일째 15:10 이후 정리(기존 -3.5% 손절·3일 기한 안 씀)
+            if pos.get("buy_tag") == dip_leader.TAG:
+                self._check_dip_exit(code, pos, entry, rate, current)
                 continue
 
             if pos.get("peak_price") is not None:
@@ -657,6 +659,25 @@ class DayBot:
             if held >= HOLD_DAYS_LIMIT:
                 self._do_sell(code, pos["qty"],
                               f"보유기한청산({held}영업일, {rate:+.2f}%)", current)
+
+    def _check_dip_exit(self, code: str, pos: dict, entry: float, rate: float, current: float):
+        """음봉 엔진 매도(dip_leader.TP_PCT/TP_RATIO/TRAIL_PCT/STOP_PCT/HOLD_DAYS)."""
+        if pos.get("partial_done"):
+            pos["peak_price"] = max(pos.get("peak_price") or current, current)
+            stop = max(entry, pos["peak_price"] * (1 - dip_leader.TRAIL_PCT / 100))
+            if current <= stop:
+                self._do_sell(code, pos["qty"], f"음봉트레일링(고점{pos['peak_price']:,.0f}대비 "
+                              f"-{dip_leader.TRAIL_PCT:g}%·본전보호, {rate:+.2f}%)", current)
+                return
+        elif rate >= dip_leader.TP_PCT:
+            pos["peak_price"] = current
+            if self._do_partial_sell(code, rate, current, ratio=dip_leader.TP_RATIO, label="음봉익절50%"):
+                return
+        elif rate <= -dip_leader.STOP_PCT:
+            self._do_sell(code, pos["qty"], f"음봉손절({rate:.2f}%)", current)
+            return
+        if pos.get("held_trading_days", 0) >= dip_leader.HOLD_DAYS - 1 and now_hhmm() >= "1510":
+            self._do_sell(code, pos["qty"], f"음봉기한정리({dip_leader.HOLD_DAYS}거래일, {rate:+.2f}%)", current)
 
     # ============================================================
     # 매수/매도 실행
@@ -866,7 +887,8 @@ class DayBot:
         print(f"{emoji} [daybot] 매도 {code}({name}) | {reason} @{price:,.0f}원")
         return True
 
-    def _do_partial_sell(self, code: str, rate: float, price: float) -> bool:
+    def _do_partial_sell(self, code: str, rate: float, price: float,
+                         ratio: float = FIRST_TP_RATIO, label: str = "1차익절30%") -> bool:
         """★ 2026-10-12 — 1차 익절(+5%) 30%. 접수되면 추적 수량을 바로 줄이고(트레일링은 나머지로),
         장부 기록은 _verify_partials()가 SELL_VERIFY_SEC 뒤 잔고로 체결을 확인한 다음에 한다.
         한 번 시도하면(실패·건너뜀 포함) 그 포지션에선 다시 안 함 — 트레일링이 본 업무."""
@@ -874,7 +896,7 @@ class DayBot:
         if not pos:
             return False
         qty  = int(pos.get("qty", 0))
-        part = int(qty * FIRST_TP_RATIO)
+        part = int(qty * ratio)
         if part < 1 or qty - part < 1 or code in self._partial_verify:
             pos["partial_done"] = True
             return False
@@ -884,16 +906,16 @@ class DayBot:
         if fail and time.time() < fail["until"]:
             return False
         pos["partial_done"] = True
-        reason = f"1차익절30%({rate:+.2f}%)"
+        reason = f"{label}({rate:+.2f}%)"
         if not self.api.sell(code, part, price=0):
-            print(f"⚠️ [daybot] 1차익절 30% 주문 실패 {code} — 건너뛰고 전량 트레일링")
+            print(f"⚠️ [daybot] {label} 주문 실패 {code} — 건너뛰고 전량 트레일링")
             return False
         with self._positions_lock:
             pos["qty"] = qty - part
         self._partial_verify[code] = {"ts": time.time(), "qty": part, "price": price, "reason": reason,
                                       "entry_price": pos.get("entry_price", price),
                                       "buy_tag": pos.get("buy_tag", "")}
-        msg = f"💰 [daybot] 1차익절 {code}({self._name(code)}) {part}주(30%) @{price:,.0f}원 — 나머지 {qty - part}주 트레일링"
+        msg = f"💰 [daybot] {label} {code}({self._name(code)}) {part}주 @{price:,.0f}원 — 나머지 {qty - part}주 트레일링"
         self._notify(msg)
         print(msg)
         return True
@@ -1472,23 +1494,30 @@ class DayBot:
         return len(self.positions) - self._dip_count()
 
     def _dip_due(self, now_t: str) -> bool:
-        """음봉 엔진을 돌릴 때인가 — 음봉 전용 슬롯이 비었고 10:00~매수마감, 60초마다(국면 무관 — 지수 조건은 엔진 안에서)."""
+        """음봉 엔진을 돌릴 때인가 — 음봉 전용 슬롯이 비었고 dip_leader.START(10-31부터 14:30)~매수마감, 60초마다(국면 무관 — 지수 조건은 엔진 안에서)."""
         if DIP_SLOTS <= 0 or self._dip_count() >= DIP_SLOTS:
             return False
         return dip_leader.START <= now_t < NEW_BUY_END_TIME and time.time() - self._last_dip_ts >= 60
 
     def _run_dip_engine(self):
-        """★ 2026-10-30 대장 결정 — 음봉 엔진: 지수(코스피·코스닥 중 하나) -2%↓인 날 10:00~15:20, 그 지수가 당일 저가 대비
-        +0.5% 반등하면 중기 주도주(60일 +30%↑·거래대금 100억↑) 중 오늘 -5%↓ & 5일 고점 -10%↓인 종목을 당일 저가 대비
-        반등 큰 순으로 1종목 하락장 슬롯(50만). 매도는 +3% 전량, 안 되면 기존 규칙. 근거: backtest/dip_leader_review.py(일봉)."""
+        """★ 2026-10-30 대장 결정 — 음봉 엔진: 중기 주도주(60일 +30%↑·거래대금 100억↑) 중 오늘 -5%↓ & 5일 고점 -10%↓인 종목을
+        당일 저가 대비 반등 큰 순으로 1종목, 음봉 전용 슬롯(50만).
+        ★ 10-31 대장 결정(분봉 검증): 지수(코스피·코스닥 중 하나) 장중 -2%↓ 찍은 날 14:30부터, 단 그 지수가 첫 하락날이거나
+        20일 고점 -15%↓ 무너진 장이면 그날은 안 삼(dip_leader.situation). 매도는 _check_dip_exit(+5% 50%·트레일 -5%·손절 -10%·5거래일)."""
         self._last_dip_ts = time.time()
         if self._daily_loss_hit():
             return
-        st = dip_leader.index_status()                 # ★ 10-30 지수 당일 저가 대비 +0.5% 반등해야 진입(대장)
+        st = dip_leader.index_status()
         idx = {k: v[0] for k, v in st.items()}
-        if not dip_leader.index_ready(st):
+        if not dip_leader.index_hit(st):              # ★ 10-31 오늘 장중 -2%↓ 찍은 지수가 있어야
             return
         today = today_str()
+        if self._dip_sit[0] != today:                 # ★ 10-31 첫 하락날·-15%↓ 무너진 장이면 그날은 안 삼(하루 한 번 판단)
+            ok, why = dip_leader.situation(self.api, st, today)
+            self._dip_sit = (today, ok, why)
+            print(f"🕯️ [daybot] 음봉 엔진 오늘 {'켬' if ok else '쉼'} — {why}")
+        if not self._dip_sit[1]:
+            return
         if self._dip_uni[0] != today:
             try:
                 self._dip_uni = (today, dip_leader.universe(today))
@@ -1525,7 +1554,8 @@ class DayBot:
             if self._do_buy(code, name, price, dip_leader.TAG, amount_cap=DIP_AMOUNT):
                 self._notify(f"🕯️ [daybot] 음봉 엔진 매수 {name}({code}) {chg:+.1f}% · 저가 대비 +{bounce:.1f}% · 5일 고점 {from_hi:+.1f}% "
                              f"— 지수 코스피 {idx.get('kospi', 0):+.1f}%/코스닥 {idx.get('kosdaq', 0):+.1f}%({reb}) · "
-                             f"+{dip_leader.TP_PCT:g}% 전량 익절, 안 되면 손절 -3.5%·트레일링", critical=True)
+                             f"+{dip_leader.TP_PCT:g}%에 {dip_leader.TP_RATIO:.0%} 익절 → 나머지 고점 -{dip_leader.TRAIL_PCT:g}% 트레일링(본전 보호), "
+                             f"손절 -{dip_leader.STOP_PCT:g}%, {dip_leader.HOLD_DAYS}거래일 정리 · {self._dip_sit[2]}", critical=True)
                 break
 
     def _run_candidate_scan_and_maybe_buy(self):

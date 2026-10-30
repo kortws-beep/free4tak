@@ -207,7 +207,7 @@ class DaybotLinaWatches(unittest.TestCase):
 
 
 class DipEngine(unittest.TestCase):
-    """★ 10-30 음봉 엔진 종목 — +3% 닿으면 전량, 안 되면 기존 규칙(손절 -3.5%). 일반 종목은 +3%에 안 팜."""
+    """★ 10-30 음봉 엔진 종목은 따로 매도. ★ 10-31 +5%에 50%(실주문 흐름), 손절 -10%(-3.5%엔 안 팜). 일반 종목은 그대로."""
     def setUp(self):
         daybot.now_hhmm = lambda: "1000"
 
@@ -218,13 +218,17 @@ class DipEngine(unittest.TestCase):
     def test_dip_tp_and_normal(self):
         b = mk(); p = pos(q=10); p["buy_tag"] = daybot.dip_leader.TAG; b.positions["005930"] = p
         b.positions["000660"] = pos(q=10)                                      # 일반 종목
-        self._hit(b, 10300)                                                    # +3%
-        self.assertEqual([s[0] for s in b.api.sells], ["005930"])
-        self.assertIn("000660", b.positions)
+        self._hit(b, 10300)                                                    # +3% — 둘 다 안 팜(10-31부터 음봉도 +5%)
+        self.assertEqual(b.api.sells, [])
+        self._hit(b, 10500)                                                    # +5% — 음봉 50%·일반 30%
+        self.assertEqual(sorted(b.api.sells), [("000660", 3, 0), ("005930", 5, 0)])
+        self.assertEqual(b.positions["005930"]["qty"], 5)
 
-    def test_dip_stop_still_applies(self):
+    def test_dip_stop_minus10(self):
         b = mk(); p = pos(q=10); p["buy_tag"] = daybot.dip_leader.TAG; b.positions["005930"] = p
-        self._hit(b, 9640)                                                     # -3.6% → 기존 손절
+        self._hit(b, 9640)                                                     # -3.6% — 예전 손절선, 이제 안 팜
+        self.assertEqual(b.api.sells, [])
+        self._hit(b, 8990)                                                     # -10.1%
         self.assertEqual([s[0] for s in b.api.sells], ["005930"])
 
 
