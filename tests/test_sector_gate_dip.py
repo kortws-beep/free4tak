@@ -43,15 +43,27 @@ class Dip(unittest.TestCase):
         self.assertFalse(D.index_down({"kospi": -1.9, "kosdaq": -1.0}))
         self.assertFalse(D.index_down({"kospi": 0.0, "kosdaq": 0.0}))     # 조회 실패(0)는 하락 아님
 
+    def test_index_ready(self):
+        # ★ 10-30 대장 — 빠진 지수가 당일 저가 대비 +0.5% 반등해야(종가배팅 아님)
+        self.assertTrue(D.index_ready({"kospi": (-5.4, 0.6), "kosdaq": (-4.5, 0.1)}))
+        self.assertFalse(D.index_ready({"kospi": (-5.4, 0.3), "kosdaq": (-4.5, 0.2)}))
+        self.assertFalse(D.index_ready({"kospi": (-1.5, 1.2)}))          # -2%까진 안 빠짐
+        st = D.index_status(get=lambda u: (
+            {"totalInfos": [{"code": "lastClosePrice", "value": "5,937.66"}, {"code": "lowPrice", "value": "5,599.42"}]}
+            if u.endswith("integration") else {"closePrice": "5,627.42"}))
+        self.assertAlmostEqual(st["kospi"][0], -5.22, places=2); self.assertAlmostEqual(st["kospi"][1], 0.50, places=2)
+
     def test_pick(self):
         uni = {"A": {"name": "대덕전자", "value_eok": 1566, "r60": 42, "hi5": 140100},
                "B": {"name": "티엘비", "value_eok": 273, "r60": 53, "hi5": 42700},
                "C": {"name": "덜빠짐", "value_eok": 900, "r60": 40, "hi5": 10000}}
-        q = {"A": {"price": 116600, "chg": -15.6, "high": 130000}, "B": {"price": 36850, "chg": -9.5},
-             "C": {"price": 9500, "chg": -6.0}}                            # C는 5일 고점 대비 -5%뿐
+        q = {"A": {"price": 116600, "chg": -15.6, "high": 130000, "low": 115000},     # 저가 대비 +1.4%
+             "B": {"price": 36850, "chg": -9.5, "low": 35000},                         # 저가 대비 +5.3%
+             "C": {"price": 9500, "chg": -6.0, "low": 9000}}                           # C는 5일 고점 대비 -5%뿐
         got = D.pick(uni, q)
-        self.assertEqual([g[0] for g in got], ["A", "B"])                  # 거래대금 큰 순
-        self.assertEqual(D.pick(uni, q, exclude={"A"})[0][0], "B")
+        self.assertEqual([g[0] for g in got], ["B", "A"])                  # ★ 저가 대비 가장 많이 오른 순(대장)
+        self.assertAlmostEqual(got[0][5], 5.29, places=1)
+        self.assertEqual(D.pick(uni, q, exclude={"B"})[0][0], "A")
 
     def test_universe(self):
         c = sqlite3.connect("daily.db")

@@ -52,25 +52,29 @@ class DipEngineBuy(unittest.TestCase):
         b._notify = lambda m, critical=False: b.notes.append(m)
         b._daily_loss_hit = lambda: False
         b.db = type("D", (), {"log_candidate": lambda self, *a, **k: None})()
-        b.api = type("A", (), {"get_market_index": lambda self: idx,
-                               "get_multi_price": lambda self, codes, pause=0: {"A": {"price": 116600, "chg": -15.6, "high": 0}}})()
+        b.api = type("A", (), {"get_multi_price": lambda self, codes, pause=0: {"A": {"price": 116600, "chg": -15.6, "high": 0, "low": 115000}}})()
+        self._st = idx
         b._do_buy = lambda code, name, price, tier, **k: (b.bought.append((code, tier, k.get("amount_cap"))), True)[1]
         return b
 
     def test_buy_on_index_down(self):
-        old = daybot.dip_leader.universe, daybot.get_all_positions, daybot._lina_daybot_watches
+        old = (daybot.dip_leader.universe, daybot.get_all_positions, daybot._lina_daybot_watches,
+               daybot.dip_leader.index_status)
         daybot.dip_leader.universe = lambda today: {"A": {"name": "대덕전자", "value_eok": 1566, "r60": 42, "hi5": 140100}}
         daybot.get_all_positions, daybot._lina_daybot_watches = None, lambda: set()
         try:
-            b = self._bot({"kospi": -5.2, "kosdaq": -4.4})
+            daybot.dip_leader.index_status = lambda: {"kospi": (-5.2, 0.6), "kosdaq": (-4.4, 0.2)}   # 코스피 저가 대비 +0.6%
+            b = self._bot(None)
             b._run_dip_engine()
             self.assertEqual(b.bought, [("A", daybot.dip_leader.TAG, daybot.DOWN_AMOUNT)])
             self.assertIn("음봉 엔진 매수", b.notes[0])
-            b = self._bot({"kospi": -1.0, "kosdaq": -0.5})
+            daybot.dip_leader.index_status = lambda: {"kospi": (-5.2, 0.2), "kosdaq": (-4.4, 0.1)}   # 아직 바닥 안 다짐
+            b = self._bot(None)
             b._run_dip_engine()
             self.assertEqual(b.bought, [])
         finally:
-            daybot.dip_leader.universe, daybot.get_all_positions, daybot._lina_daybot_watches = old
+            (daybot.dip_leader.universe, daybot.get_all_positions, daybot._lina_daybot_watches,
+             daybot.dip_leader.index_status) = old
 
 
 class ManualAdd(unittest.TestCase):

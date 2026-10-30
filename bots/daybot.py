@@ -1462,14 +1462,15 @@ class DayBot:
         return self._down_market(self._market_breadth())
 
     def _run_dip_engine(self):
-        """★ 2026-10-30 대장 결정 — 음봉 엔진: 지수(코스피·코스닥 중 하나) -2%↓인 날 14:30부터, 중기 주도주(60일 +30%↑·
-        거래대금 100억↑)가 오늘 -5%↓ & 5일 고점 -10%↓면 거래대금 큰 순 1종목을 하락장 슬롯(50만)으로. 매도는 +3% 전량,
-        안 되면 기존 규칙(_check_all_positions_for_exit). 근거: backtest/dip_leader_review.py."""
+        """★ 2026-10-30 대장 결정 — 음봉 엔진: 지수(코스피·코스닥 중 하나) -2%↓인 날 10:00~15:20, 그 지수가 당일 저가 대비
+        +0.5% 반등하면 중기 주도주(60일 +30%↑·거래대금 100억↑) 중 오늘 -5%↓ & 5일 고점 -10%↓인 종목을 당일 저가 대비
+        반등 큰 순으로 1종목 하락장 슬롯(50만). 매도는 +3% 전량, 안 되면 기존 규칙. 근거: backtest/dip_leader_review.py(일봉)."""
         self._last_dip_ts = time.time()
         if self._daily_loss_hit():
             return
-        idx = self.api.get_market_index() or {}
-        if not dip_leader.index_down(idx):
+        st = dip_leader.index_status()                 # ★ 10-30 지수 당일 저가 대비 +0.5% 반등해야 진입(대장)
+        idx = {k: v[0] for k, v in st.items()}
+        if not dip_leader.index_ready(st):
             return
         today = today_str()
         if self._dip_uni[0] != today:
@@ -1489,16 +1490,17 @@ class DayBot:
             except Exception:
                 pass
         picks = dip_leader.pick(uni, self.api.get_multi_price(list(uni), pause=0.1), exclude=held)
-        print(f"🕯️ [daybot] 음봉 엔진 — 코스피 {idx.get('kospi', 0):+.2f}% · 코스닥 {idx.get('kosdaq', 0):+.2f}% · "
-              f"조건 통과 {len(picks)}종목" + (f" (1순위 {picks[0][1]} {picks[0][3]:+.1f}%)" if picks else ""))
-        for code, name, price, chg, from_hi in picks[:3]:
+        reb = " · ".join(f"{k} 저가 대비 +{v[1]:.2f}%" for k, v in st.items())
+        print(f"🕯️ [daybot] 음봉 엔진 — 코스피 {idx.get('kospi', 0):+.2f}% · 코스닥 {idx.get('kosdaq', 0):+.2f}% ({reb}) · "
+              f"조건 통과 {len(picks)}종목" + (f" (1순위 {picks[0][1]} {picks[0][3]:+.1f}%, 저가 대비 +{picks[0][5]:.1f}%)" if picks else ""))
+        for code, name, price, chg, from_hi, bounce in picks[:3]:
             if len(self.positions) >= DOWN_SLOTS:
                 break
             self.code_name_map.setdefault(code, name)
             self.db.log_candidate(code, name, dip_leader.TAG, price, chg, bought=True)
             if self._do_buy(code, name, price, dip_leader.TAG, amount_cap=DOWN_AMOUNT):
-                self._notify(f"🕯️ [daybot] 음봉 엔진 매수 {name}({code}) {chg:+.1f}% · 5일 고점 {from_hi:+.1f}% "
-                             f"— 지수 코스피 {idx.get('kospi', 0):+.1f}%/코스닥 {idx.get('kosdaq', 0):+.1f}% · "
+                self._notify(f"🕯️ [daybot] 음봉 엔진 매수 {name}({code}) {chg:+.1f}% · 저가 대비 +{bounce:.1f}% · 5일 고점 {from_hi:+.1f}% "
+                             f"— 지수 코스피 {idx.get('kospi', 0):+.1f}%/코스닥 {idx.get('kosdaq', 0):+.1f}%({reb}) · "
                              f"+{dip_leader.TP_PCT:g}% 전량 익절, 안 되면 손절 -3.5%·트레일링", critical=True)
                 break
 
