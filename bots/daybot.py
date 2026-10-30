@@ -196,6 +196,10 @@ PAUSE_BELOW_PCT = float(os.getenv("DAYBOT_PAUSE_BELOW", "35") or 0)
 #   완전히 쉬려면 .env에 DAYBOT_DOWN_SLOTS=0
 DOWN_SLOTS = int(os.getenv("DAYBOT_DOWN_SLOTS", "1") or 0)
 DOWN_AMOUNT = int(os.getenv("DAYBOT_DOWN_AMOUNT", "500000") or 500000)
+# ★ 2026-10-30 12:3x 대장 결정 — "슬롯이 있었으면 하나 들어가서 기다려보면 되지"(HMM이 하락장 슬롯을 쓰는 동안 지수 반등 신호를 놓침)
+#   → 음봉 엔진 전용 슬롯(대장이 시드 51만 추가). 양봉 엔진(하락장·정상장 슬롯) 수와 따로 셈, 국면과 상관없이 지수 -2% 날 작동.
+DIP_SLOTS = int(os.getenv("DAYBOT_DIP_SLOTS", "1") or 0)
+DIP_AMOUNT = int(os.getenv("DAYBOT_DIP_AMOUNT", "500000") or 500000)
 # ★ 2026-10-12 대장 결정 — 시드 300만 기준 일손실 한도 -15만(5%). 오늘 실현손익이 이 아래면
 #   그날 신규매수만 멈춤(보유 종목 손절·트레일링은 계속), 다음 날 자동 해제. 너무 작게 잡으면
 #   민감하게 멈춰 기회를 놓친다는 대장 판단으로 5%.
@@ -1453,13 +1457,18 @@ class DayBot:
                          critical=True)
         return True
 
+    def _dip_count(self) -> int:
+        return sum(1 for p in self.positions.values() if p.get("buy_tag") == dip_leader.TAG)
+
+    def _regular_count(self) -> int:
+        """양봉 엔진 보유 수 — ★ 10-30 음봉 전용 슬롯 종목은 빼고 셈."""
+        return len(self.positions) - self._dip_count()
+
     def _dip_due(self, now_t: str) -> bool:
-        """음봉 엔진을 돌릴 때인가 — 하락장 슬롯이 비었고 14:30~매수마감, 60초마다(정지·국면 확인은 호출부/여기서)."""
-        if DOWN_SLOTS <= 0 or len(self.positions) >= DOWN_SLOTS:
+        """음봉 엔진을 돌릴 때인가 — 음봉 전용 슬롯이 비었고 10:00~매수마감, 60초마다(국면 무관 — 지수 조건은 엔진 안에서)."""
+        if DIP_SLOTS <= 0 or self._dip_count() >= DIP_SLOTS:
             return False
-        if not (dip_leader.START <= now_t < NEW_BUY_END_TIME) or time.time() - self._last_dip_ts < 60:
-            return False
-        return self._down_market(self._market_breadth())
+        return dip_leader.START <= now_t < NEW_BUY_END_TIME and time.time() - self._last_dip_ts >= 60
 
     def _run_dip_engine(self):
         """★ 2026-10-30 대장 결정 — 음봉 엔진: 지수(코스피·코스닥 중 하나) -2%↓인 날 10:00~15:20, 그 지수가 당일 저가 대비
@@ -1502,11 +1511,11 @@ class DayBot:
         print(f"🕯️ [daybot] 음봉 엔진 — 코스피 {idx.get('kospi', 0):+.2f}% · 코스닥 {idx.get('kosdaq', 0):+.2f}% ({reb}) · "
               f"조건 통과 {len(picks)}종목" + (f" (1순위 {picks[0][1]} {picks[0][3]:+.1f}%, 저가 대비 +{picks[0][5]:.1f}%)" if picks else ""))
         for code, name, price, chg, from_hi, bounce in picks[:3]:
-            if len(self.positions) >= DOWN_SLOTS:
+            if self._dip_count() >= DIP_SLOTS:
                 break
             self.code_name_map.setdefault(code, name)
             self.db.log_candidate(code, name, dip_leader.TAG, price, chg, bought=True)
-            if self._do_buy(code, name, price, dip_leader.TAG, amount_cap=DOWN_AMOUNT):
+            if self._do_buy(code, name, price, dip_leader.TAG, amount_cap=DIP_AMOUNT):
                 self._notify(f"🕯️ [daybot] 음봉 엔진 매수 {name}({code}) {chg:+.1f}% · 저가 대비 +{bounce:.1f}% · 5일 고점 {from_hi:+.1f}% "
                              f"— 지수 코스피 {idx.get('kospi', 0):+.1f}%/코스닥 {idx.get('kosdaq', 0):+.1f}%({reb}) · "
                              f"+{dip_leader.TP_PCT:g}% 전량 익절, 안 되면 손절 -3.5%·트레일링", critical=True)
@@ -1536,13 +1545,13 @@ class DayBot:
         #   확인해서 3번째 보너스슬롯 오픈 여부 판단(매 스캔마다 1회, REST
         #   호출 최소화 — 대표종목 005930 기준으로 계좌 전체 여력 조회).
         effective_max = BASE_MAX_POSITIONS
-        if len(self.positions) >= BASE_MAX_POSITIONS:
+        if self._regular_count() >= BASE_MAX_POSITIONS:
             psbl = self.api.get_psbl_order_cash("005930") or 0
             if psbl >= BONUS_SLOT_MIN_CASH:
                 effective_max = BASE_MAX_POSITIONS + 1
 
         for code in ranked:
-            if len(self.positions) >= effective_max:
+            if self._regular_count() >= effective_max:
                 break
             if now_hhmm() >= NEW_BUY_END_TIME:      # 스캔 도중 신규매수 마감 시각을 넘김
                 print(f"⏰ [daybot] 신규매수 마감({NEW_BUY_END_TIME[:2]}:{NEW_BUY_END_TIME[2:]}) — 남은 후보 매수 안 함")
@@ -1616,7 +1625,7 @@ class DayBot:
                                        raw_market_data=mdata, raw_hoga_data=hoga)
                 continue
             down = self._down_market(self._market_breadth())
-            if down and len(self.positions) >= DOWN_SLOTS:   # ★ 10-26 하락장엔 DOWN_SLOTS개까지만(0이면 완전 쉬기)
+            if down and self._regular_count() >= DOWN_SLOTS:   # ★ 10-26 하락장엔 DOWN_SLOTS개까지만(0이면 완전 쉬기, 10-30 음봉 슬롯 제외)
                 print(f"⏭️ [daybot] {code} 패스 — 하락장 쉬기(국면 {self._regime[1]:.0f}% < {PAUSE_BELOW_PCT:.0f}%, "
                       f"하락장 {DOWN_SLOTS}슬롯 찼음)")
                 self.db.log_candidate(code, self._name(code), tier, price, chg,
@@ -1638,7 +1647,7 @@ class DayBot:
                                    bought=True, raw_market_data=mdata, raw_hoga_data=hoga)
             # ★ 2026-10-06 대장 지정 — 이 매수로 effective_max에 도달하면
             #   (마지막 슬롯) 금액 캡 없이 최대까지 매수.
-            is_last_slot = (len(self.positions) + 1 >= effective_max) and not down
+            is_last_slot = (self._regular_count() + 1 >= effective_max) and not down
             self._do_buy(code, self._name(code), price, tier, is_last_slot=is_last_slot,
                          amount_cap=DOWN_AMOUNT if down else 0)
 
@@ -1771,7 +1780,7 @@ class DayBot:
                     self._scan_thread.start()
 
                 if (not self._is_paused
-                        and len(self.positions) < MAX_POSITIONS
+                        and self._regular_count() < MAX_POSITIONS
                         and BUY_START_TIME <= now_t <= SCAN_END_TIME
                         and now_t < NEW_BUY_END_TIME
                         and (time.time() - self._last_scan_ts >= SCAN_INTERVAL_SEC
