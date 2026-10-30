@@ -379,8 +379,8 @@ def _lina_daybot_watches(all_accounts: bool = False) -> set:
 
 
 def _lina_all_watches() -> set:
-    """★ 2026-10-30 대장 — 음봉 엔진은 대장이 다른 계좌(키움 등)에 들고 리나에 등록한 종목도 뺀다
-    ("흔들릴 때 두 배로 맞잖아" — 삼화콘덴서 키움 보유 중인데 음봉 대상 19종목에 들어 있었음)."""
+    """★ 2026-10-30 대장 — 음봉·양봉 엔진 모두 대장이 다른 계좌(키움 등)에 들고 리나에 등록한 종목도 뺀다
+    ("흔들릴 때 두 배로 맞잖아", "종목이 달라야 다양하게 공략" — 삼화콘덴서 키움 보유 중인데 음봉 대상 19종목에 들어 있었음)."""
     return _lina_daybot_watches(all_accounts=True)
 
 
@@ -1546,7 +1546,7 @@ class DayBot:
                                    if p["bot_type"] != "daybot"}
             except Exception:
                 pass
-        held_elsewhere |= _lina_daybot_watches()
+        held_elsewhere |= _lina_all_watches()   # ★ 10-30 대장 "종목이 달라야 다양하게 공략" — 양봉 엔진도 다른 계좌 보유분 제외
 
         # ★ 2026-10-01 대장 지정 — 기본 2슬롯 꽉 찼을 때만 매수가능금액을
         #   확인해서 3번째 보너스슬롯 오픈 여부 판단(매 스캔마다 1회, REST
