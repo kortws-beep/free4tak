@@ -74,6 +74,8 @@ from kiwoom_api import KiwoomAPI
 from notifier import Notifier
 from daybot_db import DayTradeDB, log_kiwoom_hits, python_scan_hits
 import market_regime   # ★ 2026-10-08 시장 국면(20일선 위 종목 비율)
+import dip_leader      # ★ 2026-10-30 음봉 엔진(지수 급락일 중기 주도주 급락 매수)
+from sector_gate import SectorGate   # ★ 2026-10-30 하락장 슬롯 '주도 섹터 안 종목만'
 
 load_dotenv(_os.path.join(_BASE, ".env"))
 
@@ -179,7 +181,8 @@ SCAN_END_TIME    = "1530"
 #   시간대·어느 매도규칙으로도 손실(PF 0.29~0.47), 09:00~09:40만 슬롯 3개 기준 플러스
 #   (13건 승률 85%) — 신규매수는 09:40까지만, 그 뒤엔 보유종목 매도만 본다.
 #   되돌리려면 .env에 DAYBOT_NEW_BUY_END=1530
-NEW_BUY_END_TIME = os.getenv("DAYBOT_NEW_BUY_END", "0940").strip() or "0940"
+# ★ 2026-10-30 대장 결정 — "단타는 회전율, 09:40 제한 풀어야" → 15:20(정규장 끝까지). 대신 하락장 슬롯은 주도 섹터 필터.
+NEW_BUY_END_TIME = os.getenv("DAYBOT_NEW_BUY_END", "1520").strip() or "1520"
 # ★ 2026-10-08 대장 결정(스윙 백테스트 시장 국면별): 전 종목 중 20일선 위 비율이 50% 미만인
 #   장에선 추격매수가 본전~손실 → 그런 날은 매수금 절반(멈추면 기회까지 놓쳐서 절반으로).
 #   끄려면 .env에 DAYBOT_WEAK_MARKET_RATIO=1
@@ -421,6 +424,9 @@ class DayBot:
         #   스캔을 백그라운드 스레드로 분리해서 메인루프(heartbeat/포지션
         #   감시/EOD청산)가 스캔 소요시간과 무관하게 계속 돌게 한다.
         self._scan_thread: threading.Thread = None
+        self._sector_gate = SectorGate()                       # ★ 10-30 하락장 슬롯 주도 섹터 관문
+        self._dip_uni     = (None, {})                         # ★ 10-30 음봉 엔진 오늘 후보군(날짜, {코드: …})
+        self._last_dip_ts = 0.0
         # ★ 스캔이 백그라운드 스레드로 도는 이상, self.positions에 키를
         #   추가/삭제하는 지점(_do_buy/_do_sell)과 그걸 통째로 직렬화하는
         #   _save_state()가 동시에 돌면 "dictionary changed size during
@@ -602,6 +608,11 @@ class DayBot:
                 continue
             entry = pos["entry_price"]
             rate  = (current - entry) / entry * 100 if entry > 0 else 0
+
+            # ★ 10-30 음봉 엔진 종목 — +3% 닿으면 전량(대장 결정), 안 되면 아래 기존 규칙(손절 -3.5%·+5% 트레일링)
+            if pos.get("buy_tag") == dip_leader.TAG and rate >= dip_leader.TP_PCT:
+                self._do_sell(code, pos["qty"], f"음봉익절+{dip_leader.TP_PCT:g}%({rate:+.2f}%)", current)
+                continue
 
             if pos.get("peak_price") is not None:
                 if current > pos["peak_price"]:
@@ -1442,6 +1453,55 @@ class DayBot:
                          critical=True)
         return True
 
+    def _dip_due(self, now_t: str) -> bool:
+        """음봉 엔진을 돌릴 때인가 — 하락장 슬롯이 비었고 14:30~매수마감, 60초마다(정지·국면 확인은 호출부/여기서)."""
+        if DOWN_SLOTS <= 0 or len(self.positions) >= DOWN_SLOTS:
+            return False
+        if not (dip_leader.START <= now_t < NEW_BUY_END_TIME) or time.time() - self._last_dip_ts < 60:
+            return False
+        return self._down_market(self._market_breadth())
+
+    def _run_dip_engine(self):
+        """★ 2026-10-30 대장 결정 — 음봉 엔진: 지수(코스피·코스닥 중 하나) -2%↓인 날 14:30부터, 중기 주도주(60일 +30%↑·
+        거래대금 100억↑)가 오늘 -5%↓ & 5일 고점 -10%↓면 거래대금 큰 순 1종목을 하락장 슬롯(50만)으로. 매도는 +3% 전량,
+        안 되면 기존 규칙(_check_all_positions_for_exit). 근거: backtest/dip_leader_review.py."""
+        self._last_dip_ts = time.time()
+        if self._daily_loss_hit():
+            return
+        idx = self.api.get_market_index() or {}
+        if not dip_leader.index_down(idx):
+            return
+        today = today_str()
+        if self._dip_uni[0] != today:
+            try:
+                self._dip_uni = (today, dip_leader.universe(today))
+            except Exception as e:
+                print(f"⚠️ [daybot] 음봉 엔진 후보군 계산 오류: {e}")
+                self._dip_uni = (today, {})
+            print(f"🕯️ [daybot] 음봉 엔진 오늘 후보군 {len(self._dip_uni[1])}종목(60일 +30%↑·거래대금 100억↑)")
+        uni = self._dip_uni[1]
+        if not uni:
+            return
+        held = set(self.positions) | set(self.sold_today) | _lina_daybot_watches()
+        if get_all_positions:
+            try:
+                held |= {p["code"] for p in get_all_positions() if p["bot_type"] != "daybot"}
+            except Exception:
+                pass
+        picks = dip_leader.pick(uni, self.api.get_multi_price(list(uni), pause=0.1), exclude=held)
+        print(f"🕯️ [daybot] 음봉 엔진 — 코스피 {idx.get('kospi', 0):+.2f}% · 코스닥 {idx.get('kosdaq', 0):+.2f}% · "
+              f"조건 통과 {len(picks)}종목" + (f" (1순위 {picks[0][1]} {picks[0][3]:+.1f}%)" if picks else ""))
+        for code, name, price, chg, from_hi in picks[:3]:
+            if len(self.positions) >= DOWN_SLOTS:
+                break
+            self.code_name_map.setdefault(code, name)
+            self.db.log_candidate(code, name, dip_leader.TAG, price, chg, bought=True)
+            if self._do_buy(code, name, price, dip_leader.TAG, amount_cap=DOWN_AMOUNT):
+                self._notify(f"🕯️ [daybot] 음봉 엔진 매수 {name}({code}) {chg:+.1f}% · 5일 고점 {from_hi:+.1f}% "
+                             f"— 지수 코스피 {idx.get('kospi', 0):+.1f}%/코스닥 {idx.get('kosdaq', 0):+.1f}% · "
+                             f"+{dip_leader.TP_PCT:g}% 전량 익절, 안 되면 손절 -3.5%·트레일링", critical=True)
+                break
+
     def _run_candidate_scan_and_maybe_buy(self):
         if self._daily_loss_hit():
             print(f"🛑 [daybot] 일손실 한도({DAILY_LOSS_LIMIT:,}원) — 오늘 신규매수 없음")
@@ -1554,6 +1614,15 @@ class DayBot:
                                        skip_reason="하락장쉬기",
                                        raw_market_data=mdata, raw_hoga_data=hoga)
                 continue
+            if down:   # ★ 10-30 대장 결정 — 하락장 슬롯은 그 시각 주도 섹터(프리장→본장 15분마다 상위 5) 안 종목만
+                ok_sector, why_sector = self._sector_gate.allows(code)
+                if not ok_sector:
+                    print(f"⏭️ [daybot] {code} 패스 — {why_sector}")
+                    self.db.log_candidate(code, self._name(code), tier, price, chg,
+                                           ask_bid_ratio=hoga.get("ask_bid_ratio", 0),
+                                           skip_reason="섹터밖",
+                                           raw_market_data=mdata, raw_hoga_data=hoga)
+                    continue
             self.db.log_candidate(code, self._name(code), tier, price, chg,
                                    ask_bid_ratio=hoga.get("ask_bid_ratio", 0),
                                    bought=True, raw_market_data=mdata, raw_hoga_data=hoga)
@@ -1685,6 +1754,12 @@ class DayBot:
                 #     재시도로 몇 분씩 걸려도 메인루프(heartbeat/포지션감시)는
                 #     계속 돈다. 이전 스캔이 아직 안 끝났으면 새로 안 띄움
                 #     (중복실행 방지).
+                # 9-0) ★ 10-30 음봉 엔진(14:30~, 하락장 슬롯 비었을 때, 60초마다) — 스캔과 같은 스레드 칸을 써서 동시 매수 방지
+                if (not self._is_paused and self._dip_due(now_t)
+                        and (self._scan_thread is None or not self._scan_thread.is_alive())):
+                    self._scan_thread = threading.Thread(target=self._run_dip_engine, daemon=True)
+                    self._scan_thread.start()
+
                 if (not self._is_paused
                         and len(self.positions) < MAX_POSITIONS
                         and BUY_START_TIME <= now_t <= SCAN_END_TIME

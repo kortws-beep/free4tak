@@ -20,7 +20,7 @@ DBS = {"sbot": os.path.join(_BASE, "sbot_trade_history.db"), "daybot": os.path.j
        "lina": os.path.join(_BASE, "lina_bot", "three_month_leader_log.db")}
 BOTS = {"sbot": "🤖 sbot", "daybot": "⚡ daybot", "cbot": "🪙 cbot", "lina": "🌸 리나"}
 SBOT_TAGS = {"expert": "NEW 관심그룹", "sub": "SUB 고정석", "s7": "S7 대형주 급락", "trend": "추세(예전 소스)", "수동": "대장 수동"}
-DAYBOT_TAGS = [("overlap", "겹침(2개 이상)"), ("090930", "090930타점"), ("단타000", "단타000"), ("주도주", "주도주검색식3"),
+DAYBOT_TAGS = [("dip_leader", "🕯️ 음봉 엔진(급락 주도주)"), ("overlap", "겹침(2개 이상)"), ("090930", "090930타점"), ("단타000", "단타000"), ("주도주", "주도주검색식3"),
                ("섹터", "섹터"), ("scout", "스카우트"), ("fallback", "폴백"), ("수동", "대장 수동")]
 CBOT_REASONS = [("보호선", "보호선"), ("급락감지", "급락감지"), ("트레일링", "트레일링"), ("익절", "익절"), ("목표", "익절"),
                 ("손절", "손절"), ("수동", "수동 매도")]

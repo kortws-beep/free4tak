@@ -205,6 +205,28 @@ class DaybotLinaWatches(unittest.TestCase):
                     f.write(old)
 
 
+class DipEngine(unittest.TestCase):
+    """★ 10-30 음봉 엔진 종목 — +3% 닿으면 전량, 안 되면 기존 규칙(손절 -3.5%). 일반 종목은 +3%에 안 팜."""
+    def setUp(self):
+        daybot.now_hhmm = lambda: "1000"
+
+    def _hit(self, b, price):
+        b._get_current_price = lambda c: float(price)
+        b._check_all_positions_for_exit()
+
+    def test_dip_tp_and_normal(self):
+        b = mk(); p = pos(q=10); p["buy_tag"] = daybot.dip_leader.TAG; b.positions["005930"] = p
+        b.positions["000660"] = pos(q=10)                                      # 일반 종목
+        self._hit(b, 10300)                                                    # +3%
+        self.assertEqual([s[0] for s in b.api.sells], ["005930"])
+        self.assertIn("000660", b.positions)
+
+    def test_dip_stop_still_applies(self):
+        b = mk(); p = pos(q=10); p["buy_tag"] = daybot.dip_leader.TAG; b.positions["005930"] = p
+        self._hit(b, 9640)                                                     # -3.6% → 기존 손절
+        self.assertEqual([s[0] for s in b.api.sells], ["005930"])
+
+
 class DaybotFirstTakeProfit(unittest.TestCase):
     """2026-10-12 — +5% 도달 때 30% 매도(트레일링 시작도 +5%), 나머지는 트레일링. 장부는 체결 확인 뒤."""
     def setUp(self):

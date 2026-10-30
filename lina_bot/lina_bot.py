@@ -2060,6 +2060,29 @@ async def before_evening_report_loop():
     await client.wait_until_ready()
 
 
+# ★ 2026-10-30 대장 결정 — 데이봇 매수 마감 09:40→15:20 + 하락장 슬롯 '그 시각 주도 섹터' 관문(core/sector_gate.py) →
+#   본장 테마 순위를 10:00~15:15 15분마다 남김(09:15·09:30·09:45는 크론이 이미 함). intelligence/theme_open_obs.run()
+THEME_OBS_TIMES = {f"{h:02d}{m:02d}" for h in range(10, 16) for m in (0, 15, 30, 45)} - {"1530", "1545"}
+_theme_obs_done = {"key": ""}
+
+
+@tasks.loop(minutes=1)
+async def theme_obs_loop():
+    kst_now = datetime.datetime.now(KST)
+    hhmm = kst_now.strftime("%H%M")
+    key = kst_now.strftime("%Y-%m-%d ") + hhmm
+    if not _is_trading_day() or hhmm not in THEME_OBS_TIMES or _theme_obs_done["key"] == key:
+        return
+    _theme_obs_done["key"] = key
+    try:
+        import theme_open_obs
+        from kis_api import KisAPI
+        line = await asyncio.to_thread(theme_open_obs.run, KisAPI())
+        print(f"🧭 [테마순위] {line or '기록 실패'}")
+    except Exception as e:
+        print(f"⚠️ [테마순위] 오류: {e}")
+
+
 # ★ 2026-10-14 시나리오1 — 투매일 반등 섹터 알림(intelligence/capitulation_alert.py)
 CAP_ALERT_HHMM, CAP_REMIND_HHMM = "1540", "0850"   # 장 마감 뒤 → 시간외 종가(~16:00) 매수
 _cap_alert_state = {"date": ""}
@@ -2800,6 +2823,12 @@ async def on_ready():
             capitulation_alert_loop.start()
         print(f"✅ [시스템] 투매일 반등 섹터 알림 ({CAP_ALERT_HHMM[:2]}:{CAP_ALERT_HHMM[2:]}, 아침 {CAP_REMIND_HHMM[:2]}:{CAP_REMIND_HHMM[2:]}) 가동 성공!")
     except Exception as e: print(f"⚠️ [에러] 투매일 알림: {e}")
+
+    try:
+        if not theme_obs_loop.is_running():
+            theme_obs_loop.start()
+        print("✅ [시스템] 본장 테마 순위 기록 (10:00~15:15, 15분마다 — 데이봇 하락장 섹터 관문) 가동 성공!")
+    except Exception as e: print(f"⚠️ [에러] 테마 순위 기록: {e}")
 
     try:
         if not evening_report_loop.is_running():

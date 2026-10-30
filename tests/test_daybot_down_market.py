@@ -43,6 +43,36 @@ class DownMarket(unittest.TestCase):
         self.assertIn("약한 장", b._scan_notifier.msgs[-1])
 
 
+class DipEngineBuy(unittest.TestCase):
+    """★ 10-30 음봉 엔진 — 지수 -2%↓면 후보 1순위를 하락장 슬롯 금액(50만)으로, 지수 괜찮으면 안 삼."""
+    def _bot(self, idx):
+        b = object.__new__(daybot.DayBot)
+        b.positions, b.sold_today, b.code_name_map, b.notes, b.bought = {}, {}, {}, [], []
+        b._last_dip_ts, b._dip_uni = 0.0, (None, {})
+        b._notify = lambda m, critical=False: b.notes.append(m)
+        b._daily_loss_hit = lambda: False
+        b.db = type("D", (), {"log_candidate": lambda self, *a, **k: None})()
+        b.api = type("A", (), {"get_market_index": lambda self: idx,
+                               "get_multi_price": lambda self, codes, pause=0: {"A": {"price": 116600, "chg": -15.6, "high": 0}}})()
+        b._do_buy = lambda code, name, price, tier, **k: (b.bought.append((code, tier, k.get("amount_cap"))), True)[1]
+        return b
+
+    def test_buy_on_index_down(self):
+        old = daybot.dip_leader.universe, daybot.get_all_positions, daybot._lina_daybot_watches
+        daybot.dip_leader.universe = lambda today: {"A": {"name": "대덕전자", "value_eok": 1566, "r60": 42, "hi5": 140100}}
+        daybot.get_all_positions, daybot._lina_daybot_watches = None, lambda: set()
+        try:
+            b = self._bot({"kospi": -5.2, "kosdaq": -4.4})
+            b._run_dip_engine()
+            self.assertEqual(b.bought, [("A", daybot.dip_leader.TAG, daybot.DOWN_AMOUNT)])
+            self.assertIn("음봉 엔진 매수", b.notes[0])
+            b = self._bot({"kospi": -1.0, "kosdaq": -0.5})
+            b._run_dip_engine()
+            self.assertEqual(b.bought, [])
+        finally:
+            daybot.dip_leader.universe, daybot.get_all_positions, daybot._lina_daybot_watches = old
+
+
 class ManualAdd(unittest.TestCase):
     """★ 10-27 대장이 daybot 한미반도체 2주에 1주 더 삼 → daybot이 3주·잔고 평단으로 같이 관리."""
     def _bot(self):

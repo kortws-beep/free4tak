@@ -120,16 +120,13 @@ def save(date: str, hhmm: str, ranked: list, log_db: str = LOG_DB):
     conn.close()
 
 
-if __name__ == "__main__":
-    from dotenv import load_dotenv
-    load_dotenv(os.path.join(BASE, ".env"))
-    from kis_api import KisAPI
+def run(api=None, now: datetime.datetime = None) -> str:
+    """한 번 기록(09시 전이면 프리장 NXT, 아니면 본장). 반환: 한 줄 요약(실패면 ""). ★ 10-30: 리나가 장중 15분마다 부르려고 함수로."""
     import capitulation_alert as C
-    now = datetime.datetime.now()
-    api = KisAPI()
-    if api.is_market_open() is False:
-        print(f"{now:%Y-%m-%d %H:%M} 휴장일 — 기록 안 함")
-        sys.exit(0)
+    now = now or datetime.datetime.now()
+    if api is None:
+        from kis_api import KisAPI
+        api = KisAPI()
     themes = load_themes()
     codes = sorted({c for ms in themes.values() for c, _ in ms})
     pre = now.strftime("%H%M") < "0900"
@@ -141,9 +138,22 @@ if __name__ == "__main__":
         ranked = rank_themes(themes, quotes)
     if not ranked:
         print(f"{now:%H:%M} 시세 부족 — 기록 안 함 ({len(quotes)}/{len(codes)}종목)")
-        sys.exit(1)
+        return ""
     save(now.date().isoformat(), now.strftime("%H%M"), ranked)
     if pre:
         save_pre_top(now.date().isoformat(), now.strftime("%H%M"), pre_top(themes, quotes, ranked))
-    print(f"{now:%Y-%m-%d %H:%M} 주도 테마 기록 {len(ranked)}개 (시세 {len(quotes)}/{len(codes)}종목) — "
-          + " · ".join(f"{r}.{t}({a:+.1f}%)" for r, t, a, *_ in ranked[:5]))
+    line = (f"{now:%Y-%m-%d %H:%M} 주도 테마 기록 {len(ranked)}개 (시세 {len(quotes)}/{len(codes)}종목) — "
+            + " · ".join(f"{r}.{t}({a:+.1f}%)" for r, t, a, *_ in ranked[:5]))
+    print(line)
+    return line
+
+
+if __name__ == "__main__":
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(BASE, ".env"))
+    from kis_api import KisAPI
+    _api = KisAPI()
+    if _api.is_market_open() is False:
+        print(f"{datetime.datetime.now():%Y-%m-%d %H:%M} 휴장일 — 기록 안 함")
+        sys.exit(0)
+    sys.exit(0 if run(_api) else 1)

@@ -80,6 +80,7 @@ class NewBuyCutoff(unittest.TestCase):
                               "get_today_realized": lambda self: 0})()
         b._do_buy = lambda code, name, price, tier, **k: bought.append(code)
         b._market_breadth = lambda: None          # 국면 모름 → 하락장 쉬기 안 걸림(10-19)
+        b._sector_gate = type("G", (), {"allows": lambda self, c, now=None: (True, "")})()   # ★ 10-30 섹터 관문(기본 통과)
         return b
 
     def test_no_buy_after_cutoff(self):
@@ -91,10 +92,14 @@ class NewBuyCutoff(unittest.TestCase):
             self._scan_bot(bought)._run_candidate_scan_and_maybe_buy()
             self.assertEqual(bought, ["111110"])
             bought.clear()
-            daybot.now_hhmm = lambda: "0940"
+            daybot.now_hhmm = lambda: "0940"                       # ★ 10-30 대장 — 09:40 마감 풀고 15:20까지
+            self._scan_bot(bought)._run_candidate_scan_and_maybe_buy()
+            self.assertEqual(bought, ["111110"])
+            bought.clear()
+            daybot.now_hhmm = lambda: "1520"
             self._scan_bot(bought)._run_candidate_scan_and_maybe_buy()
             self.assertEqual(bought, [])
-            self.assertEqual(daybot.NEW_BUY_END_TIME, "0940")
+            self.assertEqual(daybot.NEW_BUY_END_TIME, "1520")
         finally:
             daybot.now_hhmm, daybot.get_all_positions = old
 
@@ -120,6 +125,12 @@ class NewBuyCutoff(unittest.TestCase):
             b._run_candidate_scan_and_maybe_buy()
             self.assertEqual(bought, [])
             self.assertIn("하락장쉬기", logged)
+            b.positions = {}                                          # ★ 10-30 하락장 슬롯은 주도 섹터 밖이면 안 삼
+            b._sector_gate = type("G", (), {"allows": lambda self, c, now=None: (False, "섹터밖(테스트)")})()
+            bought.clear(); logged.clear()
+            b._run_candidate_scan_and_maybe_buy()
+            self.assertEqual(bought, []); self.assertIn("섹터밖", logged)
+            b._sector_gate = type("G", (), {"allows": lambda self, c, now=None: (True, "")})()
             b.positions, daybot.DOWN_SLOTS = {}, 0                    # 0이면 예전처럼 완전 쉬기
             b._run_candidate_scan_and_maybe_buy()
             self.assertEqual(bought, [])
