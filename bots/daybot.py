@@ -1514,6 +1514,9 @@ class DayBot:
         today = today_str()
         if self._dip_sit[0] != today:                 # ★ 10-31 첫 하락날·-15%↓ 무너진 장이면 그날은 안 삼(하루 한 번 판단)
             ok, why = dip_leader.situation(self.api, st, today)
+            if ok is None:                            # ★ 11-01 점검 — 조회 실패는 그날 '쉼'으로 굳히지 않고 다음 분에 다시
+                print(f"⚠️ [daybot] 음봉 엔진 상황 판단 보류 — {why}")
+                return
             self._dip_sit = (today, ok, why)
             print(f"🕯️ [daybot] 음봉 엔진 오늘 {'켬' if ok else '쉼'} — {why}")
         if not self._dip_sit[1]:
@@ -1530,6 +1533,10 @@ class DayBot:
                 print(f"⚠️ [daybot] 음봉 엔진 관심그룹 조회 오류: {e}")
                 watch = set()
             full = self._dip_uni[1]
+            if not watch or not full:   # ★ 11-01 점검 — 관심그룹·일봉 조회가 한 번 실패하면 그날 내내 빈 후보로 굳던 것 → 다음 분에 다시
+                print(f"⚠️ [daybot] 음봉 엔진 후보군 비어 있음(관심그룹 {len(watch)} · 주도주 {len(full)}) — 1분 뒤 다시")
+                self._dip_uni = (None, {})
+                return
             self._dip_uni = (today, {c: u for c, u in full.items() if c in watch})
             print(f"🕯️ [daybot] 음봉 엔진 오늘 후보군 {len(self._dip_uni[1])}종목(60일 +30%↑·거래대금 100억↑ {len(full)} ∩ "
                   f"NEW·SUB {len(watch)})")

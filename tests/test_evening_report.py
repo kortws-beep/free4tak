@@ -13,7 +13,7 @@ import master_db as M       # noqa: E402
 import evening_report as E  # noqa: E402
 
 DB = os.path.abspath("m.db")
-D = datetime.date.today().isoformat()
+D = "2026-10-15"   # ★ 11-01 — 오늘 날짜를 쓰면 매월 1일엔 '이달 초 거래'가 오늘과 겹쳐 실패했음(고정 날짜로)
 
 
 def trade(bot, name, buy, sell, qty, reason, day=D):

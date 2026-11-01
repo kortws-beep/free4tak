@@ -83,7 +83,16 @@ class DipEngineBuy(unittest.TestCase):
             b = self._bot(None)
             b._run_dip_engine()
             self.assertEqual(b.bought, [])
+            D.situation = lambda api, st, today: (None, "일봉 조회 실패")          # ★ 11-01 조회 실패 → 안 사고, 그날 '쉼'으로 굳히지 않음
+            b = self._bot(None)
+            b._run_dip_engine()
+            self.assertEqual(b.bought, []); self.assertNotEqual(b._dip_sit[0], daybot.today_str())
             D.situation = lambda api, st, today: (True, "")
+            D.watch_codes = lambda api, h: set()                              # ★ 11-01 관심그룹 조회 실패 → 다음 분에 다시
+            b = self._bot(None)
+            b._run_dip_engine()
+            self.assertEqual((b.bought, b._dip_uni[0]), ([], None))
+            D.watch_codes = lambda api, h: {"A"}
             daybot._lina_all_watches = lambda: {"A"}                          # ★ 10-30 대장이 키움에 들고 리나 등록한 종목
             b = self._bot(None)
             b._run_dip_engine()

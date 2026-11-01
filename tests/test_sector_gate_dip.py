@@ -59,6 +59,9 @@ class Dip(unittest.TestCase):
         rows[-1]["close"], rows[-2]["close"] = 80, 84
         ok, why = D.situation(api, {"kospi": (-3.0, 0.5)}, "2026-10-23")
         self.assertFalse(ok); self.assertIn("스윙 몫", why)                 # 20일 고점 -20%
+        bad = type("A", (), {"get_daily_ohlc": lambda self, code, days=30: []})()
+        self.assertIsNone(D.situation(bad, {"kospi": (-3.0, 0.5)}, "2026-10-23")[0])   # ★ 11-01 조회 실패는 None(굳히지 않음)
+        self.assertIsNone(D.situation(api, {}, "2026-10-23")[0])
 
     def test_index_ready(self):
         # ★ 10-30 대장 — 빠진 지수가 당일 저가 대비 +0.5% 반등해야(종가배팅 아님)

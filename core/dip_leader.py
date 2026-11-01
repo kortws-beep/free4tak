@@ -137,18 +137,19 @@ def trend_tags(closes: list) -> dict:
 
 
 def situation(api, st: dict, today: str):
-    """★ 10-31 그날 더 빠진 지수(장중 저가 기준)의 전날까지 추세 → (켤까?, 설명). 조회 실패면 (False, 사유) — 안 삼."""
+    """★ 10-31 그날 더 빠진 지수(장중 저가 기준)의 전날까지 추세 → (켤까?, 설명).
+    ★ 11-01 점검 — 조회 실패면 (None, 사유): 안 사되 그날 '쉼'으로 굳히지 않음(호출부가 다음 분에 다시 판단)."""
     lows = low_change(st)
     if not lows:
-        return False, "지수 조회 실패"
+        return None, "지수 조회 실패"
     key = min(lows, key=lows.get)
     try:
         rows = api.get_daily_ohlc(INDEX_ETF[key], days=30) or []
     except Exception as e:
-        return False, f"{key} 일봉 조회 실패({e})"
+        return None, f"{key} 일봉 조회 실패({e})"
     closes = [r["close"] for r in sorted(rows, key=lambda r: r["date"]) if r.get("date") and r["date"] < today and r.get("close")]
     if len(closes) < 21:
-        return False, f"{key} 일봉 부족({len(closes)})"
+        return None, f"{key} 일봉 부족({len(closes)})"
     t = trend_tags(closes)
     ok = t["streak"] >= MIN_STREAK and t["dd20"] > -MAX_DD20
     why = (f"{key} 장중저가 {lows[key]:+.1f}% · 전날까지 연속하락 {t['streak']}일 · 20일고점 {t['dd20']:+.1f}%"
