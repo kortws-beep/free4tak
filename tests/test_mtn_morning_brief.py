@@ -28,5 +28,15 @@ class Brief(unittest.TestCase):
         self.assertTrue(all(len(p) <= 1800 for p in M.split_msg("나" * 4000)))   # 빈 줄 없는 긴 덩어리도
 
 
+    def test_save_featured(self):
+        summ = "**🧭 방송의 시각**\n- 흐름\n\n**🔦 오늘 주목**\n- 전력기기: 수주잔고 역대 최고\n\n**⚠️ 오늘 일정·변수**\n- 선거"
+        self.assertEqual(M.featured_section(summ), "- 전력기기: 수주잔고 역대 최고")
+        self.assertEqual(M.featured_section("주목 칸 없음"), "")
+        import sqlite3
+        M.save_day("2026-11-03", summ, db="m.db"); M.save_day("2026-11-03", summ, db="m.db")   # 같은 날 다시 돌려도 한 줄
+        rows = sqlite3.connect("m.db").execute("SELECT date, featured FROM mtn_morning").fetchall()
+        self.assertEqual(rows, [("2026-11-03", "- 전력기기: 수주잔고 역대 최고")])
+
+
 if __name__ == "__main__":
     unittest.main()

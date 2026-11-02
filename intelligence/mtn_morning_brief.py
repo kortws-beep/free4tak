@@ -118,6 +118,25 @@ def summarize(text: str, today: str) -> str:
     return extract_claude_text(res)
 
 
+DB_PATH = os.path.join(_here, "mtn_morning.db")
+
+
+def featured_section(summary: str) -> str:
+    """요약에서 '🔦 오늘 주목' 칸만 떼어냄(없으면 "")."""
+    m = re.search(r"🔦[^\n]*\n(.*?)(?=\n[^\n]*⚠️|\Z)", summary, re.S)
+    return m.group(1).strip() if m else ""
+
+
+def save_day(date: str, summary: str, db: str = DB_PATH):
+    """★ 11-03 대장: '오늘 주목'은 전일 강했던 섹터를 돌아가며 소개 — 쌓아두면 섹터 대장 재선정(SUB 등) 때 참고."""
+    import sqlite3
+    c = sqlite3.connect(db)
+    c.execute("CREATE TABLE IF NOT EXISTS mtn_morning (date TEXT PRIMARY KEY, featured TEXT, summary TEXT)")
+    c.execute("INSERT OR REPLACE INTO mtn_morning VALUES (?,?,?)", (date, featured_section(summary), summary))
+    c.commit()
+    c.close()
+
+
 def split_msg(msg: str, limit: int = 1800) -> list:
     """디스코드 한 통 한도(1900자)를 넘으면 섹션(빈 줄) 단위로 나눔 — 넘치면 Notifier가 뒤를 잘라버림."""
     parts, cur = [], ""
@@ -171,7 +190,12 @@ def main():
     if len(text) < 300:
         _notify(f"[MTN 아침] 받아쓰기가 {len(text)}자뿐이라 요약 생략")
         return
-    _notify(f"📺 [MTN 아침 정리 {today[5:]}]\n{summarize(text, today)}")
+    summary = summarize(text, today)
+    try:
+        save_day(today, summary)
+    except Exception as e:
+        print(f"⚠️ 요약 저장 실패: {e}")
+    _notify(f"📺 [MTN 아침 정리 {today[5:]}]\n{summary}")
 
 
 if __name__ == "__main__":
