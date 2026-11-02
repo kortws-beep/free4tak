@@ -118,9 +118,25 @@ def summarize(text: str, today: str) -> str:
     return extract_claude_text(res)
 
 
+def split_msg(msg: str, limit: int = 1800) -> list:
+    """디스코드 한 통 한도(1900자)를 넘으면 섹션(빈 줄) 단위로 나눔 — 넘치면 Notifier가 뒤를 잘라버림."""
+    parts, cur = [], ""
+    for block in msg.split("\n\n"):
+        if cur and len(cur) + 2 + len(block) > limit:
+            parts.append(cur)
+            cur = block
+        else:
+            cur = f"{cur}\n\n{block}" if cur else block
+    if cur:
+        parts.append(cur)
+    return [p[i:i + limit] for p in parts for i in range(0, len(p), limit)]
+
+
 def _notify(msg: str):
     from notifier import Notifier
-    Notifier(name="MTN아침", route="scan").send(msg)
+    n = Notifier(name="MTN아침", route="scan")
+    for part in split_msg(msg):
+        n.send(part)
 
 
 def main():

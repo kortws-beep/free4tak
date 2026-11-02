@@ -20,5 +20,13 @@ class Brief(unittest.TestCase):
         self.assertIn("2026-11-03", p); self.assertIn("지어내지 마", p); self.assertIn("받아쓰기", p); self.assertIn("내용", p)
 
 
+    def test_split(self):
+        msg = "\n\n".join(["가" * 700] * 4)                            # 2800자+ → 섹션 경계에서 나눔
+        parts = M.split_msg(msg)
+        self.assertEqual(len(parts), 2); self.assertTrue(all(len(p) <= 1800 for p in parts))
+        self.assertEqual(M.split_msg("짧음"), ["짧음"])
+        self.assertTrue(all(len(p) <= 1800 for p in M.split_msg("나" * 4000)))   # 빈 줄 없는 긴 덩어리도
+
+
 if __name__ == "__main__":
     unittest.main()
