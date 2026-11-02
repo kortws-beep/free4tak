@@ -11,13 +11,13 @@ import mtn_morning_brief as M  # noqa: E402
 class Brief(unittest.TestCase):
     def test_seconds_until(self):
         at = lambda h, m: datetime.datetime(2026, 11, 3, h, m)  # noqa: E731
-        self.assertEqual(M.seconds_until("0736", at(6, 55)), 41 * 60)
+        self.assertEqual(M.seconds_until(M.END_HHMM, at(6, 55)), 46 * 60)
         self.assertEqual(M.seconds_until("0736", at(7, 40)), 0)          # 이미 지남
         self.assertEqual(M.seconds_until("0736", at(6, 0)), M.MAX_SEC)   # 상한
 
     def test_prompt(self):
         p = M.build_prompt("받아쓰기", "2026-11-03")
-        self.assertIn("2026-11-03", p); self.assertIn("지어내지 마", p); self.assertIn("받아쓰기", p); self.assertIn("내용", p)
+        self.assertIn("2026-11-03", p); self.assertIn("지어내지 마", p); self.assertIn("받아쓰기", p); self.assertIn("내용", p); self.assertIn("오늘 주목", p)
 
 
     def test_split(self):
