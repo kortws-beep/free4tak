@@ -17,7 +17,7 @@ class Brief(unittest.TestCase):
 
     def test_prompt(self):
         p = M.build_prompt("받아쓰기", "2026-11-03")
-        self.assertIn("2026-11-03", p); self.assertIn("지어내지 마", p); self.assertIn("받아쓰기", p)
+        self.assertIn("2026-11-03", p); self.assertIn("지어내지 마", p); self.assertIn("받아쓰기", p); self.assertIn("내용", p)
 
 
 if __name__ == "__main__":
