@@ -69,6 +69,20 @@ def scanner(api):
     return s
 
 
+class SharesRetry(unittest.TestCase):
+    """★ 11-02 — 상장주식수 조회 실패를 '0주'로 하루 종일 저장하지 않음(다음 스캔에 다시)."""
+    def test_failure_not_cached(self):
+        api = API()
+        s = scanner(api)
+        ok = api.get_market_data
+        api.get_market_data = lambda code: {}                 # 초당 한도 등으로 빈 응답
+        self.assertEqual(s._shares("111111", "2026-11-02"), 0.0)
+        self.assertNotIn("111111", s.shares)
+        api.get_market_data = ok
+        self.assertEqual(s._shares("111111", "2026-11-02"), 20_000_000)
+        self.assertEqual(s.shares["111111"], (20_000_000, "2026-11-02"))
+
+
 class DantaScan(unittest.TestCase):
     def test_tick_rate(self):
         self.assertAlmostEqual(D.tick_rate([f"1029{59 - i // 2:02d}" for i in range(30)], "103000"), 120.0)

@@ -168,6 +168,10 @@ class DantaScanner:
             n = float(md.get("lstn_stcn") or 0)
         except (TypeError, ValueError):
             n = 0.0
+        if n <= 0:
+            # ★ 11-02 장 마감 점검 — 조회 실패(초당 한도·연결 끊김)를 '0주'로 하루 종일 저장해서 11-02 090930 '정밀 0'·단타000 통과 0이
+            #   하루 내내 이어졌음 → 실패는 저장하지 않고 다음 스캔에 다시 물어봄
+            return 0.0
         self.shares[code] = (n, today)
         self.excluded[code] = (leader_scan.excluded_by_status(md), today)
         return n
