@@ -112,7 +112,7 @@ def summarize(text: str, today: str) -> str:
     client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
     res = client.messages.create(
         model=os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5"),
-        max_tokens=3000,     # 소넷5 thinking 몫까지 넉넉히(본문 잘림 방지)
+        max_tokens=6000,     # 소넷5 thinking 몫까지 넉넉히 — 11-03 3000에서 본문 잘림 실측
         messages=[{"role": "user", "content": build_prompt(text, today)}],
     )
     return extract_claude_text(res)
