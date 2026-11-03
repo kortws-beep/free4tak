@@ -916,6 +916,52 @@ class KisAPI:
         target = cur - offset if side == "sell" else cur + offset
         return max(hoga, int(target / hoga) * hoga)
 
+    # ★ 2026-11-04 대장 — 프리장·애프터장 매매. 한투 주문 신TR(매수 TTTC0012U·매도 TTTC0011U·정정취소 TTTC0013U)
+    #   + 거래소 칸(EXCG_ID_DVSN_CD). 구TR(0802U/0801U/0803U)은 이 칸을 무시해 프리장 NXT 주문이 안 됐고
+    #   (11-04 08:00 HMM 보유기한청산 '주문구분코드 오류' 20회+), 한투 공지상 사전고지 없이 막힐 수 있음.
+    #   실주문 검증(11-04 08:25): HMM 1주 TTTC0011U·NXT·00 지정가 23,250원 체결, TTTC0013U·NXT 취소 OK.
+    #   프리장 08:00~08:50 = NXT 지정가만(시장가 없음, NXT 종목만) · 08:50~09:00 주문 안 받음
+    #   정규장·애프터장 = KRX(기존과 같은 거래소·주문구분). 신TR이 거부되면 구TR로 한 번 더(정규장 안전판).
+    PRE_START, PRE_END = "0800", "0850"
+    NEW_TR = {"buy": "TTTC0012U", "sell": "TTTC0011U", "cancel": "TTTC0013U"}
+    OLD_TR = {"buy": "TTTC0802U", "sell": "TTTC0801U", "cancel": "TTTC0803U"}
+
+    @staticmethod
+    def _now_hhmm() -> str:
+        return datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9))).strftime("%H%M")
+
+    @classmethod
+    def order_exchange(cls, now_t: str = None) -> str:
+        """지금 주문 낼 거래소: 'NXT'(프리장) · 'KRX' · ''(08:50~09:00·08시 전 — 주문 불가)."""
+        now_t = now_t or cls._now_hhmm()
+        if cls.PRE_START <= now_t < cls.PRE_END:
+            return "NXT"
+        if "0900" <= now_t < "2000":
+            return "KRX"
+        return ""
+
+    def _nxt_price(self, code: str) -> float:
+        """NXT 현재가(NXT 미상장·거래 없으면 0)."""
+        try:
+            return float((self.get_multi_price([code], pause=0, market="NX").get(code) or {}).get("price") or 0)
+        except Exception:
+            return 0.0
+
+    def _order_post(self, kind: str, path: str, data: dict, excg: str) -> dict:
+        """신TR(거래소 칸 포함)로 보내고, KRX 주문이 거부되면 구TR(거래소 칸 없이)로 한 번 더."""
+        url = f"{self.base_url}{path}"
+
+        def _send(tr, body):
+            headers = {"authorization": f"Bearer {self.token}", "appkey": self.appkey, "appsecret": self.secret,
+                       "tr_id": tr, "custtype": "P", "hashkey": self.get_hashkey(body)}
+            return _post(url, headers=headers, data=json.dumps(body), timeout=10).json()
+
+        res = _send(self.NEW_TR[kind], dict(data, EXCG_ID_DVSN_CD=excg))
+        if res.get("rt_cd") != "0" and excg == "KRX":
+            print(f"⚠️ 신TR {kind} 거부({res.get('msg1', '')}) — 구TR로 재시도")
+            res = _send(self.OLD_TR[kind], {k: v for k, v in data.items() if k not in ("SLL_TYPE", "CNDT_PRIC")})
+        return res
+
     def buy(self, code: str, price: float, amount: int,
             code_name_map: dict = None, psbl_cash: int = None,
             extra_ticks: int = 0) -> bool:
@@ -975,23 +1021,24 @@ class KisAPI:
         #   없어(항상 지정가+가격) 이 부분 자체는 동작엔 영향 없지만,
         #   AFTERHOURS_ORD_DVSN(00→필요시 41)을 sell()과 동일하게 적용해
         #   두 함수가 같은 상수로 같이 움직이게 통일.
-        now_t = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9))).strftime("%H%M")
-        if "0800" <= now_t < "0900":
-            ord_dvsn = "62"
+        now_t = self._now_hhmm()
+        excg = self.order_exchange(now_t)
+        if not excg:
+            print(f"⏸️ 매수 보류 {code}: 주문 받는 시간 아님({now_t})"); return False, "", "", 0
+        if excg == "NXT":
+            if self._nxt_price(code) <= 0:
+                print(f"⏸️ 매수 보류 {code}: NXT 거래 안 되는 종목 — 09:00 정규장부터"); return False, "", "", 0
+            ord_dvsn = "00"      # NXT 프리장은 지정가만
         elif now_t < "1530":
             ord_dvsn = "00"
         else:
             ord_dvsn = self.AFTERHOURS_ORD_DVSN
 
-        url  = f"{self.base_url}/uapi/domestic-stock/v1/trading/order-cash"
         data = {"CANO": self.cano, "ACNT_PRDT_CD": self.acnt,
                 "PDNO": code, "ORD_QTY": str(qty),
                 "ORD_UNPR": str(limit_price), "ORD_DVSN": ord_dvsn}
-        headers = {"authorization": f"Bearer {self.token}",
-                   "appkey": self.appkey, "appsecret": self.secret,
-                   "tr_id": "TTTC0802U", "hashkey": self.get_hashkey(data)}
         try:
-            res = _post(url, headers=headers, data=json.dumps(data), timeout=10).json()
+            res = self._order_post("buy", "/uapi/domestic-stock/v1/trading/order-cash", data, excg)
             if res.get("rt_cd") == "0":
                 out = res.get("output", {})
                 orgno = out.get("KRX_FWDG_ORD_ORGNO", "")
@@ -1003,9 +1050,9 @@ class KisAPI:
             print(f"❌ 매수 요청 예외 {code}: {e}"); return False, "", "", 0
 
 
-    def cancel_order(self, orgno: str, odno: str, code: str, qty: int) -> bool:
+    def cancel_order(self, orgno: str, odno: str, code: str, qty: int, excg: str = None) -> bool:
         """
-        미체결 주문 취소 (TTTC0803U)
+        미체결 주문 취소 (신TR TTTC0013U, 거부 시 구TR TTTC0803U)
         ★ 반환값은 항상 bool 단일값으로 통일 (호출부가
           `ok = api.cancel_order(...)`로 단일 변수에 받음).
           과거 (False, "")/(True, "") 튜플을 반환하던 버그가 있었는데,
@@ -1014,7 +1061,6 @@ class KisAPI:
         """
         if not odno:
             return False
-        url  = f"{self.base_url}/uapi/domestic-stock/v1/trading/order-rvsecncl"
         data = {
             "CANO": self.cano, "ACNT_PRDT_CD": self.acnt,
             "KRX_FWDG_ORD_ORGNO": orgno,
@@ -1023,11 +1069,10 @@ class KisAPI:
             "ORD_QTY": str(qty), "ORD_UNPR": "0",
             "QTY_ALL_ORD_YN": "Y", "PDNO": code,
         }
-        headers = {"authorization": f"Bearer {self.token}",
-                   "appkey": self.appkey, "appsecret": self.secret,
-                   "tr_id": "TTTC0803U", "hashkey": self.get_hashkey(data)}
+        # 거래소는 원주문 거래소 — 호출부가 모르면 지금 시간대 기준(프리장 주문은 프리장 안에 취소된다는 가정)
+        excg = excg or self.order_exchange() or "KRX"
         try:
-            res = _post(url, headers=headers, data=json.dumps(data), timeout=10).json()
+            res = self._order_post("cancel", "/uapi/domestic-stock/v1/trading/order-rvsecncl", data, excg)
             if res.get("rt_cd") == "0":
                 print(f"✅ 주문취소: {code} (odno:{odno})")
                 return True
@@ -1041,7 +1086,7 @@ class KisAPI:
     def sell(self, code: str, qty: int, price: int = 0) -> bool:
         """
         시간대별 매도 (실제 장 시간 기준):
-        - 08:00~09:00 프리장    : ORD_DVSN=62 (시간외단일가)
+        - 08:00~08:50 프리장    : NXT 지정가(00, NXT 현재가 -2호가) — ★ 11-04, 62는 폐지 코드였음
         - 09:00~15:30 정규장    : ORD_DVSN=01 (시장가)
         - 15:30~20:00 애프터마켓: ORD_DVSN=AFTERHOURS_ORD_DVSN(기본 00)
           ★ 2026-10-01: 01(시장가)/03(최유리지정가) 전부 "애프터 지정가/
@@ -1059,10 +1104,19 @@ class KisAPI:
             기준 체결 보장 가격(-extra_ticks호가)을 합성해서 쓴다.
             정규장(09:00~15:30)은 기존 시장가 그대로 유지(안 건드림).
         """
-        now_t = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9))).strftime("%H%M")
-        if "0800" <= now_t < "0900":
-            ord_dvsn = "62"   # 프리장 — NEXT 종목만 (시간외단일가)
-            ord_unpr = str(price) if price > 0 else "0"
+        now_t = self._now_hhmm()
+        excg = self.order_exchange(now_t)
+        if not excg:
+            print(f"⏸️ 매도 보류 {code}: 주문 받는 시간 아님({now_t})"); return False
+        if excg == "NXT":
+            # ★ 11-04 프리장 = NXT 지정가만(시장가 없음). 호가가 얇아 현재가 지정가는 안 잡힐 수 있어(실측)
+            #   NXT 현재가 -2호가로 냄. NXT에 없는 종목은 09:00 정규장까지 보류.
+            nx = self._nxt_price(code)
+            if nx <= 0:
+                print(f"⏸️ 매도 보류 {code}: NXT 거래 안 되는 종목 — 09:00 정규장부터"); return False
+            tick = self._hoga_tick(nx)
+            ord_dvsn = "00"
+            ord_unpr = str(max(tick, int(nx / tick) * tick - tick * 2))
         elif now_t < "1530":
             ord_dvsn = "01"   # 정규장 시장가 (09:00~15:30)
             ord_unpr = "0"
@@ -1073,17 +1127,14 @@ class KisAPI:
                 print(f"⚠️ 애프터마켓 매도가 산정 실패(시세조회 불가): {code}")
                 return False
             ord_unpr = str(int(order_price))
-        url  = f"{self.base_url}/uapi/domestic-stock/v1/trading/order-cash"
         data = {"CANO": self.cano, "ACNT_PRDT_CD": self.acnt,
                 "PDNO": code, "ORD_QTY": str(qty),
-                "ORD_UNPR": ord_unpr, "ORD_DVSN": ord_dvsn}
-        headers = {"authorization": f"Bearer {self.token}",
-                   "appkey": self.appkey, "appsecret": self.secret,
-                   "tr_id": "TTTC0801U", "hashkey": self.get_hashkey(data)}
+                "ORD_UNPR": ord_unpr, "ORD_DVSN": ord_dvsn,
+                "SLL_TYPE": "01", "CNDT_PRIC": ""}
         try:
-            res = _post(url, headers=headers, data=json.dumps(data), timeout=10).json()
+            res = self._order_post("sell", "/uapi/domestic-stock/v1/trading/order-cash", data, excg)
             if res.get("rt_cd") == "0":
-                print(f"✅ 매도 성공 {code} | {ord_dvsn} | {qty}주")
+                print(f"✅ 매도 성공 {code} | {excg} {ord_dvsn} | {qty}주")
                 return True
             else:
                 print(f"❌ 매도 실패 {code}: {res.get('msg1', '알 수 없는 오류')}"); return False

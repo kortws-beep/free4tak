@@ -846,10 +846,14 @@ class DayBot:
             self._sell_fail[code] = {"count": 0, "until": time.time() + SELL_FAIL_RETRY_SEC}
             return False
 
-        # 프리장(시간외단일가 62)은 가격이 필수라 현재가를 넘기고, 정규장은
+        # 프리장(NXT 지정가 — kis_api가 NXT 현재가 -2호가로 냄)은 현재가를 넘기고, 정규장은
         # 시장가, 애프터장은 kis_api가 현재가-3호가로 체결보장가를 합성(price=0).
         order_price = int(price) if now_hhmm() < "0900" else 0
         ok = self.api.sell(code, qty, price=order_price)
+        if not ok and now_hhmm() < "0900":
+            # ★ 11-04 프리장은 NXT 종목만·08:50~09:00은 주문 자체가 안 됨 — 09:00 전 실패는 조용히 다시(알림 X)
+            self._sell_fail[code] = {"count": 0, "until": time.time() + SELL_FAIL_RETRY_SEC}
+            return False
         if not ok:
             count = (fail or {}).get("count", 0) + 1
             self._sell_fail[code] = {"count": count, "until": time.time() + SELL_FAIL_RETRY_SEC}
