@@ -921,8 +921,9 @@ class KisAPI:
     #   (11-04 08:00 HMM 보유기한청산 '주문구분코드 오류' 20회+), 한투 공지상 사전고지 없이 막힐 수 있음.
     #   실주문 검증(11-04 08:25): HMM 1주 TTTC0011U·NXT·00 지정가 23,250원 체결, TTTC0013U·NXT 취소 OK.
     #   프리장 08:00~08:50 = NXT 지정가만(시장가 없음, NXT 종목만) · 08:50~09:00 주문 안 받음
-    #   정규장·애프터장 = KRX(기존과 같은 거래소·주문구분). 신TR이 거부되면 구TR로 한 번 더(정규장 안전판).
+    #   애프터장 15:30~20:00 = 프리장과 같이 NXT 지정가(대장 11-04) · 정규장 = KRX(신TR 거부 시 구TR로 한 번 더).
     PRE_START, PRE_END = "0800", "0850"
+    AFTER_START, AFTER_END = "1530", "2000"
     NEW_TR = {"buy": "TTTC0012U", "sell": "TTTC0011U", "cancel": "TTTC0013U"}
     OLD_TR = {"buy": "TTTC0802U", "sell": "TTTC0801U", "cancel": "TTTC0803U"}
 
@@ -932,11 +933,13 @@ class KisAPI:
 
     @classmethod
     def order_exchange(cls, now_t: str = None) -> str:
-        """지금 주문 낼 거래소: 'NXT'(프리장) · 'KRX' · ''(08:50~09:00·08시 전 — 주문 불가)."""
+        """지금 주문 낼 거래소: 'NXT'(프리장·애프터장) · 'KRX'(정규장) · ''(08:50~09:00·장 밖 — 주문 불가).
+        ★ 11-04 대장 "애프터장도 동일 적용" — 15:30~20:00도 NXT 지정가(-2호가)로. KRX 애프터 코드(06/00)는
+          10월에 거부·불안정했음."""
         now_t = now_t or cls._now_hhmm()
-        if cls.PRE_START <= now_t < cls.PRE_END:
+        if cls.PRE_START <= now_t < cls.PRE_END or cls.AFTER_START <= now_t < cls.AFTER_END:
             return "NXT"
-        if "0900" <= now_t < "2000":
+        if "0900" <= now_t < cls.AFTER_START:
             return "KRX"
         return ""
 
@@ -1027,8 +1030,8 @@ class KisAPI:
             print(f"⏸️ 매수 보류 {code}: 주문 받는 시간 아님({now_t})"); return False, "", "", 0
         if excg == "NXT":
             if self._nxt_price(code) <= 0:
-                print(f"⏸️ 매수 보류 {code}: NXT 거래 안 되는 종목 — 09:00 정규장부터"); return False, "", "", 0
-            ord_dvsn = "00"      # NXT 프리장은 지정가만
+                print(f"⏸️ 매수 보류 {code}: NXT 거래 안 되는 종목 — 정규장에서"); return False, "", "", 0
+            ord_dvsn = "00"      # NXT(프리장·애프터장)는 지정가만
         elif now_t < "1530":
             ord_dvsn = "00"
         else:
@@ -1109,11 +1112,11 @@ class KisAPI:
         if not excg:
             print(f"⏸️ 매도 보류 {code}: 주문 받는 시간 아님({now_t})"); return False
         if excg == "NXT":
-            # ★ 11-04 프리장 = NXT 지정가만(시장가 없음). 호가가 얇아 현재가 지정가는 안 잡힐 수 있어(실측)
-            #   NXT 현재가 -2호가로 냄. NXT에 없는 종목은 09:00 정규장까지 보류.
+            # ★ 11-04 프리장·애프터장 = NXT 지정가만(시장가 없음). 호가가 얇아 현재가 지정가는 안 잡힐 수 있어(실측)
+            #   NXT 현재가 -2호가로 냄. NXT에 없는 종목은 다음 정규장까지 보류.
             nx = self._nxt_price(code)
             if nx <= 0:
-                print(f"⏸️ 매도 보류 {code}: NXT 거래 안 되는 종목 — 09:00 정규장부터"); return False
+                print(f"⏸️ 매도 보류 {code}: NXT 거래 안 되는 종목 — 정규장에서"); return False
             tick = self._hoga_tick(nx)
             ord_dvsn = "00"
             ord_unpr = str(max(tick, int(nx / tick) * tick - tick * 2))

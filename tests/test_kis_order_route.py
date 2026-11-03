@@ -34,8 +34,8 @@ class Route(unittest.TestCase):
 
     def test_exchange(self):
         f = kis_api.KisAPI.order_exchange
-        self.assertEqual((f("0759"), f("0800"), f("0849"), f("0855"), f("0900"), f("1930"), f("2000")),
-                         ("", "NXT", "NXT", "", "KRX", "KRX", ""))
+        self.assertEqual((f("0759"), f("0800"), f("0849"), f("0855"), f("0900"), f("1529"), f("1530"), f("1959"), f("2000")),
+                         ("", "NXT", "NXT", "", "KRX", "KRX", "NXT", "NXT", ""))
 
     def test_premarket_sell_nxt(self):
         a = self._api("0825")
@@ -44,6 +44,9 @@ class Route(unittest.TestCase):
         self.assertEqual((tr, body["EXCG_ID_DVSN_CD"], body["ORD_DVSN"], body["ORD_UNPR"]), ("TTTC0011U", "NXT", "00", "23200"))
         a = self._api("0825", nx=0)                       # NXT에 없는 종목 → 보류(주문 안 냄)
         self.assertFalse(a.sell("253590", 1, price=15000)); self.assertEqual(a.sent, [])
+        a = self._api("1700")                           # ★ 애프터장도 NXT 지정가
+        self.assertTrue(a.sell("011200", 2, price=0))
+        self.assertEqual((a.sent[0][0], a.sent[0][1]["EXCG_ID_DVSN_CD"], a.sent[0][1]["ORD_DVSN"]), ("TTTC0011U", "NXT", "00"))
         a = self._api("0855")
         self.assertFalse(a.sell("011200", 1)); self.assertEqual(a.sent, [])
 
