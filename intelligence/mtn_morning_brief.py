@@ -6,7 +6,7 @@ mtn_morning_brief.py — MTN 아침 방송(전일장·미장 정리) 요약 (202
       라이브로 하니까.. 우리 유튜브캐치를 그대로 쓰면 되."
 youtube_live_monitor(07~20시, 60분 단위 종목 캐치)와 같은 방식 — 라이브 오디오를 yt-dlp로 받아
 로컬 Whisper(CPU)로 글로 바꾼 뒤, 소넷이 핵심만 요약해서 리나 이름으로 보냄.
-  06:54 크론 → MTN이 라이브면 07:41까지 녹음(07:40쯤 끝나는 '오늘 주목' 섹터 소개까지)(아직이면 07:05까지 1분마다 다시 봄) → 전사 → 요약 → 발송
+  06:54 크론 → MTN이 라이브면 07:41까지 녹음(07:40쯤 끝나는 '오늘 주목' 섹터 소개까지)(아직이면 07:30까지 1분마다 다시 봄) → 전사 → 요약 → 발송
   라이브가 아니면(주말·휴일 등) 조용히 끝냄.
 youtube_live_monitor를 import하지 않는 이유: 그 파일은 import 순간 자기 임시폴더를 비워서
   돌고 있는 서비스의 녹음 파일을 지울 수 있음 — 캡처 몇 줄만 여기 따로 둠.
@@ -37,7 +37,7 @@ import requests
 
 HANDLE = "mtn"
 END_HHMM = "0741"           # 11-03 대장: 끝의 "오늘 주목"(매일 돌아가며 섹터 소개)까지 07:40쯤 — +1분 여유
-WAIT_UNTIL = "0705"         # 이때까지 라이브 안 잡히면 그날은 쉼
+WAIT_UNTIL = "0730"         # 이때까지 라이브 안 잡히면 그날은 쉼 — 11-04 06:54~07:05 내내 못 잡음(07:26에야 잡힘) → 늘림
 MAX_SEC = 50 * 60
 AUDIO_FORMAT = "233"
 YTDLP_BIN = os.path.join(os.path.dirname(sys.executable), "yt-dlp")
@@ -53,6 +53,9 @@ def live_video_id(handle: str = HANDLE) -> str:
     try:
         r = requests.get(f"https://www.youtube.com/@{handle}/live", headers=HEADERS, timeout=15)
         if '"isLiveNow":true' not in r.text:
+            title = re.search(r"<title>(.*?)</title>", r.text)
+            print(f"{datetime.datetime.now():%H:%M:%S} 라이브 아님 — HTTP {r.status_code} · {len(r.text)}자 · "
+                  f"{title.group(1)[:60] if title else '제목없음'}")
             return ""
         m = re.search(r'"videoId":"([^"]+)"', r.text)
         return m.group(1) if m else ""
@@ -166,6 +169,8 @@ def main():
         vid = live_video_id()
     if not vid:
         print(f"{today} MTN 라이브 없음 — 쉼")
+        if datetime.date.today().weekday() < 5:
+            _notify(f"[MTN 아침] {WAIT_UNTIL[:2]}:{WAIT_UNTIL[2:]}까지 라이브를 못 찾아 오늘 요약 없음")
         return
     sec = seconds_until(END_HHMM)
     if sec < 60:
