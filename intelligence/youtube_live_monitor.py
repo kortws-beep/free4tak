@@ -112,13 +112,24 @@ def is_channel_live(handle: str):
     try:
         resp = requests.get(f"https://www.youtube.com/@{handle}/live",
                              headers=HEADERS, timeout=15)
-        if '"isLiveNow":true' not in resp.text:
-            return False, ""
-        m = re.search(r'"videoId":"([^"]+)"', resp.text)
-        return (True, m.group(1)) if m else (False, "")
+        if '"isLiveNow":true' in resp.text:
+            m = re.search(r'"videoId":"([^"]+)"', resp.text)
+            if m:
+                return True, m.group(1)
     except Exception as e:
         print(f"⚠️ [라이브체크] {handle} 오류: {e}")
-        return False, ""
+    # ★ 2026-11-04: 방송 중인데 페이지 확인이 07:00~07:25 내내 '라이브 아님'(세 채널 모두) — yt-dlp로 한 번 더 봄
+    try:
+        res = subprocess.run([YTDLP_BIN, "--skip-download", "--print", "%(id)s %(is_live)s",
+                              f"https://www.youtube.com/@{handle}/live"],
+                             capture_output=True, text=True, timeout=60)
+        parts = res.stdout.split()
+        if len(parts) >= 2 and parts[1] == "True":
+            print(f"   🔁 [라이브체크] {handle} 페이지는 아님, yt-dlp로 라이브 확인 {parts[0]}")
+            return True, parts[0]
+    except Exception as e:
+        print(f"⚠️ [라이브체크] {handle} yt-dlp 오류: {e}")
+    return False, ""
 
 
 def capture_audio_chunk(video_id: str, duration_sec: int, out_path: str) -> bool:

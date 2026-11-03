@@ -50,6 +50,27 @@ HEADERS = {
 
 
 def live_video_id(handle: str = HANDLE) -> str:
+    """페이지의 isLiveNow로 먼저 보고, 못 찾으면 yt-dlp로 한 번 더 — 11-04 대장이 라이브를 보고 있었는데
+    페이지 확인은 06:54~07:25 내내 '라이브 아님'(유튜브가 다른 페이지를 준 듯)."""
+    return _page_live_id(handle) or _ytdlp_live_id(handle)
+
+
+def _ytdlp_live_id(handle: str) -> str:
+    try:
+        res = subprocess.run([YTDLP_BIN, "--skip-download", "--print", "%(id)s %(is_live)s",
+                              f"https://www.youtube.com/@{handle}/live"],
+                             capture_output=True, text=True, timeout=60)
+        parts = res.stdout.split()
+        if len(parts) >= 2 and parts[1] == "True":
+            print(f"{datetime.datetime.now():%H:%M:%S} yt-dlp로 라이브 확인 {parts[0]}")
+            return parts[0]
+        print(f"{datetime.datetime.now():%H:%M:%S} yt-dlp도 라이브 아님: {res.stdout.strip()[:80]} {res.stderr.strip()[-120:]}")
+    except Exception as e:
+        print(f"⚠️ yt-dlp 라이브 확인 오류: {e}")
+    return ""
+
+
+def _page_live_id(handle: str) -> str:
     try:
         r = requests.get(f"https://www.youtube.com/@{handle}/live", headers=HEADERS, timeout=15)
         if '"isLiveNow":true' not in r.text:
