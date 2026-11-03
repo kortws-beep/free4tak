@@ -211,6 +211,16 @@ DAILY_LOSS_LIMIT = int(os.getenv("DAYBOT_DAILY_LOSS_LIMIT", "-150000") or -15000
 #   보류하고 다음 정규장 재개까지 기다린다(API에 계속 거부당하며 재시도 스팸
 #   내는 것보다 안전 — 당일청산 원칙보다 주문 안정성 우선).
 REGULAR_SELL_END_TIME = "1520"
+# ★ 2026-11-04 대장 "그거도 풀어 — 그때 방법을 못 찾아서 막아둔 거니까": 애프터장(15:30~20:00)·프리장(08:00~08:50)은
+#   이제 NXT 지정가로 매도됨(kis_api.order_exchange, HMM 프리장 실매도 확인). 막는 건 장종료동시호가(15:20~15:30)와 장 밖뿐.
+AFTER_SELL_START, AFTER_SELL_END = "1530", "2000"
+
+
+def sell_closed(hhmm: str) -> bool:
+    """지금 매도 주문을 보류할 시간인가 — 15:20~15:30 동시호가(시장가 거부), 08:50~09:00·20:00~08:00 주문 안 받음.
+    (1차익절 30%는 정규장에서만 — 그대로)"""
+    return (REGULAR_SELL_END_TIME <= hhmm < AFTER_SELL_START) or hhmm >= AFTER_SELL_END or hhmm < "0800" \
+        or "0850" <= hhmm < "0900"
 # ★ 2026-10-02 대장 지정 — 당일 EOD 강제청산 폐지, 대신 "트레일링
 #   미진입(아직 +2.5% 못 찍은) 상태로 3영업일 지나면 손익 무관 강제청산"
 #   으로 교체("가랑비에 옷 젖는다" — 매일 EOD에 억지로 끊다 손실만
@@ -842,7 +852,7 @@ class DayBot:
         #   참고) 재시도해도 계속 거부되니, 다음 정규장까지 조용히 대기만
         #   한다. 프리장(08:00~09:00, 기존 62코드 경로)은 그대로 둠 —
         #   오늘 문제는 장마감 쪽이라 거기만 막음.
-        if now_hhmm() >= REGULAR_SELL_END_TIME:
+        if sell_closed(now_hhmm()):
             self._sell_fail[code] = {"count": 0, "until": time.time() + SELL_FAIL_RETRY_SEC}
             return False
 
@@ -850,8 +860,8 @@ class DayBot:
         # 시장가, 애프터장은 kis_api가 현재가-3호가로 체결보장가를 합성(price=0).
         order_price = int(price) if now_hhmm() < "0900" else 0
         ok = self.api.sell(code, qty, price=order_price)
-        if not ok and now_hhmm() < "0900":
-            # ★ 11-04 프리장은 NXT 종목만·08:50~09:00은 주문 자체가 안 됨 — 09:00 전 실패는 조용히 다시(알림 X)
+        if not ok and (now_hhmm() < "0900" or now_hhmm() >= AFTER_SELL_START):
+            # ★ 11-04 프리장·애프터장은 NXT 종목만·08:50~09:00은 주문 자체가 안 됨 — 그 시간 실패는 조용히 다시(알림 X)
             self._sell_fail[code] = {"count": 0, "until": time.time() + SELL_FAIL_RETRY_SEC}
             return False
         if not ok:
@@ -905,7 +915,7 @@ class DayBot:
             pos["partial_done"] = True
             return False
         if now_hhmm() < "0900" or now_hhmm() >= REGULAR_SELL_END_TIME:
-            return False                       # 정규장에서만(시장가) — 장 열리면 다시 시도
+            return False                       # 정규장에서만 — 1차익절은 실패해도 다시 안 해서(partial_done) NXT 없는 종목이 놓침
         fail = self._sell_fail.get(code)
         if fail and time.time() < fail["until"]:
             return False

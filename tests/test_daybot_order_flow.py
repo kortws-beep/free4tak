@@ -77,13 +77,17 @@ class DaybotOrderFlow(unittest.TestCase):
         daybot.now_hhmm = lambda: "1000"   # 정규장
 
     def test_after_regular_hours_defers_without_calling_api(self):
-        # ★ 2026-10-08: 장종료동시마감/애프터마켓 모두 주문거부가 잦아
-        #   15:20 이후엔 매도 시도 자체를 보류(API 호출 없음).
-        daybot.now_hhmm = lambda: "1600"
+        # ★ 2026-10-08: 장종료동시마감(15:20~15:30)은 시장가 거부 → 매도 시도 자체를 보류(API 호출 없음).
+        daybot.now_hhmm = lambda: "1525"
         b = mk(); b.positions["0035S0"] = pos()
         self.assertFalse(b._do_sell("0035S0", 10, "손절", 9600))
         self.assertEqual(b.api.sells, [])
         self.assertIn("0035S0", b.positions)
+        # ★ 11-04 애프터장(15:30~20:00)은 NXT 지정가로 매도함(대장 "그거도 풀어")
+        daybot.now_hhmm = lambda: "1600"
+        b = mk(); b.positions["0035S0"] = pos()
+        self.assertTrue(b._do_sell("0035S0", 10, "손절", 9600))
+        self.assertEqual(b.api.sells[-1][:2], ("0035S0", 10))
 
     def test_unfilled_sell_is_readopted_not_booked(self):
         b = mk(); b.positions["0035S0"] = pos()

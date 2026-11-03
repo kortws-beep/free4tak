@@ -43,6 +43,14 @@ class DownMarket(unittest.TestCase):
         self.assertIn("약한 장", b._scan_notifier.msgs[-1])
 
 
+class SellWindow(unittest.TestCase):
+    def test_after_hours_open(self):
+        # ★ 11-04 대장 — 애프터장·프리장(NXT 지정가) 매도 풀기, 동시호가(15:20~15:30)·장 밖만 보류
+        f = daybot.sell_closed
+        self.assertEqual([f(t) for t in ["0759", "0800", "0849", "0850", "0900", "1519", "1520", "1529", "1530", "1959", "2000"]],
+                         [True, False, False, True, False, False, True, True, False, False, True])
+
+
 class DipEngineBuy(unittest.TestCase):
     """★ 10-30 음봉 엔진 — 지수 -2%↓면 후보 1순위를 음봉 슬롯 금액(50만)으로.
     ★ 10-31 장중 -2%↓ 찍었으면 됨(반등 기다리지 않음, 14:30부터) · 첫 하락날/-15%↓ 무너진 장(situation)이면 안 삼."""
