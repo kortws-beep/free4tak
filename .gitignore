@@ -29,3 +29,4 @@ intraday_guard.json.tmp
 # sbot 탈출 감시 상태(런타임)
 sbot_exit_watch.json
 sbot_exit_watch.json.tmp
+docs/reference/semi_map_part14.txt
