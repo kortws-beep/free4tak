@@ -2060,6 +2060,30 @@ async def before_evening_report_loop():
     await client.wait_until_ready()
 
 
+# ★ 2026-11-05 대장 — 종목별 외국인·기관 장중 잠정 수급(하루 5회 집계)을 매일 쌓음('외국인 귀환 엔진' 검증용, 매매 안 함).
+#   장 끝난 뒤에도 그날 5회분을 다 줘서 15:45 한 번. intelligence/intraday_flow.py
+INTRADAY_FLOW_HHMM = "1545"
+
+
+@tasks.loop(minutes=1)
+async def intraday_flow_loop():
+    kst_now = datetime.datetime.now(KST)
+    if kst_now.strftime("%H%M") != INTRADAY_FLOW_HHMM or not _is_trading_day():
+        return
+    try:
+        import intraday_flow
+        from kis_api import KisAPI
+        n, ok = await asyncio.to_thread(intraday_flow.collect, KisAPI(), kst_now.date().isoformat())
+        print(f"✅ [잠정수급] {ok}/{n}종목 저장")
+    except Exception as e:
+        print(f"⚠️ [잠정수급] 수집 오류: {e}")
+
+
+@intraday_flow_loop.before_loop
+async def before_intraday_flow_loop():
+    await client.wait_until_ready()
+
+
 # ★ 2026-10-30 대장 결정 — 데이봇 매수 마감 09:40→15:20 + 하락장 슬롯 '그 시각 주도 섹터' 관문(core/sector_gate.py) →
 #   본장 테마 순위를 10:00~15:15 15분마다 남김(09:15·09:30·09:45는 크론이 이미 함). intelligence/theme_open_obs.run()
 THEME_OBS_TIMES = {f"{h:02d}{m:02d}" for h in range(10, 16) for m in (0, 15, 30, 45)} - {"1530", "1545"}
@@ -2835,6 +2859,12 @@ async def on_ready():
             evening_report_loop.start()
         print(f"✅ [시스템] 저녁 봇 성적표 ({EVENING_REPORT_HHMM[:2]}:{EVENING_REPORT_HHMM[2:]}, 거래일) 가동 성공!")
     except Exception as e: print(f"⚠️ [에러] 저녁 성적표: {e}")
+
+    try:
+        if not intraday_flow_loop.is_running():
+            intraday_flow_loop.start()
+        print(f"✅ [시스템] 외국인·기관 잠정 수급 수집 ({INTRADAY_FLOW_HHMM[:2]}:{INTRADAY_FLOW_HHMM[2:]}, 거래일) 가동 성공!")
+    except Exception as e: print(f"⚠️ [에러] 잠정 수급 수집: {e}")
 
 def _fetch_sbo2_status_sync(api, positions: dict):
     """!상태 — 보유종목 기준 주문가능금액+시세 조회 (동기, to_thread로 실행)."""
