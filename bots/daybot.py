@@ -1609,7 +1609,7 @@ class DayBot:
             print(f"🎯 [daybot] 오늘 이벤트 섹터: {theme} {len(members)}종목 — {why}")
 
     def _evt_pausing_regular(self) -> bool:
-        """이벤트 섹터 엔진이 일반 엔진을 멈추게 하는 중인가 — 테마가 있고 지수 -2%를 본 날(산 뒤에도 그날은 계속)."""
+        """이벤트 섹터 엔진이 일반 엔진을 멈추게 하는 중인가 — 테마가 있고 지수 -3%를 본 날(산 뒤에도 그날은 계속)."""
         e = getattr(self, "_evt", None) or {}
         return bool(e.get("date") == today_str() and e.get("theme") and e.get("t0"))
 
@@ -1626,11 +1626,11 @@ class DayBot:
         now_t = now_hhmm()
         if not e["t0"]:
             st = dip_leader.index_status()
-            if not dip_leader.index_hit(st):
-                return
+            if not any(v <= -event_sector.INDEX_DROP for v in dip_leader.low_change(st).values()):
+                return                                # ★ 11-04 대장 — 이벤트 엔진은 지수 장중 -3%↓ 날만
             e["t0"], e["start"] = now_t, event_sector.plus_min(now_t, event_sector.WAIT_MIN)
             idx = " · ".join(f"{k} {v[0]:+.1f}%" for k, v in st.items())
-            self._notify(f"🎯 [daybot] 지수 장중 -2% ({idx}) — 일반 매수 멈춤, 이벤트 섹터 '{e['theme']}' "
+            self._notify(f"🎯 [daybot] 지수 장중 -{event_sector.INDEX_DROP:g}% ({idx}) — 일반 매수 멈춤, 이벤트 섹터 '{e['theme']}' "
                          f"{e['start'][:2]}:{e['start'][2:]}부터 강반등 1종목 찾음")
             return
         if now_t < e["start"]:
@@ -1666,7 +1666,7 @@ class DayBot:
 
     def _run_candidate_scan_and_maybe_buy(self):
         if self._evt_pausing_regular():
-            print(f"⏸️ [daybot] 일반 매수 멈춤 — 지수 -2% 날, 이벤트 섹터 '{self._evt['theme']}' 엔진이 슬롯 사용")
+            print(f"⏸️ [daybot] 일반 매수 멈춤 — 지수 -{event_sector.INDEX_DROP:g}% 날, 이벤트 섹터 '{self._evt['theme']}' 엔진이 슬롯 사용")
             return
         if self._daily_loss_hit():
             print(f"🛑 [daybot] 일손실 한도({DAILY_LOSS_LIMIT:,}원) — 오늘 신규매수 없음")

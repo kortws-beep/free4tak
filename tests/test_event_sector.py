@@ -76,7 +76,10 @@ class Engine(unittest.TestCase):
         b._run_event_engine()
         self.assertIsNone(b._evt["t0"]); self.assertFalse(b._evt_pausing_regular())
         daybot.dip_leader.index_status = lambda: {"kospi": (-2.6, 0.1)}
-        b._run_event_engine()                                      # 11:05 -2% 확인 → 11:25부터
+        b._run_event_engine()
+        self.assertIsNone(b._evt["t0"])                            # ★ -2.7%: 이벤트 엔진은 -3%↓만
+        daybot.dip_leader.index_status = lambda: {"kospi": (-2.9, 0.2)}
+        b._run_event_engine()                                      # 11:05 저가 -3.1% 확인 → 11:25부터
         self.assertEqual((b._evt["t0"], b._evt["start"]), ("1105", "1125")); self.assertTrue(b._evt_pausing_regular())
         self.assertIn("일반 매수 멈춤", b.notes[0])
         daybot.now_hhmm = lambda: "1120"
