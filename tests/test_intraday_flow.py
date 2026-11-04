@@ -20,6 +20,25 @@ class Flow(unittest.TestCase):
         self.assertEqual(sqlite3.connect("f.db").execute("SELECT count(*) FROM flow").fetchone()[0], 2)
         self.assertEqual(F.parse(None), [])
 
+    def test_kiwoom(self):
+        class KW:
+            def _post(self, path, aid, body):
+                if body["amt_qty_tp"] == "1":
+                    return {"opmr_invsr_trde_chart": [{"tm": "090000", "frgnr_invsr": "0", "orgn": "0", "penfnd_etc": "0", "invtrt": "0"},
+                                                      {"tm": "091900", "frgnr_invsr": "-39891", "orgn": "0", "penfnd_etc": "0", "invtrt": "0"},
+                                                      {"tm": "141400", "frgnr_invsr": "-200142", "orgn": "79467", "penfnd_etc": "5", "invtrt": "7"}]}
+                return {"opmr_invsr_trde_chart": [{"tm": "091900", "frgnr_invsr": "-179000", "orgn": "0"},
+                                                  {"tm": "141400", "frgnr_invsr": "-929000", "orgn": "372000"}]}
+        old = F.time.sleep
+        F.time.sleep = lambda s: None
+        try:
+            rows = F.kiwoom_rows(KW(), "005930")
+        finally:
+            F.time.sleep = old
+        self.assertEqual(rows, [("091900", -39891, 0, 0, 0, -179000, 0), ("141400", -200142, 79467, 5, 7, -929000, 372000)])
+        F.save_kiwoom("2026-11-04", "005930", rows, db="k.db")
+        self.assertEqual(sqlite3.connect("k.db").execute("SELECT count(*) FROM kflow").fetchone()[0], 2)
+
     def test_prices_next_day(self):
         F.save_prices("2026-11-04", {"A": {"price": 100, "open": 95, "high": 101, "low": 94, "chg": 2, "prev_close": 98}}, db="p.db")
         F.save_prices("2026-11-05", {"A": {"price": 104, "open": 102, "high": 106, "low": 100, "chg": 4}}, db="p.db")

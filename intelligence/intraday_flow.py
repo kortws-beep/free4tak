@@ -4,7 +4,9 @@ intraday_flow.py — 종목별 외국인·기관 장중 잠정(가집계) 수급
 [이 파일이 하는 일 — 비개발자용 설명]
 11-04 대장: 외국인이 오전에 던지고 오후에 되사는 날(삼성전자 오전 -717억 → 오후 +625억)의 '되사는 종목'을 따라가는
 '외국인 귀환 엔진'을 검토하려면 시간대별 수급이 필요함. 장중 잠정치는 지나면 사라지니 지금부터 매일 쌓는다(매매 안 함).
-  한투 HHPTJ04160200(종목별 외인기관 추정가집계) — 증권사 직원이 장중 입력한 누계(주),
+  ★ 키움 ka10064(장중투자자별매매차트) — 대장이 보는 [1051] 화면과 같은 거래소 잠정(금액·수량, 09:19·09:51·11:00·13:09·14:14쯤 5회),
+     대장 "키움 게 더 정확" → 주 데이터. 테이블 kflow.
+  한투 HHPTJ04160200(종목별 외인기관 추정가집계) — 증권사 직원이 장중 입력한 누계(주), 비교용(테이블 flow).
   입력 시각 외국인 09:30·11:20·13:20·14:30 / 기관 10:00·11:20·13:20·14:30 (bsop_hour_gb 1~5, 5가 마지막).
   장 끝난 뒤에도 그날 5회분을 다 줘서 하루 한 번(리나 15:45)만 모으면 됨.
   대상: 최근 20일 평균 거래대금 100억↑ 종목 + NEW·SUB 관심그룹.
@@ -79,6 +81,40 @@ def save(date: str, code: str, rows: list, db: str = DB_PATH):
     c.close()
 
 
+def kiwoom_rows(kw, code: str) -> list:
+    """★ 11-05 대장 "키움 게 더 정확(수많은 사람이 검증)" — 키움 ka10064(장중투자자별매매차트, [1051] 화면과 같은 거래소 잠정).
+    → [(시각, 외국인금액, 기관금액, 연기금금액, 투신금액, 외국인수량, 기관수량)] 금액 백만원·수량 주, 그 시각까지 누계."""
+    out = {}
+    for tp in ("1", "2"):                      # 1=금액(백만원) 2=수량(주)
+        try:
+            r = kw._post("chart", "ka10064", {"mrkt_tp": "000", "amt_qty_tp": tp, "trde_tp": "0", "stk_cd": code})
+        except Exception:
+            return []
+        for x in r.get("opmr_invsr_trde_chart") or []:
+            tm = x.get("tm", "")
+            if not tm or tm == "090000":
+                continue
+            try:
+                d = out.setdefault(tm, {})
+                if tp == "1":
+                    d.update(fa=int(x["frgnr_invsr"]), oa=int(x["orgn"]), pa=int(x["penfnd_etc"]), ia=int(x["invtrt"]))
+                else:
+                    d.update(fq=int(x["frgnr_invsr"]), oq=int(x["orgn"]))
+            except (KeyError, ValueError, TypeError):
+                continue
+        time.sleep(0.25)
+    return [(tm, d.get("fa"), d.get("oa"), d.get("pa"), d.get("ia"), d.get("fq"), d.get("oq")) for tm, d in sorted(out.items())]
+
+
+def save_kiwoom(date: str, code: str, rows: list, db: str = DB_PATH):
+    c = sqlite3.connect(db, timeout=10)
+    c.execute("CREATE TABLE IF NOT EXISTS kflow (date TEXT, code TEXT, tm TEXT, frgn_amt INTEGER, orgn_amt INTEGER, "
+              "penfnd_amt INTEGER, invtrt_amt INTEGER, frgn_qty INTEGER, orgn_qty INTEGER, PRIMARY KEY(date, code, tm))")
+    c.executemany("INSERT OR REPLACE INTO kflow VALUES (?,?,?,?,?,?,?,?,?)", [(date, code, *r) for r in rows])
+    c.commit()
+    c.close()
+
+
 def save_prices(date: str, quotes: dict, db: str = DB_PATH):
     """★ 11-05 제미나이 제안 — 그날 성적(시가·고가·저가·종가·등락)을 같이 남기고, 전 거래일 줄엔 '다음날 시가·고가'를 채움
     → 나중에 '잠정 수급 → 당일 종가·다음날 시가/고가' 승률을 바로 볼 수 있게."""
@@ -98,8 +134,8 @@ def save_prices(date: str, quotes: dict, db: str = DB_PATH):
     c.close()
 
 
-def collect(api, date: str, codes: dict = None) -> tuple:
-    """→ (대상 수, 저장 수)."""
+def collect(api, date: str, codes: dict = None, kw=None) -> tuple:
+    """→ (대상 수, 저장 수) — 한투 추정(flow)·키움 잠정(kflow) 둘 다. kw 없으면 키움 API를 만들어 씀(실패하면 한투만)."""
     if codes is None:
         codes = universe()
         try:
@@ -112,14 +148,26 @@ def collect(api, date: str, codes: dict = None) -> tuple:
         save_prices(date, api.get_multi_price(list(codes), pause=0.1))
     except Exception as e:
         print(f"⚠️ [잠정수급] 그날 시세 저장 실패: {e}")
-    ok = 0
+    if kw is None:
+        try:
+            from kiwoom_api import KiwoomAPI
+            kw = KiwoomAPI()
+        except Exception as e:
+            print(f"⚠️ [잠정수급] 키움 API 준비 실패(한투만): {e}")
+    ok = kok = 0
     for code in codes:
         rows = fetch(api, code)
         if rows:
             save(date, code, rows)
             ok += 1
         time.sleep(PAUSE)
-    return len(codes), ok
+        if kw is not None:
+            krows = kiwoom_rows(kw, code)
+            if krows:
+                save_kiwoom(date, code, krows)
+                kok += 1
+    print(f"   [잠정수급] 한투 {ok} · 키움 {kok} / {len(codes)}종목")
+    return len(codes), max(ok, kok)
 
 
 def main():
