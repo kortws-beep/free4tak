@@ -76,6 +76,7 @@ from daybot_db import DayTradeDB, log_kiwoom_hits, python_scan_hits
 import market_regime   # ★ 2026-10-08 시장 국면(20일선 위 종목 비율)
 import dip_leader      # ★ 2026-10-30 음봉 엔진(지수 급락일 중기 주도주 급락 매수)
 from sector_gate import SectorGate   # ★ 2026-10-30 하락장 슬롯 '주도 섹터 안 종목만'
+import event_sector   # ★ 2026-11-04 이벤트 섹터 엔진(MTN 아침 1섹터 · 지수 -2% 날 강반등 1종목)
 
 load_dotenv(_os.path.join(_BASE, ".env"))
 
@@ -449,6 +450,9 @@ class DayBot:
         self._dip_uni     = (None, {})                         # ★ 10-30 음봉 엔진 오늘 후보군(날짜, {코드: …})
         self._last_dip_ts = 0.0
         self._dip_sit = ("", False, "")              # ★ 10-31 (날짜, 켤까, 설명)
+        # ★ 11-04 이벤트 섹터 엔진 — 날짜, 테마, {코드: 이름}, 지수 -2% 처음 본 시각, 지켜보기 끝 시각, 새 저가, 산 뒤 끝
+        self._evt = {"date": None, "theme": None, "why": "", "codes": {}, "t0": None, "start": None, "lows": {},
+                     "done": False, "ts": 0.0}
         # ★ 스캔이 백그라운드 스레드로 도는 이상, self.positions에 키를
         #   추가/삭제하는 지점(_do_buy/_do_sell)과 그걸 통째로 직렬화하는
         #   _save_state()가 동시에 돌면 "dictionary changed size during
@@ -1579,7 +1583,91 @@ class DayBot:
                              f"손절 -{dip_leader.STOP_PCT:g}%, {dip_leader.HOLD_DAYS}거래일 정리 · {self._dip_sit[2]}", critical=True)
                 break
 
+    # ============================================================
+    # ★ 2026-11-04 이벤트 섹터 엔진(음봉 엔진 2) — core/event_sector.py 설명 참고
+    # ============================================================
+    def _evt_load(self):
+        """오늘 이벤트 테마(MTN 아침이 고른 것) 읽기 — 없으면 5분마다 다시."""
+        today = today_str()
+        if self._evt["date"] != today:
+            self._evt = {"date": today, "theme": None, "why": "", "codes": {}, "t0": None, "start": None, "lows": {},
+                         "done": False, "ts": 0.0, "loaded": 0.0}
+        if self._evt["theme"] or time.time() - self._evt.get("loaded", 0) < 300:
+            return
+        self._evt["loaded"] = time.time()
+        theme, why = event_sector.load_theme(today)
+        if not theme:
+            return
+        try:
+            import theme_open_obs
+            members = dict(theme_open_obs.load_themes().get(theme, []))
+        except Exception as e:
+            print(f"⚠️ [daybot] 이벤트 섹터 종목 조회 오류: {e}")
+            return
+        if members:
+            self._evt.update(theme=theme, why=why, codes=members)
+            print(f"🎯 [daybot] 오늘 이벤트 섹터: {theme} {len(members)}종목 — {why}")
+
+    def _evt_pausing_regular(self) -> bool:
+        """이벤트 섹터 엔진이 일반 엔진을 멈추게 하는 중인가 — 테마가 있고 지수 -2%를 본 날(산 뒤에도 그날은 계속)."""
+        e = getattr(self, "_evt", None) or {}
+        return bool(e.get("date") == today_str() and e.get("theme") and e.get("t0"))
+
+    def _evt_due(self, now_t: str) -> bool:
+        self._evt_load()
+        return (bool(self._evt["theme"]) and not self._evt["done"] and BUY_START_TIME <= now_t < NEW_BUY_END_TIME
+                and time.time() - self._evt["ts"] >= 60)
+
+    def _run_event_engine(self):
+        e = self._evt
+        e["ts"] = time.time()
+        if self._daily_loss_hit():
+            return
+        now_t = now_hhmm()
+        if not e["t0"]:
+            st = dip_leader.index_status()
+            if not dip_leader.index_hit(st):
+                return
+            e["t0"], e["start"] = now_t, event_sector.plus_min(now_t, event_sector.WAIT_MIN)
+            idx = " · ".join(f"{k} {v[0]:+.1f}%" for k, v in st.items())
+            self._notify(f"🎯 [daybot] 지수 장중 -2% ({idx}) — 일반 매수 멈춤, 이벤트 섹터 '{e['theme']}' "
+                         f"{e['start'][:2]}:{e['start'][2:]}부터 강반등 1종목 찾음")
+            return
+        if now_t < e["start"]:
+            return
+        held = set(self.positions) | set(self.sold_today) | _lina_all_watches()
+        if get_all_positions:
+            try:
+                held |= {p["code"] for p in get_all_positions() if p["bot_type"] != "daybot"}
+            except Exception:
+                pass
+        quotes = self.api.get_multi_price(list(e["codes"]), pause=0.1)
+        first = not e["lows"]
+        event_sector.update_lows(e["lows"], quotes)
+        if first:
+            return                                    # 첫 분은 새 저가 기준만 잡음
+        best = event_sector.pick(quotes, e["lows"], exclude=held)
+        if not best:
+            return
+        code, price, chg, bounce = best
+        name = e["codes"].get(code, code)
+        down = self._down_market(self._market_breadth())
+        limit = DOWN_SLOTS if down else MAX_POSITIONS
+        if self._regular_count() >= limit:
+            print(f"⏭️ [daybot] 이벤트 섹터 {name} 반등 +{bounce:.1f}% — 슬롯 찼음({self._regular_count()}/{limit})")
+            return
+        self.code_name_map.setdefault(code, name)
+        self.db.log_candidate(code, name, event_sector.TAG, price, chg, bought=True)
+        if self._do_buy(code, name, price, event_sector.TAG, amount_cap=DOWN_AMOUNT if down else 0):
+            e["done"] = True
+            self._notify(f"🎯 [daybot] 이벤트 섹터 매수 {name}({code}) {chg:+.1f}% · "
+                         f"{e['start'][:2]}:{e['start'][2:]} 뒤 새 저가 대비 +{bounce:.1f}% — 테마 '{e['theme']}'({e['why']}) · "
+                         f"매도는 일반 규칙(손절 -3.5%·+5% 30% → 트레일링)", critical=True)
+
     def _run_candidate_scan_and_maybe_buy(self):
+        if self._evt_pausing_regular():
+            print(f"⏸️ [daybot] 일반 매수 멈춤 — 지수 -2% 날, 이벤트 섹터 '{self._evt['theme']}' 엔진이 슬롯 사용")
+            return
         if self._daily_loss_hit():
             print(f"🛑 [daybot] 일손실 한도({DAILY_LOSS_LIMIT:,}원) — 오늘 신규매수 없음")
             return
@@ -1835,6 +1923,12 @@ class DayBot:
                 if (not self._is_paused and self._dip_due(now_t)
                         and (self._scan_thread is None or not self._scan_thread.is_alive())):
                     self._scan_thread = threading.Thread(target=self._run_dip_engine, daemon=True)
+                    self._scan_thread.start()
+
+                # 9-1) ★ 11-04 이벤트 섹터 엔진(MTN 아침 테마 있는 날 · 지수 -2% 뒤 20분 지나 강반등 1종목, 60초마다)
+                if (not self._is_paused and self._evt_due(now_t)
+                        and (self._scan_thread is None or not self._scan_thread.is_alive())):
+                    self._scan_thread = threading.Thread(target=self._run_event_engine, daemon=True)
                     self._scan_thread.start()
 
                 if (not self._is_paused

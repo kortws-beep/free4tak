@@ -130,16 +130,34 @@ def build_prompt(text: str, today: str) -> str:
     )
 
 
-def summarize(text: str, today: str) -> str:
+def _ask(prompt: str) -> str:
     import anthropic
     from common_utils import extract_claude_text
     client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
     res = client.messages.create(
         model=os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5"),
         max_tokens=6000,     # 소넷5 thinking 몫까지 넉넉히 — 11-03 3000에서 본문 잘림 실측
-        messages=[{"role": "user", "content": build_prompt(text, today)}],
+        messages=[{"role": "user", "content": prompt}],
     )
     return extract_claude_text(res)
+
+
+def summarize(text: str, today: str) -> str:
+    return _ask(build_prompt(text, today))
+
+
+def pick_event_theme(summary: str, today: str, ask=None) -> str:
+    """★ 11-04 대장 — 방송 요약에서 오늘 '이벤트로 조명받을' 테마 1개 → event_sector에 저장(daybot 이벤트 섹터 엔진).
+    → 알림에 붙일 한 줄(못 고르면 "")."""
+    import event_sector
+    import theme_open_obs
+    themes = sorted(theme_open_obs.load_themes())
+    theme, why = event_sector.parse_choice((ask or _ask)(event_sector.choose_prompt(summary, themes, today)), themes)
+    event_sector.save_theme(today, theme or "", why)
+    if not theme:
+        return ""
+    return (f"🎯 오늘 이벤트 섹터: **{theme}** — {why}\n"
+            f"   (daybot: 지수 장중 -2% 찍으면 일반 매수 멈추고, 20분 뒤부터 이 테마에서 강하게 반등하는 1종목)")
 
 
 DB_PATH = os.path.join(_here, "mtn_morning.db")
@@ -221,7 +239,12 @@ def main():
         save_day(today, summary)
     except Exception as e:
         print(f"⚠️ 요약 저장 실패: {e}")
-    _notify(f"📺 [MTN 아침 정리 {today[5:]}]\n{summary}")
+    try:
+        evt = pick_event_theme(summary, today)
+    except Exception as e:
+        print(f"⚠️ 이벤트 섹터 고르기 실패: {e}")
+        evt = ""
+    _notify(f"📺 [MTN 아침 정리 {today[5:]}]\n{summary}" + (f"\n\n{evt}" if evt else ""))
 
 
 if __name__ == "__main__":
