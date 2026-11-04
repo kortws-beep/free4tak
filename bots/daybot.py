@@ -1608,10 +1608,12 @@ class DayBot:
             self._evt.update(theme=theme, why=why, codes=members)
             print(f"🎯 [daybot] 오늘 이벤트 섹터: {theme} {len(members)}종목 — {why}")
 
-    def _evt_pausing_regular(self) -> bool:
-        """이벤트 섹터 엔진이 일반 엔진을 멈추게 하는 중인가 — 테마가 있고 지수 -3%를 본 날(산 뒤에도 그날은 계속)."""
+    def _evt_hunting(self) -> bool:
+        """이벤트 섹터 엔진이 종목을 찾는 중인가(테마 있음 · 지수 -3% 봄 · 아직 안 삼) — 그동안 일반 엔진은 슬롯 1개를 비워 둠.
+        ★ 11-04 대장: 국면 35%↑에서는 일반 슬롯이 다 열리니까 하루 종일 멈추면 안 됨 → '1슬롯 양보'로.
+          하락장(1슬롯)이면 결과적으로 일반 매수는 멈춤, 정상장(3슬롯)이면 2슬롯은 일반 엔진이 씀. 산 뒤에는 양보 끝."""
         e = getattr(self, "_evt", None) or {}
-        return bool(e.get("date") == today_str() and e.get("theme") and e.get("t0"))
+        return bool(e.get("date") == today_str() and e.get("theme") and e.get("t0") and not e.get("done"))
 
     def _evt_due(self, now_t: str) -> bool:
         self._evt_load()
@@ -1630,7 +1632,7 @@ class DayBot:
                 return                                # ★ 11-04 대장 — 이벤트 엔진은 지수 장중 -3%↓ 날만
             e["t0"], e["start"] = now_t, event_sector.plus_min(now_t, event_sector.WAIT_MIN)
             idx = " · ".join(f"{k} {v[0]:+.1f}%" for k, v in st.items())
-            self._notify(f"🎯 [daybot] 지수 장중 -{event_sector.INDEX_DROP:g}% ({idx}) — 일반 매수 멈춤, 이벤트 섹터 '{e['theme']}' "
+            self._notify(f"🎯 [daybot] 지수 장중 -{event_sector.INDEX_DROP:g}% ({idx}) — 이벤트 섹터 '{e['theme']}' 1슬롯 확보(살 때까지 일반 엔진 양보), "
                          f"{e['start'][:2]}:{e['start'][2:]}부터 강반등 1종목 찾음")
             return
         if now_t < e["start"]:
@@ -1689,9 +1691,7 @@ class DayBot:
         if self._index_dropped_today():
             print(f"⏸️ [daybot] 일반 매수 멈춤 — 지수 장중 -{dip_leader.INDEX_DROP:g}%↓ 뒤 아직 마이너스")
             return
-        if self._evt_pausing_regular():
-            print(f"⏸️ [daybot] 일반 매수 멈춤 — 지수 -{event_sector.INDEX_DROP:g}% 날, 이벤트 섹터 '{self._evt['theme']}' 엔진이 슬롯 사용")
-            return
+        reserve = 1 if self._evt_hunting() else 0   # ★ 11-04 이벤트 섹터 엔진이 찾는 중이면 1슬롯 양보
         if self._daily_loss_hit():
             print(f"🛑 [daybot] 일손실 한도({DAILY_LOSS_LIMIT:,}원) — 오늘 신규매수 없음")
             return
@@ -1719,6 +1719,7 @@ class DayBot:
             psbl = self.api.get_psbl_order_cash("005930") or 0
             if psbl >= BONUS_SLOT_MIN_CASH:
                 effective_max = BASE_MAX_POSITIONS + 1
+        effective_max -= reserve
 
         for code in ranked:
             if self._regular_count() >= effective_max:
@@ -1795,7 +1796,7 @@ class DayBot:
                                        raw_market_data=mdata, raw_hoga_data=hoga)
                 continue
             down = self._down_market(self._market_breadth())
-            if down and self._regular_count() >= DOWN_SLOTS:   # ★ 10-26 하락장엔 DOWN_SLOTS개까지만(0이면 완전 쉬기, 10-30 음봉 슬롯 제외)
+            if down and self._regular_count() >= DOWN_SLOTS - reserve:   # ★ 10-26 하락장엔 DOWN_SLOTS개까지만(0이면 완전 쉬기, 10-30 음봉 슬롯 제외, 11-04 이벤트 양보)
                 print(f"⏭️ [daybot] {code} 패스 — 하락장 쉬기(국면 {self._regime[1]:.0f}% < {PAUSE_BELOW_PCT:.0f}%, "
                       f"하락장 {DOWN_SLOTS}슬롯 찼음)")
                 self.db.log_candidate(code, self._name(code), tier, price, chg,

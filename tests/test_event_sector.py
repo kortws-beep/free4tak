@@ -74,14 +74,14 @@ class Engine(unittest.TestCase):
         b = self._bot("1105")
         daybot.dip_leader.index_status = lambda: {"kospi": (-1.5, 0.1)}
         b._run_event_engine()
-        self.assertIsNone(b._evt["t0"]); self.assertFalse(b._evt_pausing_regular())
+        self.assertIsNone(b._evt["t0"]); self.assertFalse(b._evt_hunting())
         daybot.dip_leader.index_status = lambda: {"kospi": (-2.6, 0.1)}
         b._run_event_engine()
         self.assertIsNone(b._evt["t0"])                            # ★ -2.7%: 이벤트 엔진은 -3%↓만
         daybot.dip_leader.index_status = lambda: {"kospi": (-2.9, 0.2)}
         b._run_event_engine()                                      # 11:05 저가 -3.1% 확인 → 11:25부터
-        self.assertEqual((b._evt["t0"], b._evt["start"]), ("1105", "1125")); self.assertTrue(b._evt_pausing_regular())
-        self.assertIn("일반 매수 멈춤", b.notes[0])
+        self.assertEqual((b._evt["t0"], b._evt["start"]), ("1105", "1125")); self.assertTrue(b._evt_hunting())
+        self.assertIn("1슬롯 확보", b.notes[0])
         daybot.now_hhmm = lambda: "1120"
         b._run_event_engine(); self.assertEqual(b._evt["lows"], {})  # 지켜보기만
         daybot.now_hhmm = lambda: "1125"
@@ -90,6 +90,7 @@ class Engine(unittest.TestCase):
         daybot.now_hhmm = lambda: "1126"
         b._run_event_engine()
         self.assertEqual(b.bought, [("A", "event_sector", daybot.DOWN_AMOUNT)]); self.assertTrue(b._evt["done"])
+        self.assertFalse(b._evt_hunting())                            # 산 뒤엔 양보 끝
         self.assertIn("이벤트 섹터 매수 OCI", b.notes[-1])
 
     def test_slot_full(self):

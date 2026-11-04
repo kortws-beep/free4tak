@@ -162,7 +162,7 @@ def pick_event_theme(summary: str, today: str, ask=None, text: str = "") -> str:
     if not theme:
         return ""
     return (f"🎯 오늘 이벤트 섹터: **{theme}** — {why}\n"
-            f"   (daybot: 지수 장중 -{event_sector.INDEX_DROP:g}% 찍으면 일반 매수 멈추고, 20분 뒤부터 이 테마에서 강하게 반등하는 1종목)")
+            f"   (daybot: 지수 장중 -{event_sector.INDEX_DROP:g}% 찍으면 1슬롯 확보, 20분 뒤부터 이 테마에서 강하게 반등하는 1종목)")
 
 
 DB_PATH = os.path.join(_here, "mtn_morning.db")
