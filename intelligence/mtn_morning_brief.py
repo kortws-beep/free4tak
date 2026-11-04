@@ -146,13 +146,18 @@ def summarize(text: str, today: str) -> str:
     return _ask(build_prompt(text, today))
 
 
-def pick_event_theme(summary: str, today: str, ask=None) -> str:
+def pick_event_theme(summary: str, today: str, ask=None, text: str = "") -> str:
     """★ 11-04 대장 — 방송 요약에서 오늘 '이벤트로 조명받을' 테마 1개 → event_sector에 저장(daybot 이벤트 섹터 엔진).
     → 알림에 붙일 한 줄(못 고르면 "")."""
     import event_sector
     import theme_open_obs
-    themes = sorted(theme_open_obs.load_themes())
+    all_themes = theme_open_obs.load_themes()
+    themes = sorted(all_themes)
     theme, why = event_sector.parse_choice((ask or _ask)(event_sector.choose_prompt(summary, themes, today)), themes)
+    if theme and not event_sector.natural(text, theme, all_themes.get(theme, [])):
+        n, parts = event_sector.mention_stats(text, theme, all_themes.get(theme, []))
+        print(f"🎯 이벤트 섹터 후보 '{theme}' 탈락 — 받아쓰기 언급 {n}번·{parts}구간(억지로 고르지 않음)")
+        why, theme = f"'{theme}' 후보였지만 언급 {n}번·{parts}구간뿐이라 안 고름", None
     event_sector.save_theme(today, theme or "", why)
     if not theme:
         return ""
@@ -240,7 +245,7 @@ def main():
     except Exception as e:
         print(f"⚠️ 요약 저장 실패: {e}")
     try:
-        evt = pick_event_theme(summary, today)
+        evt = pick_event_theme(summary, today, text=text)
     except Exception as e:
         print(f"⚠️ 이벤트 섹터 고르기 실패: {e}")
         evt = ""

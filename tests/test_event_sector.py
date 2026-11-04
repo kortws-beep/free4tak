@@ -26,6 +26,16 @@ class Pure(unittest.TestCase):
         self.assertEqual(E.load_theme("2026-11-05", db="e.db"), (None, None))
         self.assertIn("태양광 / 2차전지", E.choose_prompt("요약", th, "2026-11-04"))
 
+    def test_natural_only(self):
+        # ★ 11-04 대장 "억지로 고르면 안 돼 — 자연스럽게 많이 언급될 때만": 10번↑ · 방송 셋 중 두 구간↑
+        mem = [("1", "OCI홀딩스"), ("2", "한화솔루션"), ("3", "LS")]
+        spread = "태양광 얘기 " * 4 + "다른 얘기 " * 60 + "OCI홀딩스 한화솔루션 " * 3 + "다른 얘기 " * 60 + "태양광 "
+        self.assertEqual(E.mention_stats(spread, "태양광", mem), (11, 3))
+        self.assertTrue(E.natural(spread, "태양광", mem))
+        corner = "다른 얘기 " * 200 + "태양광 OCI홀딩스 " * 8                 # 끝 코너에서만 몰아서
+        self.assertFalse(E.natural(corner, "태양광", mem))
+        self.assertFalse(E.natural("LS LS LS " * 20, "태양광", mem))       # 'LS' 같은 짧은 이름은 안 셈
+
     def test_pick(self):
         self.assertEqual(E.plus_min("1105", 20), "1125")
         lows = {}
