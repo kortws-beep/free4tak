@@ -145,10 +145,17 @@ EXPIRE_DAYS = 25  # ★ 2026-09-19: 대장 — "픽된 후 매수안되고 20일
 # 참조 창(21일)보다 넉넉히 긴 값을 유지할 것.
 
 
-def cleanup_old_picks(days: int = EXPIRE_DAYS) -> int:
-    """days일보다 오래된 픽을 DB에서 삭제. 반환: 삭제된 행 수."""
-    conn = sqlite3.connect(DB_PATH, timeout=10)
+def cleanup_old_picks(days: int = EXPIRE_DAYS, db: str = None) -> int:
+    """days일보다 오래된 픽을 youtube_picks에서 뺌. 반환: 뺀 행 수.
+    ★ 2026-11-05 대장 — 지우지 말고 youtube_picks_archive로 옮김(횡보장 '개별 특징주' 엔진 검증용 기록 —
+      9월치가 지워져 있어서 검증 못 했음). 알림·매매가 보는 youtube_picks는 예전처럼 25일치만."""
+    conn = sqlite3.connect(db or DB_PATH, timeout=10)
     conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("CREATE TABLE IF NOT EXISTS youtube_picks_archive AS SELECT * FROM youtube_picks WHERE 0")
+    conn.execute("""
+        INSERT INTO youtube_picks_archive SELECT * FROM youtube_picks
+        WHERE pick_date < date('now', 'localtime', ? || ' days')
+    """, (f"-{days}",))
     cur = conn.execute("""
         DELETE FROM youtube_picks
         WHERE pick_date < date('now', 'localtime', ? || ' days')

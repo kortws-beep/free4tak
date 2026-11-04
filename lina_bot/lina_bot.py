@@ -2084,6 +2084,25 @@ async def before_intraday_flow_loop():
     await client.wait_until_ready()
 
 
+# ★ 2026-11-05 대장 — '[특징주]' 뉴스를 시각과 함께 쌓음(횡보장 개별 특징주 엔진 검증용, 매매 안 함). intelligence/feature_news.py
+@tasks.loop(minutes=30)
+async def feature_news_loop():
+    hhmm = datetime.datetime.now(KST).strftime("%H%M")
+    if not ("0800" <= hhmm <= "1830") or not _is_trading_day():
+        return
+    try:
+        import feature_news
+        n = await asyncio.to_thread(feature_news.collect)
+        print(f"✅ [특징주뉴스] 새로 {n}건")
+    except Exception as e:
+        print(f"⚠️ [특징주뉴스] 수집 오류: {e}")
+
+
+@feature_news_loop.before_loop
+async def before_feature_news_loop():
+    await client.wait_until_ready()
+
+
 # ★ 2026-10-30 대장 결정 — 데이봇 매수 마감 09:40→15:20 + 하락장 슬롯 '그 시각 주도 섹터' 관문(core/sector_gate.py) →
 #   본장 테마 순위를 10:00~15:15 15분마다 남김(09:15·09:30·09:45는 크론이 이미 함). intelligence/theme_open_obs.run()
 THEME_OBS_TIMES = {f"{h:02d}{m:02d}" for h in range(10, 16) for m in (0, 15, 30, 45)} - {"1530", "1545"}
@@ -2865,6 +2884,12 @@ async def on_ready():
             intraday_flow_loop.start()
         print(f"✅ [시스템] 외국인·기관 잠정 수급 수집 ({INTRADAY_FLOW_HHMM[:2]}:{INTRADAY_FLOW_HHMM[2:]}, 거래일) 가동 성공!")
     except Exception as e: print(f"⚠️ [에러] 잠정 수급 수집: {e}")
+
+    try:
+        if not feature_news_loop.is_running():
+            feature_news_loop.start()
+        print("✅ [시스템] [특징주] 뉴스 수집 (거래일 08:00~18:30, 30분마다) 가동 성공!")
+    except Exception as e: print(f"⚠️ [에러] 특징주 뉴스 수집: {e}")
 
 def _fetch_sbo2_status_sync(api, positions: dict):
     """!상태 — 보유종목 기준 주문가능금액+시세 조회 (동기, to_thread로 실행)."""
