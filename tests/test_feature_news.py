@@ -26,6 +26,20 @@ class News(unittest.TestCase):
         self.assertEqual(sqlite3.connect("n.db").execute("SELECT pub_ts, code FROM news").fetchall(), [("2026-11-04 18:32", "259960")])
 
 
+class Consensus(unittest.TestCase):
+    def test_parse_save(self):
+        import hk_consensus as H
+        page = """<table><tr><th>일자</th></tr><tr>
+        <td class="first txt_number">2026-11-05</td>
+        <td class="text_l"><a href="/analysis/downpdf?report_idx=653768" target="_blank">비에이치(090460) 반등의 실마리를 찾아서 </a></td>
+        <td class="text_r txt_number">21,000</td><td>
+Buy                                </td><td>양승수</td><td>메리츠증권</td><td></td></tr></table>"""
+        rows = H.parse(page)
+        self.assertEqual(rows, [(653768, "2026-11-05", "090460", "비에이치", "비에이치(090460) 반등의 실마리를 찾아서",
+                                 21000, "Buy", "양승수", "메리츠증권")])
+        self.assertEqual(H.save(rows, db="h.db"), 1); self.assertEqual(H.save(rows, db="h.db"), 0)
+
+
 class YoutubeArchive(unittest.TestCase):
     def test_archive(self):
         import youtube_stock_monitor as Y
