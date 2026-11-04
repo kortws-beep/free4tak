@@ -44,20 +44,20 @@ class DownMarket(unittest.TestCase):
 
 
 class IndexDropPause(unittest.TestCase):
-    def test_pause_after_index_drop(self):
-        # ★ 11-04 대장 — 지수 장중 -2% 본 날은 그 뒤 일반 엔진 신규매수 멈춤(그날 계속), 조회 실패는 안 막음
+    def test_pause_until_positive(self):
+        # ★ 11-04 대장 — 지수 장중 -2% 찍고 아직 마이너스면 일반 엔진 멈춤, 그 지수가 양전환하면 다시 가동, 조회 실패는 안 막음
         b = object.__new__(daybot.DayBot)
         b.notes = []
         b._notify = lambda m, critical=False: b.notes.append(m)
         old = daybot.dip_leader.index_status
         try:
-            daybot.dip_leader.index_status = lambda: {"kospi": (-1.0, 0.5)}
+            daybot.dip_leader.index_status = lambda: {"kospi": (-1.0, 0.5), "kosdaq": (-0.5, 0.2)}
             self.assertFalse(b._index_dropped_today())
-            daybot.dip_leader.index_status = lambda: {"kospi": (-1.9, 0.2)}       # 저가 -2.1%
+            daybot.dip_leader.index_status = lambda: {"kospi": (-1.9, 0.2), "kosdaq": (0.3, 0.5)}   # 코스피 저가 -2.1%
             self.assertTrue(b._index_dropped_today()); self.assertIn("일반 매수 멈춤", b.notes[0])
-            daybot.dip_leader.index_status = lambda: {"kospi": (1.0, 3.0)}        # 반등해도 그날은 계속
-            self.assertTrue(b._index_dropped_today()); self.assertEqual(len(b.notes), 1)
-            b._idx_drop_day = None
+            self.assertTrue(b._index_dropped_today()); self.assertEqual(len(b.notes), 1)         # 알림은 한 번
+            daybot.dip_leader.index_status = lambda: {"kospi": (0.02, 4.2), "kosdaq": (1.1, 4.2)}  # 11-04처럼 양전환
+            self.assertFalse(b._index_dropped_today()); self.assertIn("다시 가동", b.notes[-1])
             def boom(): raise RuntimeError("x")
             daybot.dip_leader.index_status = boom
             self.assertFalse(b._index_dropped_today())

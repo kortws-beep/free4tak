@@ -1665,24 +1665,29 @@ class DayBot:
                          f"매도는 일반 규칙(손절 -3.5%·+5% 30% → 트레일링)", critical=True)
 
     def _index_dropped_today(self) -> bool:
-        """★ 11-04 대장 결정 — 지수(코스피·코스닥 중 하나) 장중 -2%↓를 본 날은 그 뒤 일반 엔진 신규매수 멈춤(그날 계속).
+        """★ 11-04 대장 결정 — 지수(코스피·코스닥 중 하나)가 오늘 장중 -2%↓를 찍었고 아직 마이너스면 일반 엔진 신규매수 멈춤.
+        그 지수가 양전환(0% 이상)하면 다시 가동(대장 "지수가 양전환하면 일반 가동").
         근거: 9/30~11/3 daybot 일반 매매 — 매수일 지수 저가 -2%↓ 34건 승률 29%·평균 -1.60% vs 그 외 21건 -0.34%.
-        그날은 음봉 엔진(14:30)·이벤트 섹터 엔진만 일함. 지수 조회 실패는 막지 않음."""
-        today = today_str()
-        if getattr(self, "_idx_drop_day", None) == today:
-            return True
+        멈춘 동안은 음봉 엔진(14:30)·이벤트 섹터 엔진만 일함. 지수 조회 실패는 막지 않음."""
         try:
-            if dip_leader.index_hit(dip_leader.index_status()):
-                self._idx_drop_day = today
-                self._notify(f"⏸️ [daybot] 지수 장중 -{dip_leader.INDEX_DROP:g}% — 오늘 일반 매수 멈춤(음봉·이벤트 엔진만)")
-                return True
+            st = dip_leader.index_status()
         except Exception as e:
             print(f"⚠️ [daybot] 지수 확인 오류(막지 않음): {e}")
-        return False
+            return False
+        hit = [k for k, v in dip_leader.low_change(st).items() if v <= -dip_leader.INDEX_DROP]
+        paused = any(st[k][0] < 0 for k in hit)
+        was = getattr(self, "_idx_paused", (None, False))
+        today = today_str()
+        if paused and was != (today, True):
+            self._notify(f"⏸️ [daybot] 지수 장중 -{dip_leader.INDEX_DROP:g}% — 일반 매수 멈춤(양전환하면 다시, 그동안 음봉·이벤트 엔진만)")
+        elif not paused and was == (today, True):
+            self._notify("▶️ [daybot] 지수 양전환 — 일반 매수 다시 가동")
+        self._idx_paused = (today, paused)
+        return paused
 
     def _run_candidate_scan_and_maybe_buy(self):
         if self._index_dropped_today():
-            print(f"⏸️ [daybot] 일반 매수 멈춤 — 오늘 지수 장중 -{dip_leader.INDEX_DROP:g}%↓")
+            print(f"⏸️ [daybot] 일반 매수 멈춤 — 지수 장중 -{dip_leader.INDEX_DROP:g}%↓ 뒤 아직 마이너스")
             return
         if self._evt_pausing_regular():
             print(f"⏸️ [daybot] 일반 매수 멈춤 — 지수 -{event_sector.INDEX_DROP:g}% 날, 이벤트 섹터 '{self._evt['theme']}' 엔진이 슬롯 사용")
