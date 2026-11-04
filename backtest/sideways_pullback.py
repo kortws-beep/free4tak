@@ -11,6 +11,7 @@ sideways_pullback.py — 횡보장 엔진 후보 ① '당일 눌림목 반등' �
     눌림 D%      — 가격 ≤ 아침 고점 × (1-D)   (D = 5, 7)
     거래 죽음    — 고점 이후 분당 평균 거래대금 < 상승 구간(시가→고점) 분당 평균 × 0.5
     +VWAP        — 추가로 그 시각 VWAP(시가부터 거래량 가중 평균가) ±1.5% 안
+    →반등1%      — 눌림에 닿은 뒤 바로 사지 않고, 그 뒤 저가 대비 +1% 반등 확인하고(고점 -D%+2% 안쪽) 매수(11-05 1차 결과: 떨어지는 칼날 잡기)
   매도 규칙(수수료·세금 0.2%, 매수 미끄러짐 0.1%):
     daybot현행   — 손절 -3.5% · +5%에 30% → 나머지 고점 -2% 트레일링 · 3거래일 종가
     짧게+3       — +3% 전량 · 손절 -3.5% · 당일 15:15 정리
@@ -120,6 +121,7 @@ def signals(bars, prev):
     rise = [b[1] * b[4] for b in morning[:i_hi + 1]]
     rise_avg = sum(rise) / len(rise) if rise else 0
     out, cum_pv, cum_v, post = {}, 0.0, 0.0, []
+    touched, low_after = {}, {}                # 눌림 D%에 (거래 죽은 채) 닿은 뒤 저가 → 그 저가 대비 +1% 반등 확인
     for tm, p, h, l, v in bars:
         cum_pv += p * v
         cum_v += v
@@ -134,6 +136,11 @@ def signals(bars, prev):
                 out.setdefault(f"눌림{d:g}%", (tm, p))
                 if abs(p / vwap - 1) * 100 <= VWAP_BAND:
                     out.setdefault(f"눌림{d:g}%+VWAP", (tm, p))
+                touched[d] = True
+            if touched.get(d):
+                low_after[d] = min(low_after.get(d, l), l)
+                if p >= low_after[d] * 1.01 and p <= mh * (1 - d / 100 + 0.02):
+                    out.setdefault(f"눌림{d:g}%→반등1%", (tm, p))
     return out
 
 
