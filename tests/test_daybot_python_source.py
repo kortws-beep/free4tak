@@ -70,6 +70,7 @@ class NewBuyCutoff(unittest.TestCase):
         b._scan_conditions = lambda: (["111110"], {"111110": ["주도주검색식3"]})
         b._rank_candidates = lambda codes, tags: (codes, {"111110": "tier2_주도주"})
         b._name = lambda c: c
+        b._index_dropped_today = lambda: False      # ★ 11-04 지수 -2% 멈춤은 test_daybot_down_market에서
 
         class Api:
             def get_market_data(self, c): return {"stck_prpr": "10000", "prdy_ctrt": "5.0"}

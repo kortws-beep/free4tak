@@ -129,6 +129,7 @@ class DaybotLossLimit(unittest.TestCase):
         self.assertTrue(b._daily_loss_hit()); self.assertTrue(b._daily_loss_hit())
         self.assertEqual(len(b.notes), 1); self.assertIn("신규매수 중단", b.notes[0])
         b._scan_conditions = lambda: self.fail("한도 걸리면 스캔도 안 함")
+        b._index_dropped_today = lambda: False
         b._run_candidate_scan_and_maybe_buy()
 
 

@@ -1664,7 +1664,26 @@ class DayBot:
                          f"{e['start'][:2]}:{e['start'][2:]} 뒤 새 저가 대비 +{bounce:.1f}% — 테마 '{e['theme']}'({e['why']}) · "
                          f"매도는 일반 규칙(손절 -3.5%·+5% 30% → 트레일링)", critical=True)
 
+    def _index_dropped_today(self) -> bool:
+        """★ 11-04 대장 결정 — 지수(코스피·코스닥 중 하나) 장중 -2%↓를 본 날은 그 뒤 일반 엔진 신규매수 멈춤(그날 계속).
+        근거: 9/30~11/3 daybot 일반 매매 — 매수일 지수 저가 -2%↓ 34건 승률 29%·평균 -1.60% vs 그 외 21건 -0.34%.
+        그날은 음봉 엔진(14:30)·이벤트 섹터 엔진만 일함. 지수 조회 실패는 막지 않음."""
+        today = today_str()
+        if getattr(self, "_idx_drop_day", None) == today:
+            return True
+        try:
+            if dip_leader.index_hit(dip_leader.index_status()):
+                self._idx_drop_day = today
+                self._notify(f"⏸️ [daybot] 지수 장중 -{dip_leader.INDEX_DROP:g}% — 오늘 일반 매수 멈춤(음봉·이벤트 엔진만)")
+                return True
+        except Exception as e:
+            print(f"⚠️ [daybot] 지수 확인 오류(막지 않음): {e}")
+        return False
+
     def _run_candidate_scan_and_maybe_buy(self):
+        if self._index_dropped_today():
+            print(f"⏸️ [daybot] 일반 매수 멈춤 — 오늘 지수 장중 -{dip_leader.INDEX_DROP:g}%↓")
+            return
         if self._evt_pausing_regular():
             print(f"⏸️ [daybot] 일반 매수 멈춤 — 지수 -{event_sector.INDEX_DROP:g}% 날, 이벤트 섹터 '{self._evt['theme']}' 엔진이 슬롯 사용")
             return
