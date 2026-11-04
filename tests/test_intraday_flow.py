@@ -20,6 +20,13 @@ class Flow(unittest.TestCase):
         self.assertEqual(sqlite3.connect("f.db").execute("SELECT count(*) FROM flow").fetchone()[0], 2)
         self.assertEqual(F.parse(None), [])
 
+    def test_prices_next_day(self):
+        F.save_prices("2026-11-04", {"A": {"price": 100, "open": 95, "high": 101, "low": 94, "chg": 2, "prev_close": 98}}, db="p.db")
+        F.save_prices("2026-11-05", {"A": {"price": 104, "open": 102, "high": 106, "low": 100, "chg": 4}}, db="p.db")
+        c = sqlite3.connect("p.db")
+        self.assertEqual(c.execute("SELECT close, next_open, next_high FROM day WHERE date='2026-11-04'").fetchone(), (100, 102, 106))
+        self.assertEqual(c.execute("SELECT next_open FROM day WHERE date='2026-11-05'").fetchone(), (None,))
+
 
 if __name__ == "__main__":
     unittest.main()

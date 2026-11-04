@@ -9,6 +9,7 @@ intraday_flow.py — 종목별 외국인·기관 장중 잠정(가집계) 수급
   장 끝난 뒤에도 그날 5회분을 다 줘서 하루 한 번(리나 15:45)만 모으면 됨.
   대상: 최근 20일 평균 거래대금 100억↑ 종목 + NEW·SUB 관심그룹.
   저장: intelligence/intraday_flow.db 테이블 flow(date, code, round, frgn, orgn, total) — 같은 날 다시 돌려도 덮어씀.
+        테이블 day(그날 시가·고가·저가·종가·등락·거래대금 + 다음날 시가·고가 — 다음 거래일 수집 때 채움)
 실행(수동): venv/bin/python intelligence/intraday_flow.py [YYYY-MM-DD]
 """
 import os
@@ -78,6 +79,25 @@ def save(date: str, code: str, rows: list, db: str = DB_PATH):
     c.close()
 
 
+def save_prices(date: str, quotes: dict, db: str = DB_PATH):
+    """★ 11-05 제미나이 제안 — 그날 성적(시가·고가·저가·종가·등락)을 같이 남기고, 전 거래일 줄엔 '다음날 시가·고가'를 채움
+    → 나중에 '잠정 수급 → 당일 종가·다음날 시가/고가' 승률을 바로 볼 수 있게."""
+    c = sqlite3.connect(db, timeout=10)
+    c.execute("CREATE TABLE IF NOT EXISTS day (date TEXT, code TEXT, prev_close REAL, open REAL, high REAL, low REAL, "
+              "close REAL, chg REAL, value REAL, next_open REAL, next_high REAL, PRIMARY KEY(date, code))")
+    rows = [(date, k, q.get("prev_close"), q.get("open"), q.get("high"), q.get("low"), q.get("price"), q.get("chg"),
+             q.get("value")) for k, q in quotes.items() if q.get("price")]
+    c.executemany("INSERT INTO day (date, code, prev_close, open, high, low, close, chg, value) VALUES (?,?,?,?,?,?,?,?,?) "
+                  "ON CONFLICT(date, code) DO UPDATE SET prev_close=excluded.prev_close, open=excluded.open, "
+                  "high=excluded.high, low=excluded.low, close=excluded.close, chg=excluded.chg, value=excluded.value", rows)
+    prev = c.execute("SELECT MAX(date) FROM day WHERE date < ?", (date,)).fetchone()[0]
+    if prev:
+        c.executemany("UPDATE day SET next_open=?, next_high=? WHERE date=? AND code=?",
+                      [(q.get("open"), q.get("high"), prev, k) for k, q in quotes.items() if q.get("price")])
+    c.commit()
+    c.close()
+
+
 def collect(api, date: str, codes: dict = None) -> tuple:
     """→ (대상 수, 저장 수)."""
     if codes is None:
@@ -88,6 +108,10 @@ def collect(api, date: str, codes: dict = None) -> tuple:
                 codes.setdefault(c, c)
         except Exception as e:
             print(f"⚠️ [잠정수급] 관심그룹 조회 실패(거래대금 상위만): {e}")
+    try:
+        save_prices(date, api.get_multi_price(list(codes), pause=0.1))
+    except Exception as e:
+        print(f"⚠️ [잠정수급] 그날 시세 저장 실패: {e}")
     ok = 0
     for code in codes:
         rows = fetch(api, code)
