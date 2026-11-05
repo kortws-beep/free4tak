@@ -147,22 +147,29 @@ def summarize(text: str, today: str) -> str:
 
 
 def pick_event_theme(summary: str, today: str, ask=None, text: str = "") -> str:
-    """★ 11-04 대장 — 방송 요약에서 오늘 '이벤트로 조명받을' 테마 1개 → event_sector에 저장(daybot 이벤트 섹터 엔진).
-    → 알림에 붙일 한 줄(못 고르면 "")."""
+    """★ 11-04 대장 — 방송에서 오늘 '이벤트로 조명받을' 테마 → event_sector에 저장(daybot 이벤트 섹터 엔진).
+    ★ 11-05 대장 — 하나가 아니라 언급 1·2·3위(받아쓰기에서 자연스럽게 많이 나온 것만, 많이 나온 순). → 알림 한 줄(없으면 "")."""
     import event_sector
     import theme_open_obs
     all_themes = theme_open_obs.load_themes()
     themes = sorted(all_themes)
-    theme, why = event_sector.parse_choice((ask or _ask)(event_sector.choose_prompt(summary, themes, today)), themes)
-    if theme and not event_sector.natural(text, theme, all_themes.get(theme, [])):
-        n, parts = event_sector.mention_stats(text, theme, all_themes.get(theme, []))
-        print(f"🎯 이벤트 섹터 후보 '{theme}' 탈락 — 받아쓰기 언급 {n}번·{parts}구간(억지로 고르지 않음)")
-        why, theme = f"'{theme}' 후보였지만 언급 {n}번·{parts}구간뿐이라 안 고름", None
-    event_sector.save_theme(today, theme or "", why)
-    if not theme:
+    picked = event_sector.parse_choice((ask or _ask)(event_sector.choose_prompt(summary, themes, today)), themes)
+    ok, why = [], []
+    for th, w in picked:
+        n, parts = event_sector.mention_stats(text, th, all_themes.get(th, []))
+        if event_sector.natural(text, th, all_themes.get(th, [])):
+            ok.append((n, th, w))
+        else:
+            print(f"🎯 이벤트 섹터 후보 '{th}' 탈락 — 받아쓰기 언급 {n}번·{parts}구간(억지로 고르지 않음)")
+    ok.sort(key=lambda x: -x[0])
+    names = [th for _, th, _ in ok][:event_sector.MAX_THEMES]
+    reason = " / ".join(f"{th}: {w}" for _, th, w in ok[:event_sector.MAX_THEMES])
+    event_sector.save_theme(today, names, reason)
+    if not names:
         return ""
-    return (f"🎯 오늘 이벤트 섹터: **{theme}** — {why}\n"
-            f"   (daybot: 지수 장중 -{event_sector.INDEX_DROP:g}% 찍으면 1슬롯 확보, 20분 뒤부터 이 테마에서 강하게 반등하는 1종목)")
+    return (f"🎯 오늘 이벤트 섹터(언급순): **{' · '.join(names)}** — {reason}\n"
+            f"   (daybot: 지수 장중 -{event_sector.INDEX_DROP:g}%~-{event_sector.PANIC_DROP:g}% 사이면 1슬롯 확보 → 지수 바닥 확인 뒤 "
+            f"이 테마들 대장주 중 강반등 1종목)")
 
 
 DB_PATH = os.path.join(_here, "mtn_morning.db")

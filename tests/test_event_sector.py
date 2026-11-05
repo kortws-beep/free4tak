@@ -17,14 +17,27 @@ import daybot             # noqa: E402
 
 class Pure(unittest.TestCase):
     def test_choice_and_store(self):
-        th = ["태양광", "2차전지"]
-        self.assertEqual(E.parse_choice('답: {"theme": "태양광", "why": "블루웨이브"}', th), ("태양광", "블루웨이브"))
-        self.assertEqual(E.parse_choice('{"theme": "우주", "why": "x"}', th)[0], None)      # 목록에 없는 이름
-        self.assertEqual(E.parse_choice("모르겠음", th), (None, ""))
-        E.save_theme("2026-11-04", "태양광", "블루웨이브", db="e.db")
-        self.assertEqual(E.load_theme("2026-11-04", db="e.db"), ("태양광", "블루웨이브"))
-        self.assertEqual(E.load_theme("2026-11-05", db="e.db"), (None, None))
+        th = ["태양광", "2차전지", "항공"]
+        self.assertEqual(E.parse_choice('답: {"themes": [{"theme": "태양광", "why": "블루웨이브"}, {"theme": "우주", "why": "x"}, '
+                                        '{"theme": "항공", "why": "유가"}]}', th), [("태양광", "블루웨이브"), ("항공", "유가")])
+        self.assertEqual(E.parse_choice('{"theme": "태양광", "why": "예전 꼴"}', th), [("태양광", "예전 꼴")])
+        self.assertEqual(E.parse_choice("모르겠음", th), [])
+        E.save_theme("2026-11-04", ["태양광", "항공"], "이유", db="e.db")
+        self.assertEqual(E.load_theme("2026-11-04", db="e.db"), (["태양광", "항공"], "이유"))
+        self.assertEqual(E.load_theme("2026-11-05", db="e.db"), ([], None))
         self.assertIn("태양광 / 2차전지", E.choose_prompt("요약", th, "2026-11-04"))
+
+    def test_leaders_bottom(self):
+        q = {"A": {"price": 10, "value": 5e9}, "B": {"price": 10, "value": 9e9}, "C": {"price": 10, "value": 1e9}}
+        self.assertEqual(E.leaders(q, {"태양광": {"A": "a", "B": "b"}, "항공": {"C": "c"}}), {"B": "태양광", "C": "항공"})
+        st = {}
+        E.track_index(st, {"kospi": -3.1}, "1001")
+        E.track_index(st, {"kospi": -5.0}, "1015")                 # 새 저가 → 시각 갱신
+        E.track_index(st, {"kospi": -5.02}, "1020")                # 0.05%p 안 되는 건 무시
+        self.assertEqual(st["idx"]["kospi"], (-5.0, "1015"))
+        self.assertFalse(E.bottom_ok(st, {"kospi": (-3.0, 2.1)}, "1030"))   # 15분뿐
+        self.assertTrue(E.bottom_ok(st, {"kospi": (-3.0, 2.1)}, "1035"))    # 20분 새 저가 없음 & +2.1%
+        self.assertFalse(E.bottom_ok(st, {"kospi": (-4.5, 0.6)}, "1040"))   # 반등 +0.6%뿐
 
     def test_natural_only(self):
         # ★ 11-04 대장 "억지로 고르면 안 돼 — 자연스럽게 많이 언급될 때만": 10번↑ · 방송 셋 중 두 구간↑
@@ -51,61 +64,67 @@ class Pure(unittest.TestCase):
 
 class Engine(unittest.TestCase):
     def _bot(self, hhmm):
+        import threading
         b = object.__new__(daybot.DayBot)
+        b._positions_lock = threading.Lock()
         b.positions, b.sold_today, b.code_name_map, b.notes, b.bought = {}, {}, {}, [], []
-        b._evt = {"date": daybot.today_str(), "theme": "태양광", "why": "블루웨이브", "codes": {"A": "OCI", "B": "한화솔루션"},
+        b._evt = {"date": daybot.today_str(), "theme": "태양광", "themes": {"태양광": {"A": "OCI", "B": "한화솔루션"}},
+                  "why": "블루웨이브", "codes": {"A": "OCI", "B": "한화솔루션"},
                   "t0": None, "start": None, "lows": {}, "done": False, "ts": 0.0, "loaded": 9e18}
         b._notify = lambda m, critical=False: b.notes.append(m)
         b._daily_loss_hit = lambda: False
         b._market_breadth = lambda: 15.0
         b.db = type("D", (), {"log_candidate": lambda self, *a, **k: None})()
-        b.prices = {"A": {"price": 100, "chg": 2}, "B": {"price": 50, "chg": 1}}
+        b.prices = {"A": {"price": 100, "chg": 2, "value": 9e9}, "B": {"price": 50, "chg": 1, "value": 1e9}}
         b.api = type("A", (), {"get_multi_price": lambda s, codes, pause=0: dict(b.prices)})()
-        b._do_buy = lambda code, name, price, tier, **k: (b.bought.append((code, tier, k.get("amount_cap"))), True)[1]
+        def buy(code, name, price, tier, **k):
+            b.bought.append((code, tier, k.get("amount_cap"))); b.positions[code] = {"buy_tag": tier}; return True
+        b._do_buy = buy
         self._old = (daybot.now_hhmm, daybot.dip_leader.index_status, daybot.get_all_positions, daybot._lina_all_watches)
-        daybot.now_hhmm = lambda: hhmm
         daybot.get_all_positions, daybot._lina_all_watches = None, lambda: set()
+        self._at(hhmm)
         return b
+
+    def _at(self, hhmm, idx=None):
+        daybot.now_hhmm = lambda: hhmm
+        if idx is not None:
+            daybot.dip_leader.index_status = lambda: idx
 
     def tearDown(self):
         daybot.now_hhmm, daybot.dip_leader.index_status, daybot.get_all_positions, daybot._lina_all_watches = self._old
 
     def test_flow(self):
-        b = self._bot("1105")
-        daybot.dip_leader.index_status = lambda: {"kospi": (-1.5, 0.1)}
+        b = self._bot("1001")
+        self._at("1001", {"kospi": (-2.6, 0.1)})
+        b._run_event_engine(); self.assertIsNone(b._evt["t0"])          # -2.7%: 이벤트 엔진은 -3%↓만
+        self._at("1001", {"kospi": (-3.1, 0.0)})
         b._run_event_engine()
-        self.assertIsNone(b._evt["t0"]); self.assertFalse(b._evt_hunting())
-        daybot.dip_leader.index_status = lambda: {"kospi": (-2.6, 0.1)}
-        b._run_event_engine()
-        self.assertIsNone(b._evt["t0"])                            # ★ -2.7%: 이벤트 엔진은 -3%↓만
-        daybot.dip_leader.index_status = lambda: {"kospi": (-2.9, 0.2)}
-        b._run_event_engine()                                      # 11:05 저가 -3.1% 확인 → 11:25부터
-        self.assertEqual((b._evt["t0"], b._evt["start"]), ("1105", "1125")); self.assertTrue(b._evt_hunting())
-        self.assertIn("1슬롯 확보", b.notes[0])
-        daybot.now_hhmm = lambda: "1120"
-        b._run_event_engine(); self.assertEqual(b._evt["lows"], {})  # 지켜보기만
-        daybot.now_hhmm = lambda: "1125"
-        b._run_event_engine(); self.assertEqual(b.bought, [])        # 첫 분은 새 저가만
-        b.prices = {"A": {"price": 101.5, "chg": 3.5}, "B": {"price": 50.2, "chg": 1.4}}
-        daybot.now_hhmm = lambda: "1126"
+        self.assertEqual((b._evt["t0"], b._evt["start"]), ("1001", "1021")); self.assertTrue(b._evt_hunting())
+        self.assertIn("바닥 확인", b.notes[0])
+        self._at("1022", {"kospi": (-3.3, 0.2)})                          # 20분 지났지만 지수 반등 없음 → 안 봄
+        b._run_event_engine(); self.assertEqual(b._evt["lows"], {})
+        self._at("1045", {"kospi": (-2.0, 1.3)})                          # 저가 -3.3%(10:22) 뒤 23분·+1.3% → 바닥 확인
+        b._run_event_engine(); self.assertEqual(b.bought, []); self.assertEqual(set(b._evt["lows"]), {"A"})   # 대장(대금 1위)만
+        b.prices = {"A": {"price": 101.5, "chg": 3.5, "value": 9e9}, "B": {"price": 60, "chg": 20, "value": 1e9}}
+        self._at("1046", {"kospi": (-1.9, 1.4)})
         b._run_event_engine()
         self.assertEqual(b.bought, [("A", "event_sector", daybot.DOWN_AMOUNT)]); self.assertTrue(b._evt["done"])
-        self.assertFalse(b._evt_hunting())                            # 산 뒤엔 양보 끝
-        self.assertIn("이벤트 섹터 매수 OCI", b.notes[-1])
+        self.assertFalse(b._evt_hunting()); self.assertIn("대장", b.notes[-1])
 
-    def test_slot_full(self):
-        import threading
+    def test_panic_day(self):
+        b = self._bot("1001")
+        self._at("1001", {"kospi": (-5.3, 0.1)})                          # ★ 11-05 저가 -5%↓ 폭락날 쉼
+        b._run_event_engine()
+        self.assertTrue(b._evt["done"]); self.assertIn("폭락", b.notes[0]); self.assertEqual(b.bought, [])
+
+    def test_borrow_dip_slot(self):
         b = self._bot("1130")
-        b._positions_lock = threading.Lock()
-        b._evt.update(t0="1100", start="1120", lows={"A": 98.0, "B": 50})
+        self._at("1130", {"kospi": (-2.0, 1.5)})
+        b._evt.update(t0="1001", start="1021", lows={"A": 98.0}, idx={"kospi": (-3.4, "1005")})
         b.positions = {"Z": {"buy_tag": "tier2_주도주"}, "N": {"buy_tag": daybot.dip_leader.TAG}}   # 일반·음봉 둘 다 참
         b._run_event_engine()
         self.assertEqual(b.bought, []); self.assertFalse(b._evt["done"])
-        # ★ 11-05 대장 — 일반 슬롯이 찼어도 음봉 슬롯이 비었으면 빌려 씀(음봉 슬롯 금액), 그 뒤 음봉 슬롯은 찬 걸로
-        b.positions = {"Z": {"buy_tag": "tier2_주도주"}}
-        def buy(code, name, price, tier, **k):
-            b.bought.append((code, tier, k.get("amount_cap"))); b.positions[code] = {"buy_tag": tier}; return True
-        b._do_buy = buy
+        b.positions = {"Z": {"buy_tag": "tier2_주도주"}}                  # ★ 11-05 음봉 슬롯 비면 빌려 씀
         b._run_event_engine()
         self.assertEqual(b.bought, [("A", "event_sector", daybot.DIP_AMOUNT)])
         self.assertEqual(b.positions["A"].get("slot"), "dip")

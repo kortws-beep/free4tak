@@ -1588,26 +1588,28 @@ class DayBot:
     # ★ 2026-11-04 이벤트 섹터 엔진(음봉 엔진 2) — core/event_sector.py 설명 참고
     # ============================================================
     def _evt_load(self):
-        """오늘 이벤트 테마(MTN 아침이 고른 것) 읽기 — 없으면 5분마다 다시."""
+        """오늘 이벤트 테마 1~3위(MTN 아침이 고른 것) 읽기 — 없으면 5분마다 다시."""
         today = today_str()
         if self._evt["date"] != today:
-            self._evt = {"date": today, "theme": None, "why": "", "codes": {}, "t0": None, "start": None, "lows": {},
-                         "done": False, "ts": 0.0, "loaded": 0.0}
+            self._evt = {"date": today, "theme": None, "themes": {}, "why": "", "codes": {}, "t0": None, "start": None,
+                         "lows": {}, "done": False, "ts": 0.0, "loaded": 0.0}
         if self._evt["theme"] or time.time() - self._evt.get("loaded", 0) < 300:
             return
         self._evt["loaded"] = time.time()
-        theme, why = event_sector.load_theme(today)
-        if not theme:
+        names, why = event_sector.load_theme(today)
+        if not names:
             return
         try:
             import theme_open_obs
-            members = dict(theme_open_obs.load_themes().get(theme, []))
+            allt = theme_open_obs.load_themes()
         except Exception as e:
             print(f"⚠️ [daybot] 이벤트 섹터 종목 조회 오류: {e}")
             return
-        if members:
-            self._evt.update(theme=theme, why=why, codes=members)
-            print(f"🎯 [daybot] 오늘 이벤트 섹터: {theme} {len(members)}종목 — {why}")
+        themes = {th: dict(allt.get(th, [])) for th in names if allt.get(th)}
+        if themes:
+            codes = {c: n for m in themes.values() for c, n in m.items()}
+            self._evt.update(theme="·".join(themes), themes=themes, why=why, codes=codes)
+            print(f"🎯 [daybot] 오늘 이벤트 섹터: {self._evt['theme']} ({len(codes)}종목) — {why}")
 
     def _evt_hunting(self) -> bool:
         """이벤트 섹터 엔진이 종목을 찾는 중인가(테마 있음 · 지수 -3% 봄 · 아직 안 삼) — 그동안 일반 엔진은 슬롯 1개를 비워 둠.
@@ -1627,16 +1629,24 @@ class DayBot:
         if self._daily_loss_hit():
             return
         now_t = now_hhmm()
+        st = dip_leader.index_status()
+        lows_pct = dip_leader.low_change(st)
+        if any(v <= -event_sector.PANIC_DROP for v in lows_pct.values()):
+            e["done"] = True                          # ★ 11-05 대장 — 지수 저가 -5%↓ 폭락날은 이벤트 엔진도 쉼
+            self._notify(f"🎯 [daybot] 지수 장중 -{event_sector.PANIC_DROP:g}%↓ 폭락 — 오늘 이벤트 섹터 엔진 쉼")
+            return
         if not e["t0"]:
-            st = dip_leader.index_status()
-            if not any(v <= -event_sector.INDEX_DROP for v in dip_leader.low_change(st).values()):
+            if not any(v <= -event_sector.INDEX_DROP for v in lows_pct.values()):
                 return                                # ★ 11-04 대장 — 이벤트 엔진은 지수 장중 -3%↓ 날만
             e["t0"], e["start"] = now_t, event_sector.plus_min(now_t, event_sector.WAIT_MIN)
             idx = " · ".join(f"{k} {v[0]:+.1f}%" for k, v in st.items())
             self._notify(f"🎯 [daybot] 지수 장중 -{event_sector.INDEX_DROP:g}% ({idx}) — 이벤트 섹터 '{e['theme']}' 1슬롯 확보(살 때까지 일반 엔진 양보), "
-                         f"{e['start'][:2]}:{e['start'][2:]}부터 강반등 1종목 찾음")
-            return
+                         f"{e['start'][:2]}:{e['start'][2:]} 뒤 지수 바닥 확인(저가 +{event_sector.BOTTOM_REBOUND:g}%·{event_sector.BOTTOM_QUIET_MIN}분 새 저가 없음)되면 대장주 강반등 1종목")
+        event_sector.track_index(e, lows_pct, now_t)
         if now_t < e["start"]:
+            return
+        if not event_sector.bottom_ok(e, st, now_t):  # ★ 11-05 대장 — 지수 바닥 확인 전엔 안 삼(새 저가 기준도 그때부터)
+            e["lows"] = {}
             return
         held = set(self.positions) | set(self.sold_today) | _lina_all_watches()
         if get_all_positions:
@@ -1644,7 +1654,9 @@ class DayBot:
                 held |= {p["code"] for p in get_all_positions() if p["bot_type"] != "daybot"}
             except Exception:
                 pass
-        quotes = self.api.get_multi_price(list(e["codes"]), pause=0.1)
+        allq = self.api.get_multi_price(list(e["codes"]), pause=0.1)
+        lead = event_sector.leaders(allq, e.get("themes") or {"": e["codes"]})   # ★ 11-05 대장 — 1·2·3위 테마 대장주만
+        quotes = {c: allq[c] for c in lead}
         first = not e["lows"]
         event_sector.update_lows(e["lows"], quotes)
         if first:
@@ -1674,7 +1686,7 @@ class DayBot:
                         self.positions[code]["slot"] = "dip"
             e["done"] = True
             self._notify(f"🎯 [daybot] 이벤트 섹터 매수 {name}({code}) {chg:+.1f}% · "
-                         f"{e['start'][:2]}:{e['start'][2:]} 뒤 새 저가 대비 +{bounce:.1f}% — 테마 '{e['theme']}'({e['why']}) · "
+                         f"지수 바닥 확인 뒤 새 저가 대비 +{bounce:.1f}% — '{lead.get(code, '')}' 대장(테마 {e['theme']}) · "
                          f"매도는 일반 규칙(손절 -3.5%·+5% 30% → 트레일링)" + (" · 음봉 슬롯 빌려 씀" if use_dip else ""), critical=True)
 
     def _index_dropped_today(self) -> bool:
