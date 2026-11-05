@@ -94,11 +94,23 @@ class Engine(unittest.TestCase):
         self.assertIn("이벤트 섹터 매수 OCI", b.notes[-1])
 
     def test_slot_full(self):
+        import threading
         b = self._bot("1130")
+        b._positions_lock = threading.Lock()
         b._evt.update(t0="1100", start="1120", lows={"A": 98.0, "B": 50})
-        b.positions = {"Z": {"buy_tag": "tier2_주도주"}}               # 하락장 1슬롯 이미 참
+        b.positions = {"Z": {"buy_tag": "tier2_주도주"}, "N": {"buy_tag": daybot.dip_leader.TAG}}   # 일반·음봉 둘 다 참
         b._run_event_engine()
         self.assertEqual(b.bought, []); self.assertFalse(b._evt["done"])
+        # ★ 11-05 대장 — 일반 슬롯이 찼어도 음봉 슬롯이 비었으면 빌려 씀(음봉 슬롯 금액), 그 뒤 음봉 슬롯은 찬 걸로
+        b.positions = {"Z": {"buy_tag": "tier2_주도주"}}
+        def buy(code, name, price, tier, **k):
+            b.bought.append((code, tier, k.get("amount_cap"))); b.positions[code] = {"buy_tag": tier}; return True
+        b._do_buy = buy
+        b._run_event_engine()
+        self.assertEqual(b.bought, [("A", "event_sector", daybot.DIP_AMOUNT)])
+        self.assertEqual(b.positions["A"].get("slot"), "dip")
+        self.assertEqual((b._dip_count(), b._regular_count()), (1, 1))
+        self.assertIn("음봉 슬롯 빌려", b.notes[-1])
 
 
 if __name__ == "__main__":

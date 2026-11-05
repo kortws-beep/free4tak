@@ -1505,7 +1505,8 @@ class DayBot:
         return True
 
     def _dip_count(self) -> int:
-        return sum(1 for p in self.positions.values() if p.get("buy_tag") == dip_leader.TAG)
+        """음봉 슬롯을 쓰는 보유 수 — 음봉 엔진 종목 + ★ 11-05 음봉 슬롯을 빌려 산 이벤트 섹터 종목(slot="dip")."""
+        return sum(1 for p in self.positions.values() if p.get("buy_tag") == dip_leader.TAG or p.get("slot") == "dip")
 
     def _regular_count(self) -> int:
         """양봉 엔진 보유 수 — ★ 10-30 음봉 전용 슬롯 종목은 빼고 셈."""
@@ -1655,16 +1656,26 @@ class DayBot:
         name = e["codes"].get(code, code)
         down = self._down_market(self._market_breadth())
         limit = DOWN_SLOTS if down else MAX_POSITIONS
+        use_dip = False
         if self._regular_count() >= limit:
-            print(f"⏭️ [daybot] 이벤트 섹터 {name} 반등 +{bounce:.1f}% — 슬롯 찼음({self._regular_count()}/{limit})")
-            return
+            # ★ 11-05 대장 "유연하게 써야지" — 일반 슬롯이 이미 차 있으면(09:01 현대제철이 같은 분에 먼저 들어감) 비어 있는 음봉 슬롯을 빌림
+            if DIP_SLOTS > 0 and self._dip_count() < DIP_SLOTS:
+                use_dip = True
+            else:
+                print(f"⏭️ [daybot] 이벤트 섹터 {name} 반등 +{bounce:.1f}% — 슬롯 찼음(일반 {self._regular_count()}/{limit}·음봉 {self._dip_count()}/{DIP_SLOTS})")
+                return
         self.code_name_map.setdefault(code, name)
         self.db.log_candidate(code, name, event_sector.TAG, price, chg, bought=True)
-        if self._do_buy(code, name, price, event_sector.TAG, amount_cap=DOWN_AMOUNT if down else 0):
+        amt = DIP_AMOUNT if use_dip else (DOWN_AMOUNT if down else 0)
+        if self._do_buy(code, name, price, event_sector.TAG, amount_cap=amt):
+            if use_dip:
+                with self._positions_lock:
+                    if code in self.positions:
+                        self.positions[code]["slot"] = "dip"
             e["done"] = True
             self._notify(f"🎯 [daybot] 이벤트 섹터 매수 {name}({code}) {chg:+.1f}% · "
                          f"{e['start'][:2]}:{e['start'][2:]} 뒤 새 저가 대비 +{bounce:.1f}% — 테마 '{e['theme']}'({e['why']}) · "
-                         f"매도는 일반 규칙(손절 -3.5%·+5% 30% → 트레일링)", critical=True)
+                         f"매도는 일반 규칙(손절 -3.5%·+5% 30% → 트레일링)" + (" · 음봉 슬롯 빌려 씀" if use_dip else ""), critical=True)
 
     def _index_dropped_today(self) -> bool:
         """★ 11-04 대장 결정 — 지수(코스피·코스닥 중 하나)가 오늘 장중 -2%↓를 찍었고 아직 마이너스면 일반 엔진 신규매수 멈춤.
