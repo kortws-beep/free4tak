@@ -6,7 +6,8 @@ mtn_morning_brief.py — MTN 아침 방송(전일장·미장 정리) 요약 (202
       라이브로 하니까.. 우리 유튜브캐치를 그대로 쓰면 되."
 youtube_live_monitor(07~20시, 60분 단위 종목 캐치)와 같은 방식 — 라이브 오디오를 yt-dlp로 받아
 로컬 Whisper(CPU)로 글로 바꾼 뒤, 소넷이 핵심만 요약해서 리나 이름으로 보냄.
-  06:54 크론 → MTN이 라이브면 07:41까지 녹음(07:40쯤 끝나는 '오늘 주목' 섹터 소개까지)(아직이면 07:30까지 1분마다 다시 봄) → 전사 → 요약 → 발송
+  ★ 11-06: 05:54 크론 → 06:00~07:41 녹음(①06:51까지·②07:41까지, ①은 ② 녹음 중 받아씀) → 07:50쯤 '아침 정리'
+            + 07:41~08:11 '오늘 전문가 전략' 녹음 → 08:20쯤 따로 발송. 광고·유료 회원 홍보는 요약에서 뺌.
   라이브가 아니면(주말·휴일 등) 조용히 끝냄.
 youtube_live_monitor를 import하지 않는 이유: 그 파일은 import 순간 자기 임시폴더를 비워서
   돌고 있는 서비스의 녹음 파일을 지울 수 있음 — 캡처 몇 줄만 여기 따로 둠.
@@ -19,6 +20,7 @@ import time
 import datetime
 import subprocess
 import tempfile
+import threading
 
 _here = os.path.dirname(os.path.abspath(__file__))
 _base = os.path.dirname(_here)
@@ -37,8 +39,11 @@ import requests
 
 HANDLE = "mtn"
 END_HHMM = "0741"           # 11-03 대장: 끝의 "오늘 주목"(매일 돌아가며 섹터 소개)까지 07:40쯤 — +1분 여유
+# ★ 11-06 대장 — MTN 아침 구성: 06:00~06:50 미장 정리 / 06:55~07:40 미장·국장·섹터 뉴스 / 07:40~08:10 오늘 전문가 전략
+#   → 06:00부터 세 구간 다 받음: ①06:00~06:51 ②~07:41 → 07:50쯤 '아침 정리'(①은 ② 녹음 중에 미리 받아씀) ③07:41~08:11 → 08:20쯤 '전문가 전략'
+SEG1_END, EXPERT_END = "0651", "0811"
 WAIT_UNTIL = "0730"         # 이때까지 라이브 안 잡히면 그날은 쉼 — 11-04 06:54~07:05 내내 못 잡음(07:26에야 잡힘) → 늘림
-MAX_SEC = 50 * 60
+MAX_SEC = 60 * 60
 AUDIO_FORMAT = "233"
 YTDLP_BIN = os.path.join(os.path.dirname(sys.executable), "yt-dlp")
 SAVE_DIR = os.path.join(_base, "logs", "mtn_morning")   # 전사 원문 보관(요약 검증용)
@@ -106,16 +111,23 @@ def capture(video_id: str, sec: int, out_path: str) -> bool:
         return False
 
 
+_MODEL = None
+_MODEL_LOCK = threading.Lock()
+
+
 def transcribe(path: str) -> str:
-    from faster_whisper import WhisperModel
-    model = WhisperModel(os.getenv("YT_WHISPER_MODEL", "small"), device="cpu", compute_type="int8")
-    segments, _ = model.transcribe(path, language="ko", vad_filter=True)
-    return " ".join(s.text for s in segments)
+    global _MODEL
+    with _MODEL_LOCK:
+        if _MODEL is None:
+            from faster_whisper import WhisperModel
+            _MODEL = WhisperModel(os.getenv("YT_WHISPER_MODEL", "small"), device="cpu", compute_type="int8")
+        segments, _ = _MODEL.transcribe(path, language="ko", vad_filter=True)
+        return " ".join(s.text for s in segments)
 
 
 def build_prompt(text: str, today: str) -> str:
     return (
-        f"오늘은 {today}이야. 아래는 MTN 머니투데이방송 아침 라이브(06:55~07:40, 전일 국내장·간밤 미국장 정리)를 "
+        f"오늘은 {today}이야. 아래는 MTN 머니투데이방송 아침 라이브(06:00~07:40 — 앞쪽은 간밤 미장 정리, 뒤쪽은 미장·국장·섹터 뉴스)를 "
         "음성인식으로 받아적은 글이야. 음성인식이라 종목명·숫자가 틀리게 적혔을 수 있어.\n\n"
         f"[방송 받아쓰기]\n{text}\n\n"
         "[작성 지침]\n"
@@ -125,7 +137,7 @@ def build_prompt(text: str, today: str) -> str:
         "3. 순서: 🇺🇸 간밤 미장(지수 + 왜 움직였나) → 🇰🇷 전일 국장(흐름·수급 + 왜) → 🧭 방송의 시각(오늘 장 해석·섹터 흐름) "
         "→ 🔦 오늘 주목(방송 끝부분에 매일 돌아가며 소개하는 섹터 — 어떤 섹터를 왜 골랐는지, 업황·근거 위주) → ⚠️ 오늘 일정·변수.\n"
         "4. 각 항목은 짧은 글머리표로. 방송에서 말한 숫자만 쓰고, 어색한 숫자·종목명은 빼거나 '(확인 필요)'를 붙여.\n"
-        "5. 방송에 없는 내용은 절대 지어내지 마. 광고·시청자 안내 같은 잡담은 빼.\n"
+        "5. 방송에 없는 내용은 절대 지어내지 마. 광고·시청자 안내·유료 회원/리딩 가입 홍보 같은 건 다 빼.\n"
         "6. 받아쓰기가 너무 짧거나 방송 내용이 아니면 '오늘 방송 내용을 제대로 못 받았어'라고만 해."
     )
 
@@ -144,6 +156,20 @@ def _ask(prompt: str) -> str:
 
 def summarize(text: str, today: str) -> str:
     return _ask(build_prompt(text, today))
+
+
+def expert_prompt(text: str, today: str) -> str:
+    return (
+        f"오늘은 {today}이야. 아래는 MTN 아침 라이브 '오늘 전문가 전략'(07:40~08:10)을 음성인식으로 받아적은 글이야. "
+        "음성인식이라 종목명·숫자가 틀리게 적혔을 수 있어.\n\n"
+        f"[방송 받아쓰기]\n{text}\n\n"
+        "[작성 지침]\n"
+        "1. 한국어로, 1200자 이내.\n"
+        "2. 전문가별로: 🎙️ 이름(나오면) → 오늘 시장 대응 전략 한두 줄 → 주목 섹터·종목(매수가·목표가·손절가를 말했으면 그대로).\n"
+        "3. 마지막에 🧭 공통 의견(여러 전문가가 같이 말한 방향)을 한 줄.\n"
+        "4. 광고·시청자 안내·유료 회원/리딩 가입 홍보·전화번호 안내는 전부 빼. 방송에 없는 내용은 절대 지어내지 마.\n"
+        "5. 어색한 종목명·숫자는 빼거나 '(확인 필요)'. 받아쓰기가 방송 내용이 아니면 '전문가 전략을 제대로 못 받았어'라고만 해."
+    )
 
 
 def pick_event_theme(summary: str, today: str, ask=None, text: str = "") -> str:
@@ -212,8 +238,54 @@ def _notify(msg: str):
         n.send(part)
 
 
+def _record(vid: str, end: str, tag: str) -> str:
+    """지금부터 end까지 녹음 → 파일 경로("" = 실패·이미 지남)."""
+    sec = seconds_until(end)
+    if sec < 60:
+        return ""
+    path = os.path.join(tempfile.gettempdir(), f"mtn_morning_{tag}_{int(time.time())}.m4a")
+    print(f"🔴 MTN {tag} {vid} — {sec // 60}분 녹음(~{end[:2]}:{end[2:]})", flush=True)
+    return path if capture(vid, sec, path) else ""
+
+
+def _text_of(path: str) -> str:
+    if not path:
+        return ""
+    try:
+        return transcribe(path)
+    finally:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+
+def _save_text(today: str, name: str, text: str):
+    os.makedirs(SAVE_DIR, exist_ok=True)
+    with open(os.path.join(SAVE_DIR, f"{today}{name}.txt"), "w", encoding="utf-8") as f:
+        f.write(text)
+
+
+def _already_running(today: str) -> bool:
+    """같은 날 두 번 돌지 않게(크론 시각을 바꾸는 날 수동 실행·옛 크론이 겹칠 수 있음) — 살아 있는 프로세스가 잡고 있으면 True."""
+    os.makedirs(SAVE_DIR, exist_ok=True)
+    lock = os.path.join(SAVE_DIR, f".run_{today}")
+    try:
+        pid = int(open(lock).read().strip())
+        os.kill(pid, 0)
+        return True
+    except (OSError, ValueError):
+        pass
+    with open(lock, "w") as f:
+        f.write(str(os.getpid()))
+    return False
+
+
 def main():
     today = datetime.date.today().isoformat()
+    if _already_running(today):
+        print(f"{today} 이미 도는 중 — 쉼")
+        return
     vid = live_video_id()
     while not vid and datetime.datetime.now().strftime("%H%M") < WAIT_UNTIL:
         time.sleep(60)
@@ -223,40 +295,43 @@ def main():
         if datetime.date.today().weekday() < 5:
             _notify(f"[MTN 아침] {WAIT_UNTIL[:2]}:{WAIT_UNTIL[2:]}까지 라이브를 못 찾아 오늘 요약 없음")
         return
-    sec = seconds_until(END_HHMM)
-    if sec < 60:
-        print("방송 끝날 시각이 지남 — 쉼")
+    # ① 06:00~06:51 녹음 → ② 녹음하는 동안 ① 받아쓰기(스레드)
+    p1 = _record(vid, SEG1_END, "1미장")
+    part1 = {}
+    t1 = threading.Thread(target=lambda: part1.setdefault("t", _text_of(p1)), daemon=True)
+    t1.start()
+    p2 = _record(vid, END_HHMM, "2국장")
+    if not (p1 or p2):
+        _notify("[MTN 아침] 방송 녹음 실패 — 오늘 요약 없음")
         return
-    path = os.path.join(tempfile.gettempdir(), f"mtn_morning_{int(time.time())}.m4a")
-    print(f"🔴 MTN 라이브 {vid} — {sec // 60}분 녹음")
-    try:
-        if not capture(vid, sec, path):
-            _notify("[MTN 아침] 방송 녹음 실패 — 오늘 요약 없음")
-            return
-        text = transcribe(path)
-    finally:
-        try:
-            os.remove(path)
-        except OSError:
-            pass
-    print(f"📝 전사 {len(text)}자")
-    os.makedirs(SAVE_DIR, exist_ok=True)
-    with open(os.path.join(SAVE_DIR, f"{today}.txt"), "w", encoding="utf-8") as f:
-        f.write(text)
+    # ③ 전문가 전략 녹음은 바로 이어서(스레드) — 그동안 ② 받아쓰고 아침 정리 발송
+    p3box = {}
+    t3 = threading.Thread(target=lambda: p3box.setdefault("p", _record(vid, EXPERT_END, "3전문가")), daemon=True)
+    t3.start()
+    t1.join()
+    text = (part1.get("t", "") + " " + _text_of(p2)).strip()
+    print(f"📝 아침 정리 전사 {len(text)}자", flush=True)
+    _save_text(today, "", text)
     if len(text) < 300:
         _notify(f"[MTN 아침] 받아쓰기가 {len(text)}자뿐이라 요약 생략")
-        return
-    summary = summarize(text, today)
-    try:
-        save_day(today, summary)
-    except Exception as e:
-        print(f"⚠️ 요약 저장 실패: {e}")
-    try:
-        evt = pick_event_theme(summary, today, text=text)
-    except Exception as e:
-        print(f"⚠️ 이벤트 섹터 고르기 실패: {e}")
-        evt = ""
-    _notify(f"📺 [MTN 아침 정리 {today[5:]}]\n{summary}" + (f"\n\n{evt}" if evt else ""))
+    else:
+        summary = summarize(text, today)
+        try:
+            save_day(today, summary)
+        except Exception as e:
+            print(f"⚠️ 요약 저장 실패: {e}")
+        try:
+            evt = pick_event_theme(summary, today, text=text)
+        except Exception as e:
+            print(f"⚠️ 이벤트 섹터 고르기 실패: {e}")
+            evt = ""
+        _notify(f"📺 [MTN 아침 정리 {today[5:]}]\n{summary}" + (f"\n\n{evt}" if evt else ""))
+    t3.join()
+    etext = _text_of(p3box.get("p", ""))
+    print(f"📝 전문가 전략 전사 {len(etext)}자", flush=True)
+    if len(etext) >= 300:
+        _save_text(today, "_전문가", etext)
+        _notify(f"🎙️ [MTN 오늘 전문가 전략 {today[5:]}]\n{_ask(expert_prompt(etext, today))}")
 
 
 if __name__ == "__main__":
