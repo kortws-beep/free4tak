@@ -373,7 +373,8 @@ async def _register_manual_watch(channel, code: str, buy_price: float = None,
                 tp_px = buy_price * (1 + autosell.SCALP_TP / 100)
                 await send_safe_message(
                     channel,
-                    f"⚡ {name}({code}) **단타** 등록 [{acct}] — 평단가 {buy_price:,.0f}원 · {qty}주\n"
+                    f"⚡ {name}({code}) **단타** 등록 [{acct}] — 평단가 {buy_price:,.0f}원 · "
+                    + (f"{qty}주\n" if qty else "⚠️ 수량 미입력 — 실제 매도 모드에서도 주문 안 나가(알림만)\n") +
                     f"   +{autosell.SCALP_TP:g}%({tp_px:,.0f}원) 찍으면 30% 익절 → 나머지 {autosell.trail_desc(watches[key])} [{md}]\n"
                     f"   손절은 대장이 직접. 해제는 `해제 {name} D`")
                 return
@@ -2111,7 +2112,7 @@ async def before_broker_loop():
 
 
 # ★ 2026-11-07 대장 — 'isee5' 관심그룹(한투, 항상 5종목) 급등 알림: A 5분 +3%↑·거래대금 급증 / B 계단식 → 고가 돌파(core/spike_watch.py). 매매 안 함.
-_spike = {"w": None, "codes": {}, "loaded": 0.0, "warned": ""}
+_spike = {"w": None, "api": None, "codes": {}, "loaded": 0.0, "warned": ""}
 
 
 def _spike_tick(now):
@@ -2120,14 +2121,20 @@ def _spike_tick(now):
     from kis_api import KisAPI
     if _spike["w"] is None:
         _spike["w"] = spike_watch.SpikeWatch()
-    api = KisAPI()
+    if _spike["api"] is None:            # ★ 11-07 제미나이 검토 — 매분 새로 만들지 않고 하나 재사용(토큰·접속 재활용)
+        _spike["api"] = KisAPI()
+    api = _spike["api"]
     if _t.time() - _spike["loaded"] > 600:
         _spike["codes"] = spike_watch.group_codes(api, os.getenv("KIS_HTS_ID2", os.getenv("KIS_HTS_ID", "")))
         _spike["loaded"] = _t.time()
     codes = _spike["codes"]
     if not codes:
         return [], {}
-    q = api.get_multi_price(list(codes), pause=0.1)
+    try:
+        q = api.get_multi_price(list(codes), pause=0.1) or {}
+    except Exception as e:            # ★ 11-07 제미나이 검토 — 시세 실패는 이번 분만 건너뜀(루프 바깥 try도 있지만 여기서 조용히)
+        print(f"⚠️ [끼알림] 시세 조회 실패: {e}")
+        return [], {}
     return _spike["w"].update(now.date().isoformat(), now.strftime("%H%M"), q), q
 
 
