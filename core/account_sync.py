@@ -248,6 +248,42 @@ def sync_positions(
 # ============================================================
 # cbot(업비트) 전용 동기화
 # ============================================================
+def recent_sales_upbit(cbot, markets: list, days: int = 3, get=None) -> dict:
+    """★ 2026-11-06 — 업비트 최근 days일 체결 완료 매도(ask)에서 markets → {market: (평균 매도가, 매도 수량)}. 조회 실패면 {}.
+    sync_positions()의 recent_sales(한투)와 같은 역할 — 봇이 꺼진 사이 판 코인을 '유령'으로 지우지 않고 매도로 기록하려고."""
+    import datetime as _dt
+    import urllib.parse
+    if not markets:
+        return {}
+    params = {"state": "done", "limit": 100, "order_by": "desc"}
+    qs = urllib.parse.urlencode(params)
+    try:
+        if get is None:
+            import requests
+            get = lambda: requests.get("https://api.upbit.com/v1/orders/closed?" + qs,  # noqa: E731
+                                       headers=cbot._get_headers(qs), timeout=10).json()
+        orders = get()
+    except Exception as e:
+        print(f"⚠️ 업비트 최근 매도 조회 실패: {e}")
+        return {}
+    if not isinstance(orders, list):
+        return {}
+    since = (_dt.datetime.now() - _dt.timedelta(days=days)).isoformat(timespec="seconds")
+    acc = {}
+    for o in orders:
+        m = o.get("market")
+        if o.get("side") != "ask" or m not in markets or (o.get("created_at") or "")[:19] < since:
+            continue
+        try:
+            v, f = float(o.get("executed_volume") or 0), float(o.get("executed_funds") or 0)
+        except (TypeError, ValueError):
+            continue
+        if v > 0 and f > 0:
+            tv, tf = acc.get(m, (0.0, 0.0))
+            acc[m] = (tv + v, tf + f)
+    return {m: (f / v, v) for m, (v, f) in acc.items()}
+
+
 def sync_positions_upbit(
     cbot,
     db_path: str,
@@ -303,8 +339,28 @@ def sync_positions_upbit(
 
     print(f"   DB 미매도: {len(db_pos)}종목 — {list(db_pos.keys())}")
 
-    # 3. 실계좌에 없는 DB 레코드 삭제
+    # 3. 실계좌에 없는 DB 레코드 — ★ 2026-11-06: sync_positions(한투, 10-28)와 같이, 봇이 꺼진 사이 판 것이면
+    #   삭제하지 말고 매도로 기록(업비트 최근 3일 체결 매도에 있을 때). 매도가 안 보일 때만 삭제.
     ghost_markets = [m for m in db_pos if m not in real_pos]
+    sold = recent_sales_upbit(cbot, ghost_markets) if ghost_markets else {}
+    if sold:
+        import datetime as _dt
+        now = _dt.datetime.now().isoformat(timespec="seconds")
+        try:
+            conn = sqlite3.connect(db_path, timeout=10)
+            for market, (price, _q) in sold.items():
+                for row_id, buy_price, qty in db_pos[market]:
+                    rate = (price - buy_price) / buy_price * 100 if buy_price else 0
+                    conn.execute("UPDATE trades SET sell_price=?, sell_time=?, profit_rate=?, profit_krw=?, sell_reason=? "
+                                 "WHERE id=?", (price, now, rate, (price - buy_price) * (qty or 0),
+                                                "수동매도(봇 꺼진 사이 감지)", row_id))
+                print(f"   📝 매도 기록: {market} @{price:,.4f} — 봇 꺼진 사이 매도(업비트 체결로 확인)")
+            conn.commit()
+            conn.close()
+            notify_fn(f"📝 [{bot_type}] 봇 꺼진 사이 매도된 코인 기록: {', '.join(sold)}", critical=False)
+        except Exception as e:
+            print(f"⚠️ 매도 기록 실패: {e}")
+        ghost_markets = [m for m in ghost_markets if m not in sold]
     if ghost_markets:
         try:
             conn = sqlite3.connect(db_path, timeout=10)

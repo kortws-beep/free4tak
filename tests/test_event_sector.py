@@ -111,6 +111,19 @@ class Engine(unittest.TestCase):
         self.assertEqual(b.bought, [("A", "event_sector", daybot.DOWN_AMOUNT)]); self.assertTrue(b._evt["done"])
         self.assertFalse(b._evt_hunting()); self.assertIn("대장", b.notes[-1])
 
+    def test_resume_after_restart(self):
+        # ★ 11-06 장중 재시작해도 오늘 이벤트 엔진 진행(t0·바닥 추적·끝남)을 이어받음
+        b = self._bot("1100")
+        b._evt = {"date": None}
+        b._evt_saved = {"date": daybot.today_str(), "t0": "0901", "start": "0921", "idx": {"kospi": [-3.4, "0905"]}, "done": False}
+        old = daybot.event_sector.load_theme
+        daybot.event_sector.load_theme = lambda d: ([], None)
+        try:
+            b._evt_load()
+        finally:
+            daybot.event_sector.load_theme = old
+        self.assertEqual((b._evt["t0"], b._evt["start"], b._evt["idx"]["kospi"][1]), ("0901", "0921", "0905"))
+
     def test_panic_day(self):
         b = self._bot("1001")
         self._at("1001", {"kospi": (-5.3, 0.1)})                          # ★ 11-05 저가 -5%↓ 폭락날 쉼

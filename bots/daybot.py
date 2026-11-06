@@ -503,6 +503,8 @@ class DayBot:
             sell_verify=self._sell_verify,
             cancel_reconcile=self._cancel_reconcile,
             partial_verify=self._partial_verify,
+            # ★ 11-06 이벤트 섹터 엔진 진행(지수 -3% 본 시각·바닥 추적·끝남) — 장중 재시작해도 20분 지켜보기를 처음부터 안 하게
+            event_state={k: self._evt.get(k) for k in ("date", "t0", "start", "idx", "done")},
             last_update=now_hms(),
         )
 
@@ -521,6 +523,7 @@ class DayBot:
         self._sell_verify      = saved.get("sell_verify", {}) or {}
         self._cancel_reconcile = saved.get("cancel_reconcile", {}) or {}
         self._partial_verify   = saved.get("partial_verify", {}) or {}
+        self._evt_saved        = saved.get("event_state") or {}
 
         if self._sold_today_date != today_str():
             self.sold_today = {}
@@ -1593,6 +1596,9 @@ class DayBot:
         if self._evt["date"] != today:
             self._evt = {"date": today, "theme": None, "themes": {}, "why": "", "codes": {}, "t0": None, "start": None,
                          "lows": {}, "done": False, "ts": 0.0, "loaded": 0.0}
+            saved = getattr(self, "_evt_saved", None) or {}
+            if saved.get("date") == today:            # ★ 11-06 장중 재시작 — 오늘 진행분 이어받기
+                self._evt.update({k: saved.get(k) for k in ("t0", "start", "idx", "done") if saved.get(k) is not None})
         if self._evt["theme"] or time.time() - self._evt.get("loaded", 0) < 300:
             return
         self._evt["loaded"] = time.time()

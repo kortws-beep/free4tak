@@ -47,5 +47,38 @@ class SyncGhost(unittest.TestCase):
         self.assertEqual(A.recent_sales(api, ["A", "B"]), {"A": (175.0, 40)})
 
 
+class UpbitGhost(unittest.TestCase):
+    """★ 11-06 — 코인봇도 봇 꺼진 사이 판 코인은 지우지 말고 매도로 기록(업비트 체결 매도로 확인)."""
+    def test_recorded_not_deleted(self):
+        import datetime
+        now = datetime.datetime.now().isoformat(timespec="seconds")
+        c = sqlite3.connect("c.db")
+        c.execute("CREATE TABLE trades (id INTEGER PRIMARY KEY, market TEXT, buy_price REAL, buy_time TEXT, sell_price REAL, "
+                  "sell_time TEXT, qty REAL, profit_rate REAL, profit_krw REAL, sell_reason TEXT)")
+        c.executemany("INSERT INTO trades (market, buy_price, buy_time, qty) VALUES (?,?,?,?)",
+                      [("KRW-SUI", 1000, now, 10), ("KRW-OLD", 50, now, 2), ("KRW-BTC", 1e8, now, 0.001)])
+        c.commit(); c.close()
+        orders = [{"market": "KRW-SUI", "side": "ask", "executed_volume": "10", "executed_funds": "11000", "created_at": now},
+                  {"market": "KRW-SUI", "side": "bid", "executed_volume": "10", "executed_funds": "9000", "created_at": now},
+                  {"market": "KRW-OLD", "side": "ask", "executed_volume": "2", "executed_funds": "100", "created_at": "2020-01-01T00:00:00"}]
+        self.assertEqual(A.recent_sales_upbit(None, ["KRW-SUI", "KRW-OLD"], get=lambda: orders), {"KRW-SUI": (1100.0, 10.0)})
+
+        class Bot:
+            def get_current_positions(self):
+                return {"KRW-BTC": {"entry_price": 1e8, "qty": 0.001}}
+        notes = []
+        old = A.recent_sales_upbit
+        A.recent_sales_upbit = lambda cbot, markets, days=3: old(cbot, markets, days, get=lambda: orders)
+        try:
+            A.sync_positions_upbit(Bot(), "c.db", lambda m, critical=False: notes.append(m))
+        finally:
+            A.recent_sales_upbit = old
+        c = sqlite3.connect("c.db")
+        self.assertEqual(c.execute("SELECT sell_price, profit_krw, sell_reason FROM trades WHERE market='KRW-SUI'").fetchone(),
+                         (1100.0, 1000.0, "수동매도(봇 꺼진 사이 감지)"))
+        self.assertIsNone(c.execute("SELECT 1 FROM trades WHERE market='KRW-OLD'").fetchone())     # 매도 기록 없으면 예전처럼 정리
+        self.assertTrue(any("봇 꺼진 사이" in n for n in notes))
+
+
 if __name__ == "__main__":
     unittest.main()
