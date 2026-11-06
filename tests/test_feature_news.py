@@ -40,6 +40,19 @@ Buy                                </td><td>양승수</td><td>메리츠증권</t
         self.assertEqual(H.save(rows, db="h.db"), 1); self.assertEqual(H.save(rows, db="h.db"), 0)
 
 
+class Kind(unittest.TestCase):
+    def test_parse_classify(self):
+        import kind_disclosure as K
+        page = """<tr><td>18:10</td><td><a onclick="companysummary_open('38393');">디티앤씨알오</a></td>
+        <td><a href="#" onclick="openDisclsViewer('20261106000901','');">[정정] 단일판매ㆍ공급계약체결(자율공시)</a></td><td>디티앤씨알오</td></tr>"""
+        rows = K.parse(page, "2026-11-06")
+        self.assertEqual(rows, [("20261106000901", "2026-11-06", "18:10", "디티앤씨알오", "[정정] 단일판매ㆍ공급계약체결(자율공시)", "디티앤씨알오")])
+        self.assertEqual([K.classify(t) for t in ("단일판매ㆍ공급계약체결", "영업(잠정)실적(공정공시)", "자기주식취득결정", "유상증자결정", "주식등의대량보유")],
+                         ["수주", "실적", "자사주", "증자", "기타"])
+        self.assertEqual(K.save(rows, {"디티앤씨알오": "383930"}, db="k.db"), (1, False))
+        self.assertEqual(K.save(rows, {}, db="k.db"), (0, True))
+
+
 class YoutubeArchive(unittest.TestCase):
     def test_archive(self):
         import youtube_stock_monitor as Y

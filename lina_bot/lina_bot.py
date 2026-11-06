@@ -2121,7 +2121,9 @@ async def feature_news_loop():
         n = await asyncio.to_thread(feature_news.collect)
         import hk_consensus      # ★ 11-05 한경 컨센서스 기업 리포트(목표가·의견)도 같이
         k = await asyncio.to_thread(hk_consensus.collect)
-        print(f"✅ [특징주뉴스] 새로 {n}건 · [한경컨센서스] 새로 {k}건")
+        import kind_disclosure   # ★ 11-06 거래소 KIND 공시(수주·실적·자사주·증자)도 같이
+        d = await asyncio.to_thread(kind_disclosure.collect)
+        print(f"✅ [특징주뉴스] 새로 {n}건 · [한경컨센서스] 새로 {k}건 · [KIND공시] 새로 {d}건")
     except Exception as e:
         print(f"⚠️ [특징주뉴스] 수집 오류: {e}")
 
@@ -2922,7 +2924,7 @@ async def on_ready():
     try:
         if not feature_news_loop.is_running():
             feature_news_loop.start()
-        print("✅ [시스템] [특징주] 뉴스·한경 컨센서스 리포트 수집 (거래일 08:00~18:30, 30분마다) 가동 성공!")
+        print("✅ [시스템] [특징주] 뉴스·한경 컨센서스·KIND 공시 수집 (거래일 08:00~18:30, 30분마다) 가동 성공!")
     except Exception as e: print(f"⚠️ [에러] 특징주 뉴스 수집: {e}")
 
 def _fetch_sbo2_status_sync(api, positions: dict):
