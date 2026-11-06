@@ -55,6 +55,9 @@ class Spike(unittest.TestCase):
         api = type("A", (), {"get_watchlist_groups": lambda s, h: {"1": "끼", "2": "new"},
                              "get_watchlist_stocks": lambda s, g, h: {"1": [("030530", "원익홀딩스")], "2": [("A", "a")]}[g]})()
         self.assertEqual(S.group_codes(api, "id"), {"030530": "원익홀딩스"})
+        api6 = type("A", (), {"get_watchlist_groups": lambda s, h: {"9": "isee5"},
+                              "get_watchlist_stocks": lambda s, g, h: [(str(i), str(i)) for i in range(6)]})()
+        self.assertEqual(len(S.group_codes(api6, "id")), 5)               # ★ 5종목만
 
 
 if __name__ == "__main__":

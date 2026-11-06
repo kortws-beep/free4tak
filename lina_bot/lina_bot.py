@@ -2110,7 +2110,7 @@ async def before_broker_loop():
     await client.wait_until_ready()
 
 
-# ★ 2026-11-07 대장 — '끼' 관심그룹(한투) 급등 알림: A 5분 +3%↑·거래대금 급증 / B 계단식 → 고가 돌파(core/spike_watch.py). 매매 안 함.
+# ★ 2026-11-07 대장 — 'isee5' 관심그룹(한투, 항상 5종목) 급등 알림: A 5분 +3%↑·거래대금 급증 / B 계단식 → 고가 돌파(core/spike_watch.py). 매매 안 함.
 _spike = {"w": None, "codes": {}, "loaded": 0.0, "warned": ""}
 
 
@@ -2141,7 +2141,7 @@ async def spike_watch_loop():
         alerts, q = await asyncio.to_thread(_spike_tick, now)
         if not _spike["codes"] and _spike["warned"] != str(now.date()):
             _spike["warned"] = str(now.date())
-            print("⚠️ [끼알림] 한투 관심그룹 '끼'(또는 'V알림')를 못 찾음 — 그룹을 만들면 10분 안에 읽음")
+            print("⚠️ [끼알림] 한투 관심그룹 'isee5'를 못 찾음 — 그룹을 만들면 10분 안에 읽음")
         if not alerts:
             return
         channel = await client.fetch_channel(REPORT_CHANNEL_ID)
@@ -2975,7 +2975,7 @@ async def on_ready():
     try:
         if not spike_watch_loop.is_running():
             spike_watch_loop.start()
-        print("✅ [시스템] '끼' 관심그룹 급등 알림 (거래일 09:00~15:20, 1분마다) 가동 성공!")
+        print("✅ [시스템] 'isee5' 관심그룹 급등 알림 (거래일 09:00~15:20, 1분마다) 가동 성공!")
     except Exception as e: print(f"⚠️ [에러] 끼 알림: {e}")
 
     try:

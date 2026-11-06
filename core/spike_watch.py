@@ -3,7 +3,7 @@ spike_watch.py — 대장 관심 '끼 강한 종목' 급등 알림 (2026-11-07, 
 ================================================================
 [이 파일이 하는 일 — 비개발자용 설명]
 대장: "끼가 강한 놈들 중심으로 보거든 — 수급이 들어오면 바로 치고 가는 놈들." (11-06 원익홀딩스 -9% → +6%처럼)
-매수는 대장이 하고, 리나는 놓치지 않게 신호만 준다(매매 안 함). 대장이 한투 관심그룹(기본 이름 '끼')에 넣은 종목만 1분마다 본다.
+매수는 대장이 하고, 리나는 놓치지 않게 신호만 준다(매매 안 함). 대장이 한투 관심그룹 'isee5'(항상 5종목)에 넣은 종목만 1분마다 본다.
   A. 급등 시작형 — 음봉이든 양봉이든 5분 안에 +3%↑ 치고 올라옴 & 그 5분 거래대금이 오늘 평소(5분 평균)의 2.5배↑·3억↑
      → "여기서부터 수급 보고 매수 준비". 같은 종목 30분에 한 번.
   B. 계단식 → 돌파형 — 최근 60분 동안 15분마다 저점·고점을 높이며(4칸 중 3칸↑) +2%↑ 야금야금 오르다가,
@@ -12,7 +12,9 @@ spike_watch.py — 대장 관심 '끼 강한 종목' 급등 알림 (2026-11-07, 
 """
 import os
 
-GROUP_NAMES = {n.strip().lower() for n in os.getenv("LINA_SPIKE_GROUP", "끼,v알림").split(",") if n.strip()}
+# ★ 11-07 대장 — 관심그룹 이름 "isee5"(항상 5종목만 — 많으면 시선이 분산됨). 예전 기본 '끼'·'V알림'도 받음.
+GROUP_NAMES = {n.strip().lower() for n in os.getenv("LINA_SPIKE_GROUP", "isee5,끼,v알림").split(",") if n.strip()}
+MAX_CODES = 5
 A_WIN, A_UP, A_VAL_X, A_VAL_MIN, A_COOL = 5, 3.0, 2.5, 3e8, 30
 B_LOOK, B_UP, B_STEP, B_JUMP_WIN, B_JUMP, B_VAL_X = 60, 2.0, 15, 3, 1.5, 2.0
 
@@ -25,7 +27,7 @@ def group_codes(api, hts_id: str) -> dict:
     for gc, gn in (api.get_watchlist_groups(hts_id) or {}).items():
         if (gn or "").strip().lower() in GROUP_NAMES:
             out.update(dict(api.get_watchlist_stocks(gc, hts_id) or []))
-    return out
+    return dict(list(out.items())[:MAX_CODES])       # 대장 원칙: 5종목만(더 넣어도 앞 5개만 봄)
 
 
 def _mins(hhmm: str) -> int:
