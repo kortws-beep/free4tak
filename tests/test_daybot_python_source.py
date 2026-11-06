@@ -104,6 +104,25 @@ class NewBuyCutoff(unittest.TestCase):
         finally:
             daybot.now_hhmm, daybot.get_all_positions = old
 
+    def test_min_market_cap(self):
+        # ★ 11-06 대장 — 일반 엔진 시총 하한 1조(hts_avls 억원), 시총 모르면(0) 막지 않음
+        old = daybot.now_hhmm, daybot.get_all_positions
+        daybot.get_all_positions = None
+        daybot.now_hhmm = lambda: "1000"
+        try:
+            for cap, want in (("5000", []), ("12000", ["111110"]), ("0", ["111110"])):
+                bought, logged = [], []
+                b = self._scan_bot(bought)
+                b.api.get_market_data = lambda c, cap=cap: {"stck_prpr": "10000", "prdy_ctrt": "5.0", "hts_avls": cap}
+                b.db = type("D", (), {"log_candidate": lambda self, *a, **k: logged.append(k.get("skip_reason")),
+                                      "get_today_realized": lambda self: 0})()
+                b._run_candidate_scan_and_maybe_buy()
+                self.assertEqual(bought, want, cap)
+                if not want:
+                    self.assertIn("시총미달", logged)
+        finally:
+            daybot.now_hhmm, daybot.get_all_positions = old
+
     def test_down_market_skips_buy_but_logs(self):
         # 10-19 대장 결정 — 전날 국면 35% 미만이면 신규매수 쉬기, 후보는 '하락장쉬기'로 기록
         # 10-26 대장 결정 — 단, daybot 보유가 DOWN_SLOTS(1) 미만이면 DOWN_AMOUNT(50만)로 1종목은 운영

@@ -196,6 +196,8 @@ PAUSE_BELOW_PCT = float(os.getenv("DAYBOT_PAUSE_BELOW", "35") or 0)
 #   daybot 보유가 DOWN_SLOTS 미만일 때만 신규매수(들고 넘어간 종목 있으면 그날은 안 삼), 매수금은 DOWN_AMOUNT 고정.
 #   완전히 쉬려면 .env에 DAYBOT_DOWN_SLOTS=0
 DOWN_SLOTS = int(os.getenv("DAYBOT_DOWN_SLOTS", "1") or 0)
+# ★ 2026-11-06 대장 — 일반 엔진 후보 시총 하한(억원, 0이면 끔). 음봉·이벤트 엔진은 따로(이미 거래대금·대장 기준).
+MIN_CAP_EOK = float(os.getenv("DAYBOT_MIN_CAP_EOK", "10000") or 0)
 DOWN_AMOUNT = int(os.getenv("DAYBOT_DOWN_AMOUNT", "500000") or 500000)
 # ★ 2026-10-30 12:3x 대장 결정 — "슬롯이 있었으면 하나 들어가서 기다려보면 되지"(HMM이 하락장 슬롯을 쓰는 동안 지수 반등 신호를 놓침)
 #   → 음봉 엔진 전용 슬롯(대장이 시드 51만 추가). 양봉 엔진(하락장·정상장 슬롯) 수와 따로 셈, 국면과 상관없이 지수 -2% 날 작동.
@@ -1780,6 +1782,17 @@ class DayBot:
             except (TypeError, ValueError):
                 continue
             if price <= 0:
+                continue
+            # ★ 2026-11-06 대장 결정 — 일반 엔진 시총 하한 1조(후보 10-06~11-05: 1조 미만 당일 -1.8~-2.2%·다음날 -5%대,
+            #   실제 매매 소형 9건 1승). "요즘은 시총 큰 것도 쉽게 10%씩 가니 하한 1조도 좋은 선택" — 횡보·상승장 오면 다시 볼 것.
+            try:
+                cap_eok = float(mdata.get("hts_avls", 0) or 0)
+            except (TypeError, ValueError):
+                cap_eok = 0
+            if MIN_CAP_EOK and 0 < cap_eok < MIN_CAP_EOK:
+                print(f"⏭️ [daybot] {code} 패스 — 시총 {cap_eok:,.0f}억 < {MIN_CAP_EOK:,.0f}억")
+                self.db.log_candidate(code, self._name(code), tier, price, chg,
+                                       skip_reason="시총미달", raw_market_data=mdata)
                 continue
             if now_hhmm() < EARLY_ENTRY_CUTOFF_TIME:
                 lo = early_min_change(set(self._recent_tags.get(code, {}).keys()) or set(code_multi_tag_map.get(code, [])))
