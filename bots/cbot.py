@@ -1769,18 +1769,26 @@ class CBot:
     # ============================================================
     # 매수 신호 판단
     # ============================================================
+    def _night_block(self) -> str:
+        """★ 야간 신규 매수 (23시~06시) — BTC +1% AND 탐욕 50 이상 둘 다 충족해야 허용(막히면 사유, 아니면 "").
+        (2026-10-13 대장: +2%는 과도함, 다른 안전장치들이 있으니 +1%로 완화)"""
+        if not self._is_night():
+            return ""
+        btc_surge = self.btc_rate >= 1.0    # BTC +1% 이상
+        greed_ok  = self.fear_greed >= 50
+        if btc_surge and greed_ok:          # 둘 다 충족해야 허용
+            return ""
+        reason = []
+        if not btc_surge: reason.append(f"BTC {self.btc_rate:+.1f}%<1%")
+        if not greed_ok:  reason.append(f"탐욕{self.fear_greed}<50")
+        return f"야간 매수 금지 ({', '.join(reason)})"
+
     def check_buy_signal(self, market: str) -> tuple:
         """반환: (매수 여부, 지표, 사유)"""
-        # ★ 야간 신규 매수 (23시~06시) — BTC +1% AND 탐욕 50 이상 둘 다 충족해야 허용
-        #   (2026-10-13 대장: +2%는 과도함, 다른 안전장치들이 있으니 +1%로 완화)
+        night = self._night_block()
+        if night:
+            return False, {}, night
         if self._is_night():
-            btc_surge = self.btc_rate >= 1.0    # BTC +1% 이상
-            greed_ok  = self.fear_greed >= 50
-            if not (btc_surge and greed_ok):    # 둘 다 충족해야 허용
-                reason = []
-                if not btc_surge: reason.append(f"BTC {self.btc_rate:+.1f}%<1%")
-                if not greed_ok:  reason.append(f"탐욕{self.fear_greed}<50")
-                return False, {}, f"야간 매수 금지 ({', '.join(reason)})"
             print(f"🌙 야간 특례 매수 허용 — BTC:{self.btc_rate:+.1f}% 탐욕:{self.fear_greed}")
         ind = self.get_indicators(market)
         if not ind:
@@ -2955,7 +2963,14 @@ class CBot:
                     print(f"📉 비트 24시간 {self.btc_24h:+.2f}% — 매수 쉬기")
                 elif self.btc_funding is not None and self.btc_funding < BTC_FUNDING_MIN:
                     print(f"🧊 비트 펀딩비 {self.btc_funding:+.4f}% — 매수 쉬기")
+                elif self._night_block():
+                    # ★ 11-06 로그 정리(제미나이 검토 7) — 야간 금지는 코인마다 같은 사유라 한 번만(사유가 바뀔 때만) 찍음
+                    msg = self._night_block()
+                    if msg != getattr(self, "_last_night_msg", ""):
+                        print(f"🌙 {msg} — 후보 {len(self.coin_pool)}개 전부 패스")
+                    self._last_night_msg = msg
                 else:
+                    self._last_night_msg = ""
                     for market in self.coin_pool:
                         if available_slots <= 0:
                             break

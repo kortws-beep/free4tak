@@ -1674,7 +1674,10 @@ class DayBot:
             if DIP_SLOTS > 0 and self._dip_count() < DIP_SLOTS:
                 use_dip = True
             else:
-                print(f"⏭️ [daybot] 이벤트 섹터 {name} 반등 +{bounce:.1f}% — 슬롯 찼음(일반 {self._regular_count()}/{limit}·음봉 {self._dip_count()}/{DIP_SLOTS})")
+                msg = f"⏭️ [daybot] 이벤트 섹터 {name} 반등 +{bounce:.1f}% — 슬롯 찼음(일반 {self._regular_count()}/{limit}·음봉 {self._dip_count()}/{DIP_SLOTS})"
+                if e.get("last_skip") != (code, "slot"):        # ★ 11-06 로그 정리 — 같은 종목·같은 사유는 한 번만
+                    print(msg)
+                e["last_skip"] = (code, "slot")
                 return
         self.code_name_map.setdefault(code, name)
         self.db.log_candidate(code, name, event_sector.TAG, price, chg, bought=True)
@@ -1704,6 +1707,7 @@ class DayBot:
         was = getattr(self, "_idx_paused", (None, False))
         today = today_str()
         if paused and was != (today, True):
+            print(f"⏸️ [daybot] 일반 매수 멈춤 — 지수 장중 -{dip_leader.INDEX_DROP:g}%↓ 뒤 아직 마이너스")
             self._notify(f"⏸️ [daybot] 지수 장중 -{dip_leader.INDEX_DROP:g}% — 일반 매수 멈춤(양전환하면 다시, 그동안 음봉·이벤트 엔진만)")
         elif not paused and was == (today, True):
             self._notify("▶️ [daybot] 지수 양전환 — 일반 매수 다시 가동")
@@ -1712,8 +1716,7 @@ class DayBot:
 
     def _run_candidate_scan_and_maybe_buy(self):
         if self._index_dropped_today():
-            print(f"⏸️ [daybot] 일반 매수 멈춤 — 지수 장중 -{dip_leader.INDEX_DROP:g}%↓ 뒤 아직 마이너스")
-            return
+            return                                     # ★ 11-06 로그 정리 — 멈춤/재가동은 _index_dropped_today가 바뀔 때만 알림·기록
         reserve = 1 if self._evt_hunting() else 0   # ★ 11-04 이벤트 섹터 엔진이 찾는 중이면 1슬롯 양보
         if self._daily_loss_hit():
             print(f"🛑 [daybot] 일손실 한도({DAILY_LOSS_LIMIT:,}원) — 오늘 신규매수 없음")

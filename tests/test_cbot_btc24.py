@@ -38,6 +38,21 @@ def mk(now, ago, n=145):
     return b
 
 
+class NightBlock(unittest.TestCase):
+    def test_night_reason(self):
+        # ★ 11-06 로그 정리 — 야간 금지 사유는 코인 무관이라 _night_block 한 곳에서(후보 루프는 한 번만 찍음)
+        b = mk(0, 0)
+        b._is_night = lambda: True
+        b.btc_rate, b.fear_greed = 3.8, 34
+        self.assertEqual(b._night_block(), "야간 매수 금지 (탐욕34<50)")
+        self.assertEqual(b.check_buy_signal("KRW-A")[2], "야간 매수 금지 (탐욕34<50)")
+        b.fear_greed = 55
+        self.assertEqual(b._night_block(), "")
+        b._is_night = lambda: False
+        b.fear_greed = 10
+        self.assertEqual(b._night_block(), "")
+
+
 class Btc24(unittest.TestCase):
     def test_update_and_notify_once(self):
         b = mk(98.5, 100.0)
