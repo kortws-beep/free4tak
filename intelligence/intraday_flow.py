@@ -7,6 +7,7 @@ intraday_flow.py — 종목별 외국인·기관 장중 잠정(가집계) 수급
   ★ 키움 ka10064(장중투자자별매매차트) — 대장이 보는 [1051] 화면과 같은 거래소 잠정(금액·수량, 09:19·09:51·11:00·13:09·14:14쯤 5회),
      대장 "키움 게 더 정확" → 주 데이터. 테이블 kflow.
   한투 HHPTJ04160200(종목별 외인기관 추정가집계) — 증권사 직원이 장중 입력한 누계(주), 비교용(테이블 flow).
+  ★ 키움 ka10040(당일 주요 거래원) — 외국계 창구 추정 매도·매수 합 + 상위 5 창구, 장중 6번 스냅샷(테이블 broker) — 잠정과 어느 쪽이 빠른지 비교용.
   입력 시각 외국인 09:30·11:20·13:20·14:30 / 기관 10:00·11:20·13:20·14:30 (bsop_hour_gb 1~5, 5가 마지막).
   장 끝난 뒤에도 그날 5회분을 다 줘서 하루 한 번(리나 15:45)만 모으면 됨.
   대상: 최근 20일 평균 거래대금 100억↑ 종목 + NEW·SUB 관심그룹.
@@ -113,6 +114,52 @@ def save_kiwoom(date: str, code: str, rows: list, db: str = DB_PATH):
     c.executemany("INSERT OR REPLACE INTO kflow VALUES (?,?,?,?,?,?,?,?,?)", [(date, code, *r) for r in rows])
     c.commit()
     c.close()
+
+
+def broker_row(kw, code: str):
+    """★ 11-06 대장(11-05 삼성전자: 외국계 창구 매도 208만 주인데 잠정 외국인은 -60억뿐) — 키움 ka10040(당일 주요 거래원).
+    → (외국계 추정 매도 합, 매수 합, 매도 상위5 [(창구, 수량)], 매수 상위5) 주 단위 / 실패 None."""
+    try:
+        r = kw._post("rkinfo", "ka10040", {"stk_cd": code})
+    except Exception:
+        return None
+    if r.get("return_code") not in (0, "0"):
+        return None
+    n = lambda v: int(str(v or "0").replace("+", "").replace("--", "-") or 0)  # noqa: E731
+    top = lambda side: [(r.get(f"{side}_trde_ori_{i}", ""), n(r.get(f"{side}_trde_ori_qty_{i}"))) for i in range(1, 6)  # noqa: E731
+                        if r.get(f"{side}_trde_ori_{i}")]
+    try:
+        return n(r.get("frgn_sel_prsm_sum")), n(r.get("frgn_buy_prsm_sum")), top("sel"), top("buy")
+    except ValueError:
+        return None
+
+
+def save_broker(date: str, tm: str, code: str, row, db: str = DB_PATH):
+    c = sqlite3.connect(db, timeout=10)
+    c.execute("CREATE TABLE IF NOT EXISTS broker (date TEXT, tm TEXT, code TEXT, frgn_sell INTEGER, frgn_buy INTEGER, "
+              "top_sell TEXT, top_buy TEXT, PRIMARY KEY(date, tm, code))")
+    import json as _j
+    c.execute("INSERT OR REPLACE INTO broker VALUES (?,?,?,?,?,?,?)",
+              (date, tm, code, row[0], row[1], _j.dumps(row[2], ensure_ascii=False), _j.dumps(row[3], ensure_ascii=False)))
+    c.commit()
+    c.close()
+
+
+def collect_broker(date: str, tm: str, codes=None, kw=None) -> int:
+    """거래원(외국계 창구) 스냅샷 — 리나가 장중 여러 번(잠정 집계 시각 근처)."""
+    if codes is None:
+        codes = universe()
+    if kw is None:
+        from kiwoom_api import KiwoomAPI
+        kw = KiwoomAPI()
+    ok = 0
+    for code in codes:
+        row = broker_row(kw, code)
+        if row:
+            save_broker(date, tm, code, row)
+            ok += 1
+        time.sleep(0.25)
+    return ok
 
 
 def save_prices(date: str, quotes: dict, db: str = DB_PATH):

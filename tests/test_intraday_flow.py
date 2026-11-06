@@ -39,6 +39,17 @@ class Flow(unittest.TestCase):
         F.save_kiwoom("2026-11-04", "005930", rows, db="k.db")
         self.assertEqual(sqlite3.connect("k.db").execute("SELECT count(*) FROM kflow").fetchone()[0], 2)
 
+    def test_broker(self):
+        class KW:
+            def _post(self, path, aid, body):
+                return {"return_code": 0, "frgn_sel_prsm_sum": "-5139976", "frgn_buy_prsm_sum": "+5580321",
+                        "sel_trde_ori_1": "모건스탠리", "sel_trde_ori_qty_1": "-3509107",
+                        "buy_trde_ori_1": "JP모간서울", "buy_trde_ori_qty_1": "+3713098"}
+        row = F.broker_row(KW(), "005930")
+        self.assertEqual(row, (-5139976, 5580321, [("모건스탠리", -3509107)], [("JP모간서울", 3713098)]))
+        F.save_broker("2026-11-06", "1550", "005930", row, db="b.db")
+        self.assertEqual(sqlite3.connect("b.db").execute("SELECT frgn_sell, frgn_buy FROM broker").fetchone(), (-5139976, 5580321))
+
     def test_prices_next_day(self):
         F.save_prices("2026-11-04", {"A": {"price": 100, "open": 95, "high": 101, "low": 94, "chg": 2, "prev_close": 98}}, db="p.db")
         F.save_prices("2026-11-05", {"A": {"price": 104, "open": 102, "high": 106, "low": 100, "chg": 4}}, db="p.db")

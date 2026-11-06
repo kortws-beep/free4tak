@@ -2084,6 +2084,32 @@ async def before_intraday_flow_loop():
     await client.wait_until_ready()
 
 
+# ★ 2026-11-06 대장 — 거래원(외국계 창구) 장중 스냅샷: 잠정 집계(09:19·09:51·11:00·13:09·14:14쯤) 근처 + 마감 뒤
+BROKER_TIMES = {"0930", "1000", "1105", "1315", "1420", "1550"}
+_broker_done = {"key": ""}
+
+
+@tasks.loop(minutes=1)
+async def broker_loop():
+    kst_now = datetime.datetime.now(KST)
+    hhmm = kst_now.strftime("%H%M")
+    key = f"{kst_now.date()}-{hhmm}"
+    if hhmm not in BROKER_TIMES or _broker_done["key"] == key or not _is_trading_day():
+        return
+    _broker_done["key"] = key
+    try:
+        import intraday_flow
+        n = await asyncio.to_thread(intraday_flow.collect_broker, kst_now.date().isoformat(), hhmm)
+        print(f"✅ [거래원] {hhmm} {n}종목 저장")
+    except Exception as e:
+        print(f"⚠️ [거래원] 수집 오류: {e}")
+
+
+@broker_loop.before_loop
+async def before_broker_loop():
+    await client.wait_until_ready()
+
+
 # ★ 2026-11-05 대장 — '[특징주]' 뉴스를 시각과 함께 쌓음(횡보장 개별 특징주 엔진 검증용, 매매 안 함). intelligence/feature_news.py
 @tasks.loop(minutes=30)
 async def feature_news_loop():
@@ -2886,6 +2912,12 @@ async def on_ready():
             intraday_flow_loop.start()
         print(f"✅ [시스템] 외국인·기관 잠정 수급 수집 ({INTRADAY_FLOW_HHMM[:2]}:{INTRADAY_FLOW_HHMM[2:]}, 거래일) 가동 성공!")
     except Exception as e: print(f"⚠️ [에러] 잠정 수급 수집: {e}")
+
+    try:
+        if not broker_loop.is_running():
+            broker_loop.start()
+        print(f"✅ [시스템] 거래원(외국계 창구) 스냅샷 ({', '.join(sorted(BROKER_TIMES))}, 거래일) 가동 성공!")
+    except Exception as e: print(f"⚠️ [에러] 거래원 스냅샷: {e}")
 
     try:
         if not feature_news_loop.is_running():
