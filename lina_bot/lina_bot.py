@@ -2110,6 +2110,57 @@ async def before_broker_loop():
     await client.wait_until_ready()
 
 
+# ★ 2026-11-07 대장 — '끼' 관심그룹(한투) 급등 알림: A 5분 +3%↑·거래대금 급증 / B 계단식 → 고가 돌파(core/spike_watch.py). 매매 안 함.
+_spike = {"w": None, "codes": {}, "loaded": 0.0, "warned": ""}
+
+
+def _spike_tick(now):
+    import time as _t
+    import spike_watch
+    from kis_api import KisAPI
+    if _spike["w"] is None:
+        _spike["w"] = spike_watch.SpikeWatch()
+    api = KisAPI()
+    if _t.time() - _spike["loaded"] > 600:
+        _spike["codes"] = spike_watch.group_codes(api, os.getenv("KIS_HTS_ID2", os.getenv("KIS_HTS_ID", "")))
+        _spike["loaded"] = _t.time()
+    codes = _spike["codes"]
+    if not codes:
+        return [], {}
+    q = api.get_multi_price(list(codes), pause=0.1)
+    return _spike["w"].update(now.date().isoformat(), now.strftime("%H%M"), q), q
+
+
+@tasks.loop(minutes=1)
+async def spike_watch_loop():
+    now = datetime.datetime.now(KST)
+    hhmm = now.strftime("%H%M")
+    if not ("0900" <= hhmm <= "1520") or not _is_trading_day():
+        return
+    try:
+        alerts, q = await asyncio.to_thread(_spike_tick, now)
+        if not _spike["codes"] and _spike["warned"] != str(now.date()):
+            _spike["warned"] = str(now.date())
+            print("⚠️ [끼알림] 한투 관심그룹 '끼'(또는 'V알림')를 못 찾음 — 그룹을 만들면 10분 안에 읽음")
+        if not alerts:
+            return
+        channel = await client.fetch_channel(REPORT_CHANNEL_ID)
+        for code, kind, why in alerts:
+            x = q.get(code, {})
+            name = _spike["codes"].get(code) or x.get("name", code)
+            head = "🔥 [끼 A 급등 시작]" if kind == "A" else "🪜 [끼 B 계단식 돌파]"
+            tail = "여기서부터 수급 보고 매수 준비" if kind == "A" else "주포가 올리는 중일 수 있음"
+            await send_safe_message(channel, f"{head} {name}({code}) {float(x.get('price') or 0):,.0f}원 "
+                                             f"(오늘 {float(x.get('chg') or 0):+.1f}%) — {why} · {tail}")
+    except Exception as e:
+        print(f"⚠️ [끼알림] 오류: {e}")
+
+
+@spike_watch_loop.before_loop
+async def before_spike_watch_loop():
+    await client.wait_until_ready()
+
+
 # ★ 2026-11-05 대장 — '[특징주]' 뉴스를 시각과 함께 쌓음(횡보장 개별 특징주 엔진 검증용, 매매 안 함). intelligence/feature_news.py
 @tasks.loop(minutes=30)
 async def feature_news_loop():
@@ -2920,6 +2971,12 @@ async def on_ready():
             broker_loop.start()
         print(f"✅ [시스템] 거래원(외국계 창구) 스냅샷 ({', '.join(sorted(BROKER_TIMES))}, 거래일) 가동 성공!")
     except Exception as e: print(f"⚠️ [에러] 거래원 스냅샷: {e}")
+
+    try:
+        if not spike_watch_loop.is_running():
+            spike_watch_loop.start()
+        print("✅ [시스템] '끼' 관심그룹 급등 알림 (거래일 09:00~15:20, 1분마다) 가동 성공!")
+    except Exception as e: print(f"⚠️ [에러] 끼 알림: {e}")
 
     try:
         if not feature_news_loop.is_running():
