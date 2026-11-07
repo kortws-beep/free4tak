@@ -29,106 +29,14 @@ import sideways_pullback as SP          # noqa: E402
 import disclosure_stock as DS           # noqa: E402
 
 KIND_DB = DS.KIND_DB
-UA = {"User-Agent": "Mozilla/5.0"}
 COST, SLIP = 0.002, 0.001
-
-
-def kind_of(title: str):
-    t = title.replace(" ", "")
-    if t.startswith("[정정]"):
-        return None
-    if "PBR개선계획제출기업" in t:
-        return "PBR딱지"
-    if t.startswith("기업가치제고계획(자율공시)"):
-        return "밸류업"
-    if "자기주식취득신탁계약체결결정" in t:
-        return "취득신탁"
-    if "자기주식취득결정" in t:
-        return "취득결정"
-    if "주식소각결정" in t:
-        return "소각결정"
-    return None
-
-
-def _num(s):
-    m = re.search(r"([\d,]+)", s or "")
-    return int(m.group(1).replace(",", "")) if m else 0
-
-
-def parse_doc(text: str, kind: str) -> dict:
-    """본문 텍스트 → {주식수, 금액, 목적}."""
-    out = {"shares": 0, "amount": 0, "purpose": ""}
-    if kind == "취득결정":
-        out["shares"] = _num((re.search(r"취득예정주식\(주\)\s*보통주식\s*([\d,]+)", text) or [None, ""])[1])
-        out["amount"] = _num((re.search(r"취득예정금액\(원\)\s*보통주식\s*([\d,]+)", text) or [None, ""])[1])
-        m = re.search(r"취득목적\s*(.+?)\s*\d+\.\s*취득방법", text)
-        out["purpose"] = m.group(1)[:60] if m else ""
-    elif kind == "취득신탁":
-        out["amount"] = _num((re.search(r"계약금액\(원\)\s*([\d,]+)", text) or [None, ""])[1])
-        out["shares"] = _num((re.search(r"취득예정주식\(주\)\s*보통주식\s*([\d,]+)", text) or [None, ""])[1])
-        m = re.search(r"계약목적\s*(.+?)\s*\d+\.\s*", text)
-        out["purpose"] = m.group(1)[:60] if m else ""
-    elif kind == "소각결정":
-        out["shares"] = _num((re.search(r"소각할\s*주식의\s*종류와\s*수\s*보통주식\s*\(주\)\s*([\d,]+)", text) or [None, ""])[1])
-        out["amount"] = _num((re.search(r"소각예정금액\(원\)\s*([\d,]+)", text) or [None, ""])[1])
-        out["purpose"] = "소각"
-    return out
-
-
-def fetch_text(acptno: str, get) -> str:
-    v = get(f"https://kind.krx.co.kr/common/disclsviewer.do?method=search&acptno={acptno}&docno=&viewerhost=&viewerport=")
-    m = re.search(r"option value='(\d+)\|Y'", v)
-    if not m:
-        return ""
-    c = get(f"https://kind.krx.co.kr/common/disclsviewer.do?method=searchContents&docNo={m.group(1)}")
-    p = re.search(r"setPath\('[^']*','([^']+\.htm)'", c)
-    if not p:
-        return ""
-    d = get(p.group(1))
-    d = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", d, flags=re.S)
-    return " ".join(html.unescape(re.sub(r"<[^>]+>", " ", d)).split())
-
-
-def _get(u: str) -> str:
-    """KIND 본문은 utf-8인데 requests가 latin-1로 읽어 글자가 깨짐 → 바이트를 직접 풀음(안 되면 euc-kr)."""
-    import requests
-    b = requests.get(u, headers=UA, timeout=20).content
-    try:
-        return b.decode("utf-8")
-    except UnicodeDecodeError:
-        return b.decode("euc-kr", errors="ignore")
+# ★ 11-07 실전 엔진(core/buyback_signal.py)과 같은 본문 추출·분류를 씀
+from buyback_signal import kind_of, parse_doc, fetch_text, purpose_tag, UA, _get  # noqa: E402,F401
+from buyback_signal import detail as _detail  # noqa: E402
 
 
 def detail(acptno: str, kind: str, get=None) -> dict:
-    c = sqlite3.connect(KIND_DB)
-    c.execute("CREATE TABLE IF NOT EXISTS detail (acptno TEXT PRIMARY KEY, kind TEXT, shares INTEGER, amount INTEGER, purpose TEXT)")
-    r = c.execute("SELECT shares, amount, purpose FROM detail WHERE acptno=?", (acptno,)).fetchone()
-    if r:
-        c.close()
-        return {"shares": r[0], "amount": r[1], "purpose": r[2]}
-    if get is None:
-        import requests
-        get = _get
-    try:
-        d = parse_doc(fetch_text(acptno, get), kind)
-    except Exception as e:
-        print(f"  ⚠️ 본문 실패 {acptno}: {e}")
-        d = {"shares": 0, "amount": 0, "purpose": ""}
-    c.execute("INSERT OR REPLACE INTO detail VALUES (?,?,?,?,?)", (acptno, kind, d["shares"], d["amount"], d["purpose"]))
-    c.commit()
-    c.close()
-    time.sleep(0.3)
-    return d
-
-
-def purpose_tag(p: str, kind: str) -> str:
-    if kind == "소각결정" or "소각" in p:
-        return "소각"
-    if any(w in p for w in ("임직원", "보상", "상여", "RSU", "스톡", "우리사주", "성과")):
-        return "임직원보상"
-    if any(w in p for w in ("주주가치", "주가안정", "주가 안정", "주주환원", "가치제고")):
-        return "주주가치"
-    return "기타"
+    return _detail(acptno, kind, get=get, db=KIND_DB)
 
 
 def main():

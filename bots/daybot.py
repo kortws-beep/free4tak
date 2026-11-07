@@ -77,6 +77,7 @@ import market_regime   # ★ 2026-10-08 시장 국면(20일선 위 종목 비율
 import dip_leader      # ★ 2026-10-30 음봉 엔진(지수 급락일 중기 주도주 급락 매수)
 from sector_gate import SectorGate   # ★ 2026-10-30 하락장 슬롯 '주도 섹터 안 종목만'
 import event_sector   # ★ 2026-11-04 이벤트 섹터 엔진(MTN 아침 1섹터 · 지수 -2% 날 강반등 1종목)
+import buyback_signal  # ★ 2026-11-07 자사주 엔진(주주가치 목적·상장주식 1%↑ 자사주 취득 공시 → 5거래일 보유)
 
 load_dotenv(_os.path.join(_BASE, ".env"))
 
@@ -453,6 +454,7 @@ class DayBot:
         self._last_dip_ts = 0.0
         self._dip_sit = ("", False, "")              # ★ 10-31 (날짜, 켤까, 설명)
         # ★ 11-04 이벤트 섹터 엔진 — 날짜, 테마, {코드: 이름}, 지수 -2% 처음 본 시각, 지켜보기 끝 시각, 새 저가, 산 뒤 끝
+        self._bb = {"date": None, "done": [], "ts": 0.0, "kind_ts": 0.0}   # ★ 11-07 자사주 엔진(오늘 본 공시 접수번호)
         self._evt = {"date": None, "theme": None, "why": "", "codes": {}, "t0": None, "start": None, "lows": {},
                      "done": False, "ts": 0.0}
         # ★ 스캔이 백그라운드 스레드로 도는 이상, self.positions에 키를
@@ -507,6 +509,7 @@ class DayBot:
             partial_verify=self._partial_verify,
             # ★ 11-06 이벤트 섹터 엔진 진행(지수 -3% 본 시각·바닥 추적·끝남) — 장중 재시작해도 20분 지켜보기를 처음부터 안 하게
             event_state={k: self._evt.get(k) for k in ("date", "t0", "start", "idx", "done")},
+            buyback_state={"date": self._bb.get("date"), "done": list(self._bb.get("done") or [])},
             last_update=now_hms(),
         )
 
@@ -526,6 +529,9 @@ class DayBot:
         self._cancel_reconcile = saved.get("cancel_reconcile", {}) or {}
         self._partial_verify   = saved.get("partial_verify", {}) or {}
         self._evt_saved        = saved.get("event_state") or {}
+        _bbs = saved.get("buyback_state") or {}
+        if _bbs.get("date") == today_str():           # ★ 11-07 재시작해도 오늘 본 자사주 공시는 다시 안 봄
+            self._bb.update(date=_bbs["date"], done=list(_bbs.get("done") or []))
 
         if self._sold_today_date != today_str():
             self.sold_today = {}
@@ -644,6 +650,13 @@ class DayBot:
             #   그 전엔 손절 -10%, 산 날 포함 5거래일째 15:10 이후 정리(기존 -3.5% 손절·3일 기한 안 씀)
             if pos.get("buy_tag") == dip_leader.TAG:
                 self._check_dip_exit(code, pos, entry, rate, current)
+                continue
+            # ★ 11-07 자사주 엔진 — 손절 -10%, 산 날 포함 5거래일째 15:10 이후 정리(백테스트 5일 종가)
+            if pos.get("buy_tag") == buyback_signal.TAG:
+                if rate <= -buyback_signal.STOP_PCT:
+                    self._do_sell(code, pos["qty"], f"자사주손절({rate:.2f}%)", current)
+                elif pos.get("held_trading_days", 0) >= buyback_signal.HOLD_DAYS - 1 and now_hhmm() >= "1510":
+                    self._do_sell(code, pos["qty"], f"자사주기한정리({buyback_signal.HOLD_DAYS}거래일, {rate:+.2f}%)", current)
                 continue
 
             if pos.get("peak_price") is not None:
@@ -1513,9 +1526,12 @@ class DayBot:
         """음봉 슬롯을 쓰는 보유 수 — 음봉 엔진 종목 + ★ 11-05 음봉 슬롯을 빌려 산 이벤트 섹터 종목(slot="dip")."""
         return sum(1 for p in self.positions.values() if p.get("buy_tag") == dip_leader.TAG or p.get("slot") == "dip")
 
+    def _bb_count(self) -> int:
+        return sum(1 for p in self.positions.values() if p.get("buy_tag") == buyback_signal.TAG)
+
     def _regular_count(self) -> int:
-        """양봉 엔진 보유 수 — ★ 10-30 음봉 전용 슬롯 종목은 빼고 셈."""
-        return len(self.positions) - self._dip_count()
+        """양봉 엔진 보유 수 — ★ 10-30 음봉 전용 슬롯·★ 11-07 자사주 전용 슬롯 종목은 빼고 셈."""
+        return len(self.positions) - self._dip_count() - self._bb_count()
 
     def _dip_due(self, now_t: str) -> bool:
         """음봉 엔진을 돌릴 때인가 — 음봉 전용 슬롯이 비었고 dip_leader.START(10-31부터 14:30)~매수마감, 60초마다(국면 무관 — 지수 조건은 엔진 안에서)."""
@@ -1699,6 +1715,72 @@ class DayBot:
             self._notify(f"🎯 [daybot] 이벤트 섹터 매수 {name}({code}) {chg:+.1f}% · "
                          f"지수 바닥 확인 뒤 새 저가 대비 +{bounce:.1f}% — '{lead.get(code, '')}' 대장(테마 {e['theme']}) · "
                          f"매도는 일반 규칙(손절 -3.5%·+5% 30% → 트레일링)" + (" · 음봉 슬롯 빌려 씀" if use_dip else ""), critical=True)
+
+    # ============================================================
+    # ★ 2026-11-07 자사주 엔진 — core/buyback_signal.py 설명 참고(50만 전용 1슬롯, 국면 무관)
+    # ============================================================
+    def _bb_due(self, now_t: str) -> bool:
+        return (self._bb_count() < 1 and BUY_START_TIME <= now_t < NEW_BUY_END_TIME
+                and time.time() - self._bb.get("ts", 0) >= 60)
+
+    def _run_buyback_engine(self):
+        b = self._bb
+        b["ts"] = time.time()
+        today, now_t = today_str(), now_hhmm()
+        if b.get("date") != today:
+            b.update(date=today, done=[])
+        if self._daily_loss_hit():
+            return
+        if time.time() - b.get("kind_ts", 0) >= 120:   # KIND 오늘 공시 새로 읽기(2분마다)
+            b["kind_ts"] = time.time()
+            try:
+                import kind_disclosure
+                kind_disclosure.collect(today)
+            except Exception as e:
+                print(f"⚠️ [daybot] KIND 공시 조회 오류: {e}")
+        d = datetime.date.fromisoformat(today) - datetime.timedelta(days=1)
+        while d.weekday() >= 5:
+            d -= datetime.timedelta(days=1)
+        held = set(self.positions) | set(self.sold_today) | _lina_all_watches()
+        if get_all_positions:
+            try:
+                held |= {p["code"] for p in get_all_positions() if p["bot_type"] != "daybot"}
+            except Exception:
+                pass
+        for acpt, date, tm, code, comp, kind in buyback_signal.todays_events(today, d.isoformat()):
+            if acpt in b["done"]:
+                continue
+            ready = "0905" if (date != today or tm < "09:00") else (
+                datetime.datetime.strptime(tm, "%H:%M") + datetime.timedelta(minutes=2)).strftime("%H%M")
+            if now_t < ready:
+                continue
+            if code in held:
+                b["done"].append(acpt)
+                continue
+            det = buyback_signal.detail(acpt, kind)
+            if not (det["shares"] or det["amount"] or det["purpose"]):
+                continue                                # 본문 못 읽음 → 다음 분에 다시
+            md = self.api.get_market_data(code) or {}
+            try:
+                price, listed = float(md.get("stck_prpr") or 0), float(md.get("lstn_stcn") or 0)
+                chg = float(md.get("prdy_ctrt") or 0)
+            except (TypeError, ValueError):
+                continue
+            if price <= 0:
+                continue
+            b["done"].append(acpt)
+            ok, why = buyback_signal.judge(det, kind, listed, price)
+            name = comp or self._name(code)
+            self.code_name_map.setdefault(code, name)
+            if not ok:
+                print(f"⏭️ [daybot] 자사주 {name}({code}) 패스 — {why}")
+                self.db.log_candidate(code, name, buyback_signal.TAG, price, chg, skip_reason="자사주:" + why[:20])
+                continue
+            self.db.log_candidate(code, name, buyback_signal.TAG, price, chg, bought=True)
+            if self._do_buy(code, name, price, buyback_signal.TAG, amount_cap=buyback_signal.AMOUNT):
+                self._notify(f"🏦 [daybot] 자사주 엔진 매수 {name}({code}) {chg:+.1f}% — {why} · 공시 {date[5:]} {tm} · "
+                             f"{buyback_signal.HOLD_DAYS}거래일 보유(손절 -{buyback_signal.STOP_PCT:g}%)", critical=True)
+                break
 
     def _index_dropped_today(self) -> bool:
         """★ 11-04 대장 결정 — 지수(코스피·코스닥 중 하나)가 오늘 장중 -2%↓를 찍었고 아직 마이너스면 일반 엔진 신규매수 멈춤.
@@ -1999,6 +2081,12 @@ class DayBot:
                 if (not self._is_paused and self._evt_due(now_t)
                         and (self._scan_thread is None or not self._scan_thread.is_alive())):
                     self._scan_thread = threading.Thread(target=self._run_event_engine, daemon=True)
+                    self._scan_thread.start()
+
+                # 9-2) ★ 11-07 자사주 엔진(주주가치 목적·상장주식 1%↑ 자사주 취득 공시, 60초마다, 전용 1슬롯 50만)
+                if (not self._is_paused and self._bb_due(now_t)
+                        and (self._scan_thread is None or not self._scan_thread.is_alive())):
+                    self._scan_thread = threading.Thread(target=self._run_buyback_engine, daemon=True)
                     self._scan_thread.start()
 
                 if (not self._is_paused
