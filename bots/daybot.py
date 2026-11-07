@@ -1728,19 +1728,22 @@ class DayBot:
         b["ts"] = time.time()
         today, now_t = today_str(), now_hhmm()
         if b.get("date") != today:
-            b.update(date=today, done=[])
+            b.update(date=today, done=[], prev_done=False)
         if self._daily_loss_hit():
             return
+        d = datetime.date.fromisoformat(today) - datetime.timedelta(days=1)
+        while d.weekday() >= 5:
+            d -= datetime.timedelta(days=1)
         if time.time() - b.get("kind_ts", 0) >= 120:   # KIND 오늘 공시 새로 읽기(2분마다)
             b["kind_ts"] = time.time()
             try:
                 import kind_disclosure
+                if not b.get("prev_done"):            # ★ 하루 처음엔 전 거래일 저녁 공시(리나 수집 18:30 뒤)도 다시 읽음
+                    kind_disclosure.collect(d.isoformat())
+                    b["prev_done"] = True
                 kind_disclosure.collect(today)
             except Exception as e:
                 print(f"⚠️ [daybot] KIND 공시 조회 오류: {e}")
-        d = datetime.date.fromisoformat(today) - datetime.timedelta(days=1)
-        while d.weekday() >= 5:
-            d -= datetime.timedelta(days=1)
         held = set(self.positions) | set(self.sold_today) | _lina_all_watches()
         if get_all_positions:
             try:
