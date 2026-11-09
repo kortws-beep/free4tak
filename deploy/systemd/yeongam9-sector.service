@@ -1,0 +1,22 @@
+[Unit]
+StartLimitIntervalSec=300
+StartLimitBurst=10
+Description=영암9 섹터모니터 (sector_monitor)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=free4tak
+WorkingDirectory=/home/free4tak/k-bot/stock_bot
+Environment=PATH=/home/free4tak/k-bot/stock_bot/venv/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/home/free4tak/k-bot/stock_bot/venv/bin/python3 -u intelligence/sector_monitor.py
+# ★ 자동 재시작 (API 충돌로 죽어도 30초 후 재시작)
+Restart=always
+RestartSec=30s
+# 로그
+StandardOutput=append:/home/free4tak/k-bot/stock_bot/logs/sector_monitor.log
+StandardError=append:/home/free4tak/k-bot/stock_bot/logs/sector_monitor.log
+TimeoutStopSec=30
+[Install]
+WantedBy=multi-user.target

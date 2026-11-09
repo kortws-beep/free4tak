@@ -1,0 +1,18 @@
+[Unit]
+Description=영암9 sbo2 리나 스윙봇
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=free4tak
+WorkingDirectory=/home/free4tak/k-bot/stock_bot/lina_bot
+ExecStart=/home/free4tak/k-bot/stock_bot/venv/bin/python3 sbo2.py
+Restart=on-failure
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

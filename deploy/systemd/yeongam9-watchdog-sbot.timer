@@ -1,0 +1,11 @@
+[Unit]
+Description=영암9 sbot Watchdog 타이머
+Requires=yeongam9-watchdog-sbot.service
+
+[Timer]
+OnBootSec=60
+OnUnitActiveSec=30
+Unit=yeongam9-watchdog-sbot.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,15 @@
+[Unit]
+Description=영암9 통합 대시보드
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=free4tak
+WorkingDirectory=/home/free4tak/k-bot/stock_bot
+ExecStart=/home/free4tak/k-bot/stock_bot/venv/bin/python3 interface/dashboard.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

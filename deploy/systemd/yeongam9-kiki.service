@@ -1,0 +1,27 @@
+[Unit]
+StartLimitIntervalSec=300
+StartLimitBurst=5
+Description=영암9 AI 비서 키키 (kiki)
+After=network-online.target
+Wants=network-online.target
+# nbot보다 늦게 시작 (상태파일 생성 후 읽어야 함)
+After=yeongam9-nbot.service
+
+[Service]
+Type=simple
+User=free4tak
+WorkingDirectory=/home/free4tak/k-bot/stock_bot
+Environment=PATH=/home/free4tak/k-bot/stock_bot/venv/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/home/free4tak/k-bot/stock_bot/venv/bin/python3 -u interface/kiki.py
+
+Restart=on-failure
+RestartSec=30s
+
+StandardOutput=append:/home/free4tak/k-bot/stock_bot/logs/kiki.log
+StandardError=append:/home/free4tak/k-bot/stock_bot/logs/kiki.log
+
+# 디스코드 연결 끊김 자동 복구 시간
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

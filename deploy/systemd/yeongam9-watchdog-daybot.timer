@@ -1,0 +1,11 @@
+[Unit]
+Description=영암9 daybot Watchdog 타이머
+Requires=yeongam9-watchdog-daybot.service
+
+[Timer]
+OnBootSec=60
+OnUnitActiveSec=30
+Unit=yeongam9-watchdog-daybot.service
+
+[Install]
+WantedBy=timers.target

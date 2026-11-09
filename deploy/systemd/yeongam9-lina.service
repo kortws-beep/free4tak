@@ -1,0 +1,17 @@
+[Unit]
+Description=영암9 리나 디스코드 봇
+After=network.target
+
+[Service]
+Type=simple
+User=free4tak
+WorkingDirectory=/home/free4tak/k-bot/stock_bot/lina_bot
+ExecStart=/home/free4tak/k-bot/stock_bot/venv/bin/python3 lina_bot.py
+Restart=on-failure
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
