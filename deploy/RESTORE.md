@@ -43,7 +43,11 @@ bash k-bot/stock_bot/deploy/restore.sh ~/yeongam9_full_XXXX.tar.gz
 7. **마와리 노드**: `restore.sh`가 `sudo deploy/mawari_up.sh`를 실행합니다. 따로 돌려도 됩니다.
    노드 신원은 docker 볼륨 `mawari-data`에 있고, 백업에는 `k-bot/mawari_data_backup`으로 들어갑니다.
    지갑 주소는 `.env`의 `MAWARI_DELEGATOR_ALLOWLIST`에 있습니다.
-8. 시작: `./bot.sh start`. 상태 확인: `./bot.sh status`.
+8. **원격접속(윈도우 → 이 PC)**: `sudo deploy/remote_access_setup.sh`를 실행하세요. 방화벽을 먼저 잠그고, Tailscale을 예전 IP 그대로 복원하고, SSH를 설치합니다.
+   이어서 GNOME 원격 데스크톱을 켭니다(`grdctl rdp enable`, `disable-view-only`). 예전 인증서는 `~/.local/share/gnome-remote-desktop/certs`에 있습니다.
+   ⚠️ 자동 로그인이면 열쇠고리가 잠겨 있어서 `grdctl rdp set-credentials`가 저장에 실패합니다.
+   먼저 seahorse에서 "로그인" 열쇠고리 비번을 빈칸으로 바꾸세요. mstsc에서 사용자명은 `.\free4tak`입니다.
+9. 시작: `./bot.sh start`. 상태 확인: `./bot.sh status`.
    youtube-live가 실패하면 `ffmpeg`가 설치됐는지 확인하세요.
 
 ## 2026-11-09 복구 때 실제로 터진 것

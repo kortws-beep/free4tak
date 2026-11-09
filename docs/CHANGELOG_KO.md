@@ -4,6 +4,7 @@
 대상: sbot · daybot · cbot · 리나 · 키키 · 대시보드 · 서버 · 분석
 (odt 변경이력과 같은 문장. 최신이 위. 더 예전 기록은 git log·SCENARIOS.md)
 
+- 2026-11-09 | 서버 | 원격접속 새 PC로 — 방화벽 먼저 잠금(원격화면은 Tailscale만), Tailscale 예전 IP 그대로, SSH, 원격 데스크톱(열쇠고리 빈 비번 필요) · deploy/remote_access_setup.sh
 - 2026-11-09 | 서버 | 마와리 가디언 노드 새 PC로 — deploy/mawari_up.sh(예전 디스크 노드 데이터 그대로 옮겨 같은 노드 유지, 재부팅 자동시작, 로그창 sudoers, 주간 백업에 노드 데이터 포함), 지갑 주소는 .env
 - 2026-11-09 | 서버 | 새 PC 이전 복구 — venv 누락 패키지 13개(yfinance·websocket-client·yt-dlp 등) 설치로 리나 무한재시작·sbot/daybot 웹소켓 없음 해결, 서비스 전부 부팅 자동시작+watchdog, ffmpeg 설치로 유튜브 라이브 복구, 업비트·키움 허용 IP 새로 등록
 - 2026-11-09 | 서버 | 복구 키트 deploy/ — requirements.txt pip freeze 고정, backup.sh(~/k-bot 전체+DB 일관사본+crontab·systemd·IP, 매주 토 03:17 예전 디스크 /mnt/old로, 5개 유지), restore.sh(새 PC 한 번에), RESTORE.md(수동 확인: 업비트·키움 IP, git 설정)
