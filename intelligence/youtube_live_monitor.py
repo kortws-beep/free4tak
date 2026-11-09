@@ -302,10 +302,11 @@ def main():
         print("⚠️ openai 패키지 없음 — 로컬 AI 호출 불가, 종료")
         sys.exit(1)
 
-    from faster_whisper import WhisperModel
-    print(f"🤖 Whisper({WHISPER_MODEL_SIZE}) 모델 로딩 중... (CPU)")
-    model = WhisperModel(WHISPER_MODEL_SIZE, device="cpu", compute_type="int8")
-    print("✅ Whisper 모델 로드 완료")
+    # ★ 2026-11-09: GPU 있으면 GPU(cuda float16), 실패하면 CPU int8 — core/whisper_loader.py
+    from whisper_loader import load_whisper
+    print(f"🤖 Whisper({WHISPER_MODEL_SIZE}) 모델 로딩 중...")
+    model, dev = load_whisper(WHISPER_MODEL_SIZE)
+    print(f"✅ Whisper 모델 로드 완료 — {dev}")
 
     threads = []
     for handle, label in CHANNELS.items():

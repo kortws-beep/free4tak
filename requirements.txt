@@ -61,6 +61,9 @@ multidict==6.7.1
 multipledispatch==1.0.0
 narwhals==2.21.0
 numpy==2.4.4
+nvidia-cublas-cu12==12.9.3.13
+nvidia-cuda-nvrtc-cu12==12.9.86
+nvidia-cudnn-cu12==9.28.1.4
 oauthlib==4.0.1
 onnxruntime==1.31.1
 openai==3.46.0

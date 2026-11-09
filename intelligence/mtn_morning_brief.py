@@ -119,8 +119,9 @@ def transcribe(path: str) -> str:
     global _MODEL
     with _MODEL_LOCK:
         if _MODEL is None:
-            from faster_whisper import WhisperModel
-            _MODEL = WhisperModel(os.getenv("YT_WHISPER_MODEL", "small"), device="cpu", compute_type="int8")
+            from whisper_loader import load_whisper  # GPU 우선, 실패 시 CPU (2026-11-09)
+            _MODEL, _dev = load_whisper(os.getenv("YT_WHISPER_MODEL", "small"))
+            print(f"🤖 Whisper 로드 — {_dev}")
         segments, _ = _MODEL.transcribe(path, language="ko", vad_filter=True)
         return " ".join(s.text for s in segments)
 
