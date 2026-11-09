@@ -64,3 +64,4 @@
 0-18/3 15 * * 1-5 cd /home/free4tak/k-bot/stock_bot && /home/free4tak/k-bot/stock_bot/venv/bin/python3 intelligence/sbot_exit_watch.py >> /home/free4tak/k-bot/stock_bot/logs/sbot_exit_watch.log 2>&1
 30,45,55 8 * * 1-5 cd /home/free4tak/k-bot/stock_bot && /home/free4tak/k-bot/stock_bot/venv/bin/python3 intelligence/theme_open_obs.py >> /home/free4tak/k-bot/stock_bot/logs/theme_open_obs.log 2>&1
 54 5 * * 1-5 cd /home/free4tak/k-bot/stock_bot && /home/free4tak/k-bot/stock_bot/venv/bin/python3 intelligence/mtn_morning_brief.py >> /home/free4tak/k-bot/stock_bot/logs/mtn_morning_brief.log 2>&1
+17 3 * * 6 /home/free4tak/k-bot/stock_bot/deploy/backup.sh /mnt/old/home/free4tak/bk_bot >> /home/free4tak/k-bot/stock_bot/logs/backup.log 2>&1
