@@ -29,7 +29,8 @@ bash k-bot/stock_bot/deploy/restore.sh ~/yeongam9_full_XXXX.tar.gz
 
 1. **업비트 허용 IP**: 공인 IP가 바뀌면 cbot의 잔고 조회와 매도가 전부 실패합니다
    (`unregistered IP address`). 업비트 → Open API 관리 → 허용 IP에 새 IP를 등록하세요.
-2. **KIS / 키움 API**: IP 제한을 걸어 두었다면 마찬가지로 새 IP를 등록하세요.
+2. **키움 REST API 허용 IP**: 마찬가지로 새 IP를 등록해야 합니다. daybot이 키움으로 종목을 스크리닝합니다.
+   (한투(KIS)는 IP 등록이 없습니다. IP를 등록해야 하는 곳은 업비트와 키움 두 곳뿐입니다.)
 3. **시간대**: `timedatectl`이 `Asia/Seoul`이어야 합니다.
    다르면 `sudo timedatectl set-timezone Asia/Seoul`로 바꾸세요.
 4. **놓친 cron**: 복구하는 동안 지나간 작업(예: 20:10 `collect_daily_data.py`)은 수동으로 한 번 실행하세요.
