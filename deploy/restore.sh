@@ -28,7 +28,7 @@ step() { echo; echo "━━━ $* ━━━"; }
 step "[1] 시스템 패키지 (sudo 비밀번호 필요)"
 sudo apt-get update
 sudo apt-get install -y python3 python3-venv python3-pip python3-dev \
-  build-essential git curl sqlite3 ffmpeg default-jre
+  build-essential git curl sqlite3 ffmpeg default-jre docker.io tmux
 
 if [ -n "$ARCHIVE" ]; then
   step "[2] 백업 풀기: $ARCHIVE"
@@ -82,6 +82,9 @@ fi
 step "[5b] 재부팅 시 봇 로그창 자동 오픈 (GNOME autostart)"
 mkdir -p "$HOME/.config/autostart"
 cp deploy/open-bot-logs.desktop "$HOME/.config/autostart/" && echo "  ✅ 설치 (자동로그인 필요: /etc/gdm3/custom.conf AutomaticLogin=$USER)"
+
+step "[5c] 마와리 노드 (docker, 노드 데이터는 백업의 k-bot/mawari_data_backup)"
+sudo deploy/mawari_up.sh || echo "⚠️ 마와리 실패 — 나중에 sudo deploy/mawari_up.sh"
 
 step "[6] 점검"
 venv/bin/python3 tests/run_all.py | tail -3 || echo "⚠️ 테스트 실패 — 위 로그 확인"

@@ -40,7 +40,10 @@ bash k-bot/stock_bot/deploy/restore.sh ~/yeongam9_full_XXXX.tar.gz
 6. **Claude 원격 연결**: 부팅할 때 자동으로 켜려면 crontab에
    `@reboot sleep 30 && /usr/bin/tmux new -d -s claude "cd /home/free4tak/k-bot/stock_bot && /home/free4tak/.local/bin/claude remote-control"`
    한 줄을 넣으세요.
-7. 시작: `./bot.sh start`. 상태 확인: `./bot.sh status`.
+7. **마와리 노드**: `restore.sh`가 `sudo deploy/mawari_up.sh`를 실행합니다. 따로 돌려도 됩니다.
+   노드 신원은 docker 볼륨 `mawari-data`에 있고, 백업에는 `k-bot/mawari_data_backup`으로 들어갑니다.
+   지갑 주소는 `.env`의 `MAWARI_DELEGATOR_ALLOWLIST`에 있습니다.
+8. 시작: `./bot.sh start`. 상태 확인: `./bot.sh status`.
    youtube-live가 실패하면 `ffmpeg`가 설치됐는지 확인하세요.
 
 ## 2026-11-09 복구 때 실제로 터진 것
