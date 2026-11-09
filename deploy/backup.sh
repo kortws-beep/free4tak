@@ -36,7 +36,12 @@ DATE=$(date +%Y-%m-%d_%H%M)
 NAME="yeongam9_full_$DATE"
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
-mkdir -p "$DEST" "$WORK/$NAME/system" "$WORK/$NAME/db_snapshots"
+if ! mkdir -p "$DEST" 2>/dev/null || ! touch "$DEST/.wtest" 2>/dev/null; then
+  echo "❌ [$DATE] 백업 폴더에 쓸 수 없음: $DEST (읽기전용 마운트? → sudo mount -o remount,rw /mnt/old)"
+  exit 1
+fi
+rm -f "$DEST/.wtest"
+mkdir -p "$WORK/$NAME/system" "$WORK/$NAME/db_snapshots"
 
 echo "📦 영암9 전체 백업 시작 → $DEST/$NAME.tar.gz"
 
