@@ -33,7 +33,10 @@ bash k-bot/stock_bot/deploy/restore.sh ~/yeongam9_full_XXXX.tar.gz
 3. **시간대**: `timedatectl`이 `Asia/Seoul`이어야 합니다.
    다르면 `sudo timedatectl set-timezone Asia/Seoul`로 바꾸세요.
 4. **놓친 cron**: 복구하는 동안 지나간 작업(예: 20:10 `collect_daily_data.py`)은 수동으로 한 번 실행하세요.
-5. 시작: `./bot.sh start`. 상태 확인: `./bot.sh status`.
+5. **git 설정**: 새 PC에는 `~/.gitconfig`(이름·메일)와 `~/.git-credentials`(push 토큰)가 없어서 커밋이나 push가 실패합니다.
+   `git config --global user.name "탁원석"`, `git config --global user.email kortws@gmail.com`을 실행하고,
+   push는 처음 할 때 토큰을 입력하세요(`credential.helper store`).
+6. 시작: `./bot.sh start`. 상태 확인: `./bot.sh status`.
    youtube-live가 실패하면 `ffmpeg`가 설치됐는지 확인하세요.
 
 ## 2026-11-09 복구 때 실제로 터진 것
