@@ -37,7 +37,10 @@ bash k-bot/stock_bot/deploy/restore.sh ~/yeongam9_full_XXXX.tar.gz
 5. **git 설정**: 새 PC에는 `~/.gitconfig`(이름·메일)와 `~/.git-credentials`(push 토큰)가 없어서 커밋이나 push가 실패합니다.
    `git config --global user.name "탁원석"`, `git config --global user.email kortws@gmail.com`을 실행하고,
    push는 처음 할 때 토큰을 입력하세요(`credential.helper store`).
-6. 시작: `./bot.sh start`. 상태 확인: `./bot.sh status`.
+6. **Claude 원격 연결**: 부팅할 때 자동으로 켜려면 crontab에
+   `@reboot sleep 30 && /usr/bin/tmux new -d -s claude "cd /home/free4tak/k-bot/stock_bot && /home/free4tak/.local/bin/claude remote-control"`
+   한 줄을 넣으세요.
+7. 시작: `./bot.sh start`. 상태 확인: `./bot.sh status`.
    youtube-live가 실패하면 `ffmpeg`가 설치됐는지 확인하세요.
 
 ## 2026-11-09 복구 때 실제로 터진 것

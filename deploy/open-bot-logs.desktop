@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=영암9 봇 로그 콘솔
+Comment=재부팅 후 sbot/cbot/daybot/kiki/lina/sector/youtube-live 로그창 자동 오픈
+Exec=/home/free4tak/k-bot/stock_bot/open_bot_logs.sh
+X-GNOME-Autostart-enabled=true
+Terminal=false

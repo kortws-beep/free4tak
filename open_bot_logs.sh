@@ -13,8 +13,7 @@ sleep 8
 
 ptyxis --new-window -x "bash -c 'tail -F logs/sbot.log'" &
 sleep 1
-ptyxis --new-window -x "bash -c 'journalctl -u yeongam9-sbo2 -f --output=cat'" &
-sleep 1
+# sbo2: 2026-09-29 sbot 통합으로 정지 — 창 안 띄움
 ptyxis --new-window -x "bash -c 'tail -F logs/cbot.log'" &
 sleep 1
 ptyxis --new-window -x "bash -c 'tail -F logs/daybot.log'" &
@@ -25,4 +24,9 @@ ptyxis --new-window -x "bash -c 'journalctl -u yeongam9-lina -f --output=cat'" &
 sleep 1
 ptyxis --new-window -x "bash -c 'tail -F logs/sector_monitor.log'" &
 sleep 1
-ptyxis --new-window -x "bash -c 'sudo docker logs -f mawari-node'" &
+ptyxis --new-window -x "bash -c 'tail -F logs/youtube_live_monitor.log'" &
+# mawari-node: 새 PC(2026-11-09)엔 docker 없음 — docker 있을 때만
+if command -v docker >/dev/null 2>&1; then
+  sleep 1
+  ptyxis --new-window -x "bash -c 'sudo docker logs -f mawari-node'" &
+fi

@@ -79,6 +79,10 @@ else
   crontab deploy/crontab.txt && echo "  ✅ 설치"
 fi
 
+step "[5b] 재부팅 시 봇 로그창 자동 오픈 (GNOME autostart)"
+mkdir -p "$HOME/.config/autostart"
+cp deploy/open-bot-logs.desktop "$HOME/.config/autostart/" && echo "  ✅ 설치 (자동로그인 필요: /etc/gdm3/custom.conf AutomaticLogin=$USER)"
+
 step "[6] 점검"
 venv/bin/python3 tests/run_all.py | tail -3 || echo "⚠️ 테스트 실패 — 위 로그 확인"
 for b in ffmpeg java; do command -v $b >/dev/null && echo "  ✅ $b" || echo "  ❌ $b 없음"; done
