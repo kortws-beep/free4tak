@@ -99,7 +99,7 @@ tar --warning=no-file-changed --warning=no-file-removed "${EXCL[@]}" \
 [ "$rc" -gt 1 ] && { echo "❌ tar 실패 (코드 $rc)"; exit "$rc"; }
 
 SIZE=$(du -sh "$DEST/$NAME.tar.gz" | cut -f1)
-sha256sum "$DEST/$NAME.tar.gz" > "$DEST/$NAME.tar.gz.sha256"
+(cd "$DEST" && sha256sum "$NAME.tar.gz" > "$NAME.tar.gz.sha256")   # 파일명만 기록 → 옮겨도 검증됨
 chmod 600 "$DEST/$NAME.tar.gz"
 echo "✅ 백업 완료: $DEST/$NAME.tar.gz ($SIZE)"
 
