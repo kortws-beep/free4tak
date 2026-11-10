@@ -3,7 +3,7 @@ youtube_stock_monitor.py — 유튜브 경제방송 추천종목 모니터링
 ================================================================
 [하는 일]
 MTN(머니투데이방송)/매일경제TV 유튜브 채널을 모니터링해서 새 영상이
-올라오면 자막(자동생성 한글 캡션)을 가져와 로컬 AI(놀고있는 GPU 활용)로
+올라오면 자막(자동생성 한글 캡션)을 가져와 AI(2026-11-10부터 Claude Haiku 5.5, 예전엔 로컬 Ollama)로
 "추천/주목 종목"을 추출, (날짜, 종목명)만 DB에 저장한다.
 
 [동작 방식]
@@ -52,9 +52,9 @@ for _ep in [os.path.join(_here, ".env"), os.path.join(_base, ".env")]:
         break
 
 try:
-    import openai as _openai
+    import anthropic as _anthropic
 except ImportError:
-    _openai = None
+    _anthropic = None
 
 from youtube_transcript_api import YouTubeTranscriptApi
 
@@ -82,9 +82,11 @@ CHANNELS = {
 #   여유는 남겨둠.
 MAX_BACKLOG_PER_CHANNEL = 20
 
-# ── 로컬 AI 설정 (8GB GPU에서 안전한 크기 우선) ─────────────────
-OLLAMA_URL   = os.getenv("OLLAMA_URL", "http://localhost:11434")
-OLLAMA_MODEL = os.getenv("YT_OLLAMA_MODEL", "llama3.1:8b")
+# ── 종목 추출 AI ──────────────────────────────────────────────
+# ★ 2026-11-10: 로컬 Ollama(llama3.1:8b) → Claude Haiku 5.5 (대장 결정).
+#   새 PC 이전 때 Ollama가 빠져 하루 종일 추출 실패한 일 + 그래픽카드 메모리를
+#   Whisper와 나눠 쓰지 않아도 됨. Haiku 5.5는 입력 100만 토큰당 $0.10이라 하루 몇 센트.
+YT_LLM_MODEL = os.getenv("YT_CLAUDE_MODEL", "claude-haiku-5-5")
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -316,12 +318,26 @@ def fetch_transcript(video_id: str, max_chars: int = 6000) -> str:
 
 
 # ============================================================
-# 로컬 AI 추출 + 실종목 검증
+# AI 추출 + 실종목 검증
 # ============================================================
 def _get_llm_client():
-    if not _openai:
+    if not _anthropic or not os.getenv("ANTHROPIC_API_KEY"):
         return None
-    return _openai.OpenAI(base_url=f"{OLLAMA_URL}/v1", api_key="ollama")
+    return _anthropic.Anthropic()
+
+
+def _ask(llm, prompt: str, max_tokens: int) -> str:
+    """Claude 한 번 호출 → 답 텍스트("" = 거절·빈 답). 추출은 단순 작업이라 effort low.
+    Haiku 5.5는 생각(thinking)이 기본으로 켜져 있어 max_tokens에 생각 몫까지 여유를 둠."""
+    res = llm.messages.create(
+        model=YT_LLM_MODEL,
+        max_tokens=max_tokens,
+        output_config={"effort": "low"},
+        messages=[{"role": "user", "content": prompt}],
+    )
+    if res.stop_reason == "refusal":
+        return ""
+    return "".join(b.text for b in res.content if b.type == "text").strip()
 
 
 def extract_stock_picks(title: str, transcript: str, llm) -> list:
@@ -358,13 +374,7 @@ def extract_stock_picks(title: str, transcript: str, llm) -> list:
     #   진짜 추천을 놓치는 게 더 아까워서 실패시 1회 재시도.
     for attempt in range(2):
         try:
-            res = llm.chat.completions.create(
-                model=OLLAMA_MODEL,
-                max_tokens=500,
-                extra_body={"options": {"num_ctx": 8192}},
-                messages=[{"role": "user", "content": prompt}],
-            )
-            text = res.choices[0].message.content.strip()
+            text = _ask(llm, prompt, 2000)
             m = re.search(r"\[.*\]", text, re.S)
             if not m:
                 continue
@@ -382,7 +392,7 @@ def extract_stock_picks(title: str, transcript: str, llm) -> list:
             #   이 cap은 불필요 + 유해 판정, 제거.
             return names
         except Exception as e:
-            print(f"   ⚠️ 로컬AI 추출 오류(시도 {attempt+1}/2): {e}")
+            print(f"   ⚠️ AI 추출 오류(시도 {attempt+1}/2): {e}")
     return []
 
 
@@ -409,13 +419,8 @@ price) 또는 손절가(stop-loss price)를 찾아줘. 규칙:
 자막:
 {transcript}"""
     try:
-        res = llm.chat.completions.create(
-            model=OLLAMA_MODEL,
-            max_tokens=100,
-            extra_body={"options": {"num_ctx": 8192}},
-            messages=[{"role": "user", "content": prompt}],
-        )
-        comment = res.choices[0].message.content.strip().strip('"').strip()
+        comment = _ask(llm, prompt, 1000).strip('"').strip()
+        comment = re.sub(r"\s*\n\s*", " / ", comment)   # Claude는 두 줄로 답하기도 함 → 예전처럼 한 줄
         # ★ "가격정보없음" in comment로 부정매칭했더니, 목표가만 있고
         #   손절가는 없는 경우("목표가:150,000원 / 손절가:가격정보없음")
         #   처럼 일부만 없어도 전체가 무효 처리되던 버그 발견 — 목표가/
@@ -532,7 +537,7 @@ def main():
     state = _load_state()
     llm = _get_llm_client()
     if llm is None:
-        print("⚠️ [유튜브] openai 패키지 없음 — 로컬 AI 호출 불가, 종료")
+        print("⚠️ [유튜브] anthropic 패키지·ANTHROPIC_API_KEY 없음 — AI 호출 불가, 종료")
         return
 
     total_saved = []

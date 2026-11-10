@@ -299,7 +299,7 @@ def main():
     init_db()
     llm = _get_llm_client()
     if llm is None:
-        print("⚠️ openai 패키지 없음 — 로컬 AI 호출 불가, 종료")
+        print("⚠️ anthropic 패키지·ANTHROPIC_API_KEY 없음 — AI 호출 불가, 종료")
         sys.exit(1)
 
     # ★ 2026-11-09: GPU 있으면 GPU(cuda float16), 실패하면 CPU int8 — core/whisper_loader.py
