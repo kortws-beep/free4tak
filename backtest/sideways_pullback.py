@@ -58,12 +58,12 @@ class VolStore:
                                  (code, date)).fetchall()
 
     def _fetch(self, code, date):
-        ymd, t, rows = date.replace("-", ""), "153000", {}
+        ymd, t, rows, errored = date.replace("-", ""), "153000", {}, False
         for _ in range(6):
             try:
                 got = [b for b in self.api.get_minute_bars_by_date(code, ymd, t) if b["date"] == ymd]
             except Exception:
-                got = []
+                got, errored = [], True
             self.calls += 1
             time.sleep(self.pause)
             new = [b for b in got if b["time"] not in rows]
@@ -79,7 +79,11 @@ class VolStore:
             t = f"{m // 60:02d}{m % 60:02d}00"
         self.conn.executemany("INSERT OR REPLACE INTO bars VALUES (?,?,?,?,?,?,?)",
                               [(code, date, tm, *v) for tm, v in rows.items()])
-        self.conn.execute("INSERT OR REPLACE INTO done VALUES (?,?)", (code, date))
+        # ★ 2026-11-10: 미래·당일 장중 날짜나 API 오류로 빈 결과를 'done'으로 박아두면 영원히 빈 캐시가 됨
+        #   (11-07 실행이 보유기간용 11-09·11-10을 미리 빈 채로 done 처리한 것 발견) — daybot_replay와 같은 규칙.
+        today = datetime.date.today().isoformat()
+        if not errored and (date < today or datetime.datetime.now().strftime("%H%M") >= "1540"):
+            self.conn.execute("INSERT OR REPLACE INTO done VALUES (?,?)", (code, date))
         self.conn.commit()
 
     def days_from(self, code, date, n):
