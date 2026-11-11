@@ -151,6 +151,20 @@ class FetchCache(unittest.TestCase):
 
 
 class Step(unittest.TestCase):
+    def setUp(self):                      # ★ 11-11 신규매수 중단(NEW_BUY=False)과 별개로 매수 로직 자체는 켠 상태로 검사
+        self._nb, D.NEW_BUY = D.NEW_BUY, True
+
+    def tearDown(self):
+        D.NEW_BUY = self._nb
+
+    def test_no_new_buy_switch(self):     # ★ 11-11 대장 A안 — 신호가 와도 안 사고, 예약 몫도 0
+        D.NEW_BUY = False
+        bot = FakeBot({m: 89.0 for m in D.DIP_COINS}, {})
+        s, _ = sleeve(bot)
+        self.assertFalse(s.step({}, krw=10_000_000))
+        self.assertEqual(s.held(), set())
+        self.assertEqual(s.reserved_krw(), 0)
+
     def test_buy_skip_when_cbot_holds_and_paused(self):
         bot = FakeBot({m: 89.0 for m in D.DIP_COINS}, {})
         s, store = sleeve(bot)

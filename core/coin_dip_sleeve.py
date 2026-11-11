@@ -20,13 +20,16 @@ cbot 본체와 섞이지 않게:
   · 빈 슬롯 몫(25만)은 지금가가 매수선 3% 이내로 다가온 코인만 cbot이 쓰지 못하게 남겨 둔다(reserved_krw)
     ★ 10-18 대장: "눌림목은 언제 올지 모르니까" — 예전엔 빈 슬롯 전부 상시 예약이라 BTC가 매수선까지 -6.9%
       남은 상태에서 25만이 묶여 cbot 매수(최저 50만)가 막혔음
-끄기: .env에 DIP_SLEEVE_ENABLED=0
+끄기: .env에 DIP_SLEEVE_ENABLED=0  ⚠️ 보유 중이면 쓰지 말 것 — 청산도 멈춰 코인이 고아가 됨(본체도 안 봄)
+신규 매수만 중단: NEW_BUY=False(아래) — 보유분은 익절·기한 규칙대로 끝까지 정리
+  ★ 2026-11-11 대장 A안: 10-08 시작 뒤 청산 3건 전부 손실(-5.2만)+보유 2건 평가 -4.8만 → 새로 사지 않고 보유분만 마무리.
 """
 import datetime
 import sqlite3
 import time
 
 DIP_COINS = ["KRW-BTC", "KRW-ETH", "KRW-XRP", "KRW-SOL"]
+NEW_BUY = False   # ★ 11-11 대장 A안 — 신규 매수 중단(보유분 청산은 계속). 다시 켜려면 True
 SLOT_KRW = 250_000
 # ★ 2026-10-30 대장: 1회차(10-09 ETH·XRP·SOL 동시매수 → 20일 기한 -5.2만) 뒤 백테스트(--widen --long) —
 #   7일-10%·20일(3년 +11.2만·낙폭 -13.5만, 최근 5개월 -1.2만) → 60일-20%·15일(3년 +28.3만·승률 86%·낙폭 -3.8만,
@@ -111,8 +114,8 @@ class DipSleeve:
 
     def reserved_krw(self) -> int:
         """매수선 근처(3% 이내)인 빈 슬롯 몫 — cbot이 이만큼은 남겨 둔다."""
-        if not self.enabled:
-            return 0
+        if not self.enabled or not NEW_BUY:
+            return 0                                   # 새로 안 사면 예약할 몫도 없음 → cbot 본체가 씀
         return SLOT_KRW * sum(1 for m in DIP_COINS if not self.holds(m) and self._near.get(m))
 
     # DB
@@ -250,6 +253,9 @@ class DipSleeve:
                     continue
                 if not allow_buy:
                     line.append(f"{coin} 신호(일시중단→패스)")
+                    continue
+                if not NEW_BUY:
+                    line.append(f"{coin} 신호(신규매수 중단→패스)")
                     continue
                 if krw < SLOT_KRW:
                     line.append(f"{coin} 신호(잔고부족)")
