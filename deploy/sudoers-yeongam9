@@ -1,6 +1,6 @@
-# /etc/sudoers.d/yeongam9 — 실전 매매 3봇(sbot·cbot·daybot)·리나·키키 재시작·정지·시작만 비밀번호 없이
-# 2026-09-29 daybot만 → 2026-11-11 대장 결정으로 sbot·cbot·lina·kiki 추가 (누리가 코드 수정 후 바로 재시작용)
-# 나머지 서비스(섹터·대시보드·유튜브)는 여전히 비밀번호 필요.
+# /etc/sudoers.d/yeongam9 — 실전 매매 3봇(sbot·cbot·daybot)·리나·키키·유튜브 재시작·정지·시작만 비밀번호 없이
+# 2026-09-29 daybot만 → 2026-11-11 대장 결정으로 sbot·cbot·lina·kiki·youtube-live 추가 (누리가 코드 수정 후 바로 재시작용)
+# 나머지 서비스(섹터·대시보드)는 여전히 비밀번호 필요.
 free4tak ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart yeongam9-daybot
 free4tak ALL=(ALL) NOPASSWD: /usr/bin/systemctl stop yeongam9-daybot
 free4tak ALL=(ALL) NOPASSWD: /usr/bin/systemctl start yeongam9-daybot
@@ -16,3 +16,6 @@ free4tak ALL=(ALL) NOPASSWD: /usr/bin/systemctl start yeongam9-lina
 free4tak ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart yeongam9-kiki
 free4tak ALL=(ALL) NOPASSWD: /usr/bin/systemctl stop yeongam9-kiki
 free4tak ALL=(ALL) NOPASSWD: /usr/bin/systemctl start yeongam9-kiki
+free4tak ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart yeongam9-youtube-live
+free4tak ALL=(ALL) NOPASSWD: /usr/bin/systemctl stop yeongam9-youtube-live
+free4tak ALL=(ALL) NOPASSWD: /usr/bin/systemctl start yeongam9-youtube-live
