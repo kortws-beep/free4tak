@@ -137,9 +137,9 @@ class NewBuyCutoff(unittest.TestCase):
             b._regime = ("2026-10-19", 24.4)
             b.db = type("D", (), {"log_candidate": lambda self, *a, **k: logged.append(k.get("skip_reason")),
                                   "get_today_realized": lambda self: 0})()
-            b._run_candidate_scan_and_maybe_buy()                    # 빈 슬롯 → 50만 고정·마지막슬롯 아님
+            b._run_candidate_scan_and_maybe_buy()                    # 빈 슬롯 → 50만 캡 · ★11-11 하락장 1슬롯=마지막 슬롯(20만 하한)
             self.assertEqual(bought, ["111110"])
-            self.assertEqual(caps[-1], {"is_last_slot": False, "amount_cap": 500000})
+            self.assertEqual(caps[-1], {"is_last_slot": True, "amount_cap": 500000})
             bought.clear()
             b.positions = {"999990": {}}                              # 들고 넘어간 종목 있으면 안 삼
             b._run_candidate_scan_and_maybe_buy()

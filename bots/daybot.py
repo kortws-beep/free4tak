@@ -269,6 +269,10 @@ PENDING_ORDER_TIMEOUT_SEC = 30        # 미체결 주문 취소 판단 기준(da
 #   사버리는 걸 막는 하한선" 역할). 이 밑이면 해당 매수 시도만 스킵
 #   (스캔 자체를 멈추진 않음 — 다른 후보/다음 스캔주기는 계속 돈다).
 MIN_ANALYSIS_CASH  = 500_000
+# ★ 2026-11-11 대장 — "마지막 슬롯은 20만 이상이면 전액" 규칙이 하락장 1슬롯·전용 엔진 슬롯(음봉·이벤트·자사주)엔
+#   안 걸려 있었음 → 11-10·11-11 주문가능 46만이라 50만 하한에 막혀 조건 통과 종목(SDI·코리아써키트 등)을 조용히 못 삼.
+#   마지막 슬롯(하락장 1슬롯·고정금액 엔진 슬롯 포함)은 20만 이상이면 있는 만큼 산다.
+LAST_SLOT_MIN_CASH = 200_000
 
 # ★ 2026-10-01 대장 지정 — 대장이 daybot 보유종목을 HTS/MTS로 직접 매도할
 #   계획이라("서진하고 대원은 내가 프리장에서 팔면 팔거야") sbot의 수동매도
@@ -401,6 +405,7 @@ def _lina_all_watches() -> set:
 class DayBot:
 
     def __init__(self):
+        self._last_buy_fail = ""          # ★ 11-11 마지막 매수 실패 이유(candidate_log 기록용)
         self.api = KisAPI(
             appkey=os.getenv("KIS_APPKEY"),
             secret=os.getenv("KIS_SECRET"),
@@ -733,6 +738,16 @@ class DayBot:
                 self._scan_notifier.send(msg, critical=False)  # ★ 2026-10-08 대장 지정 — 산야로
         return self._regime[1]
 
+    def _buy_fail(self, code: str, why: str):
+        """★ 11-11 매수 못 한 이유 — 후보 기록(candidate_log)에 남기고, 같은 종목·이유는 하루 한 번만 화면에."""
+        self._last_buy_fail = why
+        key = (today_str(), code, why)
+        seen = getattr(self, "_buy_fail_seen", set())
+        if key not in seen:
+            seen.add(key)
+            self._buy_fail_seen = seen
+            print(f"⏭️ [daybot] {code} 매수 못 함 — {why}")
+
     @staticmethod
     def _down_market(breadth) -> bool:
         """전날 국면이 하락장 기준 미만이면 True — 국면을 못 구했거나 기준 0(끔)이면 막지 않음."""
@@ -740,8 +755,11 @@ class DayBot:
 
     def _do_buy(self, code: str, name: str, price: float, source_tier: str,
                 is_last_slot: bool = False, amount_cap: int = 0) -> bool:
+        self._last_buy_fail = ""
         psbl_cash = self.api.get_psbl_order_cash(code, price)
-        if psbl_cash < MIN_ANALYSIS_CASH:
+        min_cash = LAST_SLOT_MIN_CASH if (is_last_slot or amount_cap) else MIN_ANALYSIS_CASH
+        if psbl_cash < min_cash:
+            self._buy_fail(code, f"현금부족({psbl_cash // 10000}만<{min_cash // 10000}만)")
             return False
         # ★ 2026-10-06 대장 지정 — 마지막 슬롯은 캡 없이 가용현금 최대까지.
         amount = psbl_cash if is_last_slot else min(BUY_AMT_PER_SLOT, psbl_cash)
@@ -759,6 +777,7 @@ class DayBot:
             psbl_cash=psbl_cash,
         )
         if not ok or qty <= 0:
+            self._buy_fail(code, "주문실패·수량0")
             return False
 
         now = now_hms()
@@ -1597,8 +1616,10 @@ class DayBot:
             if self._dip_count() >= DIP_SLOTS:
                 break
             self.code_name_map.setdefault(code, name)
-            self.db.log_candidate(code, name, dip_leader.TAG, price, chg, bought=True)
-            if self._do_buy(code, name, price, dip_leader.TAG, amount_cap=DIP_AMOUNT):
+            ok = self._do_buy(code, name, price, dip_leader.TAG, amount_cap=DIP_AMOUNT)
+            self.db.log_candidate(code, name, dip_leader.TAG, price, chg, bought=ok,
+                                  skip_reason="" if ok else "매수실패:" + getattr(self, "_last_buy_fail", ""))
+            if ok:
                 self._notify(f"🕯️ [daybot] 음봉 엔진 매수 {name}({code}) {chg:+.1f}% · 저가 대비 +{bounce:.1f}% · 5일 고점 {from_hi:+.1f}% "
                              f"— 지수 코스피 {idx.get('kospi', 0):+.1f}%/코스닥 {idx.get('kosdaq', 0):+.1f}%({reb}) · "
                              f"+{dip_leader.TP_PCT:g}%에 {dip_leader.TP_RATIO:.0%} 익절 → 나머지 고점 -{dip_leader.TRAIL_PCT:g}% 트레일링(본전 보호), "
@@ -1704,9 +1725,11 @@ class DayBot:
                 e["last_skip"] = (code, "slot")
                 return
         self.code_name_map.setdefault(code, name)
-        self.db.log_candidate(code, name, event_sector.TAG, price, chg, bought=True)
         amt = DIP_AMOUNT if use_dip else (DOWN_AMOUNT if down else 0)
-        if self._do_buy(code, name, price, event_sector.TAG, amount_cap=amt):
+        ok = self._do_buy(code, name, price, event_sector.TAG, amount_cap=amt)
+        self.db.log_candidate(code, name, event_sector.TAG, price, chg, bought=ok,
+                              skip_reason="" if ok else "매수실패:" + getattr(self, "_last_buy_fail", ""))
+        if ok:
             if use_dip:
                 with self._positions_lock:
                     if code in self.positions:
@@ -1779,8 +1802,10 @@ class DayBot:
                 print(f"⏭️ [daybot] 자사주 {name}({code}) 패스 — {why}")
                 self.db.log_candidate(code, name, buyback_signal.TAG, price, chg, skip_reason="자사주:" + why[:20])
                 continue
-            self.db.log_candidate(code, name, buyback_signal.TAG, price, chg, bought=True)
-            if self._do_buy(code, name, price, buyback_signal.TAG, amount_cap=buyback_signal.AMOUNT):
+            ok = self._do_buy(code, name, price, buyback_signal.TAG, amount_cap=buyback_signal.AMOUNT)
+            self.db.log_candidate(code, name, buyback_signal.TAG, price, chg, bought=ok,
+                                  skip_reason="" if ok else "매수실패:" + getattr(self, "_last_buy_fail", ""))
+            if ok:
                 self._notify(f"🏦 [daybot] 자사주 엔진 매수 {name}({code}) {chg:+.1f}% — {why} · 공시 {date[5:]} {tm} · "
                              f"{buyback_signal.HOLD_DAYS}거래일 보유(손절 -{buyback_signal.STOP_PCT:g}%)", critical=True)
                 break
@@ -1943,14 +1968,16 @@ class DayBot:
                                            skip_reason="섹터밖",
                                            raw_market_data=mdata, raw_hoga_data=hoga)
                     continue
+            # ★ 2026-10-06 대장 지정 — 이 매수로 effective_max에 도달하면
+            #   (마지막 슬롯) 금액 캡 없이 최대까지 매수. ★ 11-11: 하락장 1슬롯도 마지막 슬롯(20만 하한, 금액은 DOWN_AMOUNT 캡).
+            is_last_slot = down or (self._regular_count() + 1 >= effective_max)
+            ok = self._do_buy(code, self._name(code), price, tier, is_last_slot=is_last_slot,
+                              amount_cap=DOWN_AMOUNT if down else 0)
+            # ★ 11-11 기록은 실제 매수 결과로(예전엔 매수 전에 bought=True — 현금부족으로 못 산 34건이 '매수'로 남았음)
             self.db.log_candidate(code, self._name(code), tier, price, chg,
                                    ask_bid_ratio=hoga.get("ask_bid_ratio", 0),
-                                   bought=True, raw_market_data=mdata, raw_hoga_data=hoga)
-            # ★ 2026-10-06 대장 지정 — 이 매수로 effective_max에 도달하면
-            #   (마지막 슬롯) 금액 캡 없이 최대까지 매수.
-            is_last_slot = (self._regular_count() + 1 >= effective_max) and not down
-            self._do_buy(code, self._name(code), price, tier, is_last_slot=is_last_slot,
-                         amount_cap=DOWN_AMOUNT if down else 0)
+                                   bought=ok, skip_reason="" if ok else "매수실패:" + getattr(self, "_last_buy_fail", ""),
+                                   raw_market_data=mdata, raw_hoga_data=hoga)
 
     # ============================================================
     # 메인 루프
