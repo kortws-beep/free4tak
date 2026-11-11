@@ -65,7 +65,9 @@ import requests
 from youtube_stock_monitor import (
     CHANNELS, init_db, save_pick, validate_stock_name,
     extract_stock_picks, generate_comment, notify_report, _get_llm_client,
+    DB_PATH, _ask,
 )
+import sqlite3
 
 # ── 캡처 설정 ────────────────────────────────────────────────
 CHUNK_SEC          = int(os.getenv("YT_LIVE_CHUNK_SEC", "3600"))   # 60분 (대장 확인)
@@ -89,6 +91,16 @@ HEADERS = {
 }
 
 _TMP_DIR = os.path.join(tempfile.gettempdir(), "youtube_live_monitor")
+
+# ★ 2026-11-11 대장 — 구간별 전사문 보관(나중에 "그 코너가 몇 시였나" 찾기·재분석용). 하루 1MB 안팎, 60일 지나면 지움.
+TRANSCRIPT_DIR  = os.path.join(_base, "logs", "youtube_live")
+TRANSCRIPT_KEEP_DAYS = 60
+
+# ★ 2026-11-11 대장 — 매일경제TV 오후(14시 전후, 1시간 안 됨) "텔레그램방에서 부각되는 종목" 코너(꼭지 3~4개).
+#   시각이 정확하지 않아 시간 대신 내용으로 찾음: 전사문에 '텔레그램'이 나오면 그 근처를 AI에게 따로 물어봄.
+#   목표가·손절가 게이트 없이 "텔레그램에서 부각된다고 소개된 종목"만 별도 표(telegram_buzz)에 저장 + 알림.
+#   봇 매매(유튜브 슬롯 등)엔 연결 안 함 — 대장 수동 참고용.
+TELEGRAM_RE = re.compile(r"텔레\s*그램|텔레방|텔방")
 os.makedirs(_TMP_DIR, exist_ok=True)
 
 # ★ 2026-09-25: 프로세스가 오디오 캡처/전사 도중(주로 코드배포 재시작)에
@@ -210,6 +222,86 @@ def transcribe_audio(model, path: str) -> str:
         print(f"   🧠 [메모리] 전사 전 {before}MB → 직후 {peak}MB → 정리 후 {_rss_mb()}MB")
 
 
+def _save_transcript(handle: str, start: datetime.datetime, text: str):
+    try:
+        d = os.path.join(TRANSCRIPT_DIR, start.strftime("%Y-%m-%d"))
+        os.makedirs(d, exist_ok=True)
+        end = datetime.datetime.now()
+        with open(os.path.join(d, f"{handle}_{start:%H%M}-{end:%H%M}.txt"), "w", encoding="utf-8") as f:
+            f.write(text)
+        cutoff = (datetime.date.today() - datetime.timedelta(days=TRANSCRIPT_KEEP_DAYS)).isoformat()
+        for old in os.listdir(TRANSCRIPT_DIR):
+            if old < cutoff:
+                shutil.rmtree(os.path.join(TRANSCRIPT_DIR, old), ignore_errors=True)
+    except OSError as e:
+        print(f"   ⚠️ 전사문 저장 오류: {e}")
+
+
+def _init_telegram_buzz():
+    conn = sqlite3.connect(DB_PATH, timeout=10)
+    conn.execute("""CREATE TABLE IF NOT EXISTS telegram_buzz (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, pick_date TEXT NOT NULL, stock_name TEXT NOT NULL,
+        channel TEXT DEFAULT '', video_id TEXT DEFAULT '', reason TEXT DEFAULT '',
+        created_at TEXT DEFAULT (datetime('now','localtime')), UNIQUE(pick_date, stock_name, channel))""")
+    conn.commit()
+    conn.close()
+
+
+def extract_telegram_buzz(text: str, llm) -> list:
+    """전사문에서 '텔레그램방·채널에서 부각되는 종목'으로 소개된 것만 [(이름, 이유)]."""
+    hits = [m.start() for m in TELEGRAM_RE.finditer(text)]
+    if not hits or llm is None:
+        return []
+    # 코너 첫 언급 앞 500자 ~ 마지막 언급 뒤 6000자(종목 소개가 뒤따름), 너무 길면 12000자까지
+    seg = text[max(0, hits[0] - 500): min(len(text), hits[-1] + 6000)][:12000]
+    prompt = f"""아래는 경제 방송 자막(음성인식이라 오타가 있을 수 있음)이야.
+이 중에 "텔레그램 방·채널에서 요즘 화제가 되는/부각되는/많이 언급되는 종목"을 소개하는 코너가 있으면,
+그 코너에서 그렇게 소개된 종목만 골라줘. 규칙:
+- 텔레그램과 관련 없이 일반적으로 언급된 종목은 빼.
+- 각 종목마다 왜 텔레그램에서 부각되는지 방송이 말한 이유를 20자 안으로.
+- JSON 배열로만 답해: [{{"name": "종목명", "why": "이유"}}]. 해당 코너가 없으면 [].
+
+자막:
+{seg}"""
+    try:
+        out = _ask(llm, prompt, 2000)
+        m = re.search(r"\[.*\]", out, re.S)
+        items = json.loads(m.group(0)) if m else []
+        return [(str(i.get("name", "")).strip(), str(i.get("why", "")).strip()[:40])
+                for i in items if isinstance(i, dict) and i.get("name")]
+    except Exception as e:
+        print(f"   ⚠️ 텔레그램 코너 추출 오류: {e}")
+        return []
+
+
+def _handle_telegram_buzz(today: str, text: str, channel_label: str, video_id: str, llm):
+    found = extract_telegram_buzz(text, llm)
+    if not found:
+        return
+    saved = []
+    conn = sqlite3.connect(DB_PATH, timeout=10)
+    for raw, why in found:
+        name = validate_stock_name(raw)
+        if not name:
+            print(f"   ⏭️ [텔레그램] 검증 실패: {raw}")
+            continue
+        cur = conn.execute("INSERT OR IGNORE INTO telegram_buzz (pick_date, stock_name, channel, video_id, reason) "
+                           "VALUES (?,?,?,?,?)", (today, name, channel_label, video_id, why))
+        if cur.rowcount:
+            saved.append((name, why))
+            print(f"   📨 [텔레그램 부각] {name} — {why} ({channel_label})")
+    conn.commit()
+    conn.close()
+    if saved:
+        try:
+            from notifier import Notifier
+            Notifier(name="유튜브스카우트", route="scan").send(
+                f"📨 [{channel_label}] 텔레그램방 부각 종목 ({len(saved)}건, 매매 연결 안 함)\n"
+                + "\n".join(f"· {n} — {w}" for n, w in saved))
+        except Exception as e:
+            print(f"⚠️ 알림 전송 오류: {e}")
+
+
 def process_chunk(handle: str, channel_label: str, llm, model):
     live, video_id = is_channel_live(handle)
     if not live:
@@ -218,6 +310,7 @@ def process_chunk(handle: str, channel_label: str, llm, model):
     today = datetime.date.today().strftime("%Y-%m-%d")
     audio_path = os.path.join(_TMP_DIR, f"{handle}_{int(time.time())}.m4a")
 
+    started = datetime.datetime.now()
     print(f"🔴 [{channel_label}] 라이브 감지 — {CHUNK_SEC//60}분 구간 캡처 시작 ({video_id})")
     ok = capture_audio_chunk(video_id, CHUNK_SEC, audio_path)
     if not ok:
@@ -236,6 +329,8 @@ def process_chunk(handle: str, channel_label: str, llm, model):
         return True
 
     print(f"   📝 [{channel_label}] 전사 {len(text)}자")
+    _save_transcript(handle, started, text)
+    _handle_telegram_buzz(today, text, channel_label, video_id, llm)
     # ★ 2026-09-16: 60분 구간 전사가 보통 2만자 안팎이라 한 번에
     #   text[:6000]으로 잘라 넣으면 앞쪽 16분 정도만 분석되고 나머지
     #   84%가 통째로 무시되던 버그를 실측(첫 라이브 사이클)으로 발견.
@@ -297,6 +392,7 @@ def main():
         sys.exit(1)
 
     init_db()
+    _init_telegram_buzz()
     llm = _get_llm_client()
     if llm is None:
         print("⚠️ anthropic 패키지·ANTHROPIC_API_KEY 없음 — AI 호출 불가, 종료")

@@ -9,7 +9,8 @@ from _helpers import stub, use_temp_cwd
 
 stub("requests")
 stub("youtube_stock_monitor", CHANNELS={}, init_db=None, save_pick=None, validate_stock_name=None,
-     extract_stock_picks=None, generate_comment=None, notify_report=None, _get_llm_client=None)
+     extract_stock_picks=None, generate_comment=None, notify_report=None, _get_llm_client=None,
+     DB_PATH=":memory:", _ask=None)
 _tmp = use_temp_cwd()
 import youtube_live_monitor as Y  # noqa: E402
 
