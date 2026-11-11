@@ -79,6 +79,10 @@ else
   crontab deploy/crontab.txt && echo "  ✅ 설치"
 fi
 
+step "[4b] sudoers (daybot 재시작 무비번)"
+sudo install -m 440 deploy/sudoers-yeongam9 /etc/sudoers.d/yeongam9 && sudo visudo -c >/dev/null && echo "  ✅ 설치" \
+  || { sudo rm -f /etc/sudoers.d/yeongam9; echo "  ⚠️ sudoers 문법 오류 — 설치 안 함"; }
+
 step "[5b] 재부팅 시 봇 로그창 자동 오픈 (GNOME autostart)"
 mkdir -p "$HOME/.config/autostart"
 cp deploy/open-bot-logs.desktop "$HOME/.config/autostart/" && echo "  ✅ 설치 (자동로그인 필요: /etc/gdm3/custom.conf AutomaticLogin=$USER)"

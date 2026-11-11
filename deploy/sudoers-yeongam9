@@ -1,0 +1,5 @@
+# /etc/sudoers.d/yeongam9 — 2026-09-29 예전 서버에서 복원(11-11, sudo -l 결과 기준)
+# daybot 재시작·정지·시작만 비밀번호 없이(누리가 코드 수정 후 바로 재시작용). 다른 봇은 여전히 비밀번호 필요.
+free4tak ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart yeongam9-daybot
+free4tak ALL=(ALL) NOPASSWD: /usr/bin/systemctl stop yeongam9-daybot
+free4tak ALL=(ALL) NOPASSWD: /usr/bin/systemctl start yeongam9-daybot
