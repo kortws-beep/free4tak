@@ -101,6 +101,7 @@ TRANSCRIPT_KEEP_DAYS = 60
 #   목표가·손절가 게이트 없이 "텔레그램에서 부각된다고 소개된 종목"만 별도 표(telegram_buzz)에 저장 + 알림.
 #   봇 매매(유튜브 슬롯 등)엔 연결 안 함 — 대장 수동 참고용.
 TELEGRAM_RE = re.compile(r"텔레\s*그램|텔레방|텔방")
+_tg_carry = {}   # ★ 11-12 코너가 60분 구간 끝에 걸치면(마지막 언급이 끝 8000자 안) 다음 구간 앞부분도 이어서 봄
 os.makedirs(_TMP_DIR, exist_ok=True)
 
 # ★ 2026-09-25: 프로세스가 오디오 캡처/전사 도중(주로 코드배포 재시작)에
@@ -255,16 +256,17 @@ def extract_telegram_buzz(text: str, llm) -> list:
     # 코너 첫 언급 앞 500자 ~ 마지막 언급 뒤 6000자(종목 소개가 뒤따름), 너무 길면 12000자까지
     seg = text[max(0, hits[0] - 500): min(len(text), hits[-1] + 6000)][:12000]
     prompt = f"""아래는 경제 방송 자막(음성인식이라 오타가 있을 수 있음)이야.
-이 중에 "텔레그램 방·채널에서 요즘 화제가 되는/부각되는/많이 언급되는 종목"을 소개하는 코너가 있으면,
-그 코너에서 그렇게 소개된 종목만 골라줘. 규칙:
-- 텔레그램과 관련 없이 일반적으로 언급된 종목은 빼.
-- 각 종목마다 왜 텔레그램에서 부각되는지 방송이 말한 이유를 20자 안으로.
+이 중에 "텔레그램(방·채널·자료)"을 근거로 종목을 소개하는 코너가 있으면 — 예: "텔레그램 자료로 같이 들여다보겠습니다",
+텔레그램에서 화제·부각되는 종목, 텔레그램에 올라온 리포트·기사 소개 — 그 코너가 다룬 상장 종목을 골라줘. 규칙:
+- 코너는 보통 꼭지 3~4개(첫 번째·두 번째·세 번째…)로 이어짐 — 꼭지마다 빠짐없이 훑어서, 소개·탑픽·수혜·주목으로 나온 상장 종목을 전부 넣어.
+- 코너 밖에서 일반 시황으로 언급된 종목은 빼.
+- 각 종목마다 방송이 말한 소개 이유(재료)를 20자 안으로.
 - JSON 배열로만 답해: [{{"name": "종목명", "why": "이유"}}]. 해당 코너가 없으면 [].
 
 자막:
 {seg}"""
     try:
-        out = _ask(llm, prompt, 2000)
+        out = _ask(llm, prompt, 4000, effort="medium")   # 꼭지 여러 개를 빠짐없이 — low에선 1~6개로 들쭉날쭉(11-12)
         m = re.search(r"\[.*\]", out, re.S)
         items = json.loads(m.group(0)) if m else []
         return [(str(i.get("name", "")).strip(), str(i.get("why", "")).strip()[:40])
@@ -274,7 +276,13 @@ def extract_telegram_buzz(text: str, llm) -> list:
         return []
 
 
-def _handle_telegram_buzz(today: str, text: str, channel_label: str, video_id: str, llm):
+def _handle_telegram_buzz(today: str, text: str, channel_label: str, video_id: str, llm, handle: str = ""):
+    hits = [m.start() for m in TELEGRAM_RE.finditer(text)]
+    carry = _tg_carry.pop(handle, False)
+    if hits and len(text) - hits[-1] < 8000:
+        _tg_carry[handle] = True
+    if carry and not (hits and hits[0] < 8000):
+        text = "[앞 구간에서 이어지는 텔레그램 자료 코너] " + text[:8000] + " … " + text[8000:]
     found = extract_telegram_buzz(text, llm)
     if not found:
         return
@@ -330,7 +338,7 @@ def process_chunk(handle: str, channel_label: str, llm, model):
 
     print(f"   📝 [{channel_label}] 전사 {len(text)}자")
     _save_transcript(handle, started, text)
-    _handle_telegram_buzz(today, text, channel_label, video_id, llm)
+    _handle_telegram_buzz(today, text, channel_label, video_id, llm, handle)
     # ★ 2026-09-16: 60분 구간 전사가 보통 2만자 안팎이라 한 번에
     #   text[:6000]으로 잘라 넣으면 앞쪽 16분 정도만 분석되고 나머지
     #   84%가 통째로 무시되던 버그를 실측(첫 라이브 사이클)으로 발견.

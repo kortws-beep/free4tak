@@ -326,13 +326,13 @@ def _get_llm_client():
     return _anthropic.Anthropic()
 
 
-def _ask(llm, prompt: str, max_tokens: int) -> str:
+def _ask(llm, prompt: str, max_tokens: int, effort: str = "low") -> str:
     """Claude 한 번 호출 → 답 텍스트("" = 거절·빈 답). 추출은 단순 작업이라 effort low.
     Haiku 5.5는 생각(thinking)이 기본으로 켜져 있어 max_tokens에 생각 몫까지 여유를 둠."""
     res = llm.messages.create(
         model=YT_LLM_MODEL,
         max_tokens=max_tokens,
-        output_config={"effort": "low"},
+        output_config={"effort": effort},
         messages=[{"role": "user", "content": prompt}],
     )
     if res.stop_reason == "refusal":
