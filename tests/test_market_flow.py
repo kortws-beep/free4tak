@@ -115,5 +115,21 @@ class Morning(unittest.TestCase):
         self.assertEqual(M.morning_line(os.path.abspath("empty.db")), "")
 
 
+
+class FillGaps(unittest.TestCase):
+    def test_fill_investor_gaps(self):
+        # ★ 11-12 서버 멈춘 날(11-09)이 빈칸 → 한투 일별(백만원)로 빠진 날만 채움, 이미 있는 날은 안 덮음
+        import tempfile, sqlite3, os
+        db = os.path.join(tempfile.mkdtemp(), "t.db")
+        M.save({}, {"KOSPI": [("2026-11-10", -13715.0, 4207.0, 4626.0)]}, db)
+        api = type("A", (), {"base_url": "x", "token": "t", "appkey": "k", "secret": "s"})()
+        out = {"output": [{"stck_bsop_date": "20261110", "prsn_ntby_tr_pbmn": "-1394714", "frgn_ntby_tr_pbmn": "443909", "orgn_ntby_tr_pbmn": "464150"},
+                          {"stck_bsop_date": "20261109", "prsn_ntby_tr_pbmn": "-660879", "frgn_ntby_tr_pbmn": "-526276", "orgn_ntby_tr_pbmn": "726419"}]}
+        n = M.fill_investor_gaps(api, db, get=lambda u, h, p: out if p["FID_INPUT_ISCD"] == "0001" else {"output": []})
+        self.assertEqual(n, 1)
+        c = sqlite3.connect(db)
+        self.assertEqual(c.execute("select foreign_ from market_investor where date='2026-11-09'").fetchone()[0], -5263)
+        self.assertEqual(c.execute("select foreign_ from market_investor where date='2026-11-10'").fetchone()[0], 4207.0)
+
 if __name__ == "__main__":
     unittest.main()

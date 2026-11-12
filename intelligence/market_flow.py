@@ -191,6 +191,45 @@ def fetch_investor(idx: str, get=_get_json, raw: list = None) -> list:
     return rows
 
 
+def fill_investor_gaps(api, db: str = LOG_DB, get=None) -> int:
+    """★ 2026-11-12 — 네이버 trend API는 '오늘'만 줘서 서버가 멈춘 날(11-09 이전)은 영영 빈칸이었음.
+    한투 시장별 투자자매매동향(일별, FHPTJ04040000)으로 최근 날짜 중 빠진 날만 채움(INSERT OR IGNORE — 네이버 값 우선).
+    단위: 한투 백만원 → 억원. 반환: 채운 행 수."""
+    if api is None:
+        return 0
+    import requests
+    import datetime
+    get = get or (lambda url, headers, params: requests.get(url, headers=headers, params=params, timeout=10).json())
+    url = f"{api.base_url}/uapi/domestic-stock/v1/quotations/inquire-investor-daily-by-market"
+    h = {"authorization": f"Bearer {api.token}", "appkey": api.appkey, "appsecret": api.secret,
+         "tr_id": "FHPTJ04040000", "custtype": "P"}
+    today = datetime.date.today().strftime("%Y%m%d")
+    rows = []
+    for mk, iscd, i1 in (("KOSPI", "0001", "KSP"), ("KOSDAQ", "1001", "KSQ")):
+        try:
+            r = get(url, h, {"FID_COND_MRKT_DIV_CODE": "U", "FID_INPUT_ISCD": iscd, "FID_INPUT_DATE_1": today,
+                             "FID_INPUT_ISCD_1": i1, "FID_INPUT_DATE_2": today, "FID_INPUT_ISCD_2": iscd})
+            for x in r.get("output", []) or []:
+                d = str(x.get("stck_bsop_date", ""))
+                if len(d) == 8:
+                    rows.append((f"{d[:4]}-{d[4:6]}-{d[6:]}", mk,
+                                 *(round(_num(x.get(k)) / 100) for k in ("prsn_ntby_tr_pbmn", "frgn_ntby_tr_pbmn",
+                                                                         "orgn_ntby_tr_pbmn"))))
+        except Exception as e:
+            print(f"⚠️ 한투 투자자 일별 조회 오류({mk}): {e}")
+    if not rows:
+        return 0
+    conn = sqlite3.connect(db, timeout=10)
+    try:
+        _table(conn)
+        before = conn.total_changes
+        conn.executemany("INSERT OR IGNORE INTO market_investor VALUES (?,?,?,?,?)", rows)
+        conn.commit()
+        return conn.total_changes - before
+    finally:
+        conn.close()
+
+
 def collect(backfill_days: int = 0, db: str = LOG_DB, get=_get_json, api=None, post=None) -> str:
     pages = max(1, -(-backfill_days // 60)) if backfill_days else 1
     idx_rows = {i: fetch_index(i, pages, get=get) for i in INDEXES}
@@ -207,11 +246,12 @@ def collect(backfill_days: int = 0, db: str = LOG_DB, get=_get_json, api=None, p
         finally:
             conn.close()
         rebuild_from_raw(db)
+    filled = fill_investor_gaps(api, db)              # ★ 11-12 빠진 날(서버 멈춘 날) 한투 일별로 채움
     fut = fetch_futures(api) if api is not None else None
     kd = backfill_days or 20
     funds, credit = fetch_kofia(KOFIA_FUNDS, kd, post), fetch_kofia(KOFIA_CREDIT, kd, post)
     save_extra(fut, funds, credit, last, db)
-    return (f"✅ 지수 일봉 {n1}행 · 투자자 동향 {n2}행 · 원문 {len(raw)}건({last}) · 선물 {'1' if fut else '0'}행 · "
+    return (f"✅ 지수 일봉 {n1}행 · 투자자 동향 {n2}행(빈칸 채움 {filled}) · 원문 {len(raw)}건({last}) · 선물 {'1' if fut else '0'}행 · "
             f"금투협 증시자금 {len(funds)}행 · 신용 {len(credit)}행 저장 ({db})")
 
 
