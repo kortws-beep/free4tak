@@ -12,7 +12,7 @@ class Kiwoom:
         self.avail, self.ok, self.orders = avail, ok, []
     def holdings(self):
         return {"111111": {"qty": self.avail, "avail": self.avail}}
-    def sell_market(self, code, qty):
+    def sell_market(self, code, qty, credit=None):
         self.orders.append((code, qty)); return self.ok, "x"
 
 

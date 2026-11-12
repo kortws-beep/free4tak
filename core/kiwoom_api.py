@@ -344,7 +344,8 @@ class KiwoomAPI:
                              json=body, timeout=10).json()
 
     def holdings(self) -> dict:
-        """{종목코드: {"qty": 보유, "avail": 매도가능, "name"}} — kt00018 계좌평가잔고. 실패하면 {}."""
+        """{종목코드: {"qty": 보유, "avail": 매도가능, "name", "credit": 그중 신용(융자) 매도가능}} — kt00018. 실패하면 {}.
+        ★ 11-12 같은 종목이 현금·융자 두 줄로 나올 수 있어 합산하고, 융자분은 credit에 따로(신용 매도 kt10007용)."""
         try:
             body = {"qry_tp": "2", "dmst_stex_tp": "KRX"}
             if os.getenv("KIWOOM_CANO"):
@@ -361,16 +362,48 @@ class KiwoomAPI:
                 qty = n("rmnd_qty")
                 avail = n("trde_able_qty") if s.get("trde_able_qty") not in (None, "") else qty
                 if code:
-                    out[code] = {"qty": qty, "avail": avail, "name": s.get("stk_nm", "")}
+                    o = out.setdefault(code, {"qty": 0, "avail": 0, "name": s.get("stk_nm", ""), "credit": 0})
+                    o["qty"] += qty
+                    o["avail"] += avail
+                    if "융자" in str(s.get("crd_tp_nm", "")) or str(s.get("crd_tp", "00")).strip() not in ("", "00"):
+                        o["credit"] += avail
             return out
         except Exception as e:
             print(f"⚠️ 키움 잔고 조회 오류: {e}")
             return {}
 
-    def sell_market(self, code: str, qty: int) -> tuple:
-        """kt10001 주식 매도주문(시장가) → (성공, 메시지). return_code 0이면 접수.
-        ★ 2026-11-12 — 당일 SOR로 산 주식이 NXT에서 체결되면 KRX 매도가 "[571445] 유가증권 잔고가 존재하지 않습니다"로
-          거절됨(리나 심텍 25주). KRX가 잔고 없음으로 거절하면 SOR(거래소 자동 선택)로 한 번 더 낸다."""
+    def _credit_sell(self, code: str, qty: int) -> tuple:
+        """kt10007 신용 매도주문(시장가, 융자합 99 — 대출일 몰라도 됨) → (성공, 메시지). 키움 공식 명세(crdordr) 그대로."""
+        try:
+            res = self._post("crdordr", "kt10007", {"dmst_stex_tp": "KRX", "stk_cd": code, "ord_qty": str(int(qty)),
+                                                    "ord_uv": "", "trde_tp": "3", "crd_deal_tp": "99",
+                                                    "crd_loan_dt": "", "cond_uv": ""})
+        except Exception as e:
+            return False, f"신용매도 예외: {e}"
+        if str(res.get("return_code", "")) == "0":
+            return True, f"신용 주문번호 {res.get('ord_no', '')}"
+        return False, "신용매도: " + str(res.get("return_msg", res))[:200]
+
+    def sell_market(self, code: str, qty: int, credit: int = None) -> tuple:
+        """시장가 매도 → (성공, 메시지). credit=그중 신용(융자) 수량(holdings()["credit"]) — 융자분은 kt10007 신용 매도,
+        나머지는 kt10001 현금 매도. ★ 11-12 대장 키움 보유가 대부분 융자라 현금 매도가
+        "[571445] 유가증권 잔고가 존재하지 않습니다"로 거절됐음(리나 심텍) → 신용 매도 추가.
+        credit을 모르는데(None) 현금 매도가 '잔고 없음'으로 거절되면 신용 매도로 한 번 더."""
+        qty = int(qty)
+        c = min(qty, int(credit or 0))
+        msgs, ok_all = [], True
+        if c > 0:
+            ok, m = self._credit_sell(code, c)
+            msgs.append(m); ok_all &= ok
+        if qty - c > 0:
+            ok, m = self._cash_sell(code, qty - c)
+            if not ok and credit is None and "잔고" in m:
+                ok, m = self._credit_sell(code, qty - c)
+            msgs.append(m); ok_all &= ok
+        return ok_all, " / ".join(msgs)
+
+    def _cash_sell(self, code: str, qty: int) -> tuple:
+        """kt10001 주식 매도주문(시장가). KRX가 잔고 없음으로 거절하면 SOR로 한 번 더(11-12, 무해해서 유지)."""
         msg = ""
         for stex in ("KRX", "SOR"):
             try:

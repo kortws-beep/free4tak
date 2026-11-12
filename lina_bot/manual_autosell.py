@@ -39,7 +39,7 @@ class KisBroker:
         pos = self.api.get_current_positions(force=True) or {}
         return {c: {"qty": int(p.get("qty", 0) or 0), "avail": int(p.get("qty", 0) or 0)} for c, p in pos.items()}
 
-    def sell_market(self, code: str, qty: int) -> tuple:
+    def sell_market(self, code: str, qty: int, credit: int = None) -> tuple:   # 한투(데이봇 계좌)는 신용 구분 없음
         ok = self.api.sell(code, int(qty), price=0)
         return bool(ok), ("접수" if ok else "주문 거부(한투)")
 
@@ -215,7 +215,7 @@ def handle(code: str, w: dict, price: float, hhmm: str, md: str, kiwoom=None) ->
             out["msgs"].append(f"⚠️ [리나등록] {name}({code}) {act['reason']} — {label} 매도가능수량 0, 주문 안 냄"
                                f"(이미 팔았으면 `해제 {name}`)")
         return out
-    ok, msg = kiwoom.sell_market(code, qty)
+    ok, msg = kiwoom.sell_market(code, qty, credit=held.get("credit"))   # ★ 11-12 융자분은 신용 매도(kt10007)
     if not ok:
         out["msgs"].append(f"🚨 [리나등록] {name}({code}) 매도 주문 실패({qty}주) — {msg} · 다음 루프에 다시 시도")
         return out
