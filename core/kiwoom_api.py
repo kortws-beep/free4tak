@@ -368,14 +368,22 @@ class KiwoomAPI:
             return {}
 
     def sell_market(self, code: str, qty: int) -> tuple:
-        """kt10001 주식 매도주문(시장가) → (성공, 메시지). return_code 0이면 접수."""
-        try:
-            res = self._post("ordr", "kt10001", {"dmst_stex_tp": "KRX", "stk_cd": code, "ord_qty": str(int(qty)),
-                                                 "ord_uv": "", "trde_tp": "3", "cond_uv": ""})
-            ok = str(res.get("return_code", "")) == "0"
-            return ok, (f"주문번호 {res.get('ord_no', '')}" if ok else str(res.get("return_msg", res))[:200])
-        except Exception as e:
-            return False, f"예외: {e}"
+        """kt10001 주식 매도주문(시장가) → (성공, 메시지). return_code 0이면 접수.
+        ★ 2026-11-12 — 당일 SOR로 산 주식이 NXT에서 체결되면 KRX 매도가 "[571445] 유가증권 잔고가 존재하지 않습니다"로
+          거절됨(리나 심텍 25주). KRX가 잔고 없음으로 거절하면 SOR(거래소 자동 선택)로 한 번 더 낸다."""
+        msg = ""
+        for stex in ("KRX", "SOR"):
+            try:
+                res = self._post("ordr", "kt10001", {"dmst_stex_tp": stex, "stk_cd": code, "ord_qty": str(int(qty)),
+                                                     "ord_uv": "", "trde_tp": "3", "cond_uv": ""})
+            except Exception as e:
+                return False, f"예외: {e}"
+            if str(res.get("return_code", "")) == "0":
+                return True, f"주문번호 {res.get('ord_no', '')}" + ("" if stex == "KRX" else " (SOR)")
+            msg = str(res.get("return_msg", res))[:200]
+            if "잔고" not in msg:            # 잔고 문제가 아니면 다른 거래소로 다시 낼 이유 없음
+                break
+        return False, msg
 
     async def get_watchlist_groups_ws(self) -> list:
         """
