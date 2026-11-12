@@ -210,6 +210,12 @@ PROTECT_ARM_RATE   = 0.025
 PROTECT_FLOOR_RATE = 0.003
 
 
+def _vol8(qty: float) -> str:
+    """★ 11-13 (제미나이 cbot 리뷰 1번) 업비트 수량 8자리 버림 — 반올림하면 잔고보다 1e-8 커져 '잔고 부족' 거부 가능."""
+    from decimal import Decimal, ROUND_DOWN
+    return format(Decimal(repr(float(qty))).quantize(Decimal("0.00000001"), rounding=ROUND_DOWN), "f")
+
+
 def first_tp_qty(qty: float, price: float, ratio: float = FIRST_TP_RATIO, min_amt: float = 5_000) -> float:
     """1차 익절 매도 수량 — 판 쪽·남는 쪽 모두 업비트 최소주문금액 이상일 때만, 아니면 0(매도 안 함)."""
     part = round(qty * ratio, 8)
@@ -669,7 +675,7 @@ class CBot:
         반환: 실현 손익(원)
         """
         profit_krw = 0.0
-        rec_qty, buy_price = sold_qty, 0.0
+        rec_qty, buy_price, is_full_sell = sold_qty, 0.0, True
         try:
             now  = datetime.datetime.now().isoformat(timespec="seconds")
             conn = _db_connect(TRADE_HIST_DB)
@@ -732,10 +738,22 @@ class CBot:
                     qty=rec_qty,
                     sell_reason=sell_reason,
                     market_status=self.market_status,
+                    is_partial=not is_full_sell,   # ★ 11-13 (리뷰 5번) 분할 익절 — 건수·승률에서 빼고 금액엔 포함
                 )
             except Exception as _e:
                 print(f"⚠️ master_db 기록 오류: {_e}")
         return profit_krw
+
+    def _open_row_qty(self, market: str) -> float:
+        """봇 DB에 아직 안 판 매수 행이 있으면 그 수량(봇이 분할 매도하면 이 수량이 먼저 줄어듦), 없으면 0."""
+        try:
+            conn = _db_connect(TRADE_HIST_DB)
+            r = conn.execute("SELECT qty FROM trades WHERE market=? AND sell_price IS NULL ORDER BY id DESC LIMIT 1",
+                             (market,)).fetchone()
+            conn.close()
+            return float(r[0] or 0) if r else 0.0
+        except Exception:
+            return 0.0
 
     def _save_manual_trade(self, market: str, buy_price: float, sell_price: float,
                             qty: float, sell_reason: str = "수동매도"):
@@ -2065,7 +2083,7 @@ class CBot:
         #   (대장 지적, 리포트로 발견). 8자리로 고정 포맷.
         params = {
             "market": market, "side": "ask",
-            "volume": f"{qty:.8f}", "ord_type": "market",
+            "volume": _vol8(qty), "ord_type": "market",   # ★ 11-13 버림(반올림하면 잔고 초과 거부 가능)
         }
         qs   = "&".join(f"{k}={v}" for k, v in params.items())
         hdrs = self._get_headers(qs)
@@ -2781,9 +2799,14 @@ class CBot:
                         _entry_price = _old_pos.get("entry_price", 0)
                         _is_loss = _entry_price <= 0 or _sell_price <= _entry_price
                         self.sold_today[_code] = _now_ts if _is_loss else None
-                        self._save_manual_trade(
-                            _code, _old_pos.get("entry_price", 0), _sell_price,
-                            _old_pos.get("qty", 0))
+                        # ★ 11-13 (제미나이 cbot 리뷰 2번) — 봇이 산 코인이면 원래 매수 행을 '수동매도'로 닫음.
+                        #   예전엔 늘 새 행을 따로 넣어서 원래 행이 안 판 채로(유령) 남았음(매도 응답 타임아웃 때도 같은 경로).
+                        if self._open_row_qty(_code) > 0:
+                            self._save_sell_history(_code, _sell_price, "수동매도", sold_qty=0)
+                        else:
+                            self._save_manual_trade(
+                                _code, _old_pos.get("entry_price", 0), _sell_price,
+                                _old_pos.get("qty", 0))
                         self._buy_sync_guard.pop(_code, None)
                         # ★ 2026-07-02: master_positions 정리 누락 수정 —
                         #   기존엔 감지만 하고 지우질 않아 수동매도된 코인이
@@ -2792,6 +2815,18 @@ class CBot:
                             _master_remove('cbot', _code)
                 # ★ 2026-09-05: 보호 중인 종목은 new_pos에 없어도(체결반영 지연)
                 #   메모리 포지션을 그대로 유지 — 위 가드 스킵과 짝을 이룸.
+                # ★ 11-13 (제미나이 cbot 리뷰 4번) — 대장이 일부만 판 것: 실잔고가 봇 DB 수량보다 적으면 그 차이를
+                #   '수동일부매도'로 기록(봇 분할매도는 DB 수량을 먼저 줄이므로 구분됨). 예전엔 잔고만 조용히 줄고 DB엔
+                #   원래 수량이 남아, 나중에 봇이 나머지를 팔 때 손익이 부풀려졌음. 5천원 미만 자투리는 무시.
+                for _code, _np in new_pos.items():
+                    if _code not in self.positions or _code in _guarded_codes:
+                        continue
+                    _dbq = self._open_row_qty(_code)
+                    _diff = _dbq - float(_np.get("qty", 0) or 0)
+                    _px = float(_np.get("current") or self.positions[_code].get("current") or 0)
+                    if _dbq > 0 and _diff > _dbq * 1e-6 and _diff * _px >= 5000:
+                        print(f"🔍 수동 일부매도 감지: {_code} {_dbq:.6f}→{_np.get('qty')}")
+                        self._save_sell_history(_code, _px, "수동일부매도", sold_qty=_diff)
                 _guarded_positions = {c: self.positions[c] for c in _guarded_codes
                                       if c in self.positions}
                 self.positions.clear()

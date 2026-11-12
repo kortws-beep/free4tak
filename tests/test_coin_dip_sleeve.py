@@ -150,6 +150,13 @@ class FetchCache(unittest.TestCase):
         self.assertEqual(kept, good, "2라운드 실패로 짧게 받았으면 기존 캐시를 그대로 유지해야 함")
 
 
+class Vol8(unittest.TestCase):
+    def test_truncate(self):   # ★ 11-13 제미나이 cbot 리뷰 1번 — 8자리 버림(반올림하면 잔고 초과)
+        self.assertEqual(D._vol8(0.123456786), "0.12345678")
+        self.assertEqual(cbot._vol8(0.123456786), "0.12345678")
+        self.assertEqual(D._vol8(1e-9), "0.00000000")
+
+
 class Step(unittest.TestCase):
     def setUp(self):                      # ★ 11-11 신규매수 중단(NEW_BUY=False)과 별개로 매수 로직 자체는 켠 상태로 검사
         self._nb, D.NEW_BUY = D.NEW_BUY, True

@@ -29,6 +29,12 @@ import sqlite3
 import time
 
 DIP_COINS = ["KRW-BTC", "KRW-ETH", "KRW-XRP", "KRW-SOL"]
+
+
+def _vol8(qty: float) -> str:
+    """★ 11-13 (제미나이 cbot 리뷰 1번) 업비트 수량 8자리 — 반올림하면 잔고보다 1e-8 커져 거부될 수 있어 버림."""
+    from decimal import Decimal, ROUND_DOWN
+    return format(Decimal(repr(float(qty))).quantize(Decimal("0.00000001"), rounding=ROUND_DOWN), "f")
 NEW_BUY = False   # ★ 11-11 대장 A안 — 신규 매수 중단(보유분 청산은 계속). 다시 켜려면 True
 SLOT_KRW = 250_000
 # ★ 2026-10-30 대장: 1회차(10-09 ETH·XRP·SOL 동시매수 → 20일 기한 -5.2만) 뒤 백테스트(--widen --long) —
@@ -303,7 +309,7 @@ class DipSleeve:
             if qty <= 0:
                 bal = (self.bot.get_balances() or {}).get(m.replace("KRW-", ""), {})
                 qty = bal.get("balance", 0)
-            if qty <= 0 or not self._order({"market": m, "side": "ask", "volume": f"{qty:.8f}",
+            if qty <= 0 or not self._order({"market": m, "side": "ask", "volume": _vol8(qty),
                                             "ord_type": "market"}):
                 return False
         entry = st.get("entry") or px
