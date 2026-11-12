@@ -818,10 +818,14 @@ class SBot:
                          stage_reached=_stage_for_db)
         # ★ master_trades 기록
         if _master_record:  # 전량 + 분할매도 모두 기록
-            ctx = self.buy_context.get(code, {})
+            ctx = dict(self.buy_context.get(code, {}))
+            if not (ctx.get("buy_time") and ctx.get("ai_score") is not None):
+                # ★ 2026-11-13 (제미나이 sbot 리뷰 4·6번) — buy_context엔 buy_time이 없고(보유일수 항상 0: 95건 중 82건)
+                #   재시작하면 AI 점수·사유도 사라졌음. sbot 거래 DB에 이미 다 있으니 비면 거기서 채움.
+                ctx = {**self._trade_meta(code), **{k: v for k, v in ctx.items() if v not in (None, "")}}
             try:
                 import datetime as _dt
-                buy_t  = ctx.get("buy_time", "")
+                buy_t  = (ctx.get("buy_time", "") or "").replace("T", " ")
                 sell_t = _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 hold_d = 0
                 if buy_t:
@@ -984,6 +988,19 @@ class SBot:
     # ============================================================
     # 디스코드 명령 처리
     # ============================================================
+    def _trade_meta(self, code: str) -> dict:
+        """sbot 거래 DB에서 이 종목 최근 매수 건의 buy_time·ai_score·ai_reason(재시작해도 남아 있음)."""
+        try:
+            import sqlite3 as _sq
+            from sbot_db import SBOT_HIST_DB as _hist   # 작업 폴더 기준(서비스 WorkingDirectory=stock_bot)
+            c = _sq.connect(f"file:{_hist}?mode=ro", uri=True, timeout=5)
+            r = c.execute("SELECT buy_time, ai_score, ai_reason FROM trades WHERE code=? ORDER BY id DESC LIMIT 1",
+                          (code,)).fetchone()
+            c.close()
+            return {"buy_time": r[0] or "", "ai_score": r[1], "ai_reason": r[2] or ""} if r else {}
+        except Exception:
+            return {}
+
     def _handle_pending_command(self, st: dict):
         pending = st.get("pending_cmd")
         if not pending:
@@ -1497,6 +1514,7 @@ class SBot:
                     is_theme=is_new, psbl_cash=psbl_cash,
                     code=code,                           # ★ 켈리: 종목별 성과 반영
                     db_path="sbot_trade_history.db",     # ★ 켈리: sbot DB 사용
+                    bot_type="sbot",                     # ★ 11-13 sbot 거래만(통합 DB에 코인·단타 섞여 있었음)
                 )
             else:
                 # ★ 2026-10-06 대장 지정 — 마지막 슬롯은 다음 슬롯을 위해
@@ -1644,10 +1662,12 @@ class SBot:
                 # 다음 루프에 다시 확인(topup_done 안 찍음).
                 continue
 
-            shortfall = min(int(target - filled), psbl_cash)
-            if shortfall < current:
+            if int(target - filled) < current:      # 1주도 못 채울 만큼만 남음 = 사실상 목표 달성
                 pos["topup_done"] = True
                 continue
+            if psbl_cash < current:                 # ★ 11-13 (리뷰 5번) 현금만 모자람 — 포기하지 말고 다음에 다시
+                continue
+            shortfall = min(int(target - filled), psbl_cash)
 
             print(f"🌙 [SWING] {code}({self._name(code)}) 저녁보충매수 — "
                   f"목표{fmt_won(target)} 중 {fmt_won(filled)}만 체결 → {fmt_won(shortfall)} 보충 시도")

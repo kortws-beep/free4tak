@@ -24,6 +24,34 @@ import os
 from typing import Callable
 
 
+def _master_offline_sell(bot_type: str, db_path: str, row_id: int, code: str, buy_price: float,
+                         sell_price: float, qty, now: str):
+    """★ 2026-11-13 (제미나이 sbot 리뷰 3번) — 봇 꺼진 사이 매도를 봇 DB(trades)에만 쓰고 통합 DB(master_trades:
+    저녁 성적표·합산 손실 한도·대시보드)엔 안 넣었음 → 같이 기록하고 통합 포지션도 정리. 실패해도 동기화는 계속."""
+    try:
+        import master_db
+    except Exception:
+        return
+    name, buy_t = "", ""
+    try:
+        c = sqlite3.connect(db_path, timeout=10)
+        cols = [r[1] for r in c.execute("PRAGMA table_info(trades)")]
+        if "buy_time" in cols:
+            buy_t = (c.execute("SELECT buy_time FROM trades WHERE id=?", (row_id,)).fetchone() or [""])[0] or ""
+        if "stock_name" in cols:
+            name = (c.execute("SELECT stock_name FROM trades WHERE id=?", (row_id,)).fetchone() or [""])[0] or ""
+        c.close()
+    except Exception:
+        pass
+    try:
+        master_db.record_trade(bot_type=bot_type, code=code, buy_price=buy_price, sell_price=sell_price,
+                               qty=qty or 0, sell_reason="수동매도(봇 꺼진 사이 감지)", stock_name=name or code,
+                               buy_time=str(buy_t).replace("T", " "), sell_time=now.replace("T", " "))
+        master_db.remove_position(bot_type, code)
+    except Exception as e:
+        print(f"⚠️ 통합 DB 기록 실패({code}): {e}")
+
+
 def recent_sales(api, codes: list, days: int = 3) -> dict:
     """★ 2026-10-28 — 최근 days일 한투 실현손익에서 codes의 매도 → {code: (평균 매도가, 매도 수량)}. 조회 실패면 {}."""
     import datetime as _dt
@@ -117,6 +145,7 @@ def sync_positions(
                     rate = (price - buy_price) / buy_price * 100 if buy_price else 0
                     conn.execute("UPDATE trades SET sell_price=?, sell_time=?, profit_rate=?, sell_reason=? WHERE id=?",
                                  (price, now, rate, "수동매도(봇 꺼진 사이 감지)", row_id))
+                    _master_offline_sell(bot_type, db_path, row_id, code, buy_price, price, _qty, now)
                 print(f"   📝 매도 기록: {code} @{price:,.0f} — 봇 꺼진 사이 매도(실현손익 조회로 확인)")
             conn.commit()
             conn.close()
@@ -354,6 +383,7 @@ def sync_positions_upbit(
                     conn.execute("UPDATE trades SET sell_price=?, sell_time=?, profit_rate=?, profit_krw=?, sell_reason=? "
                                  "WHERE id=?", (price, now, rate, (price - buy_price) * (qty or 0),
                                                 "수동매도(봇 꺼진 사이 감지)", row_id))
+                    _master_offline_sell(bot_type, db_path, row_id, market, buy_price, price, qty, now)
                 print(f"   📝 매도 기록: {market} @{price:,.4f} — 봇 꺼진 사이 매도(업비트 체결로 확인)")
             conn.commit()
             conn.close()

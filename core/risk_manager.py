@@ -150,7 +150,8 @@ class RiskManager:
                         is_theme: bool = False,
                         psbl_cash: int = 0,
                         code: str = "",
-                        db_path: str = "") -> int:
+                        db_path: str = "",
+                        bot_type: str = "") -> int:
         """
         ★ v2 — 켈리 공식 통합 포지션 사이징
 
@@ -201,6 +202,11 @@ class RiskManager:
                     "SELECT name FROM sqlite_master WHERE type='table'"
                 ).fetchall()]
                 tbl = "master_trades" if "master_trades" in tables else "trades"
+                # ★ 2026-11-13 (제미나이 sbot 리뷰 1번) — master_trades엔 cbot·daybot·nbot 거래가 다 섞여 있어서
+                #   sbot 베팅 크기를 남의 봇 성적(코인 포함)으로 정하고 있었음 → 그 봇 것만·전량매도만.
+                flt, fprm = "", ()
+                if tbl == "master_trades" and bot_type:
+                    flt, fprm = " AND bot_type = ? AND is_partial = 0", (bot_type,)
 
                 # 종목별 최근 20건
                 rows = conn.execute(f"""
@@ -208,9 +214,9 @@ class RiskManager:
                     WHERE sell_price IS NOT NULL
                       AND profit_rate IS NOT NULL
                       AND profit_rate > -99
-                      AND code = ?
+                      AND code = ?{flt}
                     ORDER BY id DESC LIMIT 20
-                """, (code,)).fetchall() if code else []
+                """, (code,) + fprm).fetchall() if code else []
 
                 profits = [r[0] for r in rows]
 
@@ -220,9 +226,9 @@ class RiskManager:
                         SELECT profit_rate FROM {tbl}
                         WHERE sell_price IS NOT NULL
                           AND profit_rate IS NOT NULL
-                          AND profit_rate > -99
+                          AND profit_rate > -99{flt}
                         ORDER BY id DESC LIMIT 100
-                    """).fetchall()
+                    """, fprm).fetchall()
                     profits = [r[0] for r in rows2]
 
                 conn.close()
