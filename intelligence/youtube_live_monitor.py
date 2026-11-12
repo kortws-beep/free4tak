@@ -145,6 +145,28 @@ def is_channel_live(handle: str):
     return False, ""
 
 
+SALVAGE_MIN_BYTES = 2_000_000   # ★ 11-12 약 2분 분량 — 이보다 작으면 버림
+
+
+def _salvage_partial(out_path: str) -> bool:
+    """★ 2026-11-12 — 라이브 HLS 조각 하나가 실패하면 yt-dlp/ffmpeg가 오류로 끝나 60분 구간이 통째로 버려졌음
+    (하루 수십 번, 매경 텔레그램 코너 뒷부분 유실). 받은 데까지의 파일(또는 .part)이 있으면 그걸로 전사."""
+    for cand in (out_path, out_path + ".part"):
+        try:
+            if os.path.exists(cand) and os.path.getsize(cand) >= SALVAGE_MIN_BYTES:
+                if cand != out_path:
+                    os.replace(cand, out_path)
+                return True
+        except OSError:
+            pass
+    for cand in (out_path, out_path + ".part"):
+        try:
+            os.remove(cand)
+        except OSError:
+            pass
+    return False
+
+
 def capture_audio_chunk(video_id: str, duration_sec: int, out_path: str) -> bool:
     """yt-dlp로 라이브 스트림 오디오를 duration_sec만큼만 캡처.
     ffmpeg 다운로더에 -t 옵션을 넘겨서 구간을 제한 — 라이브는 seek 개념이
@@ -155,6 +177,7 @@ def capture_audio_chunk(video_id: str, duration_sec: int, out_path: str) -> bool
         YTDLP_BIN, "-f", AUDIO_FORMAT,
         "--downloader", "ffmpeg",
         "--downloader-args", f"ffmpeg_i:-t {duration_sec}",
+        "--no-part",                       # ★ 11-12 끊겨도 받은 만큼 파일로 남게(.part 정리로 사라지지 않게)
         "-o", out_path,
         url,
     ]
@@ -162,10 +185,17 @@ def capture_audio_chunk(video_id: str, duration_sec: int, out_path: str) -> bool
         res = subprocess.run(cmd, capture_output=True, text=True,
                               timeout=duration_sec + 120)
         if res.returncode != 0 or not os.path.exists(out_path):
+            if _salvage_partial(out_path):
+                print(f"⚠️ [오디오캡처] 중간에 끊김 — 받은 부분({os.path.getsize(out_path) // 1_000_000}MB)은 살려서 전사: "
+                      f"{res.stderr.strip().splitlines()[-1][-160:] if res.stderr.strip() else ''}")
+                return True
             print(f"⚠️ [오디오캡처] 실패: {res.stderr[-500:]}")
             return False
         return True
     except subprocess.TimeoutExpired:
+        if _salvage_partial(out_path):
+            print("⚠️ [오디오캡처] 타임아웃 — 받은 부분은 살려서 전사")
+            return True
         print("⚠️ [오디오캡처] 타임아웃")
         return False
     except Exception as e:
