@@ -28,6 +28,10 @@ class Signal(unittest.TestCase):
         self.assertTrue(B.judge(d, "취득결정", listed=10_000_000, price=28400)[0])                # 2.0%
         self.assertFalse(B.judge(d, "취득결정", listed=50_000_000, price=28400)[0])               # 0.4%
         self.assertFalse(B.judge(dict(d, purpose="임직원 주식보상"), "취득결정", 10_000_000, 28400)[0])
+        # ★ 11-12 하락장엔 시총 1천억↑만 — 카스(1,068원×약 2천만주≈200억대)는 하락장에서 패스, 평소엔 통과
+        self.assertFalse(B.judge(d, "취득결정", listed=10_000_000, price=2840, down=True)[0])   # 시총 284억
+        self.assertTrue(B.judge(d, "취득결정", listed=10_000_000, price=2840, down=False)[0])
+        self.assertTrue(B.judge(d, "취득결정", listed=10_000_000, price=28400, down=True)[0])   # 시총 2,840억
         self.assertAlmostEqual(B.ratio_pct({"amount": 1e10}, 10_000_000, 50000), 2.0)            # 신탁: 금액 ÷ 시총
 
     def test_events(self):
@@ -56,6 +60,7 @@ class Engine(unittest.TestCase):
         b._notify = lambda m, critical=False: b.notes.append(m)
         b._daily_loss_hit = lambda: False
         b._name = lambda c: c
+        b._market_breadth = lambda: 30.0                                  # ★ 11-12 하락장(시총 1천억↑만) — 테스트 종목 시총 2,840억
         b.db = type("D", (), {"log_candidate": lambda self, *a, **k: None})()
         b.api = type("A", (), {"get_market_data": lambda s, c: {"stck_prpr": "28400", "lstn_stcn": "10000000", "prdy_ctrt": "1.5"}})()
         b._do_buy = lambda code, name, price, tier, **k: (b.bought.append((code, tier, k.get("amount_cap"))), True)[1]

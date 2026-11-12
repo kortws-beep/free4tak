@@ -22,6 +22,10 @@ AMOUNT = 500_000          # 대장 "마찬가지 50만 한도"
 MIN_RATIO = 1.0           # 상장주식 대비 %
 HOLD_DAYS = 5             # 산 날 포함 5거래일째 15:10 정리(백테스트 5일 종가)
 STOP_PCT = 10.0           # 안전 손절(백테스트엔 손절 없음 — 음봉 엔진과 같은 -10%)
+# ★ 2026-11-12 대장 "소규모 기업은 부각을 못 받아"(카스 매수 뒤) → backtest/buyback_pbr.py 엔진조건 시총 구간:
+#   전체 기간은 소형주가 오히려 나음(500억↓ 5일 +4.69%)이라 평소엔 하한 없음 그대로, 하지만 하락장(국면<35%)에선
+#   1천억↑ 27건 5일 +5.74%(뒤 절반 +7.90%) vs 1천억↓ 44건 +3.39%(뒤 +2.83%) → 하락장일 때만 시총 1천억↑(대장 A안).
+DOWN_MIN_CAP_EOK = 1000
 
 
 def kind_of(title: str):
@@ -151,12 +155,15 @@ def todays_events(date: str, prev_date: str = None, db: str = KIND_DB) -> list:
     return out
 
 
-def judge(d: dict, kind: str, listed: float, price: float):
-    """→ (통과?, 사유)."""
+def judge(d: dict, kind: str, listed: float, price: float, down: bool = False):
+    """→ (통과?, 사유). down=하락장(국면<35%)이면 시총 DOWN_MIN_CAP_EOK억 미만은 패스."""
     tag = purpose_tag(d.get("purpose", ""), kind)
     r = ratio_pct(d, listed, price)
     if tag != "주주가치":
         return False, f"목적 '{d.get('purpose') or '?'}'({tag})"
     if r < MIN_RATIO:
         return False, f"규모 {r:.2f}% < {MIN_RATIO:g}%"
+    cap = listed * price / 1e8 if listed and price else 0
+    if down and cap and cap < DOWN_MIN_CAP_EOK:
+        return False, f"하락장 시총 {cap:,.0f}억 < {DOWN_MIN_CAP_EOK:,}억"
     return True, f"{kind} · {d.get('purpose')} · 상장주식 {r:.1f}%({(d.get('amount') or 0) / 1e8:,.0f}억)"

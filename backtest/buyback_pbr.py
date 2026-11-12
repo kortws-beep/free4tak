@@ -108,13 +108,20 @@ def main():
                 if key[0] == "자사주전체" and kd not in ("취득결정", "취득신탁", "소각결정"):
                     continue
                 res[(key, rule)].append((d0, r))
+            # ★ 11-12 대장 "소규모 기업은 부각을 못 받아" — 실전 엔진 조건(취득·주주가치·1%↑)만 시총 구간별로
+            if kd in ("취득결정", "취득신탁") and pur == "주주가치" and ratio >= 1 and cap:
+                cb = ("1 500억↓" if cap < 500 else "2 500억~1천억" if cap < 1000 else "3 1천억~3천억" if cap < 3000
+                      else "4 3천억~1조" if cap < 10000 else "5 1조↑")
+                for key in (("엔진조건", "전체"), ("엔진조건", cb), ("엔진조건", "1천억↑" if cap >= 1000 else "1천억↓"),
+                            ("엔진조건", g + "·" + ("1천억↑" if cap >= 1000 else "1천억↓"))):
+                    res[(key, rule)].append((d0, r))
         if i % 100 == 0:
             print(f"  {i}/{len(evs)} · API {store.calls}", flush=True)
-    for grp in ("PBR딱지", "밸류업", "취득결정", "취득신탁", "소각결정", "자사주전체"):
+    for grp in ("PBR딱지", "밸류업", "취득결정", "취득신탁", "소각결정", "자사주전체", "엔진조건"):
         print(f"\n===== {grp} =====")
         for (key, rule) in sorted({k for k in res if k[0][0] == grp}, key=lambda x: (x[0][1], x[1])):
             xs = [r for _, r in sorted(res[(key, rule)])]
-            if len(xs) >= 8:
+            if len(xs) >= (3 if key[0][0] == "엔진조건" else 8):
                 print(SP.line(f"{key[1]} {rule}", xs))
 
 

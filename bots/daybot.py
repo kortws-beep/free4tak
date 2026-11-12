@@ -1795,7 +1795,8 @@ class DayBot:
             if price <= 0:
                 continue
             b["done"].append(acpt)
-            ok, why = buyback_signal.judge(det, kind, listed, price)
+            ok, why = buyback_signal.judge(det, kind, listed, price,
+                                           down=self._down_market(self._market_breadth()))   # ★ 11-12 하락장엔 시총 1천억↑만
             name = comp or self._name(code)
             self.code_name_map.setdefault(code, name)
             if not ok:
