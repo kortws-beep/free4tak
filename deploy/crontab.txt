@@ -66,3 +66,4 @@
 54 5 * * 1-5 cd /home/free4tak/k-bot/stock_bot && /home/free4tak/k-bot/stock_bot/venv/bin/python3 intelligence/mtn_morning_brief.py >> /home/free4tak/k-bot/stock_bot/logs/mtn_morning_brief.log 2>&1
 17 3 * * 6 /home/free4tak/k-bot/stock_bot/deploy/backup.sh /mnt/old/home/free4tak/bk_bot >> /home/free4tak/k-bot/stock_bot/logs/backup.log 2>&1
 @reboot sleep 30 && /usr/bin/tmux new -d -s claude "cd /home/free4tak/k-bot/stock_bot && /home/free4tak/.local/bin/claude remote-control"
+17 4 1 * * cd /home/free4tak/k-bot/stock_bot && venv/bin/python3 scripts/rotate_logs.py >> logs/rotate_logs.log 2>&1
