@@ -447,11 +447,16 @@ def _get_all_stock_names() -> list:
         conn = sqlite3.connect(THEME_DB, timeout=5)
         conn.execute("PRAGMA query_only = ON")
         rows = conn.execute("SELECT DISTINCT stock_name FROM kr_theme_stocks").fetchall()
+        try:      # ★ 11-12 테마에 없는 종목(씨메스로보틱스 등)도 — 전체 종목 마스터
+            master = [r[0] for r in conn.execute("SELECT name FROM kr_stock_master")]
+        except Exception:
+            master = []
         conn.close()
         for (raw,) in rows:
             m = re.match(r"^(.*?)(KOSPI|KOSDAQ)\s", raw)
             if m:
                 names.append(m.group(1))
+        names += [n for n in master if n and n not in set(names)]
     except Exception as e:
         print(f"   ⚠️ 종목명 캐시 로드 오류: {e}")
     _ALL_STOCK_NAMES_CACHE = names
@@ -481,6 +486,8 @@ def _edit_distance_1(a: str, b: str) -> bool:
 NAME_ALIASES = {
     "SPG": "에스피지",
     "KMW": "케이엠더블유",
+    "한국PIM": "한국피아이엠",   # 11-12 매경 텔레그램 코너
+    "TFE": "티에프이",
 }
 
 
@@ -520,6 +527,23 @@ def validate_stock_name(name: str) -> str:
     except Exception as e:
         print(f"   ⚠️ 종목명 검증 오류: {e}")
         return ""
+
+    # ★ 2026-11-12: 테마 DB에 없는 종목(씨메스로보틱스)은 편집거리로 엉뚱한 종목(씨어스)으로 바뀌었음 →
+    #   전체 종목 마스터(kr_stock_master)에서 정확히 같은 이름, 또는 그 이름으로 시작하는 종목이 하나뿐이면 그걸로.
+    try:
+        conn = sqlite3.connect(THEME_DB, timeout=5)
+        conn.execute("PRAGMA query_only = ON")
+        exact = conn.execute("SELECT name FROM kr_stock_master WHERE name = ? LIMIT 1", (stripped,)).fetchone()
+        pref = [] if exact else [r[0] for r in conn.execute(
+            "SELECT name FROM kr_stock_master WHERE replace(name,' ','') LIKE ? LIMIT 3", (stripped + "%",))]
+        conn.close()
+        if exact:
+            return exact[0]
+        if len(pref) == 1 and len(stripped) >= 2:
+            print(f"   🔧 전체종목 앞부분 일치: {name} → {pref[0]}")
+            return pref[0]
+    except Exception as e:
+        print(f"   ⚠️ 종목 마스터 대조 오류: {e}")
 
     if len(stripped) > 2:
         for real_name in _get_all_stock_names():
