@@ -867,6 +867,11 @@ class DayBot:
                     self.positions[code]["qty"]         = new_qty
                     self.positions[code]["entry_price"]  = new_avg
                     self.positions[code]["topup_done"]   = True
+                    # ★ 2026-11-13 (제미나이 리뷰 1번) — 보충매수도 미체결 감시에 등록. 예전엔 접수만 되면 수량을 올리고
+                    #   _pending_orders에 안 넣어서, 안 잡힌 주문이 취소 없이 남았다가 나중에 체결되면 '대장 추가매수'로
+                    #   오인·잔고 대조는 줄어든 수량을 '수동일부매도'로 잘못 기록했음. 취소되면 기존 취소→실잔고 대조
+                    #   (_reconcile_cancelled_buys)가 실제 체결 수량·평단으로 되살림.
+                    self._pending_orders[code] = (orgno, odno, add_qty, time.time())
                 self.db.update_open_buy(code, qty=new_qty, buy_price=new_avg)
                 if _master_upsert:
                     _master_upsert(bot_type="daybot", code=code, stock_name=name,
@@ -984,6 +989,11 @@ class DayBot:
             self._partial_verify.pop(code, None)
             part = int(v.get("qty", 0))
             unfilled = 0
+            if code not in self.positions and code not in self._sell_verify:
+                # ★ 2026-11-13 (제미나이 리뷰 4번) — 1차익절 확인 전에 나머지가 이미 다 팔려 정리됐으면, 실잔고에 남은
+                #   주식이 곧 1차익절 미체결분 → 그만큼 빼고 기록(예전엔 0으로 보고 미체결분까지 '체결'로 기록).
+                #   (전량 매도 확인(_sell_verify)이 아직 진행 중이면 그쪽이 잔고를 처리하므로 여기선 안 셈)
+                unfilled = max(0, min(part, int(real_pos.get(code, {}).get("qty", 0))))
             if code in self.positions:
                 real = int(real_pos.get(code, {}).get("qty", 0))
                 unfilled = max(0, min(part, real - int(self.positions[code].get("qty", 0))))
@@ -999,7 +1009,8 @@ class DayBot:
             if _master_record:
                 _master_record(bot_type="daybot", code=code, stock_name=self._name(code),
                                buy_price=v.get("entry_price", v["price"]), sell_price=v["price"],
-                               qty=filled, sell_reason=v["reason"], buy_tag=v.get("buy_tag", ""))
+                               qty=filled, sell_reason=v["reason"], buy_tag=v.get("buy_tag", ""),
+                               is_partial=True)   # ★ 11-13 (리뷰 5번) 분할매도 — 거래 건수·승률에서 빼고 수익 금액엔 포함
 
     def _record_sell(self, code: str, v: dict, sold_qty: int, remain_qty: int):
         """체결이 확인된 매도분을 DB/master_db에 반영(_verify_sells 전용)."""

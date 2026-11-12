@@ -615,17 +615,19 @@ def get_performance(days: int = 30, bot_type: str = None,
         conn  = sqlite3.connect(db_path, timeout=5)
         conn.execute("PRAGMA query_only=ON")
 
-        where  = "WHERE date(sell_time) >= ? AND is_partial = 0"
+        # ★ 2026-11-13 (제미나이 리뷰 5번) — 예전엔 is_partial=0만 세서 분할 익절 수익 금액이 합계에서 통째로 빠졌음
+        #   (sbot). 거래 건수·평균·승률·최고/최저는 전량매도(is_partial=0)만, 수익 금액 합계는 분할 포함 전부.
+        where  = "WHERE date(sell_time) >= ?"
         params = [since]
         if bot_type:
             where += " AND bot_type = ?"
             params.append(bot_type)
 
         row = conn.execute(f"""
-            SELECT COUNT(*), SUM(profit_krw),
-                   AVG(profit_rate),
-                   SUM(CASE WHEN profit_rate >= 0 THEN 1 ELSE 0 END),
-                   MIN(profit_rate), MAX(profit_rate)
+            SELECT SUM(CASE WHEN is_partial = 0 THEN 1 ELSE 0 END), SUM(profit_krw),
+                   AVG(CASE WHEN is_partial = 0 THEN profit_rate END),
+                   SUM(CASE WHEN is_partial = 0 AND profit_rate >= 0 THEN 1 ELSE 0 END),
+                   MIN(CASE WHEN is_partial = 0 THEN profit_rate END), MAX(CASE WHEN is_partial = 0 THEN profit_rate END)
             FROM master_trades {where}
         """, params).fetchone()
         conn.close()

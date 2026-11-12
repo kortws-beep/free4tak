@@ -215,6 +215,28 @@ class KisAPI:
         except Exception as e:
             print(f"❌ 주문가능금액 조회 오류: {e}"); return 0
 
+    @staticmethod
+    def _balance_pages(url: str, headers: dict, params: dict, max_pages: int = 10):
+        """★ 2026-11-13 (제미나이 리뷰 2번) — 한투 inquire-balance는 한 번에 최대 50종목만 줌. 응답 헤더 tr_cont가
+        F/M이면 ctx_area_fk100/nk100으로 다음 페이지를 이어 받음(요청 헤더 tr_cont=N). 안 그러면 50종목 넘는
+        계좌에서 뒷순위 종목이 '수동매도'로 오판됨. → (마지막 응답 json, output1 전체 목록). 어느 페이지든 실패면
+        그 실패 응답을 그대로 돌려줘 호출부의 기존 재시도·캐시 유지 처리를 탐."""
+        hdr, prm, rows, res = dict(headers), dict(params), [], {}
+        for _ in range(max_pages):
+            r = _get(url, headers=hdr, params=prm, timeout=10)
+            res = r.json()
+            if res.get("rt_cd", "") != "0":
+                return res, []
+            rows += res.get("output1", []) or []
+            nk = (res.get("ctx_area_nk100") or "").strip()
+            if r.headers.get("tr_cont", "") in ("F", "M") and nk:
+                prm["CTX_AREA_FK100"] = res.get("ctx_area_fk100", "")
+                prm["CTX_AREA_NK100"] = res.get("ctx_area_nk100", "")
+                hdr["tr_cont"] = "N"
+                continue
+            break
+        return res, rows
+
     def get_current_positions(self, force: bool = False) -> dict:
         # ★ 30초 캐시 (API 호출 횟수 제한 대응)
         # ★ 2026-10-06: force=True면 캐시 무시 — 주문 직후 체결여부를
@@ -238,7 +260,7 @@ class KisAPI:
                      "KOSEF","TREX","SOL","ACE","PLUS","RISE"]
         for _retry in range(3):
             try:
-                res = _get(url, headers=headers, params=params, timeout=10).json()
+                res, rows = self._balance_pages(url, headers, params)
                 # ★ API 응답 자체의 성공/실패 여부를 rt_cd로 먼저 판별
                 #   (rt_cd!="0" = 진짜 API 실패 → 재시도/캐시유지, 호출측엔 None 반환
                 #    rt_cd=="0"인데 output1이 비어있음 = 정상적으로 보유종목 0개 → {} 반환)
@@ -256,7 +278,7 @@ class KisAPI:
                         return None   # ★ 진짜 실패 — 호출측이 캐시 유지 판단할 수 있게 None
 
                 pos = {}
-                for item in res.get("output1", []):
+                for item in rows:
                     qty = int(item.get("hldg_qty", 0))
                     if qty <= 0: continue
                     code = item.get("pdno")
