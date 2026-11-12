@@ -70,8 +70,19 @@ class Dip(unittest.TestCase):
         self.assertFalse(D.index_ready({"kospi": (-1.5, 1.2)}))          # -2%까진 안 빠짐
         st = D.index_status(get=lambda u: (
             {"totalInfos": [{"code": "lastClosePrice", "value": "5,937.66"}, {"code": "lowPrice", "value": "5,599.42"}]}
-            if u.endswith("integration") else {"closePrice": "5,627.42"}))
+            if u.endswith("integration") else {"closePrice": "5,627.42"}), now_hhmm="1430")
         self.assertAlmostEqual(st["kospi"][0], -5.22, places=2); self.assertAlmostEqual(st["kospi"][1], 0.50, places=2)
+
+    def test_index_status_open_stale(self):
+        # ★ 11-12 09:01 — '오늘 저가' 칸에 어제 저가(668.48)가 남아 -5.2% 폭락 오판 → 09:03 전엔 빈 값(막지 않음)
+        stale = lambda u: ({"totalInfos": [{"code": "lastClosePrice", "value": "705.10"}, {"code": "lowPrice", "value": "668.48"}]}
+                           if u.endswith("integration") else {"closePrice": "707.82"})
+        self.assertEqual(D.index_status(get=stale, now_hhmm="0901"), {})
+        self.assertIn("kospi", D.index_status(get=stale, now_hhmm="0905"))
+        # 저가가 현재가보다 높게 오는 꼬인 값은 버림
+        bad = lambda u: ({"totalInfos": [{"code": "lastClosePrice", "value": "705.10"}, {"code": "lowPrice", "value": "720.00"}]}
+                         if u.endswith("integration") else {"closePrice": "707.82"})
+        self.assertEqual(D.index_status(get=bad, now_hhmm="1000"), {})
 
     def test_pick(self):
         uni = {"A": {"name": "대덕전자", "value_eok": 1566, "r60": 42, "hi5": 140100},

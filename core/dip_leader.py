@@ -91,9 +91,16 @@ def _num(v) -> float:
         return 0.0
 
 
-def index_status(get=None) -> dict:
-    """네이버 지수 → {"kospi": (등락%, 저가 대비 반등%), "kosdaq": (…)} · 실패한 지수는 빠짐."""
+OPEN_SETTLE = "0903"   # ★ 11-12 — 09:00~09:01 네이버 지수 '오늘 저가' 칸에 어제 저가가 남아 있었음(코스닥 668/705=-5.2%)
+#   → 이벤트 엔진이 "장중 -5% 폭락"으로 착각해 하루를 쉼. 장 시작 3분 전까지는 지수 판단 안 함(조회 실패와 똑같이 → 막지 않음).
+
+
+def index_status(get=None, now_hhmm=None) -> dict:
+    """네이버 지수 → {"kospi": (등락%, 저가 대비 반등%), "kosdaq": (…)} · 실패한 지수는 빠짐 · 09:03 전엔 빈 값."""
+    import datetime
     import requests
+    if (now_hhmm or datetime.datetime.now().strftime("%H%M")) < OPEN_SETTLE:
+        return {}
     get = get or (lambda u: requests.get(u, headers={"User-Agent": "Mozilla/5.0"}, timeout=5).json())
     out = {}
     for sym, key in (("KOSPI", "kospi"), ("KOSDAQ", "kosdaq")):
@@ -102,7 +109,7 @@ def index_status(get=None) -> dict:
                     .get("totalInfos", [])}
             cur = _num(get(f"https://m.stock.naver.com/api/index/{sym}/basic").get("closePrice"))
             prev, low = _num(info.get("lastClosePrice")), _num(info.get("lowPrice"))
-            if cur > 0 and prev > 0 and low > 0:
+            if cur > 0 and prev > 0 and low > 0 and low <= cur * 1.0001:   # 저가가 현재가보다 높으면 꼬인 값
                 out[key] = ((cur / prev - 1) * 100, (cur / low - 1) * 100)
         except Exception:
             continue
