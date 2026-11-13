@@ -74,10 +74,28 @@ def sbot_api():
     return KisAPI(appkey=v["KIS_APPKEY2"], secret=v["KIS_SECRET2"], cano=v["KIS_CANO2"], acnt=v["KIS_ACNT_PRDT_CD2"])
 
 
+def sbot_positions(api) -> dict:
+    """★ 11-13 sbot이 1분마다 상태파일에 써 두는 잔고를 먼저 씀 — 3분마다 같은 계좌 잔고를 따로 조회하면
+    sbot 루프와 부딪혀 '원장 초당 거래건수 초과'가 났음(실패가 전부 3분 배수 분에 몰림). 상태가 5분 넘게 묵었으면 API."""
+    try:
+        with open(os.path.join(BASE, "sbot_state.json"), encoding="utf-8") as f:
+            s = json.load(f)
+        ls = s.get("last_status") or {}
+        hms = datetime.datetime.strptime(str(ls.get("last_update"))[-8:], "%H:%M:%S").time()   # "HH:MM:SS"(오늘)
+        age = (datetime.datetime.now() - datetime.datetime.combine(datetime.date.today(), hms)).total_seconds()
+        if 0 <= age < 300 and isinstance(ls.get("positions_detail"), dict):
+            return ls["positions_detail"]
+    except (OSError, ValueError, TypeError):
+        pass
+    return api.get_current_positions(force=True) or {}
+
+
 if __name__ == "__main__":
-    api = sbot_api()
     now = datetime.datetime.now()
-    pos = api.get_current_positions(force=True) or {}
+    if "--init" not in sys.argv and not load().get("items"):
+        sys.exit(0)        # ★ 11-13 감시할 종목이 없으면 API 안 부르고 끝
+    api = sbot_api()
+    pos = sbot_positions(api) if "--init" not in sys.argv else (api.get_current_positions(force=True) or {})
     px = api.get_multi_price(list(pos)) if pos else {}
     st = load()
     if "--init" in sys.argv:

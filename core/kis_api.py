@@ -266,7 +266,8 @@ class KisAPI:
                 #    rt_cd=="0"인데 output1이 비어있음 = 정상적으로 보유종목 0개 → {} 반환)
                 rt_cd = res.get("rt_cd", "")
                 if rt_cd != "0":
-                    print(f"⚠️ 잔고조회 API 실패(rt_cd={rt_cd}): {res.get('msg1','')}")
+                    # ★ 11-13 시각·계좌 끝자리 — 같은 계좌를 동시에 조회하는 다른 프로그램과 시간 대조용
+                    print(f"⚠️ 잔고조회 API 실패(rt_cd={rt_cd}) [{datetime.datetime.now():%H:%M:%S} ·{str(self.cano)[-2:]}]: {res.get('msg1','')}")
                     if _retry < 2:
                         print(f"⚠️ 잔고 빈값 — 재시도 {_retry+1}/3")
                         time.sleep(1)
