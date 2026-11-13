@@ -2304,6 +2304,28 @@ async def before_market_flow_loop():
     await client.wait_until_ready()
 
 
+# ★ 2026-11-14 대장 — 리나 신호 종목(검색식·daybot 후보) 분봉을 신호 날부터 3거래일 모음(장 마감 뒤 한 번에, 매매 안 함)
+SIGNAL_MINUTE_HHMM = "1550"
+
+
+@tasks.loop(minutes=1)
+async def signal_minute_loop():
+    kst_now = datetime.datetime.now(KST)
+    if kst_now.strftime("%H%M") != SIGNAL_MINUTE_HHMM or not _is_trading_day():
+        return
+    try:
+        import signal_minute_collect as smc
+        n, got, calls = await asyncio.to_thread(smc.collect, kst_now.date().isoformat())
+        print(f"📼 [신호 분봉] 대상 {n}개 · 새로 받음 {got}개 · 한투 호출 {calls}회")
+    except Exception as e:
+        print(f"⚠️ [신호 분봉] 오류: {e}")
+
+
+@signal_minute_loop.before_loop
+async def before_signal_minute_loop():
+    await client.wait_until_ready()
+
+
 @capitulation_alert_loop.before_loop
 async def before_capitulation_alert_loop():
     await client.wait_until_ready()
@@ -2975,6 +2997,8 @@ async def on_ready():
     try:
         if not market_flow_loop.is_running():
             market_flow_loop.start()
+        if not signal_minute_loop.is_running():
+            signal_minute_loop.start()
         print(f"✅ [시스템] 지수·투자자 흐름 수집 ({MARKET_FLOW_HHMM[:2]}:{MARKET_FLOW_HHMM[2:]}, 거래일) 가동 성공!")
     except Exception as e: print(f"⚠️ [에러] 시장흐름 수집: {e}")
 
