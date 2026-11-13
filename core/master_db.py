@@ -30,7 +30,8 @@ import sqlite3
 import datetime
 
 _BASE     = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-MASTER_DB = os.path.join(_BASE, "master_trades.db")
+# ★ 11-14 테스트는 YEONGAM9_MASTER_DB(임시 파일)로 — 11-13 테스트가 실제 통합 DB에 가짜 매도 18줄을 쓴 사고
+MASTER_DB = os.environ.get("YEONGAM9_MASTER_DB") or os.path.join(_BASE, "master_trades.db")
 
 
 # ============================================================

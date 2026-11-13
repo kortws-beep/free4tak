@@ -12,6 +12,9 @@ import tempfile
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+# ★ 11-14 테스트가 실제 master_trades.db(성적표·손실한도 근거)에 쓰지 못하게 — 모든 테스트가 이 파일을 먼저 import
+os.environ["YEONGAM9_MASTER_DB"] = os.path.join(tempfile.mkdtemp(prefix="master_db_test_"), "master_trades.db")
+
 # ★ 2026-10-06: 테스트는 실제 .env를 절대 읽지 않는다. kiki_cmd/kiki_briefing/
 #   kiki_data/collect_daily_data가 import 시 load_dotenv(..., override=True)를
 #   해서, 대장이 .env에 넣은 실제 값(KIKI_ALLOWED_USER_IDS 등)이 테스트가 미리
