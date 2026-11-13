@@ -27,6 +27,8 @@ bash k-bot/stock_bot/deploy/restore.sh ~/yeongam9_full_XXXX.tar.gz
 
 ## 수동 확인 (스크립트가 못 하는 것)
 
+- **데이터 점검**: `venv/bin/python scripts/data_check.py` — 수집 표마다 마지막 기록 날짜(✅/⚠️/❌). 무엇이 어디서 쌓이는지는 `docs/DATA_CATALOG.md`.
+
 1. **업비트 허용 IP**: 공인 IP가 바뀌면 cbot의 잔고 조회와 매도가 전부 실패합니다
    (`unregistered IP address`). 업비트 → Open API 관리 → 허용 IP에 새 IP를 등록하세요.
 2. **키움 REST API 허용 IP**: 마찬가지로 새 IP를 등록해야 합니다. daybot이 키움으로 종목을 스크리닝합니다.

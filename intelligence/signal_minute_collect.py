@@ -83,6 +83,12 @@ def save_targets(store, today: str, rows: list):
     (FHKST03010230)이고, daybot_replay가 백테스트 중에 받은 것은 여기 기록이 없음(= 신호 수집이 아님)."""
     store.conn.execute("CREATE TABLE IF NOT EXISTS signal_targets (collect_date TEXT, code TEXT, source TEXT, "
                        "signal_date TEXT, signal_time TEXT, PRIMARY KEY(collect_date, code, source, signal_date))")
+    # ★ 대장 "동일 종목이 계속 뜰 수 있어 — 그날 최초 1번이 기준": 출처 상관없이 종목·날짜별 최초 신호(시각·그 출처)
+    store.conn.execute("CREATE VIEW IF NOT EXISTS signal_first_of_day AS "
+                       "SELECT code, signal_date, MIN(signal_time) AS first_time, "
+                       "(SELECT s2.source FROM signal_targets s2 WHERE s2.code=s.code AND s2.signal_date=s.signal_date "
+                       " ORDER BY s2.signal_time LIMIT 1) AS first_source "
+                       "FROM signal_targets s GROUP BY code, signal_date")
     store.conn.executemany("INSERT OR IGNORE INTO signal_targets VALUES (?,?,?,?,?)",
                            [(today, c, src, d, tm) for c, src, d, tm in rows])
     store.conn.commit()
