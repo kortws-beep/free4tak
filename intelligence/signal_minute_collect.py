@@ -3,14 +3,14 @@ signal_minute_collect.py — 리나 신호 종목 분봉을 신호 날부터 3�
 ================================================================
 [이 파일이 하는 일 — 비개발자용 설명]
 대장: "리나가 [단타000]·[주도주검색식3] 같은 걸 보내오잖아. 나중에 검증하려면 그 시점부터 해당 종목만 분봉을 모으면?
-3일까지 보유로 보면 3일 동안." → 장중엔 아무것도 안 하고, 장 마감 뒤(리나 15:50) 한 번에:
+3일까지 보유로 보면 3일 동안." → 장중엔 아무것도 안 하고, 장 마감 뒤(리나 16:05) 한 번에:
   · 대상 = 최근 3거래일(오늘 포함) 안에 신호가 뜬 종목
       - 리나 검색식 통과 기록(three_month_leader_log.db: 주도주·단타000·3개월수급·0909)
       - daybot 후보 로그·실매수(daybot_trade_history.db)
   · 그 종목들의 '오늘' 1분봉을 한투에서 받아 backtest/data/minute_cache.db에 저장
     (daybot_replay.py 분봉 재현 엔진이 쓰는 그 캐시 — 이미 받은 날은 건너뜀)
 규모(11월 기준): 신호 종목 하루 평균 약 55개 × 3일 ≈ 165종목, 종목당 한투 4회 안팎 → 1~2분, 하루 수 MB.
-실행: venv/bin/python intelligence/signal_minute_collect.py [YYYY-MM-DD]   (리나가 평일 15:50에 자동 호출)
+실행: venv/bin/python intelligence/signal_minute_collect.py [YYYY-MM-DD]   (리나가 평일 16:05에 자동 호출)
 """
 import datetime
 import os

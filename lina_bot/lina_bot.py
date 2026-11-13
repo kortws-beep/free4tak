@@ -2305,7 +2305,7 @@ async def before_market_flow_loop():
 
 
 # ★ 2026-11-14 대장 — 리나 신호 종목(검색식·daybot 후보) 분봉을 신호 날부터 3거래일 모음(장 마감 뒤 한 번에, 매매 안 함)
-SIGNAL_MINUTE_HHMM = "1550"
+SIGNAL_MINUTE_HHMM = "1605"   # 15:50 거래원 스냅샷과 겹치지 않게
 
 
 @tasks.loop(minutes=1)
