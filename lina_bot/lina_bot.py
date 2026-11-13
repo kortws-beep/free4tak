@@ -470,6 +470,11 @@ async def send_safe_message(target, text, reply_to=None):
     tasks.loop가 처리 안 된 예외 시 루프를 영구 정지시켜버리는 문제가
     있었음 — 전송 실패 한 번으로 매도 알림 전체가 재시작 전까지
     조용히 꺼지는 사고로 이어질 수 있었음."""
+    try:   # ★ 11-14 대장 "리나 데이터는 모두 저장" — 보낸 원문 보관(lina_archive.db messages), 실패해도 전송은 계속
+        import lina_archive
+        await asyncio.to_thread(lina_archive.save_message, text, getattr(target, "name", None) or getattr(target, "id", ""))
+    except Exception as e:
+        print(f"⚠️ [리나 보관] {e}")
     try:
         await _send_safe_message_impl(target, text, reply_to)
     except Exception as e:
@@ -2157,6 +2162,8 @@ def _spike_tick(now):
     except Exception as e:            # ★ 11-07 제미나이 검토 — 시세 실패는 이번 분만 건너뜀(루프 바깥 try도 있지만 여기서 조용히)
         print(f"⚠️ [끼알림] 시세 조회 실패: {e}")
         return [], {}
+    import lina_archive          # ★ 11-14 관심그룹 1분 시세 보관(앞으로 쌓이는 분봉 — daybot 분봉 백테스트용)
+    lina_archive.save_quotes(now.date().isoformat(), now.strftime("%H%M"), q)
     return _spike["w"].update(now.date().isoformat(), now.strftime("%H%M"), q), q
 
 
