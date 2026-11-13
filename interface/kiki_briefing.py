@@ -71,7 +71,7 @@ def update_state(bot: str = "sbot", **kwargs):
     if not fname:
         return
     fpath = _os2.path.join(_base, fname)
-    _us(fpath, **kwargs)
+    return _us(fpath, **kwargs)   # ★ 11-13 (리뷰 3번) 성공 여부를 돌려줘 호출부가 명령 전달 실패를 알 수 있게
 
 # 봇 상태 파일 경로
 _base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

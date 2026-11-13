@@ -1334,8 +1334,8 @@ async def status_listener():
                     )
                 last_coin_profit = cprofit
 
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"⚠️ status_listener 예외: {e}")   # ★ 11-13 (리뷰 5번) 조용히 삼키지 않고 로그는 남김
 
 
 # ============================================================

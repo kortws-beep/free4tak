@@ -1026,7 +1026,7 @@ class KisAPI:
         qty = int(order_cash / (limit_price * 1.00015))
         if qty <= 0:
             # ★ 1주라도 살 수 있는지 확인 (지정가로 최소 1주 시도)
-            if order_cash >= limit_price:
+            if order_cash >= limit_price * 1.00015:   # ★ 11-13 (제미나이 키키 리뷰 1번) 수수료까지 되어야 1주
                 qty = 1
                 print(f"⚠️ 예산 부족 → 최소 1주 매수 시도: {code} ({limit_price:,}원)")
             else:

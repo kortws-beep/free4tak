@@ -282,7 +282,9 @@ async def cmd_sell(ctx, code: str, bot_name: str = "sbot"):
             else:
                 api = KisAPI()
             
-            real_pos = api.get_current_positions()
+            real_pos = await asyncio.to_thread(api.get_current_positions)   # ★ 11-13 (리뷰 4번) 키키 전체가 멈추지 않게
+            if real_pos is None:
+                raise RuntimeError("잔고 조회 실패")
             if code not in real_pos:
                 await ctx.send(f"❌ {code} 실계좌에도 보유 중이 아님")
                 return
@@ -290,7 +292,9 @@ async def cmd_sell(ctx, code: str, bot_name: str = "sbot"):
         except Exception as e:
             await ctx.send(f"⚠️ 실계좌 조회 실패: {e}\n봇 루프에서 처리 시도합니다")
 
-    update_state(bot_name, pending_cmd={"type": "sell", "code": code}, cmd_result=None)
+    if update_state(bot_name, pending_cmd={"type": "sell", "code": code}, cmd_result=None) is False:
+        await ctx.send("🚨 상태 파일 저장 실패 — 매도 명령이 전달 안 됐어. 잠시 뒤 다시 해줘.")   # ★ 11-13 (리뷰 3번)
+        return
     await ctx.send(f"📤 매도 명령 전달: **{code}**\n(다음 루프에서 실행)")
 
     result = await wait_cmd_result(bot_name)
@@ -359,8 +363,10 @@ async def cmd_hold(ctx, target: str, hold_val: bool = True):
             continue
         # ★ cbot은 기존 sell 명령과 동일하게 필드명이 "code"가 아니라 "market"
         _key = "market" if bot_name == "cbot" else "code"
-        update_state(bot_name, pending_cmd={"type": "hold", _key: code, "value": hold_val},
-                     cmd_result=None)
+        if update_state(bot_name, pending_cmd={"type": "hold", _key: code, "value": hold_val},
+                        cmd_result=None) is False:
+            await ctx.send(f"🚨 [{bot_name}] 상태 파일 저장 실패 — 홀드 명령 전달 안 됨, 다시 해줘.")
+            return
         label = "설정" if hold_val else "해제"
         await ctx.send(f"📤 [{bot_name}] {code} 홀드 {label} 명령 전달\n(다음 루프에서 실행)")
         # ★ 2026-09-02: 기본 대기(12×5s=60초)가 sbo2 루프 주기(60초+α)와
@@ -1541,7 +1547,9 @@ async def cmd_cbot_sell(ctx, market: str):
     #   발견(사용자 실사례 — TRUMP 단일매도 요청에 예전 "전체매도" 결과가
     #   섞여나옴). sbot/sbo2 매도(211행)/홀드(260행)는 이미 초기화하고
     #   있었는데 cbot 매도 두 곳만 누락돼 있었음.
-    update_state("cbot", pending_cmd={"type": "sell", "market": market}, cmd_result=None)
+    if update_state("cbot", pending_cmd={"type": "sell", "market": market}, cmd_result=None) is False:
+        await ctx.send("🚨 상태 파일 저장 실패 — 코인 매도 명령 전달 안 됨, 다시 해줘.")
+        return
     await ctx.send(f"📤 코인 매도 명령: **{market}**\n(다음 루프 ~5분 내 실행)")
 
     result = await wait_cmd_result("cbot", max_attempts=12, interval=5.0)
@@ -1561,7 +1569,9 @@ async def cmd_cbot_sell_all(ctx):
         await ctx.send("❌ 코인봇 보유 종목 없음")
         return
 
-    update_state("cbot", pending_cmd={"type": "sell", "market": "ALL"}, cmd_result=None)
+    if update_state("cbot", pending_cmd={"type": "sell", "market": "ALL"}, cmd_result=None) is False:
+        await ctx.send("🚨 상태 파일 저장 실패 — 전체매도 명령 전달 안 됨, 다시 해줘.")
+        return
     await ctx.send(f"📤 코인봇 전체매도 명령 ({len(held)}종목: {', '.join(held)})\n(다음 루프 ~5분 내 실행)")
 
     result = await wait_cmd_result("cbot", max_attempts=12, interval=5.0)
