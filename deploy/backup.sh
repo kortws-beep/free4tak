@@ -107,3 +107,6 @@ echo "✅ 백업 완료: $DEST/$NAME.tar.gz ($SIZE)"
 ls -1t "$DEST"/yeongam9_full_*.tar.gz 2>/dev/null | tail -n +6 | while read -r old; do
   rm -f "$old" "$old.sha256"; echo "🗑️  오래된 백업 삭제: $(basename "$old")"
 done
+
+# 5) ★ 11-14 클라우드 이중 백업(구글 드라이브, 암호화) — 설정 전이면 조용히 건너뜀
+"$(dirname "$0")/offsite_upload.sh" "$DEST" || true

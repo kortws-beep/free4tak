@@ -63,6 +63,33 @@ bash k-bot/stock_bot/deploy/restore.sh ~/yeongam9_full_XXXX.tar.gz
 | 재부팅하면 봇이 안 켜짐 | 서비스가 전부 disabled | restore.sh가 enable과 watchdog 등록 |
 | systemd 경고 `StartLimitIntervalSec` | `[Service]` 섹션에 있었음 | deploy/systemd 사본에서는 `[Unit]`으로 옮김 |
 
+## 클라우드 이중 백업 (구글 드라이브, 암호화) — 2026-11-14
+
+**왜 필요한가**: `/mnt/old` 백업은 같은 PC 안에 있는 디스크야. 화재·도난·전원사고·랜섬웨어가 나면 원본과 함께 사라져.
+그래서 `backup.sh`가 끝날 때 `offsite_upload.sh`가 최신 백업을 **서버에서 암호화한 뒤** 구글 드라이브에 올리고, 클라우드에는 최근 4개만 남겨.
+백업 안에 .env(키·계좌·토큰)가 들어 있으니 **암호화하지 않은 채 올리는 건 금지**야.
+
+**처음 설정 (대장이 원격 화면 터미널에서 한 번만)**
+1. rclone 설치: `sudo apt install -y rclone`
+2. `rclone config`을 실행해서 구글 드라이브 원격을 만들어.
+   - `n` → 이름 `gdrive` → 저장소 종류 `drive`
+   - client_id와 client_secret은 빈칸으로 둬(엔터).
+   - scope는 **`drive.file`**을 골라. rclone이 직접 만든 파일만 만질 수 있는 권한이라, 혹시 열쇠가 새어도 나머지 드라이브는 안전해.
+   - 나머지는 기본값으로 두고, auto config는 `y`야. 브라우저가 뜨면 구글 계정으로 로그인하고 허용해.
+3. 이어서 같은 `rclone config`에서 암호화 원격을 만들어.
+   - `n` → 이름 **`gcrypt`** → 종류 `crypt` → remote에 `gdrive:yeongam9_crypt`
+   - filename_encryption은 `standard`, directory_name_encryption은 `true`
+   - password는 `y`를 고르고 **직접 정한 비밀번호**를 넣어.
+   - password2(salt)도 `y`를 고르고 **두 번째 비밀번호**를 직접 정해.
+4. ⚠️ **비밀번호 두 개를 종이에 적어서 서버와 떨어진 곳에 보관해.** 잃어버리면 구글도, 누리도 백업을 열 수 없어.
+   이 비밀번호는 `~/.config/rclone/rclone.conf`에 들어 있는데, 이 파일은 백업에 포함되지 않아. 새 PC에서는 종이에 적어 둔 비밀번호로 위 2~3번을 다시 하면 돼.
+5. 첫 업로드 시험: `deploy/offsite_upload.sh` → "✅ 클라우드 백업 완료 … 크기 일치"가 나오면 성공이야.
+6. 구글 계정 **2단계 인증**을 반드시 켜 둬.
+
+**복구할 때**
+`rclone copy gcrypt:yeongam9/<파일명> ~/` → `sha256sum -c <파일명>.sha256`으로 확인 → 이 문서의 "복구" 순서대로 진행해.
+목록 보기: `rclone lsf gcrypt:yeongam9`. 구글 웹 화면에서는 파일 이름까지 암호화돼서 알아볼 수 없는 게 정상이야.
+
 ## 참고
 
 - `deploy/systemd/`, `deploy/crontab.txt`는 2026-11-09 현재 PC의 설정입니다.
