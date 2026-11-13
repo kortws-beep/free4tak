@@ -129,8 +129,8 @@ class KisAPI:
                                "api_key": self.appkey,
                                "timestamp": int(time.time())},
                               open(self._token_dat_path(), "wb"))
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"⚠️ 토큰 캐시 저장 실패(다음 시작 때 재발급됨): {e}")   # ★ 11-13 (리뷰 6번)
                 print(f"✅ 한투 토큰 발급 완료 [{self.cano}]")
             return token
         except Exception as e:
@@ -1095,9 +1095,16 @@ class KisAPI:
             "QTY_ALL_ORD_YN": "Y", "PDNO": code,
         }
         # 거래소는 원주문 거래소 — 호출부가 모르면 지금 시간대 기준(프리장 주문은 프리장 안에 취소된다는 가정)
+        # ★ 11-13 (제미나이 유튜브 리뷰 2번) 15:2x 정규장 주문을 15:30 넘어 취소하면 NXT로 잘못 보낼 수 있어,
+        #   추정한 거래소가 거부하면 다른 거래소로 한 번 더(이미 체결된 주문이면 둘 다 거부 → False 그대로)
+        guessed = not excg
         excg = excg or self.order_exchange() or "KRX"
         try:
             res = self._order_post("cancel", "/uapi/domestic-stock/v1/trading/order-rvsecncl", data, excg)
+            if res.get("rt_cd") != "0" and guessed:
+                other = "KRX" if excg == "NXT" else "NXT"
+                print(f"↪️ 취소 거부({excg}: {res.get('msg1', '')}) — {other}로 재시도 {code}")
+                res = self._order_post("cancel", "/uapi/domestic-stock/v1/trading/order-rvsecncl", data, other)
             if res.get("rt_cd") == "0":
                 print(f"✅ 주문취소: {code} (odno:{odno})")
                 return True

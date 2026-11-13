@@ -208,8 +208,12 @@ def _load_state() -> dict:
 
 
 def _save_state(state: dict):
-    with open(STATE_PATH, "w", encoding="utf-8") as f:
+    # ★ 11-13 (제미나이 유튜브 리뷰 3번) 임시파일에 쓰고 바꿔치기 — 쓰다 죽어도 파일이 안 깨짐
+    #   (깨지면 _load_state가 {}를 돌려 본 영상을 다시 처리·중복 알림)
+    tmp = STATE_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(state, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, STATE_PATH)
 
 
 # ============================================================

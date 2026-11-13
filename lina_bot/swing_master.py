@@ -88,8 +88,10 @@ def _get_catalyst_stocks() -> set:
     hot_kr = _get_catalyst_stocks_fresh()
 
     try:
-        with open(CATALYST_CACHE_FILE, "w", encoding="utf-8") as f:
+        _tmp = CATALYST_CACHE_FILE + ".tmp"   # ★ 11-13 (리뷰 3번) 원자적 쓰기
+        with open(_tmp, "w", encoding="utf-8") as f:
             _json.dump({"ts": _time.time(), "stocks": sorted(hot_kr)}, f, ensure_ascii=False)
+        os.replace(_tmp, CATALYST_CACHE_FILE)
     except Exception as e:
         print(f"⚠️ catalyst 캐시 저장 오류: {e}")
 
