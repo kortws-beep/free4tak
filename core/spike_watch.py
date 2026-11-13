@@ -19,15 +19,24 @@ A_WIN, A_UP, A_VAL_X, A_VAL_MIN, A_COOL = 5, 3.0, 2.5, 3e8, 30
 B_LOOK, B_UP, B_STEP, B_JUMP_WIN, B_JUMP, B_VAL_X = 60, 2.0, 15, 3, 1.5, 2.0
 
 
+GROUP_OF = {}      # ★ 11-14 {코드: 그 종목이 들어 있던 한투 관심그룹 이름} — 시세 보관 때 출처 구분용(대장 "출처는 명확히")
+
+
 def group_codes(api, hts_id: str) -> dict:
-    """한투 관심그룹 중 이름이 GROUP_NAMES인 것의 {코드: 이름}. 실패면 {}."""
-    out = {}
+    """한투 관심그룹 중 이름이 GROUP_NAMES인 것의 {코드: 이름}. 실패면 {}. (종목별 그룹 이름은 GROUP_OF에)"""
+    out, grp = {}, {}
     if not hts_id:
         return out
     for gc, gn in (api.get_watchlist_groups(hts_id) or {}).items():
         if (gn or "").strip().lower() in GROUP_NAMES:
-            out.update(dict(api.get_watchlist_stocks(gc, hts_id) or []))
-    return dict(list(out.items())[:MAX_CODES])       # 대장 원칙: 5종목만(더 넣어도 앞 5개만 봄)
+            items = dict(api.get_watchlist_stocks(gc, hts_id) or [])
+            out.update(items)
+            for c in items:
+                grp.setdefault(c, (gn or "").strip())
+    out = dict(list(out.items())[:MAX_CODES])       # 대장 원칙: 5종목만(더 넣어도 앞 5개만 봄)
+    GROUP_OF.clear()
+    GROUP_OF.update({c: grp.get(c, "") for c in out})
+    return out
 
 
 def _mins(hhmm: str) -> int:

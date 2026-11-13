@@ -472,7 +472,10 @@ async def send_safe_message(target, text, reply_to=None):
     조용히 꺼지는 사고로 이어질 수 있었음."""
     try:   # ★ 11-14 대장 "리나 데이터는 모두 저장" — 보낸 원문 보관(lina_archive.db messages), 실패해도 전송은 계속
         import lina_archive
-        await asyncio.to_thread(lina_archive.save_message, text, getattr(target, "name", None) or getattr(target, "id", ""))
+        import inspect as _insp   # ★ 출처 = 이 메시지를 보낸 리나 기능(호출한 함수) 이름 — 대장 "출처는 명확히 구분"
+        _src = next((f.function for f in _insp.stack(0)[1:4] if f.function not in ("send_safe_message", "_run_once")), "")
+        await asyncio.to_thread(lina_archive.save_message, text,
+                                getattr(target, "name", None) or getattr(target, "id", ""), _src)
     except Exception as e:
         print(f"⚠️ [리나 보관] {e}")
     try:
@@ -2163,7 +2166,7 @@ def _spike_tick(now):
         print(f"⚠️ [끼알림] 시세 조회 실패: {e}")
         return [], {}
     import lina_archive          # ★ 11-14 관심그룹 1분 시세 보관(앞으로 쌓이는 분봉 — daybot 분봉 백테스트용)
-    lina_archive.save_quotes(now.date().isoformat(), now.strftime("%H%M"), q)
+    lina_archive.save_quotes(now.date().isoformat(), now.strftime("%H%M"), q, grp=dict(spike_watch.GROUP_OF))
     return _spike["w"].update(now.date().isoformat(), now.strftime("%H%M"), q), q
 
 
