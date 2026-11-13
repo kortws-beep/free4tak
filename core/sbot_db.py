@@ -312,3 +312,38 @@ class SwingDB:
                        if sp is not None and bp is not None)
         except Exception:
             return 0
+
+    # ★ 2026-11-14 대장 "sbot 후보종목도 저장해야지" — 매수 특성 분석·필터 백테스트용(daybot candidate_log와 같은 취지).
+    #   같은 날 같은 종목·출처는 점수가 바뀔 때만 다시 씀(1분 루프마다 수십 줄 쌓이지 않게). bought는 trades와 날짜·코드로 맞춰 봄.
+    def log_candidates(self, rows: list, mode: str = "buy", _seen: dict = {}) -> int:
+        """rows: [{code, name, grade, score, rank_score, price, ai_reason, rank}] / mode: buy(매수 판단) · observe(슬롯 찼을 때 관찰)
+        · scored(풀 전체 점수 — 기준 미달 포함). 실패해도 매매엔 영향 없음."""
+        try:
+            now = datetime.datetime.now()
+            day, ts = now.date().isoformat(), now.isoformat(timespec="seconds")
+            new = []
+            for r in rows:
+                key = (day, r.get("code"), r.get("grade", ""), mode)
+                sc = round(float(r.get("score") or 0), 1)
+                if not r.get("code") or _seen.get(key) == sc:
+                    continue
+                _seen[key] = sc
+                new.append((ts, r["code"], r.get("name", ""), r.get("grade", ""), sc,
+                            round(float(r.get("rank_score") or sc), 1), float(r.get("price") or 0),
+                            str(r.get("ai_reason", ""))[:300], int(r.get("rank") or 0), mode))
+            if not new:
+                return 0
+            conn = _connect()
+            conn.execute("""CREATE TABLE IF NOT EXISTS candidate_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, code TEXT, stock_name TEXT, grade TEXT,
+                score REAL, rank_score REAL, price REAL, ai_reason TEXT, rank INTEGER, mode TEXT)""")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_sbot_cand ON candidate_log(code, ts)")
+            conn.executemany("INSERT INTO candidate_log (ts, code, stock_name, grade, score, rank_score, price, ai_reason, "
+                             "rank, mode) VALUES (?,?,?,?,?,?,?,?,?,?)", new)
+            conn.commit(); conn.close()
+            if len(_seen) > 20000:
+                _seen.clear()
+            return len(new)
+        except Exception as e:
+            print(f"⚠️ 후보 기록 실패: {e}")
+            return 0

@@ -304,6 +304,7 @@ BUY_SCORE_MIN    = 45             # 후보 최소 점수
 #   39건) 통과 — 거래량 확보하면서도 평균(57.9점)보단 확실히 위.
 BUY_SCORE_ENTER  = 85             # 매수 진입 기준점 (★2026-09-19: 백테스트 재확인 — 75→85가 +28.71%→+41.58%로 뚜렷이 우수, 07/17에 이미 한번 올렸던 값이 어느 시점에 70으로 되돌아가있던 것 재수정)
 LOOP_SLEEP       = 60
+OBSERVE_EVERY_SEC = 1800   # ★ 11-14 슬롯·현금 없어 못 살 때 후보 관찰 기록 주기(30분)
 POOL_SIZE        = 100
 NEW_GROUP_NAMES  = ("new", "신규추천", "신규", "new추천")
 SUB_GROUP_NAMES  = ("sub", "서브", "고정")      # ★ 10-21 순환 섹터 대표 고정 그룹
@@ -1223,6 +1224,11 @@ class SBot:
             data["ai_reason"] = f"룰점수({rule_score})" + (f" | {bonus}" if bonus else "")
             self.score_cache[code] = (score, data)
 
+        # ★ 11-14 풀 전체 점수 기록(기준 미달 포함 — 나중에 '안 산 후보'까지 검증하려고)
+        self.db.log_candidates([{"code": c, "name": d.get("stock_name") or self._name(c), "grade": "pool",
+                                 "score": sc, "price": d.get("current_price", 0), "ai_reason": d.get("ai_reason", "")}
+                                for c, (sc, d) in self.score_cache.items() if c in set(codes)], mode="scored")
+
         # 4) 캐시 정리
         pool_set = set(codes)
         for c in [c for c in list(self.score_cache) if c not in pool_set]:
@@ -1418,6 +1424,10 @@ class SBot:
                 best_by_code[code] = c
 
         buyable = sorted(best_by_code.values(), key=self._rank_score, reverse=True)
+        self.db.log_candidates([{"code": c["code"], "name": c.get("name", ""), "grade": c.get("grade", ""),
+                                 "score": c.get("score", 0), "rank_score": self._rank_score(c), "price": c.get("curr", 0),
+                                 "ai_reason": c.get("ai_reason", ""), "rank": i + 1} for i, c in enumerate(buyable)],
+                               mode=getattr(self, "_cand_mode", "buy"))   # ★ 11-14 sbot 후보 저장
         by_grade = {}
         for c in buyable:
             by_grade[c["grade"]] = by_grade.get(c["grade"], 0) + 1
@@ -2415,11 +2425,23 @@ class SBot:
                 )
                 보너스 = 익절중 if psbl_cash >= BONUS_SLOT_MIN_CASH else 0
                 avail_slots = MAX_POSITIONS - len(self.positions) + 보너스
-                if avail_slots <= 0:
-                    print(f"⛔ 슬롯 없음 ({len(self.positions)}/{MAX_POSITIONS}) — 종목검색/신규분석 스킵")
-                elif psbl_cash < MIN_ANALYSIS_CASH:
-                    print(f"💰 주문가능({psbl_cash:,}원) < 최소기준({MIN_ANALYSIS_CASH:,}원) "
-                          f"— 종목검색/신규분석 스킵")
+                if avail_slots <= 0 or psbl_cash < MIN_ANALYSIS_CASH:
+                    if avail_slots <= 0:
+                        print(f"⛔ 슬롯 없음 ({len(self.positions)}/{MAX_POSITIONS}) — 종목검색/신규분석 스킵")
+                    else:
+                        print(f"💰 주문가능({psbl_cash:,}원) < 최소기준({MIN_ANALYSIS_CASH:,}원) "
+                              f"— 종목검색/신규분석 스킵")
+                    # ★ 11-14 대장 "후보도 저장" — 못 사는 동안에도 30분마다 후보만 뽑아 기록(매수 안 함, 15:00까지)
+                    if now_t < "1500" and time.time() - getattr(self, "_last_observe_ts", 0) >= OBSERVE_EVERY_SEC:
+                        self._last_observe_ts = time.time()
+                        self._cand_mode = "observe"
+                        try:
+                            obs = self._get_unified_candidates(now_t, score_enter, psbl_cash)
+                            print(f"👀 [SWING] 관찰 기록: 후보 {len(obs)}개(매수 안 함)")
+                        except Exception as e:
+                            print(f"⚠️ 관찰 기록 실패: {e}")
+                        finally:
+                            self._cand_mode = "buy"
                 else:
                     buyable = self._get_unified_candidates(now_t, score_enter, psbl_cash)
                     if buyable:

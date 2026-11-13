@@ -5,8 +5,7 @@ candidate_pool_filter_test.py — 매수 특성 필터를 '후보 풀 전체'로
 buy_feature_analysis.py는 '봇이 실제로 산 것'만 봤다. 그런데 필터로 걸러 매매가 줄면 회전율이 떨어지므로
 (대장 철학: 매매 줄이지 말고 종목을 바꿔라), '봇이 후보로 봤지만 안 산 종목'까지 넣어 다시 본다:
   · daybot  : candidate_log(10-06~) — 종목·날짜별 첫 등장 가격에 샀다고 가정, 단타 규칙 비슷하게
-              (다음 날부터 3거래일: 저가가 -3.5% 닿으면 손절, 고가가 +5% 닿으면 익절 — 같은 날 둘 다면 손절로 보수적,
-               둘 다 안 닿으면 3일째 종가)
+              (★ 11-14 대장 "그날 승부" — 당일 종가 청산, 당일 저가가 -3.5% 닿았으면 손절로 보수적)
   · 스윙    : sbo2_candidates(06-12~09-28) — 그날 가격에 샀다고 가정, 10거래일(-7% 손절 / +10% 익절, 아니면 10일째 종가).
               sbot 후보 기록은 없어서, 같은 스윙인 sbo2 후보로 sbot 필터를 검증(처음 찾은 데이터와 겹치지 않는 별도 데이터).
 특성은 buy_feature_analysis.features와 같은 것(매수 전날까지만). 필터마다 '통과 / 걸림' 두 묶음의 승률·평균을 비교하고,
@@ -40,7 +39,18 @@ def simulate(b: list, entry_date: str, entry: float, days: int, stop: float, tak
     return (after[-1][4] / entry - 1) * 100
 
 
-def daybot_pool(cache, regime) -> list:
+def sameday(b: list, d: str, entry: float, stop: float = 3.5):
+    """★ 11-14 대장 "dbot은 그날 승부" — 당일 종가 청산, 당일 저가가 -stop% 닿았으면 손절(진입 전 저가일 수도 있어 보수적)."""
+    day = [x for x in b if x[0] == d]
+    if not day:
+        return None
+    _, o, h, l, c, v = day[0]
+    if l is not None and l <= entry * (1 - stop / 100):
+        return -stop
+    return (c / entry - 1) * 100
+
+
+def daybot_pool(cache, regime, quality_only: bool = True) -> list:
     c = sqlite3.connect(DAY_DB)
     rows = c.execute("SELECT code, stock_name, substr(ts,1,10), price, COALESCE(skip_reason,''), bought "
                      "FROM candidate_log WHERE price > 0 ORDER BY ts").fetchall()
@@ -49,12 +59,12 @@ def daybot_pool(cache, regime) -> list:
         if (code, d) in seen:
             continue
         seen.add((code, d))
-        if not bought and skip.startswith(DAY_QUALITY_SKIPS):
+        if quality_only and not bought and skip.startswith(DAY_QUALITY_SKIPS):
             continue
         b = bfa.bars(code, d, cache)
         tr = dict(code=code, name=name, buy_price=float(price), buy_date=d, sell_date=d, rate=0.0)
         f = bfa.features(tr, b, regime)
-        res = simulate(b, d, float(price), 3, 3.5, 5.0)
+        res = sameday(b, d, float(price))
         if f and res is not None:
             out.append({**tr, **f, "rate": res, "bought": bool(bought)})
     return out
@@ -126,7 +136,11 @@ def report(label: str, pool: list, filters: dict):
 
 def main():
     cache, regime = bfa._cache(), bfa.regime_map()
-    report("daybot 후보 풀 (3거래일, -3.5%/+5%)", daybot_pool(cache, regime), FILTERS["daybot"])
+    report("daybot 후보 풀 — 봇이 살 수 있었던 것 (당일 종가, 장중 -3.5% 손절)", daybot_pool(cache, regime), FILTERS["daybot"])
+    report("daybot 후보 전체 — 기존 필터로 빠진 것 포함 (당일 종가, 장중 -3.5% 손절)",
+           daybot_pool(cache, regime, quality_only=False), FILTERS["daybot"])
+    if "--day-only" in sys.argv:
+        return
     report("스윙 후보 풀 = sbo2 후보 (10거래일, -7%/+10%)", swing_pool(cache, regime), FILTERS["swing"])
 
 
