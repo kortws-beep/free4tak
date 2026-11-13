@@ -226,9 +226,16 @@ async def _scalp_buy(channel, code: str, arg: str, qty: int = None, amount: int 
         got, avg = 0, 0.0
         for _ in range(SCALP_FILL_WAIT_SEC // 5):
             await asyncio.sleep(5)
-            p = (await asyncio.to_thread(api.get_current_positions, True) or {}).get(code) or {}
-            got = int(p.get("qty", 0) or 0) - before
-            avg = float(p.get("entry_price", 0) or 0)
+            allp = await asyncio.to_thread(api.get_current_positions, True)
+            if allp is None:
+                continue          # ★ 11-13 (제미나이 리나 리뷰 1번) 조회 실패 — 이번 확인은 건너뜀(0주로 보지 않음)
+            p = allp.get(code) or {}
+            # 체결은 늘기만 함 — 조회가 실패해 예전 잔고(캐시)가 와도 이미 확인한 체결 수량을 줄이지 않음.
+            #   예전엔 마지막 확인이 그렇게 걸리면 '체결 0'으로 보고 리나 감시 등록을 빠뜨렸음(산 주식이 방치)
+            now_got = int(p.get("qty", 0) or 0) - before
+            if now_got > got:
+                got = now_got
+                avg = float(p.get("entry_price", 0) or 0)
             if got >= oqty:
                 break
         if got < oqty:
@@ -258,6 +265,18 @@ def _load_manual_watches() -> dict:
             watches.setdefault(f"{k}@d", w)
         _save_manual_watches(watches)
     return watches
+
+
+def _mutate_manual_watches(fn):
+    """★ 2026-11-13 (제미나이 리나 리뷰 2번) — 등록·해제도 트레일링 루프와 같은 잠금 아래서 최신 파일을 읽고 고쳐 씀.
+    예전엔 잠금 없이 통째로 덮어써서, 루프가 방금 저장한 단계(1차익절 완료 등)가 지워져 같은 분할 매도가 또 나갈 수 있었음.
+    fn(watches) 결과를 돌려주고, watches는 바뀐 최신본."""
+    from common_utils import _state_lock, _read_state_raw, _write_state_raw
+    with _state_lock(MANUAL_WATCH_STATE_FILE):
+        watches = _read_state_raw(MANUAL_WATCH_STATE_FILE, {})
+        out = fn(watches)
+        _write_state_raw(MANUAL_WATCH_STATE_FILE, watches)
+    return watches, out
 
 
 def _save_manual_watches(watches: dict):
@@ -354,16 +373,15 @@ async def _register_manual_watch(channel, code: str, buy_price: float = None,
                         return
                 except Exception as e:
                     print(f"⚠️ [리나등록] daybot 보유 확인 실패: {e}")
-            watches = _load_manual_watches()
             key = _wkey(code, account)
-            watches[key] = {
+            entry = {
                 "name": name, "entry_price": buy_price, "peak_price": None, "account": account, "code": code,
                 "last_alert_peak": 0, "stage": 0, "qty": qty, "qty0": qty,
                 "registered_at": datetime.datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S"),
             }
             if mode:
-                watches[key]["mode"] = mode      # ★ 10-20 "scalp" = 단타(manual_autosell 참고)
-            _save_manual_watches(watches)
+                entry["mode"] = mode      # ★ 10-20 "scalp" = 단타(manual_autosell 참고)
+            watches, _ = _mutate_manual_watches(lambda w: w.__setitem__(key, entry))   # ★ 11-13 잠금 아래서
             _log_manual_watch("register", code, watches[key])
             # ★ 2026-10-14 대장 — 등록 종목은 리나가 직접 익절(lina_bot/manual_autosell.py)
             md = {"paper": "🧪 연습 모드(주문 안 나감, 알림만)", "live": "💰 실제 매도(시장가)",
@@ -395,17 +413,17 @@ async def _deregister_manual_watch(channel, code: str, sell_price: float = None)
     매도가가 주어지면 등록시 평단가 대비 수익률을 바로 계산해서
     "종목명 ±N% 수익실현"으로 보고(대장 지정 — 분할매도도 고려해 가격
     기준, 금액 기준 아님)."""
-    watches = _load_manual_watches()
-    key = code
-    if key not in watches and "@" not in key and f"{key}@d" in watches:
-        key = f"{key}@d"              # 키움 등록이 없고 데이봇 등록만 있으면 그걸 해제
-    if key not in watches:
+    def _pop(watches):
+        key = code
+        if key not in watches and "@" not in key and f"{key}@d" in watches:
+            key = f"{key}@d"              # 키움 등록이 없고 데이봇 등록만 있으면 그걸 해제
+        return key, watches.pop(key, None)
+    watches, (key, w) = _mutate_manual_watches(_pop)   # ★ 11-13 잠금 아래서 읽고 빼고 저장
+    if w is None:
         await send_safe_message(channel, f"⚠️ {code}는 등록돼 있지 않아.")
         return
-    w = watches.pop(key)
     code = _wcode(key, w)
     name = w.get("name", code)
-    _save_manual_watches(watches)
 
     entry_price = w.get("entry_price")
     profit_rate = None
