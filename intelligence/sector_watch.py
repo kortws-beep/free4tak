@@ -182,7 +182,7 @@ def alerted_today(date: str, db_path: str = tml.LOG_DB) -> set:
         finally:
             conn.close()
     except sqlite3.OperationalError:
-        return set()
+        return None   # ★ 11-13 (리뷰 9번) DB 잠김 — 빈 집합이면 같은 알림이 중복 발송됨 → 호출부가 이번 회차 알림을 건너뜀
 
 
 def log_scan(out: dict, now: datetime.datetime = None, db_path: str = tml.LOG_DB) -> int:

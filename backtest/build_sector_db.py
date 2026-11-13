@@ -17,6 +17,28 @@ client = Anthropic(api_key=ANTHROPIC_API_KEY)
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.path.join(BASE_DIR, "backtest", "data", "backtest_data.db")
+MASTER_DB = os.path.join(BASE_DIR, "lina_bot", "kr_theme_finance.db")
+# ★ 2026-11-13 (제미나이 섹터 리뷰 7번) — ① AI에 종목코드만 줘서 "코드만으론 분석 불가"·뭉뚱그린 답이 많았음 → 종목명 같이
+#   ② 실패(옛 모델 404·호출 한도 429)를 '추출실패:…' 그대로 저장해 695일 중 339일이 영영 재수집 안 됐음 → 실패·거절은 저장 안 함
+_NAMES = None
+
+
+def _names() -> dict:
+    global _NAMES
+    if _NAMES is None:
+        try:
+            c = sqlite3.connect(f"file:{MASTER_DB}?mode=ro", uri=True)
+            _NAMES = {str(code).zfill(6): name for code, name in c.execute("SELECT code, name FROM kr_stock_master")}
+            c.close()
+        except sqlite3.Error:
+            _NAMES = {}
+    return _NAMES
+
+
+def is_bad(sectors: str) -> bool:
+    s = (sectors or "").strip()
+    return (not s or s.startswith("추출실패") or len(s) > 60
+            or any(w in s for w in ("불가능", "어렵", "제공된", "죄송", "정보 없이")))
 
 def init_sector_table(conn):
     cursor = conn.cursor()
@@ -42,8 +64,9 @@ def ask_claude_for_sectors(date_str, top_stocks_df):
     if top_stocks_df.empty:
         return "데이터없음"
     
+    names = _names()
     stock_list_text = "\n".join([
-        f"- {row['code']} (변동: {row['change']})" 
+        f"- {names.get(str(row['code']).zfill(6), '')} ({row['code']}, 변동: {row['change']})"
         for _, row in top_stocks_df.iterrows()
     ])
     
@@ -121,6 +144,9 @@ def build_sector_database():
             date_str = future_to_date[future]
             try:
                 _, sectors = future.result()
+                if is_bad(sectors):
+                    print(f"⏭️ [{date_str}] 저장 안 함(다음에 다시): {sectors[:80]}")
+                    continue
                 conn.execute("INSERT INTO daily_leading_sectors (date, sectors) VALUES (?, ?)", (date_str, sectors))
                 conn.commit()
                 print(f"✅ [{date_str}] {sectors}")

@@ -78,7 +78,24 @@ def pre_top(themes: dict, quotes: dict, ranked: list) -> list:
     return out
 
 
+def _write_retry(fn, tries: int = 3):
+    """★ 11-13 (제미나이 섹터 리뷰 8번) DB가 잠겨 30초 넘게 막히면 그 시간대 기록이 통째로 날아갔음 → 몇 번 다시 시도."""
+    import time as _t
+    for i in range(tries):
+        try:
+            return fn()
+        except sqlite3.OperationalError as e:
+            if i == tries - 1:
+                print(f"⚠️ [테마순위] 기록 저장 실패(DB 잠김): {e}")
+                return None
+            _t.sleep(5)
+
+
 def save_pre_top(date: str, hhmm: str, rows: list, log_db: str = LOG_DB):
+    return _write_retry(lambda: _save_pre_top(date, hhmm, rows, log_db))
+
+
+def _save_pre_top(date: str, hhmm: str, rows: list, log_db: str = LOG_DB):
     conn = sqlite3.connect(log_db, timeout=30)
     conn.execute("CREATE TABLE IF NOT EXISTS theme_pre_top (date TEXT, time TEXT, theme_rank INTEGER, theme TEXT, "
                  "stock_rank INTEGER, code TEXT, name TEXT, chg REAL, value REAL, price REAL, PRIMARY KEY(date, time, theme, code))")
@@ -111,6 +128,10 @@ def premarket_message(date: str, log_db: str = LOG_DB, n: int = 3) -> str:
 
 
 def save(date: str, hhmm: str, ranked: list, log_db: str = LOG_DB):
+    return _write_retry(lambda: _save(date, hhmm, ranked, log_db))
+
+
+def _save(date: str, hhmm: str, ranked: list, log_db: str = LOG_DB):
     conn = sqlite3.connect(log_db, timeout=30)
     conn.execute("CREATE TABLE IF NOT EXISTS theme_open_obs (date TEXT, time TEXT, rank INTEGER, theme TEXT, avg_chg REAL, "
                  "up_ratio REAL, n INTEGER, leader TEXT, leader_chg REAL, PRIMARY KEY(date, time, theme))")

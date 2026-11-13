@@ -62,6 +62,10 @@ class SectorGate:
                                                    "ORDER BY rank", (date, t, self.top))]
             conn.close()
         except sqlite3.Error:
+            # ★ 2026-11-13 (제미나이 섹터 리뷰 6번) — DB가 잠깐 잠기면 '기록 없음'처럼 통과시켜 하락장 섹터 필터가
+            #   꺼졌음 → 오늘 직전 순위가 있으면 그걸로 계속 거름(오늘 기록이 아예 없을 때만 통과).
+            if self._cache[0] == date and self._cache[2]:
+                return (self._cache[1],) + self._cache[2]
             return None, None, None
         mem = self._themes()
         codes = set().union(*(mem.get(th, set()) for th in themes)) if themes else set()

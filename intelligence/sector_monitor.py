@@ -243,10 +243,12 @@ def collect_once(api, kiwoom, conn: sqlite3.Connection,
         if not theme_cd:
             continue
         cache_key = f"{now.strftime('%Y-%m-%d %H')}_{theme_cd}"
-        if cache_key not in theme_cache:
-            theme_cache[cache_key] = get_theme_stock_codes(kiwoom, theme_cd, code_name_map, None)
+        if not theme_cache.get(cache_key):   # ★ 11-13 (리뷰 10번) 실패(빈 목록)는 캐시 안 함 — 1시간 동안 0종목으로 보던 것
+            _got = get_theme_stock_codes(kiwoom, theme_cd, code_name_map, None)
+            if _got:
+                theme_cache[cache_key] = _got
             time.sleep(0.2)
-        members[theme_cd] = theme_cache[cache_key]
+        members[theme_cd] = theme_cache.get(cache_key, [])
     values = {}
     try:
         union = sorted({c for cs in members.values() for c in cs})

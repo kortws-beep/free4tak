@@ -1980,7 +1980,11 @@ async def sector_watch_loop():
         import danta_scan
         today = kst_now.strftime("%Y-%m-%d")
         if _SECTOR_STATE["date"] != today:
-            _SECTOR_STATE.update(date=today, alerted=sector_watch.alerted_today(today), posted=set())
+            _al = sector_watch.alerted_today(today)
+            if _al is None:   # ★ 11-13 DB 잠김 — 이미 보낸 알림을 몰라서 중복 발송될 수 있으니 이번 회차는 건너뛰고 다음에 다시
+                print("⚠️ [섹터] 오늘 알림 기록 DB 잠김 — 이번 회차 건너뜀")
+                return
+            _SECTOR_STATE.update(date=today, alerted=_al, posted=set())
         out = await asyncio.to_thread(_sector_scan_sync)
         if not out["sectors"]:
             print("⚠️ [섹터] 관심그룹을 못 읽었거나 비어 있음 (KIS_HTS_ID 확인)")

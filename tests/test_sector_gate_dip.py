@@ -122,5 +122,18 @@ class Dip(unittest.TestCase):
         self.assertEqual(uni["A"]["hi5"], 101 + 61)
 
 
+
+class GateStale(unittest.TestCase):
+    def test_db_error_uses_today_cache(self):
+        # ★ 11-13 제미나이 섹터 리뷰 6번 — DB 오류면 오늘 직전 순위로 계속 거름(예전엔 무조건 통과)
+        import datetime
+        g = G.SectorGate("/nonexistent_dir/x.db", themes_loader=lambda: {})
+        now = datetime.datetime(2026, 11, 13, 10, 0)
+        g._cache = ("2026-11-13", "0945", (["반도체"], {"A"}))
+        self.assertEqual(g.allows("A", now)[0], True)
+        self.assertEqual(g.allows("B", now)[0], False)
+        g._cache = (None, None, None)
+        self.assertTrue(g.allows("B", now)[0])          # 오늘 기록이 아예 없으면 막지 않음
+
 if __name__ == "__main__":
     unittest.main()
