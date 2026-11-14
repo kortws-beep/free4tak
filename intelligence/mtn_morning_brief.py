@@ -97,7 +97,8 @@ def seconds_until(hhmm: str, now: datetime.datetime = None) -> int:
 
 
 def capture(video_id: str, sec: int, out_path: str) -> bool:
-    cmd = [YTDLP_BIN, "-f", AUDIO_FORMAT, "--downloader", "ffmpeg",
+    cmd = [YTDLP_BIN, "-f", AUDIO_FORMAT, "--add-header", "Accept-Encoding:gzip",   # ★ 11-14 재생목록 압축(수신량 1/74)
+           "--downloader", "ffmpeg",
            "--downloader-args", f"ffmpeg_i:-t {sec}", "-o", out_path,
            f"https://www.youtube.com/watch?v={video_id}"]
     try:
