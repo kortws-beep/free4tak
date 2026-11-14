@@ -175,6 +175,9 @@ def capture_audio_chunk(video_id: str, duration_sec: int, out_path: str) -> bool
     url = f"https://www.youtube.com/watch?v={video_id}"
     cmd = [
         YTDLP_BIN, "-f", AUDIO_FORMAT,
+        # ★ 11-14 라이브 재생목록(m3u8)이 24시간 방송이라 수천 줄(매경 4.4MB)인데 ffmpeg가 1~5초마다 통째로 다시 받아
+        #   채널 하나가 초당 3.4MB를 먹었음(원격 접속 끊김 원인). 압축 요청하면 4.4MB→34KB — 실측 3,395→46KB/s, 녹음은 동일.
+        "--add-header", "Accept-Encoding:gzip",
         "--downloader", "ffmpeg",
         "--downloader-args", f"ffmpeg_i:-t {duration_sec}",
         "--no-part",                       # ★ 11-12 끊겨도 받은 만큼 파일로 남게(.part 정리로 사라지지 않게)
