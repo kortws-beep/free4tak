@@ -399,8 +399,32 @@ def process_chunk(handle: str, channel_label: str, llm, model):
     return True
 
 
+_TRADING_DAY = {"date": "", "open": True}
+
+
+def _is_trading_day() -> bool:
+    """★ 11-14 대장 "주말엔 재방송·재탕이라 필요 없어" — 토·일·휴장일엔 녹음 안 함(전엔 시간대만 막혀 있어서
+    주말에도 3채널을 하루 종일 받아 회선을 잡아먹고 원격 접속이 끊겼음). 휴장일은 한투 API로 하루 한 번 확인,
+    API 실패(None)면 캐시하지 않고 열린 날로 보고 다음에 다시 확인(lina_bot._is_trading_day와 같은 방식)."""
+    now = datetime.datetime.now()
+    if now.weekday() >= 5:
+        return False
+    today = now.date().isoformat()
+    if _TRADING_DAY["date"] != today:
+        try:
+            from kis_api import KisAPI
+            is_open = KisAPI().is_market_open()
+        except Exception as e:
+            print(f"⚠️ [유튜브] 휴장일 확인 오류: {e}")
+            is_open = None
+        if is_open is None:
+            return True
+        _TRADING_DAY.update(date=today, open=bool(is_open))
+    return _TRADING_DAY["open"]
+
+
 def _within_active_hours() -> bool:
-    return ACTIVE_HOUR_START <= datetime.datetime.now().hour < ACTIVE_HOUR_END
+    return ACTIVE_HOUR_START <= datetime.datetime.now().hour < ACTIVE_HOUR_END and _is_trading_day()
 
 
 def channel_worker(handle: str, channel_label: str, llm, model):
@@ -410,7 +434,7 @@ def channel_worker(handle: str, channel_label: str, llm, model):
         try:
             if not _within_active_hours():
                 if was_active:
-                    print(f"😴 [{channel_label}] 활성시간({ACTIVE_HOUR_START}~{ACTIVE_HOUR_END}시) 아님 — 대기")
+                    print(f"😴 [{channel_label}] 활성시간(거래일 {ACTIVE_HOUR_START}~{ACTIVE_HOUR_END}시) 아님 — 대기")
                     was_active = False
                 time.sleep(POLL_INTERVAL_SEC)
                 continue
