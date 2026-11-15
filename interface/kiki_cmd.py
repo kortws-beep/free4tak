@@ -87,6 +87,8 @@ RESTART_SERVICES = {
     #   같은 이유로 빠져있던 dashboard도 같이 추가.
     "lina":      "yeongam9-lina",
     "dashboard": "yeongam9-dashboard",
+    # ★ 2026-11-16 대장 점검 — 유튜브 라이브 녹음(youtube-live)이 빠져 있어 !전체재시작 때 안 켜졌음
+    "youtube":   "yeongam9-youtube-live",
 }
 
 async def wait_cmd_result(bot_name: str, max_attempts: int = 20,
@@ -724,8 +726,10 @@ async def cmd_restart_all(ctx):
             if ret.returncode == 0:
                 results.append(f"✅ {name}")
             else:
-                err = ret.stderr.decode('utf-8', errors='ignore').strip()[:50]
-                results.append(f"❌ {name}: {err or 'returncode=' + str(ret.returncode)}")
+                err = ret.stderr.decode('utf-8', errors='ignore').strip()
+                if "password" in err.lower():      # ★ 11-16 sudo 비밀번호 요구 = 서버 sudoers에 이 서비스 재시작 허용이 없음
+                    err = "비밀번호 필요(서버 sudoers 미등록 — deploy/sudoers-yeongam9 설치)"
+                results.append(f"❌ {name}: {err[:80] or 'returncode=' + str(ret.returncode)}")
         except Exception as e:
             results.append(f"❌ {name}: {e}")
         await _ac.sleep(2)  # 2초 간격으로 안정적 재시작
