@@ -978,6 +978,13 @@ async def money_weather_collector():
                 n = await asyncio.to_thread(money_weather.collect)
                 done_day = now.date().isoformat()
                 print(f"🌦️ [자금날씨] 글로벌 지표 {n}줄 갱신")
+                # ★ 11-17 2단계: 날씨판 계산·기록·채널 전송(관찰만 — 봇 제어 안 함)
+                import weather_board
+                b = await asyncio.to_thread(weather_board.board, done_day)
+                await asyncio.to_thread(weather_board.save_board, b)
+                ch = bot.get_channel(CHANNEL_ID)
+                if ch:
+                    await send_long(ch, weather_board.format_board(b))
         except Exception as e:
             print(f"⚠️ [자금날씨] 수집 오류: {e}")
         await asyncio.sleep(60)
