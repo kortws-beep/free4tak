@@ -66,6 +66,7 @@ CATALOG = [
     ("intelligence/money_weather.db", "board_daily", "date", 5, "날씨판 1차(07:10) 기록 — 키키 관제 근거"),
     ("intelligence/money_weather.db", "midday_check", "date", 5, "2차 점검(11:50) 미국 야간선물·오전 흐름 기록"),
     ("intelligence/money_weather.db", "sector_board", "date", 5, "분야 날씨 기록(관찰)"),
+    ("intelligence/money_weather.db", "news_board", "date", 5, "뉴스 층(1차 전일12~07시·2차 07~11:30, Claude 판단·출처)"),
     # ── 코인 ──
     ("coin_price_ticks.db", "price_ticks", "ts", 2, "코인 시세 틱(cbot)"),
     ("backtestc/coin_backtest.db", "daily_ohlcv", "date", 3, "코인 봉"),

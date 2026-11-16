@@ -144,12 +144,14 @@ def layer_coin(day: str, conn=None) -> tuple:
     return sum(i[1] for i in items), items
 
 
-def combined(g: int, layer2: int) -> str:
+def combined(g: int, layer2: int, news: int = 0) -> str:
     """★ 11-17 봇 제어용 태세 — 5년 검증을 통과한 건 1층(글로벌)뿐이라 1층 태세가 기준. 2층(한국 주식·코인)은 기록이 짧아
     '나쁠 때 한 단계 더 조심(≤-2면 한 칸 아래)'로만 쓰고 올려 주지는 않음(검증 쌓이면 다시 정함)."""
     labels = [lab for _, lab in STATES]
     i = labels.index(state_of(g))
     if layer2 <= -2:
+        i = min(i + 1, len(labels) - 1)
+    if news <= -2:                      # ★ 11-17 대장 "뉴스도 반영" — 분명한 악재 뉴스면 한 칸 더 조심(올려 주진 않음, 검증 전)
         i = min(i + 1, len(labels) - 1)
     return labels[i]
 
@@ -159,8 +161,17 @@ def board(day: str = None) -> dict:
     g, gi = layer_global(day)
     k, ki = layer_kr(day)
     c, ci = layer_coin(day)
+    news, news_sum = 0, ""
+    try:
+        import news_weather
+        r = news_weather.today_score(day, 1)
+        if r:
+            news, news_sum = int(r[0] or 0), r[1] or ""
+    except Exception:
+        pass
     return {"date": day, "global": (g, state_of(g), gi), "kr": (k, state_of(k), ki), "coin": (c, state_of(c), ci),
-            "stock_total": (g + k, combined(g, k)), "coin_total": (g + c, combined(g, c))}
+            "news": (news, news_sum),
+            "stock_total": (g + k, combined(g, k, news)), "coin_total": (g + c, combined(g, c, news))}
 
 
 def format_board(b: dict) -> str:
@@ -170,8 +181,10 @@ def format_board(b: dict) -> str:
             f"1층 글로벌 {b['global'][1]} ({b['global'][0]:+d})\n{lines(b['global'][2])}\n"
             f"2층 한국 주식 {b['kr'][1]} ({b['kr'][0]:+d})\n{lines(b['kr'][2])}\n"
             f"2층 코인 {b['coin'][1]} ({b['coin'][0]:+d})\n{lines(b['coin'][2])}\n"
+            f"📰 뉴스 층(1차, 전일 12:00~07:00) {b.get('news', (0, ''))[0]:+d}"
+            f"{' — ' + b['news'][1] if b.get('news') and b['news'][1] else ' (판단 없음)'}\n"
             f"→ 주식 봇 태세 {b['stock_total'][1]} · 코인 봇 태세 {b['coin_total'][1]} "
-            f"(1층 태세가 기준, 2층이 -2 이하면 한 칸 더 조심)")
+            f"(1층 태세가 기준, 2층 -2 이하·뉴스 -2면 각각 한 칸 더 조심)")
 
 
 def save_board(b: dict) -> None:

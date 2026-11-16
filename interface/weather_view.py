@@ -17,6 +17,19 @@ for _d in ("core", "intelligence"):
         sys.path.insert(0, os.path.join(_BASE, _d))
 
 
+def _news(day: str) -> list:
+    try:
+        import weather_board
+        c = sqlite3.connect(f"file:{weather_board.MW_DB}?mode=ro", uri=True, timeout=5)
+        rows = c.execute("SELECT phase, win, score, summary, detail, n, sources FROM news_board WHERE date=? ORDER BY phase",
+                         (day,)).fetchall()
+        c.close()
+        return [{"phase": p, "win": w, "score": sc, "summary": sm, "detail": json.loads(dt or "{}"), "n": n, "sources": src}
+                for p, w, sc, sm, dt, n, src in rows]
+    except Exception:
+        return []
+
+
 def build() -> dict:
     import weather_board
     import sector_weather
@@ -48,7 +61,7 @@ def build() -> dict:
         "date": day, "now": datetime.datetime.now().strftime("%H:%M"),
         "layers": [{"name": n, "score": b[k][0], "state": b[k][1], "items": [list(i) for i in b[k][2]]}
                    for k, n in (("global", "1층 글로벌 자금"), ("kr", "2층 한국 주식"), ("coin", "2층 코인"))],
-        "stock": b["stock_total"][1], "coin": b["coin_total"][1], "bots": bots,
+        "stock": b["stock_total"][1], "coin": b["coin_total"][1], "bots": bots, "news": _news(day),
         "sectors": [{"grp": g, "score": sc, "state": st, "leader": ld or "",
                      "why": " · ".join(f"{n} {why}" for n, s, why in it if s)} for g, sc, st, it, ld in sec],
         "events": [list(e) for e in money_weather.upcoming(21, day)],
@@ -76,6 +89,7 @@ HTML = """<!DOCTYPE html>
 <div class="big"><div class="card">주식 봇 태세<b id="stock">-</b></div><div class="card">코인 봇 태세<b id="coin">-</b></div></div>
 <div class="card"><h2>🗼 키키 관제 — 봇에 실제로 건 오늘 태세</h2><div id="bots"></div>
  <div class="small">🔴쉼=신규매수 정지(매도·손절 계속) · 🟠방어=daybot 음봉·이벤트 엔진만/sbot 1슬롯/cbot BTC 오를 때만 · 🟡🟢=자유 · 키키 <b>!날씨해제</b>로 오늘 하루 풀기</div></div>
+<div id="news"></div>
 <div id="layers"></div>
 <div class="card"><h2>🗺️ 분야 날씨 (관심그룹, 어제까지 기록)</h2><table id="sec"></table>
  <div class="warn">⚠️ 검증 중 — 하락장 28일 기록으론 분야 신호가 약해 아직 봇 진입에 안 씀(관찰·기록만)</div></div>
@@ -88,6 +102,9 @@ fetch('api/weather').then(r=>r.json()).then(d=>{
  document.getElementById('sub').textContent=d.date+' · '+d.now+' 기준 · 1층(글로벌)은 5년 검증 통과, 2층은 나쁠 때 한 칸 더 조심만';
  document.getElementById('stock').textContent=d.stock;document.getElementById('coin').textContent=d.coin;
  document.getElementById('bots').innerHTML=Object.entries(d.bots).map(([k,v])=>`<div class="it"><b>${nm[k]}</b> ${esc(v.weather)} ${v.action?'→ '+esc(v.action):''}${v.paused?' · <span class="m">정지('+esc(v.pause_reason||'수동')+')</span>':''}${v.override?' · 대장 해제':''}</div>`).join('');
+ document.getElementById('news').innerHTML=(d.news||[]).map(n=>`<div class="card"><h2>📰 뉴스 층 ${n.phase}차 (${esc(n.win)}) — ${n.score>0?'+':''}${n.score}</h2><div class="it">${esc(n.summary)}</div>`+
+   ((n.detail.events||[]).map(e=>`<div class="it"><span class="${e.impact=='+'?'p':'m'}">${e.impact=='+'?'＋':'－'}</span> ${esc(e.title)} <span class="small">(${esc(e.source)})</span></div>`).join(''))+
+   `<div class="small">뉴스 ${n.n}건 · 출처 ${esc(n.sources)}${n.phase==1?' · -2면 태세 한 칸 더 조심':' · 표시만'}</div></div>`).join('');
  document.getElementById('layers').innerHTML=d.layers.map(L=>`<div class="card"><h2>${esc(L.name)} — ${esc(L.state)} (${L.score>0?'+':''}${L.score})</h2>`+
    L.items.map(i=>`<div class="it"><span class="${i[1]>0?'p':(i[1]<0?'m':'')}">${i[1]>0?'＋':(i[1]<0?'－':'·')}</span> <b>${esc(i[0])}</b> ${esc(i[2])}</div>`).join('')+'</div>').join('');
  document.getElementById('sec').innerHTML='<tr><th>분야</th><th>날씨</th><th>대장주</th><th>이유</th></tr>'+d.sectors.map(s=>`<tr><td>${esc(s.grp)}</td><td>${esc(s.state)} ${s.score>0?'+':''}${s.score}</td><td>${esc(s.leader)}</td><td class="small">${esc(s.why)}</td></tr>`).join('');

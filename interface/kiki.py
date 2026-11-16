@@ -994,14 +994,19 @@ async def money_weather_collector():
                 mid_day = now.date().isoformat()
                 import money_weather
                 m = await asyncio.to_thread(money_weather.midday_check)
+                import news_weather                 # ★ 11-17 2차 뉴스 층(07:00~11:30) — 기록·표시만
+                nw2 = await asyncio.to_thread(news_weather.run, 2)
                 ch = bot.get_channel(CHANNEL_ID)
                 if ch:
-                    await send_long(ch, money_weather.format_midday(m))
+                    await send_long(ch, money_weather.format_midday(m) + "\n" + news_weather.format_news(nw2))
             if now.strftime("%H%M") >= MONEY_WEATHER_HHMM and done_day != now.date().isoformat():
                 import money_weather
                 n = await asyncio.to_thread(money_weather.collect)
                 done_day = now.date().isoformat()
                 print(f"🌦️ [자금날씨] 글로벌 지표 {n}줄 갱신")
+                # ★ 11-17 대장 "뉴스도 반영" — 1차 뉴스 층(전일 12:00~07:00)을 먼저 판단해 날씨판에 넣음
+                import news_weather
+                nw = await asyncio.to_thread(news_weather.run, 1)
                 # ★ 11-17 2단계: 날씨판 계산·기록·채널 전송(관찰만 — 봇 제어 안 함)
                 import weather_board
                 b = await asyncio.to_thread(weather_board.board, done_day)
@@ -1011,6 +1016,7 @@ async def money_weather_collector():
                 acts = await asyncio.to_thread(weather_control.apply, b)
                 ch = bot.get_channel(CHANNEL_ID)
                 if ch:
+                    await send_long(ch, news_weather.format_news(nw))
                     await send_long(ch, weather_board.format_board(b) + "\n\n" + weather_control.format_actions(acts)
                                     + "\n(오늘 날씨판 해제: `!날씨해제` · 다시 보기: `!날씨` · 대시보드 🌦️ 날씨 탭)")
                 # ★ 11-17 3단계: 분야(관심그룹) 날씨 — 관찰·기록만(검증 쌓일 때까지 봇 진입엔 안 씀)
