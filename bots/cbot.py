@@ -1832,6 +1832,13 @@ class CBot:
             return False, ind, f"BTC 약세+알트약세 ({self.btc_rate:+.2f}%)"
         # ★ BTC 양봉이면 극단공포도 매수 허용 (반등 초입 포착)
         btc_rising = self.btc_rate >= 0.0
+        # ★ 11-17 대장 — 키키 관제 날씨판 '방어'면 BTC가 오르는 중일 때만 신규매수(core/weather_control.py)
+        try:
+            import weather_control
+            if not btc_rising and weather_control.today_weather(_read_state()) == "방어":
+                return False, ind, "키키 날씨판 방어(BTC 하락 중)"
+        except Exception as e:
+            print(f"⚠️ 날씨판 확인 오류(막지 않음): {e}")
         if self.fear_greed < FEAR_GREED_MIN and not btc_rising:
             return False, ind, f"극단공포 (탐욕:{self.fear_greed})"
         if self.fear_greed < FEAR_GREED_MIN and btc_rising:

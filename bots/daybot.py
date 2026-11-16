@@ -1864,6 +1864,16 @@ class DayBot:
         그 지수가 양전환(0% 이상)하면 다시 가동(대장 "지수가 양전환하면 일반 가동").
         근거: 9/30~11/3 daybot 일반 매매 — 매수일 지수 저가 -2%↓ 34건 승률 29%·평균 -1.60% vs 그 외 21건 -0.34%.
         멈춘 동안은 음봉 엔진(14:30)·이벤트 섹터 엔진만 일함. 지수 조회 실패는 막지 않음."""
+        # ★ 11-17 대장 — 키키 관제 날씨판이 '방어'면 하루 종일 일반 매수 멈추고 음봉·이벤트 엔진만(core/weather_control.py)
+        try:
+            import weather_control
+            if weather_control.today_weather(_read_state()) == "방어":
+                if getattr(self, "_wx_def_note", "") != today_str():
+                    self._wx_def_note = today_str()
+                    self._notify("🟠 [daybot] 키키 날씨판 '방어' — 오늘 일반 매수 멈춤, 음봉·이벤트 엔진만")
+                return True
+        except Exception as e:
+            print(f"⚠️ [daybot] 날씨판 확인 오류(막지 않음): {e}")
         try:
             st = dip_leader.index_status()
         except Exception as e:

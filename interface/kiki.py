@@ -30,6 +30,8 @@ AI 비서입니다. 명령어로 봇을 조종하고, 평일 자동 브리핑을
   🌐 공통:
     !전체상태      모든 봇 현황
     !전체재시작    kiki 제외 전체 재시작
+    !날씨          자금시장 날씨판(🟢공격·🟡보통·🟠방어·🔴쉼) — 매일 07:10 키키가 봇 태세 설정
+    !날씨해제      오늘 하루 날씨판 제어 풀기(보통) — 날씨판이 건 정지만 해제
     !테마          당일 강세 업종/테마
     !뉴스          오늘 테마별 뉴스 감성 리포트
     !관심HTS       키움 HTS 관심그룹 즉시 동기화
@@ -620,6 +622,8 @@ class AIAssistant:
 "코인봇/cbot 재시작해줘" → CMD:!c재시작
 "섹터/섹터모니터 재시작해줘" → CMD:!섹터재시작
 "전체 다 재시작해줘" → CMD:!전체재시작
+"날씨판/시장 날씨 보여줘" → CMD:!날씨
+"오늘 날씨판 제어 풀어줘/날씨 해제" → CMD:!날씨해제
 
 [설정]
 "점수 X로/기준 X점" → CMD:!점수기준 X
@@ -911,6 +915,16 @@ async def execute_command(ctx, cmd: str):
             await cmd_hold(ctx, parts[1].strip(), hold_val=True)
         else:
             await ctx.send("❌ 사용법: !h 종목명 또는 !h 005930 (sbot/sbo2 자동판별, 손절체크만 제외)")
+    elif cmd == "!날씨":                     # ★ 11-17 자금시장 날씨판(키키 관제)
+        import weather_board
+        b = await asyncio.to_thread(weather_board.board)
+        await send_long(ctx, weather_board.format_board(b))
+    elif cmd == "!날씨해제":                 # ★ 11-17 대장이 오늘 하루 날씨판 제어를 풂(보통으로) — 날씨판이 건 정지만 해제
+        import weather_board
+        import weather_control
+        b = await asyncio.to_thread(weather_board.board)
+        acts = await asyncio.to_thread(weather_control.apply, b, "보통")
+        await send_long(ctx, "🔓 오늘 날씨판 제어 해제(보통)\n" + weather_control.format_actions(acts))
     elif cmd == "!전체상태":
         await cmd_all_status(ctx)
     elif cmd in ("!전체재시작", "!재시작전체", "!all재시작"):
@@ -982,9 +996,13 @@ async def money_weather_collector():
                 import weather_board
                 b = await asyncio.to_thread(weather_board.board, done_day)
                 await asyncio.to_thread(weather_board.save_board, b)
+                # ★ 11-17 대장 "키키가 실질적인 관리" — 쉼=신규매수 정지, 방어=태세 축소, 보통·공격=자유(core/weather_control.py)
+                import weather_control
+                acts = await asyncio.to_thread(weather_control.apply, b)
                 ch = bot.get_channel(CHANNEL_ID)
                 if ch:
-                    await send_long(ch, weather_board.format_board(b))
+                    await send_long(ch, weather_board.format_board(b) + "\n\n" + weather_control.format_actions(acts)
+                                    + "\n(오늘 날씨판 해제: `!날씨해제` · 다시 보기: `!날씨`)")
         except Exception as e:
             print(f"⚠️ [자금날씨] 수집 오류: {e}")
         await asyncio.sleep(60)

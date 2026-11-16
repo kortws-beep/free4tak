@@ -1471,6 +1471,13 @@ class SBot:
 
         self._market_breadth()
         down_left = None
+        # ★ 11-17 대장 — 키키 관제 날씨판 '방어'면 국면이 괜찮아도 하락장처럼 1슬롯만(core/weather_control.py)
+        try:
+            import weather_control
+            if not getattr(self, "_pause_reason", "") and weather_control.today_weather(_read_state()) == "방어":
+                self._pause_reason = "하락장(키키 날씨판 방어)"
+        except Exception as e:
+            print(f"⚠️ [SWING] 날씨판 확인 오류(막지 않음): {e}")
         if getattr(self, "_pause_reason", ""):
             down_left = self._down_slots_left() if self._pause_reason.startswith("하락장") else 0
             if down_left <= 0:
