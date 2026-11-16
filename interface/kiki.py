@@ -980,13 +980,23 @@ async def execute_command(ctx, cmd: str):
 #   구리·비트코인·원달러·아시아) 매일 07:10 저장(미국장 마감 뒤, 최근 10일 덮어써 임시값 확정). intelligence/money_weather.py
 _money_weather_started = False
 MONEY_WEATHER_HHMM = "0710"
+MIDDAY_CHECK_HHMM = "1150"      # ★ 11-17 대장 2차 점검(미국 야간선물 반영) — 기록·표시만
 
 
 async def money_weather_collector():
     done_day = ""
+    mid_day = ""
     while True:
         try:
             now = datetime.datetime.now()
+            if (now.weekday() < 5 and now.strftime("%H%M") >= MIDDAY_CHECK_HHMM and now.strftime("%H%M") < "1530"
+                    and mid_day != now.date().isoformat()):
+                mid_day = now.date().isoformat()
+                import money_weather
+                m = await asyncio.to_thread(money_weather.midday_check)
+                ch = bot.get_channel(CHANNEL_ID)
+                if ch:
+                    await send_long(ch, money_weather.format_midday(m))
             if now.strftime("%H%M") >= MONEY_WEATHER_HHMM and done_day != now.date().isoformat():
                 import money_weather
                 n = await asyncio.to_thread(money_weather.collect)

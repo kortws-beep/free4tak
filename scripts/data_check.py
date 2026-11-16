@@ -63,6 +63,9 @@ CATALOG = [
     # ── 자금시장 날씨판(11-17~, 키키 07:10) ──
     ("intelligence/money_weather.db", "global_daily", "date", 5, "글로벌 자금 지표(미국 지수·SOX·VIX·금리·달러·금·유가·BTC 등)"),
     ("intelligence/money_weather.db", "events", "created_at", 60, "이벤트 달력(실적·IPO·FOMC·금통위 — 출처 필수)"),
+    ("intelligence/money_weather.db", "board_daily", "date", 5, "날씨판 1차(07:10) 기록 — 키키 관제 근거"),
+    ("intelligence/money_weather.db", "midday_check", "date", 5, "2차 점검(11:50) 미국 야간선물·오전 흐름 기록"),
+    ("intelligence/money_weather.db", "sector_board", "date", 5, "분야 날씨 기록(관찰)"),
     # ── 코인 ──
     ("coin_price_ticks.db", "price_ticks", "ts", 2, "코인 시세 틱(cbot)"),
     ("backtestc/coin_backtest.db", "daily_ohlcv", "date", 3, "코인 봉"),

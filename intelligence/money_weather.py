@@ -153,3 +153,61 @@ if __name__ == "__main__":
             print(r)
     else:
         print(f"✅ 최근 갱신: {collect():,}줄")
+
+
+# ── ★ 11-17 2차 점검(11:50, 대장 "미국 야간선물 반영") ─────────────────────────
+# 44일 검증(야간선물 06:00→11:50 · 코스피 오전 → 오후 11:50→종가): 선물 -0.5%↓ & 오전 -1%↓인 날 오후 오히려 +0.65%(8일 중 5일 상승),
+# 선물 +0.5%↑ 날 오후 -0.23% — 표본이 4~10일이라 규칙 못 정함 → 매일 기록·표시만, 오후 태세 자동 변경은 기록 쌓인 뒤 대장 OK로.
+# (야간선물 분봉은 외부에서 최근 60일만 받을 수 있어 우리가 매일 쌓아야 나중에 검증 가능)
+def midday_check(now=None) -> dict:
+    import yfinance as yf
+    import pandas as pd
+    now = now or datetime.datetime.now()
+    day = now.date().isoformat()
+    t0 = pd.Timestamp(datetime.datetime.combine(now.date(), datetime.time(6, 0)), tz="Asia/Seoul")
+    out = {"date": day, "time": now.strftime("%H:%M")}
+    for sym, key in (("NQ=F", "nq"), ("ES=F", "es")):
+        try:
+            h = yf.Ticker(sym).history(period="2d", interval="5m").tz_convert("Asia/Seoul")
+            a = h[h.index <= t0]["Close"]
+            out[key] = (float(h["Close"].iloc[-1]) / float(a.iloc[-1]) - 1) * 100 if len(a) and len(h) else None
+        except Exception as e:
+            print(f"⚠️ [2차 점검] {sym} 실패: {e}")
+            out[key] = None
+    try:
+        sys.path.insert(0, os.path.join(os.path.dirname(_HERE), "core"))
+        import dip_leader
+        st = dip_leader.index_status()
+        out["kospi"], out["kospi_bounce"] = st.get("kospi", (None, None))
+        out["kosdaq"], out["kosdaq_bounce"] = st.get("kosdaq", (None, None))
+    except Exception as e:
+        print(f"⚠️ [2차 점검] 지수 실패: {e}")
+    try:
+        c = sqlite3.connect(DB_PATH, timeout=10)
+        first = dict(c.execute("SELECT layer, state FROM board_daily WHERE date=? AND layer IN ('stock_total','coin_total')",
+                               (day,)).fetchall())
+        c.close()
+    except Exception:
+        first = {}
+    out["first_stock"], out["first_coin"] = first.get("stock_total", ""), first.get("coin_total", "")
+    c = _conn()
+    c.execute("CREATE TABLE IF NOT EXISTS midday_check (date TEXT PRIMARY KEY, time TEXT, nq REAL, es REAL, kospi REAL, "
+              "kospi_bounce REAL, kosdaq REAL, kosdaq_bounce REAL, first_stock TEXT, first_coin TEXT, provider TEXT)")
+    c.execute("INSERT OR REPLACE INTO midday_check VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+              (day, out["time"], out.get("nq"), out.get("es"), out.get("kospi"), out.get("kospi_bounce"), out.get("kosdaq"),
+               out.get("kosdaq_bounce"), out["first_stock"], out["first_coin"], "선물 yfinance 5분봉 · 지수 네이버"))
+    c.commit()
+    c.close()
+    return out
+
+
+def format_midday(m: dict) -> str:
+    f = lambda v: "-" if v is None else f"{v:+.2f}%"   # noqa: E731
+    hint = ""
+    if (m.get("nq") or 0) <= -0.5 and min(m.get("kospi") or 0, m.get("kosdaq") or 0) <= -1:
+        hint = "\n   💡 선물·오전 둘 다 약한 날 — 44일 기록상 오후엔 오히려 반등이 많았음(8일 중 5일, 표본 작음)"
+    return (f"🕛 **2차 점검** {m['date']} {m['time']} (기록·표시만 — 오후 태세는 안 바꿈)\n"
+            f"   미국 야간선물(06:00→지금): 나스닥 {f(m.get('nq'))} · S&P {f(m.get('es'))}\n"
+            f"   우리 장 지금: 코스피 {f(m.get('kospi'))} (저가 대비 {f(m.get('kospi_bounce'))}) · "
+            f"코스닥 {f(m.get('kosdaq'))} (저가 대비 {f(m.get('kosdaq_bounce'))})\n"
+            f"   1차(07:10) 태세: 주식 {m.get('first_stock') or '-'} · 코인 {m.get('first_coin') or '-'}{hint}")
