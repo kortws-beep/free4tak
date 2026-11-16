@@ -29,6 +29,7 @@ MW_DB = os.path.join(_HERE, "money_weather.db")
 FEATURE_DB = os.path.join(_HERE, "feature_news.db")
 MTN_DB = os.path.join(_HERE, "mtn_morning.db")
 MODEL = os.getenv("NEWS_WEATHER_MODEL", "claude-haiku-5-5")
+KST = datetime.timezone(datetime.timedelta(hours=9))   # 모든 창·시각은 한국시간(대장: "가끔 미국 기준으로 넣어 문제")
 KEYWORDS = ["증시", "코스피", "코스닥", "뉴욕증시", "나스닥", "연준", "금리", "환율", "유가", "외국인 순매도", "외국인 순매수",
             "엔비디아", "반도체", "관세", "전쟁", "중국 경기", "비트코인", "공매도", "금융위", "IPO"]
 
@@ -64,7 +65,8 @@ def naver_news(start, end) -> list:
             continue
         for it in r.get("items", []):
             try:
-                t = email.utils.parsedate_to_datetime(it.get("pubDate")).replace(tzinfo=None)
+                # ★ 한국시간으로 명시 변환(네이버는 +0900을 주지만, 다른 시간대가 섞여도 창 비교가 틀리지 않게) — 서버도 KST
+                t = email.utils.parsedate_to_datetime(it.get("pubDate")).astimezone(KST).replace(tzinfo=None)
             except Exception:
                 continue
             title = _clean(it.get("title"))

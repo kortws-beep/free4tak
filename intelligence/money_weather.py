@@ -9,6 +9,9 @@ money_weather.py — 자금시장 날씨판 1단계: 글로벌 자금 지표·�
                    (매일 키키 07:10 — 미국장 끝난 뒤 최근 10일을 다시 받아 덮어씀: 장중에 받힌 임시값도 확정값으로 고쳐짐)
   · events       : 시장을 흔드는 일정(실적·IPO·FOMC·금통위·전쟁 등) — 출처 source 칸 필수, 사람이 넣은 것도 출처 적기
 아직 판단(점수·태세)은 안 함 — 2단계 '관찰판'에서. 이 파일은 데이터만.
+★ 날짜 기준(헷갈리기 쉬움): global_daily.date = 그 시장 '현지' 거래일 — 미국 지수·ETF·선물·금리 = 미국 날짜(미국 11-16 장은 한국
+  11-17 06:00 마감), 비트코인 = UTC 날짜(한국 09:00에 하루가 바뀜), 코스피·원달러·닛케이 = 한국·아시아 날짜. 날씨판은 한국 날짜 D 아침에
+  'date < D'인 줄만 씀 → 미국은 전날 밤 끝난 장, 한국은 전 거래일. 그 밖의 시각(이벤트 time_kst·2차 점검·뉴스 창)은 전부 한국시간.
 실행: venv/bin/python intelligence/money_weather.py --backfill [년수, 기본 5]   (과거 이력 한 번에)
       venv/bin/python intelligence/money_weather.py                         (최근 10일 갱신)
       venv/bin/python intelligence/money_weather.py --events                 (이벤트 달력 보기)
