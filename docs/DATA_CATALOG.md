@@ -103,6 +103,13 @@
 | `intelligence/sector_monitor.db` | 키움 테마 흐름, 테마 안 종목 모멘텀(분 단위) | `yeongam9-sector` 서비스 | 🔒 |
 | `intelligence/market_concentration.db` | 대형주 쏠림 스냅샷, 시장 요약 | cron 09~15시 30분마다 | 🔒 |
 
+**자금시장 날씨판 `intelligence/money_weather.db` (11-17~, 대장 "자금시장 자체의 날씨판 — 키키가 관제탑")**
+
+| 표 | 내용 | 쓰는 곳 / 언제 | 출처 칸 | 보존 |
+|---|---|---|---|---|
+| global_daily | 해외 지표 일봉 14종: 나스닥·S&P·SOX·VIX·미국 10년/3개월 금리·달러 인덱스·원달러·금·WTI·구리·비트코인·닛케이·대만. 2021-11부터 백필 | 키키 매일 07:10(최근 10일 덮어써 임시값 확정), `money_weather.py --backfill` | provider | 🔁 |
+| events | 시장 흔드는 일정(실적·IPO·FOMC·금통위·전쟁…) — **출처 없으면 저장 안 됨** | `money_weather.add_event`(사람·누리가 넣음), FOMC·금통위는 macro_calendar에서 옮김 | source | 🔁 |
+
 ---
 
 ## 5. 코인

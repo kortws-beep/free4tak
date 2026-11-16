@@ -962,6 +962,27 @@ async def execute_command(ctx, cmd: str):
 # kiki_cmd.py 참조
 
 
+# ★ 2026-11-17 대장 "자금시장 자체의 날씨판 — 키키가 관제탑" 1단계: 글로벌 자금 지표(미국 지수·SOX·VIX·금리·달러·금·유가·
+#   구리·비트코인·원달러·아시아) 매일 07:10 저장(미국장 마감 뒤, 최근 10일 덮어써 임시값 확정). intelligence/money_weather.py
+_money_weather_started = False
+MONEY_WEATHER_HHMM = "0710"
+
+
+async def money_weather_collector():
+    done_day = ""
+    while True:
+        try:
+            now = datetime.datetime.now()
+            if now.strftime("%H%M") >= MONEY_WEATHER_HHMM and done_day != now.date().isoformat():
+                import money_weather
+                n = await asyncio.to_thread(money_weather.collect)
+                done_day = now.date().isoformat()
+                print(f"🌦️ [자금날씨] 글로벌 지표 {n}줄 갱신")
+        except Exception as e:
+            print(f"⚠️ [자금날씨] 수집 오류: {e}")
+        await asyncio.sleep(60)
+
+
 @bot.event
 async def on_ready():
     print(f"✅ AI 비서 봇 온라인: {bot.user}")
@@ -1008,6 +1029,10 @@ async def on_ready():
     asyncio.ensure_future(proactive_insight_provider())
     asyncio.ensure_future(proactive_daily_review())
     asyncio.ensure_future(upbit_maintenance_watcher(bot, CHANNEL_ID))   # ★ 10-19 업비트 점검 미리/시작/끝 알림
+    global _money_weather_started
+    if not _money_weather_started:          # ★ 11-17 on_ready는 재접속 때 다시 불림 — 한 번만 띄움
+        _money_weather_started = True
+        asyncio.ensure_future(money_weather_collector())
 
     ch = bot.get_channel(CHANNEL_ID)
     if ch:
