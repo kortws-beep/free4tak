@@ -996,9 +996,15 @@ async def money_weather_collector():
                 m = await asyncio.to_thread(money_weather.midday_check)
                 import news_weather                 # ★ 11-17 2차 뉴스 층(07:00~11:30) — 기록·표시만
                 nw2 = await asyncio.to_thread(news_weather.run, 2)
+                import weather_board
+                import weather_ai
+                b2 = await asyncio.to_thread(weather_board.board, mid_day)
+                rv2 = await asyncio.to_thread(weather_ai.review, b2, 2, m)
+                await asyncio.to_thread(weather_ai.save, mid_day, 2, rv2)
                 ch = bot.get_channel(CHANNEL_ID)
                 if ch:
-                    await send_long(ch, money_weather.format_midday(m) + "\n" + news_weather.format_news(nw2))
+                    await send_long(ch, money_weather.format_midday(m) + "\n" + news_weather.format_news(nw2) + "\n"
+                                    + weather_ai.format_review(rv2, 2))
             if now.strftime("%H%M") >= MONEY_WEATHER_HHMM and done_day != now.date().isoformat():
                 import money_weather
                 n = await asyncio.to_thread(money_weather.collect)
@@ -1010,6 +1016,11 @@ async def money_weather_collector():
                 # ★ 11-17 2단계: 날씨판 계산·기록·채널 전송(관찰만 — 봇 제어 안 함)
                 import weather_board
                 b = await asyncio.to_thread(weather_board.board, done_day)
+                # ★ 11-17 대장 "키키에 동생(AI)이 능동 판단" — 키키 모델이 날씨판 검토, '더 조심'만 반영(풀기 X)
+                import weather_ai
+                rv = await asyncio.to_thread(weather_ai.review, b, 1)
+                b = weather_ai.apply_to_board(b, rv)
+                await asyncio.to_thread(weather_ai.save, done_day, 1, rv)
                 await asyncio.to_thread(weather_board.save_board, b)
                 # ★ 11-17 대장 "키키가 실질적인 관리" — 쉼=신규매수 정지, 방어=태세 축소, 보통·공격=자유(core/weather_control.py)
                 import weather_control
@@ -1017,7 +1028,8 @@ async def money_weather_collector():
                 ch = bot.get_channel(CHANNEL_ID)
                 if ch:
                     await send_long(ch, news_weather.format_news(nw))
-                    await send_long(ch, weather_board.format_board(b) + "\n\n" + weather_control.format_actions(acts)
+                    await send_long(ch, weather_board.format_board(b) + "\n" + weather_ai.format_review(rv, 1) + "\n\n"
+                                    + weather_control.format_actions(acts)
                                     + "\n(오늘 날씨판 해제: `!날씨해제` · 다시 보기: `!날씨` · 대시보드 🌦️ 날씨 탭)")
                 # ★ 11-17 3단계: 분야(관심그룹) 날씨 — 관찰·기록만(검증 쌓일 때까지 봇 진입엔 안 씀)
                 import sector_weather
