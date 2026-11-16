@@ -1002,7 +1002,13 @@ async def money_weather_collector():
                 ch = bot.get_channel(CHANNEL_ID)
                 if ch:
                     await send_long(ch, weather_board.format_board(b) + "\n\n" + weather_control.format_actions(acts)
-                                    + "\n(오늘 날씨판 해제: `!날씨해제` · 다시 보기: `!날씨`)")
+                                    + "\n(오늘 날씨판 해제: `!날씨해제` · 다시 보기: `!날씨` · 대시보드 🌦️ 날씨 탭)")
+                # ★ 11-17 3단계: 분야(관심그룹) 날씨 — 관찰·기록만(검증 쌓일 때까지 봇 진입엔 안 씀)
+                import sector_weather
+                sec = await asyncio.to_thread(sector_weather.weather, done_day)
+                await asyncio.to_thread(sector_weather.save, sec, done_day)
+                if ch and sec:
+                    await send_long(ch, sector_weather.format_weather(sec, done_day) + "\n(분야 날씨는 검증 중 — 봇 진입엔 아직 안 씀)")
         except Exception as e:
             print(f"⚠️ [자금날씨] 수집 오류: {e}")
         await asyncio.sleep(60)

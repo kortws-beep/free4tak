@@ -20,6 +20,7 @@ dashboard.py — 영암9 통합 대시보드 (Flask + 모바일)
   - /lina — 리나 등록종목 모바일 보기 + 전량 매도/해제 버튼(PIN)(2026-10-20)
   - /feed — 키키·리나·산야 메시지 모아보기(2026-10-20)
   - /bots — 봇 기능 지도 + 변경 이력(docs/CHANGELOG_KO.md)(2026-10-22) · 세 화면 위쪽 탭으로 오감
+  - /weather — 자금시장 날씨판(키키 관제 태세·층별 이유·분야 날씨·이벤트·최근 기록)(2026-11-17)
 ================================================================
 """
 import os
@@ -495,6 +496,20 @@ def api_engines():
     """엔진 대항전 — p=day|week|month (2026-10-24)"""
     import engine_board
     return jsonify(engine_board.board(request.args.get("p", "week")))
+
+
+@app.route("/weather")
+def weather_page():
+    """자금시장 날씨판(키키 관제)·분야 날씨·이벤트(2026-11-17)"""
+    import weather_view
+    import bot_overview
+    return weather_view.HTML.replace("<body>", "<body>" + bot_overview.NAV, 1)
+
+
+@app.route("/api/weather")
+def api_weather():
+    import weather_view
+    return jsonify(weather_view.build())
 
 
 @app.route("/api/feed")
