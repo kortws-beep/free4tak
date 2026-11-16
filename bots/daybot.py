@@ -60,6 +60,7 @@ import asyncio
 import pathlib
 import datetime
 import threading
+import sqlite3
 from dotenv import load_dotenv
 
 HB_FILE = "/tmp/hb_daybot"
@@ -402,6 +403,24 @@ def _lina_all_watches() -> set:
     return _lina_daybot_watches(all_accounts=True)
 
 
+
+def _completed_trading_days(buy_ts) -> int:
+    """★ 11-16 매수일 다음 날부터 어제까지 '끝난 거래일' 수(리나 지수 기록 market_index의 날짜 = 실제 거래일).
+    오늘 몫은 호출부가 더함. 매수 시각이 없거나 기록을 못 읽으면 None(저장된 값 유지)."""
+    try:
+        buy_day = datetime.datetime.fromtimestamp(float(buy_ts)).date().isoformat()
+        db = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "lina_bot",
+                          "three_month_leader_log.db")
+        conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=5)
+        try:
+            n = conn.execute("SELECT COUNT(DISTINCT date) FROM market_index WHERE date > ? AND date < ?",
+                             (buy_day, datetime.date.today().isoformat())).fetchone()[0]
+        finally:
+            conn.close()
+        return int(n)
+    except Exception:
+        return None
+
 class DayBot:
 
     def __init__(self):
@@ -538,9 +557,27 @@ class DayBot:
         if _bbs.get("date") == today_str():           # ★ 11-07 재시작해도 오늘 본 자사주 공시는 다시 안 봄
             self._bb.update(date=_bbs["date"], done=list(_bbs.get("done") or []))
 
+        # ★ 11-16 대장 "카스 3일째인가?" — 여기서 날짜만 오늘로 바꾸고 보유일 +1을 안 해서, 그날 첫 루프 전에
+        #   재시작하면 그 거래일이 통째로 빠졌음(11-13 패치 재시작·11-16 02:17 전체재시작 → 카스 3일째인데 0).
+        #   → 날짜는 그대로 두고(메인루프 5)가 거래일에만 +1·초기화), 보유일은 매수일 이후 '끝난 거래일 수'로 다시 맞춤.
         if self._sold_today_date != today_str():
             self.sold_today = {}
             self._sold_today_date = today_str()
+        trading_today = datetime.date.today().weekday() < 5
+        if trading_today:
+            try:
+                trading_today = self.api.is_market_open() is not False   # 판단불가(None)면 거래일로 봄
+            except Exception:
+                pass
+        with self._positions_lock:
+            for code, pos in self.positions.items():
+                done = _completed_trading_days(pos.get("buy_ts"))
+                if done is None:
+                    continue
+                want = done + (1 if trading_today else 0)      # 매수 뒤 끝난 거래일 + 오늘(거래일이면)
+                if want > pos.get("held_trading_days", 0):
+                    print(f"🔧 [daybot] {code} 보유 거래일 보정 {pos.get('held_trading_days', 0)} → {want}")
+                    pos["held_trading_days"] = want
 
         real_pos = self.api.get_current_positions()
         if real_pos is None:
