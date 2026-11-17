@@ -2606,7 +2606,24 @@ async def daily_news_report():
         print(f"❌ 뉴스 채널 접속 실패: {e}")
         return
 
-    raw_news = await fetch_mbngold_async(service_id="10001", limit=6)
+    # ★ 2026-11-18 대장 "07시 뉴스 이상해" — MBN골드 '전체 최신 6개'라 김치·던힐·매트리스 같은 생활·광고 기사가 브리핑이 되고
+    #   엔비디아 실적 날에도 한 줄 없었음. → 키키 날씨판 뉴스 층과 같은 재료(네이버 시장 키워드 검색 + [특징주] + MTN 아침 요약,
+    #   전일 12:00~당일 07:00, 한국시간)로 바꾸고, 리나가 시장 영향 있는 것만 고르게. 실패하면 예전 MBN골드 경로로.
+    raw_news = ""
+    try:
+        import news_weather as _nw
+        _s, _e = _nw.window(1, kst_now.replace(tzinfo=None))
+        _items = await asyncio.to_thread(lambda: _nw.naver_news(_s, _e) + _nw.feature_news(_s, _e))
+        _mtn = await asyncio.to_thread(_nw.mtn_summary, kst_now.date().isoformat())
+        if _items:
+            raw_news = "\n".join(f"- [{t}] {title}" + (f" — {d}" if d else "") + f" ({src})"
+                                 for t, title, d, src in _items[:200])
+            if _mtn:
+                raw_news += f"\n\n[MTN 아침 방송 요약]\n{_mtn}"
+    except Exception as e:
+        print(f"⚠️ [아침뉴스] 시장 키워드 수집 실패 — MBN골드로: {e}")
+    if not raw_news:
+        raw_news = await fetch_mbngold_async(service_id="10001", limit=6)
     if not raw_news or "텅 비어" in raw_news:
         try:
             async with AsyncSession() as naver_session:
@@ -2625,8 +2642,10 @@ async def daily_news_report():
             raw_news = "- 국내 장전 뉴스 데이터 없음"
 
     prompt = (
-        f"너는 아침 뉴스를 브리핑하는 참모 리나야.\n"
-        f"수집된 실제 데이터만 바탕으로 핵심만 요약해줘. 절대 지어내지 마.\n\n"
+        f"오늘은 {kst_now:%Y-%m-%d}({'월화수목금토일'[kst_now.weekday()]})이야. 너는 아침 뉴스를 브리핑하는 참모 리나야.\n"
+        f"아래는 어제 12시~오늘 07시(한국시간) 뉴스 제목들이야(줄 끝 괄호가 출처). 이 중 '오늘 한국 증시·대장 매매'에 영향 있는 것만 "
+        f"중요한 순서로 6~8개 골라 한 줄씩 요약해줘 — 미국 증시·빅테크 실적, 연준·금리·환율, 반도체·AI, 외국인 수급, 정책·규제, 지정학, 큰 특징주.\n"
+        f"생활·광고·신제품 홍보·인사·지역 소식은 빼. 줄마다 출처를 짧게 붙여. 수집된 실제 데이터만 쓰고 절대 지어내지 마.\n\n"
         f"[오늘 아침 뉴스]\n{raw_news}"
     )
     try:
