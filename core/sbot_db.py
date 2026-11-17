@@ -313,6 +313,19 @@ class SwingDB:
         except Exception:
             return 0
 
+    def transfer_out(self, code: str, reason: str = "리나 관리로 이관") -> bool:
+        """★ 11-17 리나가 스윙 계좌 종목을 맡으면 sbot의 미청산 줄을 닫음 — 매도가=매수가(손익 0), 통합 성적(master)엔 안 넣음."""
+        try:
+            conn = _connect()
+            cur = conn.execute("UPDATE trades SET sell_price=buy_price, sell_time=?, profit_rate=0, sell_reason=? "
+                               "WHERE code=? AND sell_price IS NULL",
+                               (datetime.datetime.now().isoformat(timespec="seconds"), reason, code))
+            conn.commit(); conn.close()
+            return cur.rowcount > 0
+        except Exception as e:
+            print(f"⚠️ 이관 기록 실패({code}): {e}")
+            return False
+
     # ★ 2026-11-14 대장 "sbot 후보종목도 저장해야지" — 매수 특성 분석·필터 백테스트용(daybot candidate_log와 같은 취지).
     #   같은 날 같은 종목·출처는 점수가 바뀔 때만 다시 씀(1분 루프마다 수십 줄 쌓이지 않게). bought는 trades와 날짜·코드로 맞춰 봄.
     def log_candidates(self, rows: list, mode: str = "buy", _seen: dict = {}) -> int:

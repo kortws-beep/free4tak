@@ -990,7 +990,7 @@ class KisAPI:
 
     def buy(self, code: str, price: float, amount: int,
             code_name_map: dict = None, psbl_cash: int = None,
-            extra_ticks: int = 0) -> bool:
+            extra_ticks: int = 0, min_cash: int = 0) -> bool:
         # extra_ticks: 기본 +1호가에 추가로 더 얹을 호가 수 (기본 0 =
         #   기존과 동일한 +1호가). ★ 2026-08-10: sbo2에서 지정가가 너무
         #   타이트해 일부만 체결되고 나머지가 취소되는 사고가 있어(사용자
@@ -1010,6 +1010,10 @@ class KisAPI:
         psbl = psbl_cash if psbl_cash is not None else self.get_psbl_order_cash(code)
         if psbl <= 0:
             print(f"⚠️ 주문가능금액 없음: {code}"); return False, "", "", 0
+        # ★ 11-17 — 루프 시작 때 본 현금(대장 수동매수 전)을 믿고 82만 원 계획이 실제 잔액 1.8만 원으로 몇 주만 사져
+        #   하락장 1슬롯을 차지했음(DB 012030). 호출부가 최소 금액을 주면 실제 주문가능이 그보다 적을 땐 안 삼.
+        if min_cash and psbl < min_cash:
+            print(f"⚠️ 주문가능 {psbl:,}원 < 최소 {min_cash:,}원 — 안 삼: {code}"); return False, "", "", 0
 
         order_cash = min(psbl, amount)
 

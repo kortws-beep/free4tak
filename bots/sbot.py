@@ -304,6 +304,7 @@ BUY_SCORE_MIN    = 45             # 후보 최소 점수
 #   39건) 통과 — 거래량 확보하면서도 평균(57.9점)보단 확실히 위.
 BUY_SCORE_ENTER  = 85             # 매수 진입 기준점 (★2026-09-19: 백테스트 재확인 — 75→85가 +28.71%→+41.58%로 뚜렷이 우수, 07/17에 이미 한번 올렸던 값이 어느 시점에 70으로 되돌아가있던 것 재수정)
 LOOP_SLEEP       = 60
+SBOT_MIN_BUY_CASH = 200_000   # ★ 11-17 실제 주문가능 최소(자투리 매수 방지 — daybot 마지막 슬롯 20만과 같은 선)
 OBSERVE_EVERY_SEC = 1800   # ★ 11-14 슬롯·현금 없어 못 살 때 후보 관찰 기록 주기(30분)
 POOL_SIZE        = 100
 NEW_GROUP_NAMES  = ("new", "신규추천", "신규", "new추천")
@@ -692,7 +693,9 @@ class SBot:
         성공 여부를 몰라 실패해도 "매수 완료"를 보고/주문가능금액 차감을 못 했음).
         ★ 개선: 매수 직후 self.positions 즉시 반영 → 다음 매도 체크에서 누락 방지.
         """
-        ok, orgno, odno, qty = self.api.buy(code, price, amount, self.code_name_map)
+        # ★ 11-17 실제 주문가능이 계획 금액의 절반(최대 20만) 미만이면 안 삼 — 자투리 매수로 슬롯 차지 방지
+        ok, orgno, odno, qty = self.api.buy(code, price, amount, self.code_name_map,
+                                            min_cash=min(int(amount * 0.5), SBOT_MIN_BUY_CASH))
         if not ok or qty <= 0:
             return False
         # ★ 미체결 주문 등록 — ★ 2026-10-06: 2차매수 여부도 같이 기억(미체결
@@ -2246,6 +2249,15 @@ class SBot:
                     if _lina_codes - getattr(self, "_lina_notified", set()):
                         _new = _lina_codes - getattr(self, "_lina_notified", set())
                         print(f"   🤝 리나 관리 종목 — sbot은 손 안 댐: {', '.join(self._name(c) for c in _new)}")
+                        for _c in _new:            # sbot이 먼저 입양해 둔 장부 줄은 '리나로 이관'으로 닫음(성적 기록엔 안 넣음)
+                            if self.db.transfer_out(_c, "리나 관리로 이관"):
+                                self._notify(f"🤝 {self._name(_c)}({_c}) 리나 관리로 넘김 — sbot 장부에서 뺌(손익 기록 없음)")
+                            try:
+                                import master_db as _mdb
+                                _mdb.remove_position("sbot", _c)
+                            except Exception:
+                                pass
+                            self.peak_tracker.pop(_c, None)
                     self._lina_notified = _lina_codes
                     _filtered_new_pos = {
                         c: p for c, p in new_pos.items() if c not in _resurrect_risk and c not in _lina_codes
