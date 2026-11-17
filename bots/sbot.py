@@ -382,6 +382,20 @@ BOT_STATE_FILE = "sbot_state.json"
 # ============================================================
 # 상태 파일 헬퍼
 # ============================================================
+LINA_WATCH_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "lina_bot", "manual_watch_state.json")
+
+
+def _lina_swing_codes() -> set:
+    """★ 11-17 리나가 스윙(sbot) 계좌로 등록해 관리하는 종목 코드(키 '코드@s'). 못 읽으면 빈 집합(=sbot 기존대로)."""
+    try:
+        from common_utils import read_state as _rs
+        w = _rs(LINA_WATCH_FILE, default={}) or {}
+        return {(v.get("code") or k.split("@")[0]) for k, v in w.items()
+                if k.endswith("@s") and isinstance(v, dict)}
+    except Exception:
+        return set()
+
+
 def _read_state() -> dict:
     return read_state(BOT_STATE_FILE, default={
         "paused":      False,
@@ -2226,8 +2240,15 @@ class SBot:
                     for _c in [c for c, v in self._recent_sells.items()
                                if _now_ts - v["ts"] >= SELL_SYNC_GUARD_SEC]:
                         self._recent_sells.pop(_c, None)   # 체결 확인됨(잔고에서 사라짐)
+                    # ★ 11-17 대장 "리나에 관리를 넘기면 sbot 관리에서 빼는 방식" — 리나가 스윙 계좌로 등록한 종목('코드@s')은
+                    #   sbot 포지션·슬롯·매도 판단에서 제외(둘이 같이 파는 사고 방지). 리나 해제하면 다음 루프에 다시 sbot이 입양.
+                    _lina_codes = _lina_swing_codes()
+                    if _lina_codes - getattr(self, "_lina_notified", set()):
+                        _new = _lina_codes - getattr(self, "_lina_notified", set())
+                        print(f"   🤝 리나 관리 종목 — sbot은 손 안 댐: {', '.join(self._name(c) for c in _new)}")
+                    self._lina_notified = _lina_codes
                     _filtered_new_pos = {
-                        c: p for c, p in new_pos.items() if c not in _resurrect_risk
+                        c: p for c, p in new_pos.items() if c not in _resurrect_risk and c not in _lina_codes
                     }
                     _guarded_positions = {c: self.positions[c] for c in _guarded_codes
                                           if c in self.positions}
