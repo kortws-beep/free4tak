@@ -3268,6 +3268,17 @@ async def on_message(message):
 
     # ── !단타 — 단타000 파이썬판 즉시 조회 (2026-10-06) ──
     #   1분 순매수(E)는 직전 검사와의 차이라, 1분 감시가 돌고 있어야 값이 나온다.
+    # ★ 11-17 대장 "적용하세" — 급락장 고무공 후보(SCENARIOS 7-7 비상 매뉴얼, intelligence/rubber_ball.py). 매매는 대장 판단.
+    if message.content.startswith("!고무공"):
+        async with message.channel.typing():
+            try:
+                import rubber_ball
+                rows = await asyncio.to_thread(rubber_ball.candidates)
+                await send_safe_message(message.channel, rubber_ball.format_rows(rows))
+            except Exception as e:
+                await send_safe_message(message.channel, f"❌ 고무공 후보 계산 오류: {e}")
+        return
+
     if message.content.startswith("!단타"):
         async with message.channel.typing():
             try:
