@@ -389,6 +389,8 @@ async def _register_manual_watch(channel, code: str, buy_price: float = None,
                 except Exception as e:
                     print(f"⚠️ [리나등록] daybot 보유 확인 실패: {e}")
             key = _wkey(code, account)
+            if account == "swing":
+                mode = None      # ★ 11-17 대장 "리나 관리는 리나 현재 로직대로 — 단타 부분으로 만들면 복잡" → 스윙 계좌는 일반 규칙만
             entry = {
                 "name": name, "entry_price": buy_price, "peak_price": None, "account": account, "code": code,
                 "last_alert_peak": 0, "stage": 0, "qty": qty, "qty0": qty,
