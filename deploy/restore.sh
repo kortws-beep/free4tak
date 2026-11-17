@@ -9,7 +9,7 @@
 #   2) 이미 ~/k-bot 이 복원돼 있으면: ~/k-bot/stock_bot/deploy/restore.sh
 #
 # 하는 일 (단계마다 실패하면 멈춤):
-#   [1] apt 시스템 패키지 (ffmpeg·java·python venv 등)
+#   [1] apt 시스템 패키지 (ffmpeg·python venv 등 — 자바는 11-17 보안 점검 때 안 써서 뺌)
 #   [2] 백업 풀기 + DB 일관사본으로 덮어쓰기   (백업 파일 준 경우만)
 #   [3] venv 새로 만들고 requirements.txt 설치
 #   [4] systemd 유닛 설치 + 부팅 자동시작 + watchdog
@@ -28,7 +28,7 @@ step() { echo; echo "━━━ $* ━━━"; }
 step "[1] 시스템 패키지 (sudo 비밀번호 필요)"
 sudo apt-get update
 sudo apt-get install -y python3 python3-venv python3-pip python3-dev \
-  build-essential git curl sqlite3 ffmpeg default-jre docker.io tmux
+  build-essential git curl sqlite3 ffmpeg docker.io tmux
 
 if [ -n "$ARCHIVE" ]; then
   step "[2] 백업 풀기: $ARCHIVE"
@@ -92,7 +92,7 @@ sudo deploy/mawari_up.sh || echo "⚠️ 마와리 실패 — 나중에 sudo dep
 
 step "[6] 점검"
 venv/bin/python3 tests/run_all.py | tail -3 || echo "⚠️ 테스트 실패 — 위 로그 확인"
-for b in ffmpeg java; do command -v $b >/dev/null && echo "  ✅ $b" || echo "  ❌ $b 없음"; done
+for b in ffmpeg; do command -v $b >/dev/null && echo "  ✅ $b" || echo "  ❌ $b 없음"; done
 echo "  공인 IP: $(curl -s --max-time 5 https://api.ipify.org)  ← 업비트 Open API 허용IP에 등록돼 있어야 함"
 
 echo
