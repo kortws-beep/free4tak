@@ -1588,7 +1588,7 @@ async def manual_watch_trailing_loop():
         if autosell.mode() == "live":
             from kiwoom_api import KiwoomAPI
             brokers = {"kiwoom": KiwoomAPI(), "daybot": autosell.KisBroker(api),
-                       "swing": autosell.KisBroker(_kis_for("swing"))}      # ★ 11-17 스윙(sbot) 계좌
+                       "swing": autosell.KisBroker(_kis_for("swing"), "한투(스윙 계좌)")}      # ★ 11-17 스윙(sbot) 계좌
     except Exception as e:
         print(f"⚠️ [리나등록 추적] 초기화 오류: {e}")
         return

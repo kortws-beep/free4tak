@@ -32,8 +32,10 @@ class KisBroker:
     daybot 계좌(KIS_CANO)."""
     label = "한투(데이봇 계좌)"
 
-    def __init__(self, api):
+    def __init__(self, api, label: str = None):
         self.api = api
+        if label:                       # ★ 11-17 스윙(sbot) 계좌용 — 알림에 계좌 이름이 '데이봇'으로 잘못 찍히던 것
+            self.label = label
 
     def holdings(self) -> dict:
         pos = self.api.get_current_positions(force=True) or {}
