@@ -157,6 +157,28 @@ def _kis_for(account: str):
     return KisAPI()
 
 
+# ★ 11-18 대장 "이넘이 엉뚱한 놈 사버렸다" — `단타 LS ELECTRIC 61만 D`에서 첫 단어 'LS'만 종목명으로 읽어 지주사 LS(006260)를 삼.
+#   정식 이름이 띄어쓰기·영문이거나(LS ELECTRIC) 사람들이 부르는 한글 이름이 다른(LS일렉트릭) 종목 대비:
+#   뒤 단어까지 붙여 본 '가장 긴 이름'을 먼저 찾고, 흔한 한글 별칭은 정식 이름으로 바꿔 찾음.
+_NAME_ALIAS = {"LS일렉트릭": "LS ELECTRIC", "엘에스일렉트릭": "LS ELECTRIC", "LS전기": "LS ELECTRIC", "LS산전": "LS ELECTRIC"}
+
+
+def _resolve_stock_tokens(parts: list) -> tuple:
+    """parts[1:] 앞쪽에서 종목명을 가장 길게(최대 3단어) 맞춤 → (코드, 종목명, 종목명을 한 칸으로 합친 parts). 못 찾으면 ("", 첫 단어, parts)."""
+    toks = parts[1:]
+    if not toks:
+        return "", "", parts
+    if toks[0].isdigit():
+        return toks[0].zfill(6), toks[0], parts
+    for n in range(min(3, len(toks)), 0, -1):
+        for cand in dict.fromkeys([" ".join(toks[:n]), "".join(toks[:n])]):
+            for c2 in dict.fromkeys([_NAME_ALIAS.get(cand.replace(" ", "").upper(), cand), cand.upper()]):
+                code = get_stock_code(c2)
+                if code:
+                    return code, c2, [parts[0], c2] + toks[n:]
+    return "", toks[0], parts
+
+
 def _split_account(tokens: list) -> tuple:
     """★ 10-16 대장: 계좌 구분자 필수 — K(키움)/D(데이봇). (계좌 또는 None, 나머지 토큰)."""
     acct, rest = None, []
@@ -3503,12 +3525,8 @@ async def on_message(message):
         if len(parts) < 2:
             await send_safe_message(message.channel, "사용법: `해제 종목명 [매도가] [K|D]` — 두 계좌에 다 있으면 K/D 필수")
             return
-        arg = parts[1].strip()
-        # ★ 2026-10-06 — 종목코드는 항상 6자리인데 앞자리 0이 빠진 5자리
-        #   입력("35530")을 그대로 받아들여 존재하지 않는 코드로
-        #   처리되던 버그(대장 지적). 숫자만이고 6자리 미만이면 0으로
-        #   채움.
-        code = arg.zfill(6) if arg.isdigit() else get_stock_code(arg)
+        # ★ 2026-10-06 5자리 코드 0채움 · ★ 11-18 띄어쓰기·별칭 종목명(LS ELECTRIC 등) 가장 긴 이름으로
+        code, arg, parts = _resolve_stock_tokens(parts)
         if not code:
             await send_safe_message(message.channel, f"❌ '{arg}' 종목코드를 못 찾았어.")
             return
@@ -3546,8 +3564,7 @@ async def on_message(message):
         if len(parts) < 2:
             await send_safe_message(message.channel, "사용법: `단타 종목명 10주` (한투 데이봇 계좌 — 평단가는 잔고에서 가져와)")
             return
-        arg = parts[1].strip()
-        code = arg.zfill(6) if arg.isdigit() else get_stock_code(arg)
+        code, arg, parts = _resolve_stock_tokens(parts)   # ★ 11-18 'LS ELECTRIC'을 'LS'로 사던 사고 방지
         if not code:
             await send_safe_message(message.channel, f"❌ '{arg}' 종목코드를 못 찾았어.")
             return
@@ -3597,10 +3614,8 @@ async def on_message(message):
                                      "   예: `등록 삼성전자 226176 17주 K` / `등록 삼성전자 225875 8주 D`\n"
                                      "평단가 생략하면 현재가로 등록해(분할매수 완료 후 평단가로 등록 권장).")
             return
-        arg = parts[1].strip()
-        # ★ 2026-10-06 — 위 해제 명령과 동일한 5자리 코드(앞자리 0 누락)
-        #   버그 수정.
-        code = arg.zfill(6) if arg.isdigit() else get_stock_code(arg)
+        # ★ 2026-10-06 5자리 코드 0채움 · ★ 11-18 띄어쓰기·별칭 종목명
+        code, arg, parts = _resolve_stock_tokens(parts)
         if not code:
             await send_safe_message(message.channel, f"❌ '{arg}' 종목코드를 못 찾았어.")
             return
