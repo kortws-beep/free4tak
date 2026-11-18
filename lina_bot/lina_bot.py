@@ -1241,6 +1241,12 @@ def _map_themes_to_candidates(themes: list, exclude_names: set = None) -> list:
     light_candidates = []
     for theme in themes:
         words = [k for k in re.split(r'[\s/·,]+', theme) if len(k) >= 2]
+        # ★ 11-18 'AI반도체' 테마가 HK이노엔(제약)으로 연결된 버그 — DB에 'AI반도체'가 없자 아래 접두어 줄이기가
+        #   'AI'까지 내려가 '바이오AI(신약개발)'에 걸림(11-03 'AI 과잉투자'→HK이노엔도 같은 원인). 영문·한글 경계로 쪼개고
+        #   ('AI반도체'→'AI','반도체'), 다른 단어가 있으면 짧은 영문 범용어(AI·IT 등 3자 이하)는 빼고 찾음.
+        _parts = [x for w in words for x in re.findall(r'[A-Za-z0-9]+|[^A-Za-z0-9]+', w) if len(x) >= 2]
+        _meaty = [x for x in _parts if not (x.isascii() and len(x) <= 3)]
+        words = _meaty or words
         if not words:
             continue
 
@@ -1261,7 +1267,8 @@ def _map_themes_to_candidates(themes: list, exclude_names: set = None) -> list:
         if not rows:
             for cut in range(1, max(len(w) for w in words) - 1):
                 prefixes = list(dict.fromkeys(
-                    w[:len(w) - cut] for w in words if len(w) - cut >= 2
+                    w[:len(w) - cut] for w in words
+                    if len(w) - cut >= 2 and not (w[:len(w) - cut].isascii() and len(w) - cut <= 3)   # ★ 11-18 'AI'까지 줄이지 않음
                 ))
                 if not prefixes:
                     break

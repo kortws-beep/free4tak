@@ -1221,6 +1221,7 @@ class SBot:
         rule_candidates = []
         for idx, code in enumerate(new_codes):
             print(f"🔎 분석 {idx+1}/{len(new_codes)}: {code}", end="")
+            pathlib.Path(HB_FILE).touch()   # ★ 11-18 긴 분석 중에도 생존 신호(아래 AI 루프 주석 참고)
             data, rule_score = self._analyze_one_code(code)
             if data is not None:
                 rule_candidates.append((code, rule_score, data))
@@ -1234,6 +1235,10 @@ class SBot:
 
         print(f"\n🤖 AI 분석: {len(top_ai)}개")
         for code, rule_score, data in top_ai:
+            # ★ 11-18 — 09:20 매수 시작 첫 바퀴에 신규 21개 분석+AI 10개+컨센서스 조회가 몰려 한 바퀴가 5분을 넘김 →
+            #   heartbeat는 바퀴 시작에만 찍혀 watchdog(300초)이 '멈춤'으로 보고 09:25 재시작 → 재시작 직후 잔고 조회 실패와
+            #   겹쳐 홀드 5종목 일괄 손절 사고. 오래 걸리는 단계 안에서도 heartbeat를 찍음(정상 동작 중엔 재시작 안 당하게).
+            pathlib.Path(HB_FILE).touch()
             ai_result = self.ai.analyze(code, data, self.new_codes_list)
             score     = ai_result["score"]
             reason    = ai_result["reason"]
