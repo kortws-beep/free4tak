@@ -411,6 +411,24 @@ def _update_state(**kwargs):
 def _write_cmd_result(result: str):
     _update_state(cmd_result=result, pending_cmd=None)
 
+
+# ★ 2026-11-18 홀드 전부 손절 사고 — 09:25 watchdog 재시작 직후 잔고 조회가 '초당 거래건수 초과'로 3번 실패 → 빈 잔고로
+#   peak_tracker 복원을 건너뛰고(홀드 표시 소실) → 몇 초 뒤 실시간 잔고로 다시 잡힌 6종목에 홀드 없는 새 손절선이 붙어
+#   09:29 이무기 5종목(HL만도·현대오토에버·에스피지·비나텍·로보티즈)이 일괄 손절됨.
+#   → 홀드는 peak_tracker와 따로 'hold_codes' 목록에도 저장(홀드 명령으로만 바뀜 — 다른 저장이 덮어쓰지 않음),
+#     매도 체크 직전에 매번 다시 입힘. 목표1 달성(stage≥1)하면 원래대로 자동 해제되므로 목록에서도 뺌.
+def _hold_codes() -> set:
+    try:
+        return set(_read_state().get("hold_codes") or [])
+    except Exception:
+        return set()
+
+
+def _set_hold_code(code: str, on: bool) -> None:
+    s = _hold_codes()
+    (s.add if on else s.discard)(code)
+    _update_state(hold_codes=sorted(s))
+
 def _write_status(status: dict, peak_tracker: dict = None):
     # ★ 2026-09-03: 기존엔 "읽기 → 수정 → 전체 덮어쓰기"를 락 없이 수동으로
     #   해서, 이 사이에 키키가 pending_cmd를 쓰면 그 변경사항이 사라지는
@@ -1087,6 +1105,7 @@ class SBot:
             hold_val  = pending.get("value", True)
             if hold_code in self.positions:
                 self.peak_tracker.setdefault(hold_code, {})["hold"] = hold_val
+                _set_hold_code(hold_code, bool(hold_val))   # ★ 11-18 홀드 별도 목록(재시작·잔고 실패에도 안 날아가게)
                 # ★ 2026-08-30: peak_tracker 영속화는 원래 루프 후반부
                 #   _write_status() 호출 시점에만 이뤄지는데, 그 호출은
                 #   장외/주말/휴장일 분기의 continue보다 뒤에 있어서 그
@@ -1780,7 +1799,24 @@ class SBot:
 
     def _check_all_sells(self, pos_mkt_cache: dict):
         """모든 보유 종목 매도 체크"""
+        holds = _hold_codes()
         for code, pos in list(self.positions.items()):
+            # ★ 11-18 홀드 일괄 손절 사고 방지 — 손절선이 없는 종목은 시작 때 저장본에서 먼저 되살리고,
+            #   홀드 목록 종목은 (손절 체크가 있는 stage 0일 때) 홀드를 매번 다시 입힘
+            if code not in self.peak_tracker:
+                _sv = (getattr(self, "_boot_saved_pt", {}) or {}).get(code)
+                if _sv and getattr(self, "_pt_required", set()).issubset(_sv.keys()):
+                    self.peak_tracker[code] = dict(_sv)
+                    print(f"📦 {self._name(code)}({code}) 손절선·홀드 저장본에서 복원(시작 때 잔고 조회 실패분)")
+                elif code in holds and pos.get("entry_price", 0) > 0:
+                    self.peak_tracker[code] = self._make_peak_tracker_entry(
+                        entry_price=pos["entry_price"], atr_rate=self._get_atr_rate(code), buy_date=pos.get("buy_date"))
+            if code in holds and code in self.peak_tracker:
+                if self.peak_tracker[code].get("stage", 0) >= 1:
+                    _set_hold_code(code, False)          # 목표1 달성 → 원래 규칙대로 홀드 해제
+                    holds.discard(code)
+                else:
+                    self.peak_tracker[code]["hold"] = True
             mdata = pos_mkt_cache.get(code) or self.api.get_market_data(code)
             if not mdata:
                 continue
@@ -1866,6 +1902,14 @@ class SBot:
         except Exception as e:
             print(f"⚠️ peak_tracker 복원 오류: {e}")
             _saved_pt = {}
+        # ★ 11-18 — 시작 때 잔고 조회가 실패하면 아래 복원이 빈 손으로 지나가서 저장본이 사라졌음.
+        #   저장본을 기억해 두고, 나중에 잔고로 잡힌 종목에 손절선이 없으면 매도 체크 전에 여기서 되살림(_check_all_sells).
+        self._boot_saved_pt = {c: dict(v) for c, v in _saved_pt.items() if isinstance(v, dict)}
+        self._pt_required = _PT_REQUIRED_FIELDS
+        # 예전 방식(peak_tracker 안 hold)만 있던 홀드도 별도 목록으로 옮겨 둠(1회성 이전 — 목록에 더하기만)
+        _old_holds = {c for c, v in self._boot_saved_pt.items() if v.get("hold")}
+        if _old_holds - _hold_codes():
+            _update_state(hold_codes=sorted(_hold_codes() | _old_holds))
         restored, created, repaired = 0, 0, 0
         for _code, _pos in self.positions.items():
             _saved_entry = _saved_pt.get(_code)
