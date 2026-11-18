@@ -411,8 +411,10 @@ async def _register_manual_watch(channel, code: str, buy_price: float = None,
                 except Exception as e:
                     print(f"⚠️ [리나등록] daybot 보유 확인 실패: {e}")
             key = _wkey(code, account)
-            if account == "swing":
-                mode = None      # ★ 11-17 대장 "리나 관리는 리나 현재 로직대로 — 단타 부분으로 만들면 복잡" → 스윙 계좌는 일반 규칙만
+            if account in ("swing", "daybot"):
+                # ★ 11-17 스윙 계좌는 일반 규칙만 → ★ 11-18 대장 "sbot/dbot 모두 단타/리나등록 모두 한 가지로 관리하자, 전부 일반 규칙"
+                #   → 한투 두 계좌는 `단타`로 사든 `등록`하든 일반 규칙(+3% 추적·고점-4% 전량·+5% 30%). 단타 규칙 코드는 남겨 둠(되돌리기 쉽게).
+                mode = None
             entry = {
                 "name": name, "entry_price": buy_price, "peak_price": None, "account": account, "code": code,
                 "last_alert_peak": 0, "stage": 0, "qty": qty, "qty0": qty,
