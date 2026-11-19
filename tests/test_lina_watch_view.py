@@ -73,6 +73,9 @@ class Act(unittest.TestCase):
         return set(read_state(V.STATE, default={}))
 
     def test_pin_and_session_guard(self):
+        import market_hours                       # ★ 11-19 수능일처럼 장시간이 밀리는 날 실행해도 평소 시간 기준으로 시험
+        _saved, market_hours.SPECIAL_DAYS = market_hours.SPECIAL_DAYS, {}
+        self.addCleanup(setattr, market_hours, "SPECIAL_DAYS", _saved)
         b = {"kiwoom": FakeBroker()}
         self.assertFalse(V.act("052710", "sell", "0000", "1000", b)["ok"])
         self.assertIn("정규장", V.act("052710", "sell", "1234", "1525", b)["msg"])
