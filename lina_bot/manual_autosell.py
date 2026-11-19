@@ -153,7 +153,12 @@ def regime_turn_msg(watches: dict, date: str, breadth: float, prices: dict, resu
 
 
 def in_session(hhmm: str) -> bool:
-    return SELL_START <= hhmm < SELL_END
+    # ★ 11-19 수능일(10:00~16:30)처럼 개장·마감이 밀리는 날은 그만큼 밀어서(core/market_hours.py)
+    try:
+        import market_hours
+        return market_hours.shifted(SELL_START) <= hhmm < market_hours.shifted(SELL_END)
+    except Exception:
+        return SELL_START <= hhmm < SELL_END
 
 
 def handle(code: str, w: dict, price: float, hhmm: str, md: str, kiwoom=None) -> dict:

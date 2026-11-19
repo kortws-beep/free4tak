@@ -224,8 +224,11 @@ async def _scalp_buy(channel, code: str, arg: str, qty: int = None, amount: int 
     체결된 수량·평단으로 단타 등록. 안 사지면 남은 주문 취소. 하락장 쉬는 날(봇이 안 사는 날)·정규장만."""
     from kis_api import KisAPI
     now = datetime.datetime.now(KST).strftime("%H%M")
-    if not ("0900" <= now < "1520"):
-        await send_safe_message(channel, "⏰ 리나 단타 매수는 정규장 09:00~15:20에만 해.")
+    import market_hours                                   # ★ 11-19 수능일 등 개장·마감이 밀리는 날
+    _b0, _b1 = market_hours.shifted("0900"), market_hours.shifted("1520")
+    if not (_b0 <= now < _b1):
+        await send_safe_message(channel, f"⏰ 리나 단타 매수는 정규장 {_b0[:2]}:{_b0[2:]}~{_b1[:2]}:{_b1[2:]}에만 해"
+                                         + (f"(오늘은 {market_hours.note()})." if market_hours.note() else "."))
         return
     try:
         import market_regime
