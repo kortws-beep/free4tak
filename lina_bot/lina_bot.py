@@ -1624,9 +1624,44 @@ async def manual_watch_trailing_loop():
         print(f"⚠️ [리나등록 추적] 초기화 오류: {e}")
         return
 
+    # ★ 11-19 대장 "단타/등록은 팔면 리나에게서 해제되니? → 그렇게 하는 게 자연스러울 것 같아" — 대장이 MTS로 직접 팔면
+    #   리나가 몰라서 등록이 남았음(`해제`를 쳐야 했음). 한투 두 계좌(데이봇·스윙)는 3분에 한 번 잔고를 보고, 등록 종목이
+    #   잔고에 2번 연속 없으면 '대장이 판 걸로 보고' 자동 해제. 잔고 조회 실패·빈 응답이면 판단 안 함(오해제 방지),
+    #   등록 5분 안 된 종목은 체결 반영 지연일 수 있어 건너뜀. 3분 중 '나머지 1'분에만 — 0분(3의 배수)엔 sbot_exit_watch가
+    #   스윙 계좌 잔고를 봐서 원장 초당 한도에 걸렸던 이력(11-14)이 있어 피함. 키움은 신용·융자 잔고가 섞여 이번엔 제외.
+    held_by_acct = {}
+    if kst_now.minute % 3 == 1:
+        for _a in ("daybot", "swing"):
+            if any(isinstance(_w, dict) and _w.get("account") == _a for _w in watches.values()):
+                try:
+                    _p = await asyncio.to_thread((api if _a == "daybot" else _kis_for("swing")).get_current_positions, True)
+                    held_by_acct[_a] = _p if _p else None
+                except Exception as e:
+                    print(f"⚠️ [리나등록 추적] {_a} 잔고 확인 실패 — 자동 해제 판단 건너뜀: {e}")
+                    held_by_acct[_a] = None
+    _recent_cut = (kst_now - datetime.timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M:%S")
+
     changed_codes = set()
     for key, w in list(watches.items()):
         code = _wcode(key, w)
+        _held = held_by_acct.get(w.get("account", "kiwoom"))
+        if _held is not None:
+            try:
+                if code in _held:
+                    if w.pop("gone_n", None):
+                        changed_codes.add(key)
+                elif (w.get("registered_at") or "") < _recent_cut:
+                    w["gone_n"] = int(w.get("gone_n", 0) or 0) + 1
+                    changed_codes.add(key)
+                    if w["gone_n"] >= 2:
+                        await send_safe_message(channel, f"🧹 {w.get('name', code)}({code}) "
+                                                         f"{ACCT_LABEL.get(w.get('account'), '')}에 더 이상 없어 — 대장이 판 걸로 보고 리나 등록 정리할게")
+                        _save_manual_watch_updates(watches, changed_codes)
+                        changed_codes.discard(key)
+                        await _deregister_manual_watch(channel, key, None)
+                        continue
+            except Exception as e:
+                print(f"⚠️ [리나등록 추적] {code} 자동 해제 판단 오류(건너뜀): {e}")
         # ★ 2026-10-06 — 종목 하나 처리 중 생기는 예외(디스코드 전송
         #   오류/필드 누락 등)가 전체를 덮지 않도록 격리. discord.py의
         #   tasks.loop는 처리 안 된 예외가 새면 루프 자체를 영구 정지
