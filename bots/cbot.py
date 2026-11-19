@@ -2130,7 +2130,10 @@ class CBot:
                 #   수동매도 감지가 self.positions 미반영 구간(sell() 호출
                 #   직후~다음 포지션동기화 전)에 이 봇매도를 "수동매도"로
                 #   오탐해 중복 기록/알림을 낼 수 있어 반드시 등록 필요.
-                self.sold_today[market] = time.time() if profit_krw <= 0 else None
+                # ★ 11-19 대장 "급락감지로 매도한 거니까" — 급락 감지로 판 코인은 수익이 나도(+0.13%로 '익절' 분류돼
+                #   몇 분 만에 MEGA 재매수) 5시간 재매수 금지. 급락 신호를 존중.
+                _crash = "급락감지" in (reason or "")
+                self.sold_today[market] = time.time() if (profit_krw <= 0 or _crash) else None
                 # ★ 2026-10-06 — 전량매도면 메모리 포지션도 바로 제거. 잔고조회
                 #   실패 루프에선 다음 동기화가 없어서, 남겨두면 같은 코인을
                 #   다시 손절/매도 시도했음.
