@@ -219,7 +219,8 @@ def scalp_order_amount(qty: int, amount: int, price: float, tick: int) -> int:
 SCALP_FILL_WAIT_SEC = 60
 
 
-async def _scalp_buy(channel, code: str, arg: str, qty: int = None, amount: int = None, account: str = "daybot"):
+async def _scalp_buy(channel, code: str, arg: str, qty: int = None, amount: int = None, account: str = "daybot",
+                     nul: bool = False):
     """★ 10-21 리나 단타 매수 — 데이봇(한투) 계좌·시드로 현재가 +1호가 지정가 매수 → 체결 확인(최대 60초) →
     체결된 수량·평단으로 단타 등록. 안 사지면 남은 주문 취소. 하락장 쉬는 날(봇이 안 사는 날)·정규장만."""
     from kis_api import KisAPI
@@ -286,7 +287,7 @@ async def _scalp_buy(channel, code: str, arg: str, qty: int = None, amount: int 
             return
         if before:
             avg = px          # 원래 갖고 있던 게 섞이면 계좌 평단이 아니라 이번 매수가로
-        await _register_manual_watch(channel, code, avg, None, got, account, mode="scalp")
+        await _register_manual_watch(channel, code, avg, None, got, account, mode="scalp", nul=nul)
 
 
 def _wcode(key: str, w: dict) -> str:
@@ -368,7 +369,7 @@ def _log_manual_watch(event: str, code: str, w: dict, sell_price: float = None,
 
 async def _register_manual_watch(channel, code: str, buy_price: float = None,
                                   name_override: str = None, qty: int = None, account: str = "kiwoom",
-                                  mode: str = None):
+                                  mode: str = None, nul: bool = False):
     """!리나등록/자연어("등록 종목명 [평단가]") 공용 등록 로직.
     ★ 2026-10-03 대장 지정 — 분할매수를 하기 때문에 중간 금액으로는
     등록 못 함(최종 매수 완료 후에 등록). 그래서 "매수금액" 대신
@@ -425,6 +426,8 @@ async def _register_manual_watch(channel, code: str, buy_price: float = None,
             }
             if mode:
                 entry["mode"] = mode      # ★ 10-20 "scalp" = 단타(manual_autosell 참고)
+            if nul:
+                entry["nul"] = True       # ★ 11-20 널뛰기장 — 다음 거래일부터 15:10 남은 물량 전부 정리(manual_autosell)
             watches, _ = _mutate_manual_watches(lambda w: w.__setitem__(key, entry))   # ★ 11-13 잠금 아래서
             _log_manual_watch("register", code, watches[key])
             # ★ 2026-10-14 대장 — 등록 종목은 리나가 직접 익절(lina_bot/manual_autosell.py)
@@ -448,6 +451,8 @@ async def _register_manual_watch(channel, code: str, buy_price: float = None,
                 f"   +{autosell.START_PCT:.0f}% 찍으면 추적 → 고점 -{autosell.TRAIL1_PCT:.0f}%면 전량 매도, "
                 f"+{autosell.TP1_PCT:.0f}%에 30% 익절 → 이후 고점 -{autosell.TRAIL2_PCT:.0f}%면 나머지 매도 [{md}]\n"
                 f"   손절은 대장이 직접. 현재 등록: {len(watches)}종목(`등록현황`) — 해제는 `해제 {name} {ACCT_LETTER.get(account, 'K')}`"
+                + (f"\n   🎢 **널뛰기장** — 다음 거래일 {autosell.nul_cut()[:2]}:{autosell.nul_cut()[2:]}에 남은 물량 손익 상관없이 전부 정리(오버나잇 금지). "
+                   f"프리장에서 무너지면 대장이 직접 최소 손절" if nul else "")
             )
         except Exception as e:
             await send_safe_message(channel, f"❌ 등록 오류: {e}")
@@ -2424,6 +2429,30 @@ async def before_capitulation_alert_loop():
     await client.wait_until_ready()
 
 
+# ★ 11-20 대장 '널뛰기장' 매수 후보 알림 — 국면<35% & 코스피 저가 -3%↓, 최저점 찍고 15분 새 저가 없으면(장중) /
+#   종가가 최저점이면(15:31~) 고무공 후보와 함께 알림. 매수·등록은 대장(`단타 … 널`/`등록 … 널`). intelligence/neolttwigi.py
+_nul_state = {}
+
+
+@tasks.loop(minutes=1)
+async def neolttwigi_loop():
+    if not _is_trading_day():
+        return
+    try:
+        import neolttwigi
+        msg = await asyncio.to_thread(neolttwigi.check, _nul_state)
+        if msg:
+            channel = await client.fetch_channel(REPORT_CHANNEL_ID)
+            await send_safe_message(channel, msg)
+    except Exception as e:
+        print(f"⚠️ [널뛰기] 오류: {e}")
+
+
+@neolttwigi_loop.before_loop
+async def before_neolttwigi_loop():
+    await client.wait_until_ready()
+
+
 _KIWOOM_POOL_SCAN_TIMES = {(9, 30), (12, 30), (15, 0)}
 _kiwoom_pool_scan_state = {"date": "", "done": set(), "retry_at": None, "retry_label": None}
 
@@ -3117,6 +3146,8 @@ async def on_ready():
     try:
         if not capitulation_alert_loop.is_running():
             capitulation_alert_loop.start()
+        if not neolttwigi_loop.is_running():
+            neolttwigi_loop.start()          # ★ 11-20 널뛰기장 매수 후보 알림
         print(f"✅ [시스템] 투매일 반등 섹터 알림 ({CAP_ALERT_HHMM[:2]}:{CAP_ALERT_HHMM[2:]}, 아침 {CAP_REMIND_HHMM[:2]}:{CAP_REMIND_HHMM[2:]}) 가동 성공!")
     except Exception as e: print(f"⚠️ [에러] 투매일 알림: {e}")
 
@@ -3357,6 +3388,15 @@ async def on_message(message):
     # ── !단타 — 단타000 파이썬판 즉시 조회 (2026-10-06) ──
     #   1분 순매수(E)는 직전 검사와의 차이라, 1분 감시가 돌고 있어야 값이 나온다.
     # ★ 11-17 대장 "적용하세" — 급락장 고무공 후보(SCENARIOS 7-7 비상 매뉴얼, intelligence/rubber_ball.py). 매매는 대장 판단.
+    # ★ 11-20 대장 '널뛰기장' 규칙(SCENARIOS 7-8, intelligence/neolttwigi.py) — 지금 상태(조건 미달이어도)
+    if message.content.strip() == "!널뛰기":
+        try:
+            import neolttwigi
+            await send_safe_message(message.channel, await asyncio.to_thread(neolttwigi.status))
+        except Exception as e:
+            await send_safe_message(message.channel, f"❌ 널뛰기장 상태 오류: {e}")
+        return
+
     if message.content.startswith("!고무공"):
         async with message.channel.typing():
             try:
@@ -3611,6 +3651,8 @@ async def on_message(message):
         if len(parts) < 2:
             await send_safe_message(message.channel, "사용법: `단타 종목명 10주` (한투 데이봇 계좌 — 평단가는 잔고에서 가져와)")
             return
+        _nul = any(t in ("널", "널뛰기") for t in parts[2:])           # ★ 11-20 널뛰기장 등록(다음 날 15:10 정리)
+        parts = parts[:2] + [t for t in parts[2:] if t not in ("널", "널뛰기")]
         code, arg, parts = _resolve_stock_tokens(parts)   # ★ 11-18 'LS ELECTRIC'을 'LS'로 사던 사고 방지
         if not code:
             await send_safe_message(message.channel, f"❌ '{arg}' 종목코드를 못 찾았어.")
@@ -3642,7 +3684,7 @@ async def on_message(message):
         # ★ 10-21 대장: "단타 가온전선 하면 매수하고 등록" — 계좌에 없고 수량·금액이 있으면 리나가 데이봇 시드로 직접 매수
         #   (현재가 +1호가 지정가, 확인 없이 바로). 이미 갖고 있으면 예전처럼 등록만.
         if not pos and price is None and (qty or amount):
-            await _scalp_buy(message.channel, code, arg, qty, amount, account)
+            await _scalp_buy(message.channel, code, arg, qty, amount, account, nul=_nul)
             return
         if not pos and price is None:
             await send_safe_message(message.channel, f"❌ 한투(데이봇·스윙) 계좌에 {arg} 잔고가 없어 — `단타 {arg} 10주`나 "
@@ -3651,7 +3693,7 @@ async def on_message(message):
         held = int((pos or {}).get("qty", 0) or 0)
         qty = min(qty, held) if (qty and held) else (qty or held or None)
         price = price or float(pos["entry_price"])
-        await _register_manual_watch(message.channel, code, price, None, qty, account, mode="scalp")
+        await _register_manual_watch(message.channel, code, price, None, qty, account, mode="scalp", nul=_nul)
         return
 
     if message.content.startswith("!리나등록") or message.content.startswith("등록 "):
@@ -3661,6 +3703,8 @@ async def on_message(message):
                                      "   예: `등록 삼성전자 226176 17주 K` / `등록 삼성전자 225875 8주 D`\n"
                                      "평단가 생략하면 현재가로 등록해(분할매수 완료 후 평단가로 등록 권장).")
             return
+        _nul = any(t in ("널", "널뛰기") for t in parts[2:])           # ★ 11-20 널뛰기장 등록(다음 날 15:10 정리)
+        parts = parts[:2] + [t for t in parts[2:] if t not in ("널", "널뛰기")]
         # ★ 2026-10-06 5자리 코드 0채움 · ★ 11-18 띄어쓰기·별칭 종목명
         code, arg, parts = _resolve_stock_tokens(parts)
         if not code:
@@ -3689,7 +3733,7 @@ async def on_message(message):
                 await send_safe_message(message.channel, f"⚠️ 평단가 '{rest[0]}' 인식 실패 — 숫자만 입력해줘(현재가로 등록할게).")
         if len(rest) >= 2:
             name_override = rest[1].strip()
-        await _register_manual_watch(message.channel, code, buy_price, name_override, qty, account)
+        await _register_manual_watch(message.channel, code, buy_price, name_override, qty, account, nul=_nul)
         return
 
     # ── !성과 (sbo2 매매 이력) ─────────────────────────────────

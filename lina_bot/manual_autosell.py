@@ -23,6 +23,7 @@ manual_autosell.py — 리나등록 종목 자동 익절 (2026-10-14 대장 지�
   daybot 매도 로직 그대로 +2% 찍으면 30% 익절 → 나머지는 트레일링(고점 -1.5%, 고점 +4.5% 넘으면 -2%), 최소 +1%는 지킴.
   손절은 대장 직접(다른 리나 등록과 같음).
 """
+import datetime
 import os
 
 
@@ -152,6 +153,17 @@ def regime_turn_msg(watches: dict, date: str, breadth: float, prices: dict, resu
             + "\n   (알림만 — 주문은 안 나가. 다 팔면 `해제 종목명 D`)")
 
 
+NUL_CUT = "1510"          # ★ 11-20 널뛰기장 등록 종목 정리 시각(다음 거래일부터)
+
+
+def nul_cut() -> str:
+    try:
+        import market_hours
+        return market_hours.shifted(NUL_CUT)
+    except Exception:
+        return NUL_CUT
+
+
 def in_session(hhmm: str) -> bool:
     # ★ 11-19 수능일(10:00~16:30)처럼 개장·마감이 밀리는 날은 그만큼 밀어서(core/market_hours.py)
     try:
@@ -174,6 +186,11 @@ def handle(code: str, w: dict, price: float, hhmm: str, md: str, kiwoom=None) ->
     before = (w.get("peak_price"), w.get("stage"))
     act = step(w, price)
     out["changed"] = before != (w.get("peak_price"), w.get("stage"))
+    # ★ 11-20 대장 '널뛰기장' 규칙 — `널`로 등록한 종목은 산 날 다음 거래일부터 15:10(장시간 밀리는 날은 그만큼)에
+    #   손익 상관없이 남은 물량 전부 정리(오버나잇 금지). 일반 규칙(+3% 추적·고점-4%)은 반등일 +3~4%에선 안 팔려서
+    #   이 시각 정리가 있어야 규칙이 완성됨(대장 "꼭 넣어야 이걸 만드는 이유에 부합").
+    if w.get("nul") and (w.get("registered_at") or "")[:10] < datetime.date.today().isoformat() and hhmm >= nul_cut():
+        act = {"type": "final", "reason": "🎢 널뛰기장 15:10 정리(오버나잇 금지)"}
     if not act:
         return out
     if act["type"] == "start":
