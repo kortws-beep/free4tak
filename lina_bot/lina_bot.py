@@ -2356,7 +2356,8 @@ async def capitulation_alert_loop():
         import capitulation_alert as ca
         channel = await client.fetch_channel(REPORT_CHANNEL_ID)
         if hhmm == CAP_REMIND_HHMM:
-            msg = await asyncio.to_thread(ca.morning_reminder)
+            # ★ 11-20 대장 — 시나리오1(투매일 반등)·바닥 재시험은 고무공·널뛰기장으로 진화해 폐기 → 아침 규칙 알림 끔(프리장 섹터만)
+            msg = ""
             # ★ 2026-10-26 대장 — 아침 알림에 프리장 섹터(테마 1~3위와 그 테마 NXT 1~3위 종목)도 같이, 매일
             try:
                 import theme_open_obs
@@ -2373,9 +2374,9 @@ async def capitulation_alert_loop():
         _cap_alert_state["date"] = today
         from kis_api import KisAPI
         msg = await asyncio.to_thread(ca.run, KisAPI())
-        if msg:
-            await send_safe_message(channel, msg)
-        print(f"✅ [투매알림] 점검 완료({'알림' if msg else '기준 미달'})")
+        # ★ 11-20 대장 — 투매일 반등·바닥 재시험 '매수 알림'은 폐기(고무공·널뛰기장으로 진화). 계산은 계속 돌림:
+        #   sbot '전날 투매일 다음 날 쉬기' 안전장치가 여기서 저장하는 cap_alert_state.json을 읽음. `!투매`로 수동 확인은 그대로.
+        print(f"✅ [투매점검] 완료({'투매일 — 상태 저장(알림 안 보냄)' if msg else '기준 미달'})")
     except Exception as e:
         print(f"⚠️ [투매알림] 오류: {e}")
 
