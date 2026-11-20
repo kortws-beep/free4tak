@@ -362,9 +362,11 @@ class KiwoomAPI:
                 qty = n("rmnd_qty")
                 avail = n("trde_able_qty") if s.get("trde_able_qty") not in (None, "") else qty
                 if code:
-                    o = out.setdefault(code, {"qty": 0, "avail": 0, "name": s.get("stk_nm", ""), "credit": 0})
+                    o = out.setdefault(code, {"qty": 0, "avail": 0, "name": s.get("stk_nm", ""), "credit": 0, "cost": 0})
                     o["qty"] += qty
                     o["avail"] += avail
+                    o["cost"] += n("pur_pric") * qty          # ★ 11-20 매입가(현금·융자 줄 가중 평균용) — 리나 `등록 종목 K` 평단 자동
+                    o["avg"] = o["cost"] / o["qty"] if o["qty"] else 0
                     if "융자" in str(s.get("crd_tp_nm", "")) or str(s.get("crd_tp", "00")).strip() not in ("", "00"):
                         o["credit"] += avail
             return out
