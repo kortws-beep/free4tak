@@ -27,10 +27,14 @@ class KiwoomOrder(unittest.TestCase):
 
     def test_holdings(self):
         self.reply = {"acnt_evlt_remn_indv_tot": [
-            {"stk_cd": "A111111", "stk_nm": "한선", "rmnd_qty": "000000000100", "trde_able_qty": "000000000060"},
+            {"stk_cd": "A111111", "stk_nm": "한선", "rmnd_qty": "000000000100", "trde_able_qty": "000000000060",
+             "pur_pric": "000000009400"},
             {"stk_cd": "A222222", "stk_nm": "삼미", "rmnd_qty": "50"}]}
         h = self.api.holdings()
-        self.assertEqual(h["111111"], {"qty": 100, "avail": 60, "name": "한선", "credit": 0})
+        self.assertEqual({k: h["111111"][k] for k in ("qty", "avail", "name", "credit")},
+                         {"qty": 100, "avail": 60, "name": "한선", "credit": 0})
+        self.assertEqual(h["111111"]["avg"], 9400)          # ★ 11-20 매입가 → 평단(리나 `등록 종목 K` 자동)
+        self.assertEqual(h["222222"]["avg"], 0)              # 매입가 없으면 0(리나는 현재가로)
         self.assertEqual(h["222222"]["avail"], 50)
         self.assertTrue(self.calls[0][0].endswith("/acnt")); self.assertEqual(self.calls[0][1]["api-id"], "kt00018")
 
@@ -41,6 +45,12 @@ class KiwoomOrder(unittest.TestCase):
             {"stk_cd": "A222800", "stk_nm": "심텍", "rmnd_qty": "5", "trde_able_qty": "5", "crd_tp": "00", "crd_tp_nm": ""}]}
         h = self.api.holdings()["222800"]
         self.assertEqual((h["qty"], h["avail"], h["credit"]), (30, 30, 25))
+
+    def test_holdings_avg_weighted_over_credit_and_cash_rows(self):
+        self.reply = {"acnt_evlt_remn_indv_tot": [
+            {"stk_cd": "A222800", "stk_nm": "*심텍", "rmnd_qty": "30", "pur_pric": "100000", "crd_tp": "33", "crd_tp_nm": "융자"},
+            {"stk_cd": "A222800", "stk_nm": "심텍", "rmnd_qty": "10", "pur_pric": "80000", "crd_tp": "00"}]}
+        self.assertEqual(self.api.holdings()["222800"]["avg"], 95000)    # (30×10만 + 10×8만) / 40
 
     def test_credit_sell(self):
         # ★ 11-12 융자분은 kt10007(crdordr) 융자합 99 시장가
