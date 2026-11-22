@@ -50,13 +50,17 @@ def snapshot() -> dict:
     try:
         b = requests.get("https://m.stock.naver.com/api/index/KOSPI/basic", headers=UA, timeout=5).json()
         it = requests.get("https://m.stock.naver.com/api/index/KOSPI/integration", headers=UA, timeout=5).json()
-        num = lambda v: float(str(v).replace(",", "")) if v not in (None, "") else None
+        def num(v):  # 장 시작 전엔 "-" 같은 빈 값이 옴
+            try:
+                return float(str(v).replace(",", ""))
+            except (TypeError, ValueError):
+                return None
         close, chg = num(b.get("closePrice")), num(b.get("fluctuationsRatio"))
         ti = {x.get("code"): x.get("value") for x in it.get("totalInfos", [])}
         low = num(ti.get("lowPrice"))
         prev = close / (1 + chg / 100) if close and chg is not None else None
         d = it.get("dealTrendInfo") or {}
-        return {"close": close, "chg": chg, "low": low, "low_chg": (low / prev - 1) * 100 if low and prev else None,
+        return {"status": b.get("marketStatus"), "close": close, "chg": chg, "low": low, "low_chg": (low / prev - 1) * 100 if low and prev else None,
                 "foreign": num(d.get("foreignValue")), "institution": num(d.get("institutionalValue"))}
     except Exception as e:
         print(f"⚠️ [널뛰기] 지수 조회 실패: {e}")
@@ -82,7 +86,7 @@ def candidates_text(top: int = 5) -> str:
 
 
 def _rules() -> str:
-    return ("   사면 `단타 종목 금액 D 널` 또는 `등록 종목 평단 N주 D 널` — 다음 날 프리장에서 무너지면 대장이 바로 최소 손절, "
+    return ("   매수는 `!널뛰기 종목 금액`(한투 D→S 순, 매수·등록 한 번에) — 다음 날 프리장에서 무너지면 대장이 바로 최소 손절, "
             "버티면 리나 일반 규칙 → **15:10 남은 물량 리나가 전부 정리**(오버나잇 금지)")
 
 
@@ -134,6 +138,10 @@ def check(state: dict, now: datetime.datetime = None) -> str:
 def status() -> str:
     """`!널뛰기` — 지금 상태(조건 미달이어도)."""
     rg, s = regime(), snapshot()
+    if s.get("status") == "PREOPEN":
+        mode = "🎢 널뛰기장" if (rg is not None and rg < REGIME_CUT) else "🙂 널뛰기장 아님(국면 35% 이상)"
+        return (f"⏳ 장 시작 전 — {mode}(국면 {f'{rg:.0f}' if rg is not None else '-'}%, 전날) · "
+                f"코스피 전날 {s['close']:,.2f}\n급락일 판단·최저점 알림은 본장 열린 뒤(알림 10:00~)\n" + _rules())
     if not s or s.get("low_chg") is None:
         return "⚠️ 코스피 지수 조회 실패 — 잠시 뒤 다시 `!널뛰기`"
     mode = "🎢 널뛰기장" if (rg is not None and rg < REGIME_CUT) else "🙂 널뛰기장 아님(국면 35% 이상 — 스윙 가능 장)"

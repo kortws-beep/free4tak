@@ -117,5 +117,28 @@ class Alert(unittest.TestCase):
         self.assertEqual(N.check(st, self._at("1533")), "")
 
 
+
+class TestPreopen(unittest.TestCase):
+    def test_status_preopen_dash_values(self):
+        """장 시작 전 네이버가 '-'를 줘도 실패가 아니라 '장 시작 전' 안내(11-23 08:12 발견)."""
+        class R:
+            def __init__(self, d): self.d = d
+            def json(self): return self.d
+
+        def fake_get(url, **kw):
+            if url.endswith("/basic"):
+                return R({"closePrice": "4,869.96", "fluctuationsRatio": "0.00", "marketStatus": "PREOPEN"})
+            return R({"totalInfos": [{"code": "lowPrice", "value": "-"}], "dealTrendInfo": {"foreignValue": "-"}})
+
+        old_get, old_rg = N.requests.get, N.regime
+        N.requests.get, N.regime = fake_get, (lambda: 20.0)
+        try:
+            out = N.status()
+        finally:
+            N.requests.get, N.regime = old_get, old_rg
+        self.assertIn("장 시작 전", out)
+        self.assertNotIn("조회 실패", out)
+
+
 if __name__ == "__main__":
     unittest.main()
