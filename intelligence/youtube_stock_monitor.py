@@ -492,6 +492,7 @@ NAME_ALIASES = {
     "KMW": "케이엠더블유",
     "한국PIM": "한국피아이엠",   # 11-12 매경 텔레그램 코너
     "TFE": "티에프이",
+    "HVM": "에이치브이엠",       # 11-23 매경 텔레그램 코너 — 편집거리로 HMM(해운)으로 잘못 바뀜
 }
 
 
@@ -549,7 +550,8 @@ def validate_stock_name(name: str) -> str:
     except Exception as e:
         print(f"   ⚠️ 종목 마스터 대조 오류: {e}")
 
-    if len(stripped) > 2:
+    # ★ 11-23: 영문 약칭(HVM)은 한 글자 차이로 전혀 다른 종목(HMM)이 돼서 편집거리 보정 안 함 — 약칭은 NAME_ALIASES로
+    if len(stripped) > 2 and not re.fullmatch(r"[A-Za-z0-9&\-]+", stripped):
         for real_name in _get_all_stock_names():
             if _edit_distance_1(stripped, real_name):
                 print(f"   🔧 오인식 보정: {name} → {real_name}")
