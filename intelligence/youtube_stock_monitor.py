@@ -496,6 +496,25 @@ NAME_ALIASES = {
 }
 
 
+_AUTO_ALIAS_CACHE = None
+
+
+def _auto_aliases() -> dict:
+    """전체 종목 마스터로 만든 {영문 약칭: 한글 종목명} — 한 번만 만듦. 실패하면 {}."""
+    global _AUTO_ALIAS_CACHE
+    if _AUTO_ALIAS_CACHE is None:
+        try:
+            import stock_name_alias
+            conn = sqlite3.connect(THEME_DB, timeout=5)
+            names = [r[0] for r in conn.execute("SELECT name FROM kr_stock_master")]
+            conn.close()
+            _AUTO_ALIAS_CACHE = stock_name_alias.build(names)
+        except Exception as e:
+            print(f"   ⚠️ 자동 약칭표 생성 오류: {e}")
+            _AUTO_ALIAS_CACHE = {}
+    return _AUTO_ALIAS_CACHE
+
+
 def validate_stock_name(name: str) -> str:
     """kr_theme_finance.db 대조 — 실제 상장종목명이면 정규화된 이름, 아니면 빈문자열.
     로컬 AI(소형모델)가 합성어 중간에 공백을 끼워넣는 경우가 잦아서
@@ -511,6 +530,11 @@ def validate_stock_name(name: str) -> str:
     if name in NAME_ALIASES:
         print(f"   🔧 영문약칭 보정: {name} → {NAME_ALIASES[name]}")
         name = NAME_ALIASES[name]
+    elif re.search(r"[A-Za-z]", name):   # ★ 11-23 자동 약칭표(에이치브이엠=HVM 등, stock_name_alias.py)
+        auto = _auto_aliases().get(name.replace(" ", "").upper()) or _auto_aliases().get(name.replace(" ", ""))
+        if auto:
+            print(f"   🔧 자동약칭 보정: {name} → {auto}")
+            name = auto
     candidates = [name]
     stripped = name.replace(" ", "")
     if stripped != name:
