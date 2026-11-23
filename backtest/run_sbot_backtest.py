@@ -80,7 +80,7 @@ def get_sbot_scenarios(base: SBotBacktestConfig) -> list:
         {
             "name": "신규구조(6슬롯×165만,임계치75)",
             "config": {**base.__dict__, "buy_score_min": 75,
-                       "max_positions": 6, "base_buy_amt": 1_650_000},
+                       "max_positions": 6, "base_buy_amt": 1_200_000},
         },
     ]
 
@@ -205,7 +205,7 @@ def main():
     parser.add_argument("--max-codes",     type=int, default=50)
     parser.add_argument("--initial-cash",  type=int, default=10_000_000,
                         help="초기 자본 (sbot×sbo2 통합 후 1000만원)")
-    parser.add_argument("--base-buy-amt",  type=int, default=1_650_000,
+    parser.add_argument("--base-buy-amt",  type=int, default=1_200_000,
                         help="기본 매수금액 (★2026-09-29: 실전 150만→165만 반영 — "
                              "기존 default(50만원)는 이미 실전 150만원과도 안 맞던 드리프트였음)")
     parser.add_argument("--max-positions", type=int, default=6)  # ★2026-09-29: sbot×sbo2 통합, 4→6 반영

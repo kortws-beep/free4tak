@@ -148,7 +148,7 @@ class SBotBacktestConfig:
     #   루틴은 영향 없었지만, 이 dataclass를 직접 import해서 쓰면 틀린
     #   값으로 조용히 돌아감). base_buy_amt 50만→165만, max_positions
     #   4→6으로 동기화.
-    base_buy_amt:      int   = 1_650_000
+    base_buy_amt:      int   = 1_200_000
     max_positions:     int   = 6
     # 매수 임계치 — 실전 BUY_SCORE_MIN(전체필터)=45, BUY_SCORE_ENTER(스코어링
     #   게이트)=85. 백테스터는 이 중 "진입 임계치" 의미로 쓰이므로 85에 맞춤
