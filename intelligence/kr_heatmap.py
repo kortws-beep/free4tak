@@ -202,6 +202,12 @@ def build(force: bool = False) -> dict:
     data = summarize(groups, quotes(codes))
     data["index"] = index_snapshot()
     data["weather"] = weather_picks()
+    try:
+        import us_pairs
+        data["us"] = us_pairs.signals()          # ★ 11-25 미국 짝꿍 밤 등락(10분 캐시)
+    except Exception as e:
+        print(f"⚠️ [섹터맵] 미국 짝꿍 실패: {e}")
+        data["us"] = {"date": "", "groups": {}}
     data["at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     _build_cache.update(t=now, data=data)
     return data

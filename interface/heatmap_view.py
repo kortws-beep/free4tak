@@ -88,7 +88,8 @@ function draw(){const el=document.getElementById('map');el.innerHTML='';if(!D)re
   if(big.length){const rest=tot-big.reduce((a,b)=>a+b.w,0);const lim=rest*0.2/(1-0.2*big.length||1);big.forEach(i=>i.w=Math.max(lim,0)||i.w)}}
  for(const r of squarify(items.sort((a,b)=>b.w-a.w),0,0,W,H)){const s=r.item;const box=document.createElement('div');box.className='sec'+((window.__picks||[]).includes(s.group)?' pick':'');
   Object.assign(box.style,{left:r.x+'px',top:r.y+'px',width:r.w+'px',height:r.h+'px'});
-  const hd=document.createElement('div');hd.className='sh';hd.innerHTML=`${(window.__picks||[]).includes(s.group)?'🎯 ':''}${esc(s.group)} <b class="${s.chg_w>0?'p':'m'}">${sg(s.chg_w)}${s.chg_w}%</b>`;
+  const hd=document.createElement('div');hd.className='sh';const U=(D.us&&D.us.groups||{})[s.group];const um=U&&U.mark?(U.reliable?U.mark:`<span style="opacity:.45">${U.mark}</span>`):'';
+  hd.innerHTML=`${(window.__picks||[]).includes(s.group)?'🎯 ':''}${um}${esc(s.group)} <b class="${s.chg_w>0?'p':'m'}">${sg(s.chg_w)}${s.chg_w}%</b>`;
   hd.onclick=e=>{e.stopPropagation();hidePop();setView(s.group)};box.appendChild(hd);
   box.onmousemove=e=>showPop(s,e.clientX,e.clientY);box.onmouseleave=hidePop;
   box.onclick=e=>{if(e.target!==hd)showPop(s,e.clientX,e.clientY)};tiles(box,s.members,0,16,r.w,Math.max(0,r.h-16));el.appendChild(box)}}
@@ -100,11 +101,15 @@ function popHtml(s){const n=s.n||s.members.length,up=s.up,dn=s.down,fl=s.flat??(
  <div class="t"><span>${esc(s.group)}</span><span class="${s.chg_w>0?'p':'m'}">${sg(s.chg_w)}${s.chg_w}%</span></div>
  <div class="pb"><span style="width:${up/n*100}%;background:#22c55e"></span><span style="width:${fl/n*100}%;background:#71717a"></span><span style="width:${dn/n*100}%;background:#dc2626"></span></div>
  <div class="small">${n}종목 중 <span class="p">${up}개 상승</span> · ${fl}개 보합 · <span class="m">${dn}개 하락</span> · 단순평균 ${sg(s.chg)}${s.chg}%</div>
+ ${usHtml(s.group)}
  <div style="margin:10px 0 4px;font-weight:600">시가총액 상위 ${top.length}</div>`+
  top.map((m,i)=>`<div class="row"><div><span class="rk">${i+1}</span><span class="nm">${esc(m.name)}</span>${m.code===best.code?'<span class="me">오늘 최강</span>':''}
   <div class="small" style="margin-left:16px">${esc(m.code)} · 시총 ${won(m.cap)} · 거래 ${won(m.value)}</div></div>
   <div style="text-align:right">${m.price?Math.round(m.price).toLocaleString():''}<div class="${m.chg>0?'p':(m.chg<0?'m':'')}">${sg(m.chg)}${m.chg.toFixed(2)}%</div></div></div>`).join('')+
  (best&&!top.find(m=>m.code===best.code)?`<div class="small" style="margin-top:6px">오늘 최강: ${esc(best.name)} ${sg(best.chg)}${best.chg}%</div>`:'')}
+function usHtml(g){const U=(D.us&&D.us.groups||{})[g];if(!U||!U.pairs||!U.pairs.length)return '';
+ return `<div style="margin-top:8px;padding:6px 8px;background:#0f1117;border-radius:8px"><div class="small">🇺🇸 밤사이 미국 짝꿍 (${esc(D.us.date)})${U.reliable?'':' · 참고용(2년 검증상 잘 안 맞는 분야)'}</div>
+ <div>${U.mark||''} 평균 <b class="${U.avg>0?'p':'m'}">${sg(U.avg)}${U.avg}%</b> · `+U.pairs.map(([t,p])=>`${esc(t)} <span class="${p>0?'p':'m'}">${sg(p)}${p}%</span>`).join(' · ')+`</div></div>`}
 const pop=document.getElementById('pop');
 function showPop(s,x,y){pop.innerHTML=popHtml(s);pop.style.display='block';const w=pop.offsetWidth,h=pop.offsetHeight;
  let L=x+14,T=y+14;if(L+w>innerWidth-8)L=Math.max(8,x-w-14);if(T+h>innerHeight-8)T=Math.max(8,innerHeight-h-8);pop.style.left=L+'px';pop.style.top=T+'px'}
@@ -117,6 +122,10 @@ function render(){
   ((W.picks||[]).length?W.picks.map(p=>`<span class="chip" data-g="${esc(p.group)}">${esc(p.state.split(' ')[0])} ${esc(p.group)} ${p.score>0?'+':''}${p.score}${p.leader?' · '+esc(p.leader):''}</span>`).join('')
    :'<span class="lab">(점수 +1 이상 분야 없음)</span>')+'<span class="lab small">아침 분야 날씨 상위 3 · 관찰용(봇 매수엔 아직 미연결)</span>';
  document.querySelectorAll('#wx .chip').forEach(c=>c.onclick=()=>setView(c.dataset.g));
+ const UG=Object.entries((D.us&&D.us.groups)||{}).filter(([g,v])=>v.mark&&v.reliable);
+ document.getElementById('wx').innerHTML+=`<div style="flex-basis:100%;height:0"></div><span class="lab">🇺🇸 밤사이 미국 짝꿍 (${esc((D.us||{}).date||'-')})</span>`+
+  (UG.length?UG.sort((a,b)=>b[1].avg-a[1].avg).map(([g,v])=>`<span class="lab">${v.mark}${esc(g)} <b class="${v.avg>0?'p':'m'}">${sg(v.avg)}${v.avg}%</b></span>`).join(' · ')
+   :'<span class="lab">(믿을 만한 분야 중 ±2% 넘은 곳 없음)</span>')+'<span class="lab small">⭐+2%↑ 🔻-2%↓ · 흐린 표시는 짝꿍이 잘 안 맞는 분야</span>';
  window.__picks=P;
  document.getElementById('sub').textContent=D.at+' 기준 · 한투 관심그룹 '+(D.sectors.length)+'개 분야';
  document.getElementById('idx').innerHTML=D.index.map(i=>`<div>${esc(i.name)}<b class="${i.chg>0?'p':'m'}">${i.price?.toLocaleString()}</b><span class="${i.chg>0?'p':'m'}">${sg(i.chg)}${i.chg}%</span></div>`).join('');
