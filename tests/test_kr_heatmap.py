@@ -29,9 +29,9 @@ class Heatmap(unittest.TestCase):
         self.assertEqual((s["up"], s["down"]), (1, 1))
         self.assertEqual(d["breadth"], {"n": 2, "up": 50, "flat": 0, "down": 50})
         old = H.LEADERS
-        H.LEADERS = {"B"}
+        H.LEADERS = {"B": "삼성향 대장"}
         try:
-            self.assertEqual({m["name"]: m["leader"] for m in H.summarize(groups, q)["sectors"][0]["members"]}, {"A": False, "B": True})
+            self.assertEqual({m["name"]: m["leader"] for m in H.summarize(groups, q)["sectors"][0]["members"]}, {"A": "", "B": "삼성향 대장"})
         finally:
             H.LEADERS = old
 
