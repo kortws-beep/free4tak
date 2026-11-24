@@ -128,7 +128,7 @@ def summarize(groups: dict, q: dict) -> dict:
             x = q.get(code)
             if not x or x.get("chg") is None or not x.get("price"):
                 continue
-            mem.append({"code": code, "name": name or x["name"], "chg": round(x["chg"], 2),
+            mem.append({"code": code, "name": name or x["name"], "chg": round(x["chg"], 2), "price": x.get("price"),
                         "cap": x.get("cap") or 0, "value": x.get("value") or 0})
         mem.sort(key=lambda m: -m["cap"])
         return mem
@@ -142,7 +142,8 @@ def summarize(groups: dict, q: dict) -> dict:
         row = {"group": g, "n": len(mem), "cap": cap, "value": sum(m["value"] for m in mem),
                "chg_w": round(sum(m["chg"] * m["cap"] for m in mem) / cap, 2) if cap else None,
                "chg": round(sum(m["chg"] for m in mem) / len(mem), 2),
-               "up": sum(m["chg"] > 0 for m in mem), "down": sum(m["chg"] < 0 for m in mem), "members": mem}
+               "up": sum(m["chg"] > 0 for m in mem), "down": sum(m["chg"] < 0 for m in mem),
+               "flat": sum(m["chg"] == 0 for m in mem), "members": mem}
         (watch if g.strip().lower() in NOT_SECTOR else sectors).append(row)
     sectors.sort(key=lambda s: -(s["chg_w"] if s["chg_w"] is not None else s["chg"]))
     uniq = {m["code"]: m["chg"] for s in sectors for m in s["members"]}

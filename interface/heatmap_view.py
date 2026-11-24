@@ -32,6 +32,12 @@ HTML = """<!DOCTYPE html>
  table{width:100%;border-collapse:collapse;font-size:13px;margin-top:10px}td,th{padding:6px 4px;border-bottom:1px solid var(--bd);text-align:left}
  th{color:var(--sub);font-weight:500;font-size:11px}td.r,th.r{text-align:right}.small{font-size:11px;color:var(--sub)}
  tr.click{cursor:pointer}
+ #pop{position:fixed;z-index:50;display:none;width:300px;max-width:calc(100vw - 24px);background:#1a1d27f2;border:1px solid var(--bd);
+  border-radius:12px;padding:12px;box-shadow:0 8px 24px rgba(0,0,0,.5);pointer-events:none;font-size:13px}
+ #pop .t{display:flex;justify-content:space-between;align-items:baseline;font-size:17px;font-weight:700;margin:2px 0 6px}
+ #pop .pb{display:flex;height:6px;border-radius:3px;overflow:hidden;background:#3f3f46;margin:4px 0}
+ #pop .row{display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-top:1px solid var(--bd)}
+ #pop .rk{color:#818cf8;width:16px;display:inline-block}#pop .nm{font-weight:600}#pop .me{background:#312e81;color:#c7d2fe;border-radius:4px;padding:0 4px;font-size:10px;margin-left:4px}
 </style></head><body>
 <h1>🗺️ 우리 섹터맵</h1><div class="sub" id="sub">불러오는 중…</div>
 <div class="wx" id="wx"></div>
@@ -39,7 +45,7 @@ HTML = """<!DOCTYPE html>
 <div class="bar" id="views"></div>
 <div class="bar"><span class="small" style="align-self:center">칸 크기</span>
  <button data-s="value" class="on">거래대금</button><button data-s="cap">시가총액</button><button data-s="eq">균등</button></div>
-<div id="map"></div>
+<div id="map"></div><div id="pop"></div>
 <div class="legend"><span class="sw" style="background:rgb(220,38,38)"></span>-5%↓<span class="sw" style="background:rgba(220,38,38,.5)"></span>-3~-5
  <span class="sw" style="background:rgba(220,38,38,.3)"></span>~-3<span class="sw" style="background:#52525b"></span>0
  <span class="sw" style="background:#38bdf8"></span>~+5<span class="sw" style="background:#22c55e"></span>+5%↑</div>
@@ -83,8 +89,28 @@ function draw(){const el=document.getElementById('map');el.innerHTML='';if(!D)re
  for(const r of squarify(items.sort((a,b)=>b.w-a.w),0,0,W,H)){const s=r.item;const box=document.createElement('div');box.className='sec'+((window.__picks||[]).includes(s.group)?' pick':'');
   Object.assign(box.style,{left:r.x+'px',top:r.y+'px',width:r.w+'px',height:r.h+'px'});
   const hd=document.createElement('div');hd.className='sh';hd.innerHTML=`${(window.__picks||[]).includes(s.group)?'🎯 ':''}${esc(s.group)} <b class="${s.chg_w>0?'p':'m'}">${sg(s.chg_w)}${s.chg_w}%</b>`;
-  hd.onclick=()=>setView(s.group);box.appendChild(hd);tiles(box,s.members,0,16,r.w,Math.max(0,r.h-16));el.appendChild(box)}}
-function setView(v){view=v;document.querySelectorAll('#views button').forEach(b=>b.classList.toggle('on',b.dataset.v===v));draw();window.scrollTo(0,0)}
+  hd.onclick=e=>{e.stopPropagation();hidePop();setView(s.group)};box.appendChild(hd);
+  box.onmousemove=e=>showPop(s,e.clientX,e.clientY);box.onmouseleave=hidePop;
+  box.onclick=e=>{if(e.target!==hd)showPop(s,e.clientX,e.clientY)};tiles(box,s.members,0,16,r.w,Math.max(0,r.h-16));el.appendChild(box)}}
+// ★ 11-24 대장: 분야에 마우스 올리면 요약 카드(등락·상승/보합/하락 막대·시총 상위 5). 폰은 칸을 누르면 뜨고 다른 곳 누르면 닫힘
+const won=v=>v>=1e12?(v/1e12).toFixed(1)+'조':Math.round(v/1e8).toLocaleString()+'억';
+function popHtml(s){const n=s.n||s.members.length,up=s.up,dn=s.down,fl=s.flat??(n-up-dn);
+ const top=[...s.members].sort((a,b)=>b.cap-a.cap).slice(0,5),best=[...s.members].sort((a,b)=>b.chg-a.chg)[0];
+ return `<div class="small">${(window.__picks||[]).includes(s.group)?'🎯 오늘 진입 분야 · ':''}한투 관심그룹</div>
+ <div class="t"><span>${esc(s.group)}</span><span class="${s.chg_w>0?'p':'m'}">${sg(s.chg_w)}${s.chg_w}%</span></div>
+ <div class="pb"><span style="width:${up/n*100}%;background:#22c55e"></span><span style="width:${fl/n*100}%;background:#71717a"></span><span style="width:${dn/n*100}%;background:#dc2626"></span></div>
+ <div class="small">${n}종목 중 <span class="p">${up}개 상승</span> · ${fl}개 보합 · <span class="m">${dn}개 하락</span> · 단순평균 ${sg(s.chg)}${s.chg}%</div>
+ <div style="margin:10px 0 4px;font-weight:600">시가총액 상위 ${top.length}</div>`+
+ top.map((m,i)=>`<div class="row"><div><span class="rk">${i+1}</span><span class="nm">${esc(m.name)}</span>${m.code===best.code?'<span class="me">오늘 최강</span>':''}
+  <div class="small" style="margin-left:16px">${esc(m.code)} · 시총 ${won(m.cap)} · 거래 ${won(m.value)}</div></div>
+  <div style="text-align:right">${m.price?Math.round(m.price).toLocaleString():''}<div class="${m.chg>0?'p':(m.chg<0?'m':'')}">${sg(m.chg)}${m.chg.toFixed(2)}%</div></div></div>`).join('')+
+ (best&&!top.find(m=>m.code===best.code)?`<div class="small" style="margin-top:6px">오늘 최강: ${esc(best.name)} ${sg(best.chg)}${best.chg}%</div>`:'')}
+const pop=document.getElementById('pop');
+function showPop(s,x,y){pop.innerHTML=popHtml(s);pop.style.display='block';const w=pop.offsetWidth,h=pop.offsetHeight;
+ let L=x+14,T=y+14;if(L+w>innerWidth-8)L=Math.max(8,x-w-14);if(T+h>innerHeight-8)T=Math.max(8,innerHeight-h-8);pop.style.left=L+'px';pop.style.top=T+'px'}
+function hidePop(){pop.style.display='none'}
+document.addEventListener('click',e=>{if(!e.target.closest('.sec'))hidePop()});
+function setView(v){hidePop();view=v;document.querySelectorAll('#views button').forEach(b=>b.classList.toggle('on',b.dataset.v===v));draw();window.scrollTo(0,0)}
 function render(){
  const W=D.weather||{},P=(W.picks||[]).map(p=>p.group);
  document.getElementById('wx').innerHTML=`<span class="lab">🌦️ 오늘 태세 <b>${esc(W.stock||'-')}</b>${W.override?' → 대장 해제':''} · 🎯 진입 분야</span>`+
