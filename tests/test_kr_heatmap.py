@@ -16,6 +16,12 @@ class Heatmap(unittest.TestCase):
         self.assertEqual(q["value"], 64_849_000_000)        # 648억 — 원 단위 그대로
         self.assertEqual(q["cap"], 964_641_282_000)
 
+    def test_parse_quote_premarket_uses_nxt(self):
+        q = H.parse_quote({"stockName": "삼성전자", "marketStatus": "PREOPEN", "closePriceRaw": "182900", "fluctuationsRatioRaw": "0.00",
+                           "marketValueFullRaw": "1000", "overMarketPriceInfo": {"tradingSessionType": "PRE_MARKET",
+                           "overPrice": "180,600", "fluctuationsRatio": "-4.65", "accumulatedTradingValueRaw": "182452000000"}})
+        self.assertEqual((q["price"], q["chg"], q["value"], q["session"]), (180600, -4.65, 182452000000, "PRE"))
+
     def test_summarize(self):
         groups = {"반도체_기판PCB": [("1", "A"), ("2", "B")], "new": [("1", "A")], "빈그룹": [("9", "Z")]}
         q = {"1": {"name": "A", "price": 100, "chg": 10.0, "cap": 300, "value": 5},

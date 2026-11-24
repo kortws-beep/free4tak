@@ -92,11 +92,18 @@ def load_groups(api_factory=None, now: float = None) -> dict:
 
 
 def parse_quote(d: dict) -> dict:
-    """네이버 다종목 시세 한 줄 → {name, price, chg, cap(원), value(원)} (값 없으면 None)."""
+    """네이버 다종목 시세 한 줄 → {name, price, chg, cap(원), value(원), session} (값 없으면 None).
+    ★ 11-25 대장 "맵이 이상하게" — 08:00~08:50 프리장엔 정규장 값이 0(등락 0·거래대금 없음)이라 칸이 전부 같은 크기·회색이 됨
+      → 정규장 시작 전(PREOPEN)이고 NXT 프리장이 열려 있으면 NXT 프리장 가격·등락·거래대금으로."""
+    o = d.get("overMarketPriceInfo") or {}
+    if d.get("marketStatus") == "PREOPEN" and o.get("tradingSessionType") == "PRE_MARKET" and o.get("overPrice"):
+        return {"name": d.get("stockName", ""), "price": _num(o.get("overPrice")), "chg": _num(o.get("fluctuationsRatio")),
+                "cap": _num(d.get("marketValueFullRaw")), "value": _num(o.get("accumulatedTradingValueRaw")), "session": "PRE"}
     return {"name": d.get("stockName", ""), "price": _num(d.get("closePriceRaw") or d.get("closePrice")),
             "chg": _num(d.get("fluctuationsRatioRaw") or d.get("fluctuationsRatio")),
             "cap": _num(d.get("marketValueFullRaw")),
-            "value": _num(d.get("accumulatedTradingValueRaw"))}   # 원 단위(648억 = 64,849,000,000)
+            "value": _num(d.get("accumulatedTradingValueRaw")),   # 원 단위(648억 = 64,849,000,000)
+            "session": d.get("marketStatus", "")}
 
 
 def quotes(codes: list, get=None, now: float = None) -> dict:
@@ -212,6 +219,7 @@ def build(force: bool = False) -> dict:
     groups = with_s7(load_groups())
     codes = sorted({c for v in groups.values() for c, _ in v})
     data = summarize(groups, quotes(codes))
+    data["pre"] = sum(1 for x in _quote_cache["data"].values() if x.get("session") == "PRE")   # 프리장 시세로 그린 종목 수
     data["index"] = index_snapshot()
     data["weather"] = weather_picks()
     try:

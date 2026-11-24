@@ -71,7 +71,9 @@ function squarify(items,x,y,w,h){const out=[];const tot=items.reduce((a,b)=>a+b.
   else{const ch=s/w;let cx=x;for(const it of row){const cw2=it.a/ch;out.push({x:cx,y,w:cw2,h:ch,item:it});cx+=cw2}y+=ch;h-=ch}
   rest=rest.slice(row.length)}
  return out}
-const wOf=m=>size==='cap'?(m.cap||1):size==='eq'?1:(m.value||1);
+// ★ 11-25 거래대금이 거의 없을 때(프리장 초반·장 시작 전)는 시총으로 대신 — 칸이 다 같은 크기가 되는 것 방지
+let valueOK=true;
+const wOf=m=>size==='cap'||(size==='value'&&!valueOK)?(m.cap||1):size==='eq'?1:(m.value||1);
 function tiles(el,mem,x,y,w,h){const mx=Math.max(...mem.map(wOf));   // ★ 11-25 대장 지정 대장주(👑)는 그 분야 가장 큰 칸 이상
  for(const r of squarify(mem.map(m=>({...m,w:m.leader?Math.max(wOf(m),mx):wOf(m)})).sort((a,b)=>b.w-a.w),x,y,w,h)){
   const m=r.item,fs=Math.max(9,Math.min(16,Math.sqrt(r.w*r.h)/6));const t=document.createElement('div');t.className='tile';
@@ -80,6 +82,7 @@ function tiles(el,mem,x,y,w,h){const mx=Math.max(...mem.map(wOf));   // ★ 11-2
   if(r.w>34&&r.h>22)t.innerHTML=`<div class="n">${m.leader?'👑':''}${esc(m.name)}</div>`+(r.h>34?`<div>${sg(m.chg)}${m.chg.toFixed(2)}%</div>`:'');
   el.appendChild(t)}}
 function draw(){const el=document.getElementById('map');el.innerHTML='';if(!D)return;
+ {const all=D.sectors.flatMap(s=>s.members);valueOK=all.filter(m=>m.value>0).length>=all.length*0.5}
  el.style.height=Math.max(420,Math.round(window.innerHeight*0.68))+'px';const W=el.clientWidth,H=el.clientHeight;
  let secs=view==='all'?D.sectors:[...D.sectors,...D.watch].filter(s=>s.group===view);
  if(view!=='all'&&secs.length){tiles(el,secs[0].members,0,0,W,H);return}
@@ -130,7 +133,8 @@ function render(){
   (UG.length?UG.sort((a,b)=>b[1].avg-a[1].avg).map(([g,v])=>`<span class="lab">${v.mark}${esc(g)} <b class="${v.avg>0?'p':'m'}">${sg(v.avg)}${v.avg}%</b></span>`).join(' · ')
    :'<span class="lab">(믿을 만한 분야 중 ±2% 넘은 곳 없음)</span>')+'<span class="lab small">⭐+2%↑ 🔻-2%↓ · 흐린 표시는 짝꿍이 잘 안 맞는 분야</span>';
  window.__picks=P;
- document.getElementById('sub').textContent=D.at+' 기준 · 한투 관심그룹 '+(D.sectors.length)+'개 분야';
+ document.getElementById('sub').textContent=D.at+' 기준 · 한투 관심그룹 '+(D.sectors.length)+'개 분야'+
+  (D.pre?` · 🌅 NXT 프리장 시세(${D.pre}종목)`:'')+(size==='value'&&D.sectors.flatMap(s=>s.members).filter(m=>m.value>0).length<D.sectors.flatMap(s=>s.members).length*0.5?' · 거래대금 적어 칸 크기는 시총으로':'');
  document.getElementById('idx').innerHTML=D.index.map(i=>`<div>${esc(i.name)}<b class="${i.chg>0?'p':'m'}">${i.price?.toLocaleString()}</b><span class="${i.chg>0?'p':'m'}">${sg(i.chg)}${i.chg}%</span></div>`).join('');
  const b=D.breadth;document.getElementById('br').innerHTML=`분야 종목 ${b.n}개 · <span class="p">상승 ${b.up}%</span> · 보합 ${b.flat}% · <span class="m">하락 ${b.down}%</span>`;
  document.getElementById('views').innerHTML=`<button data-v="all">🗺️ 분야 전체</button>`+D.watch.map(w=>`<button data-v="${esc(w.group)}">⭐ ${esc(w.group)}</button>`).join('')+
