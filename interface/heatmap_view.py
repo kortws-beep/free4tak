@@ -23,6 +23,8 @@ HTML = """<!DOCTYPE html>
  .sec{position:absolute;border:1px solid #0f1117;overflow:hidden}
  .sh{position:absolute;left:0;right:0;top:0;height:16px;font-size:11px;line-height:16px;padding:0 4px;background:rgba(15,17,23,.75);
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;z-index:2}
+ .wx{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:12px;margin:4px 0 6px}.wx .chip{background:var(--card);border:1px solid #facc15;
+  border-radius:8px;padding:3px 8px;cursor:pointer}.wx .lab{color:var(--sub)}.sec.pick{outline:2px solid #facc15;outline-offset:-2px;z-index:1}
  .tile{position:absolute;border:1px solid rgba(15,17,23,.85);display:flex;flex-direction:column;align-items:center;justify-content:center;
   text-align:center;overflow:hidden;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.6);line-height:1.15}
  .tile .n{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;padding:0 2px}
@@ -32,13 +34,15 @@ HTML = """<!DOCTYPE html>
  tr.click{cursor:pointer}
 </style></head><body>
 <h1>🗺️ 우리 섹터맵</h1><div class="sub" id="sub">불러오는 중…</div>
+<div class="wx" id="wx"></div>
 <div class="idx" id="idx"></div>
 <div class="bar" id="views"></div>
 <div class="bar"><span class="small" style="align-self:center">칸 크기</span>
  <button data-s="value" class="on">거래대금</button><button data-s="cap">시가총액</button><button data-s="eq">균등</button></div>
 <div id="map"></div>
-<div class="legend">하락<span class="sw" style="background:#b91c1c"></span><span class="sw" style="background:#7f1d1d"></span><span class="sw" style="background:#3f3f46"></span>
- <span class="sw" style="background:#14532d"></span><span class="sw" style="background:#16a34a"></span><span class="sw" style="background:#22c55e"></span>상승 <span class="small">· ±5%↑ 가장 진함</span></div>
+<div class="legend"><span class="sw" style="background:rgb(220,38,38)"></span>-5%↓<span class="sw" style="background:rgba(220,38,38,.5)"></span>-3~-5
+ <span class="sw" style="background:rgba(220,38,38,.3)"></span>~-3<span class="sw" style="background:#52525b"></span>0
+ <span class="sw" style="background:#38bdf8"></span>~+5<span class="sw" style="background:#22c55e"></span>+5%↑</div>
 <div class="sub" id="br"></div>
 <table id="tbl"></table>
 <div class="small" style="margin-top:8px">분야 = 대장 한투 관심그룹 · 등락은 시총 가중(괄호 안 단순 평균) · 시세 네이버(30초) · 그룹 구성 30분마다 다시 읽음</div>
@@ -46,10 +50,10 @@ HTML = """<!DOCTYPE html>
 let D=null,view='all',size='value';
 const esc=s=>String(s??'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 const sg=v=>v>0?'+':'';
-function color(c){if(c==null)return '#3f3f46';const t=Math.max(-1,Math.min(1,c/5));
- if(Math.abs(c)<0.05)return '#3f3f46';
- return t>0?`rgb(${Math.round(20+(34-20)*t)},${Math.round(83+(197-83)*t)},${Math.round(45+(94-45)*t)})`
-            :`rgb(${Math.round(63+(220-63)*-t)},${Math.round(63+(38-63)*-t)},${Math.round(70+(38-70)*-t)})`}
+// ★ 11-24 대장 색: 0%=회색 · +0.1~5%=하늘색 · +5%↑=초록 · -0.1~-3%=빨강 30% · -3~-5%=빨강 50% · -5%↓=빨강
+function color(c){if(c==null||Math.abs(c)<0.05)return '#52525b';
+ if(c>0)return c<5?'#38bdf8':'#22c55e';
+ return c>-3?'rgba(220,38,38,.3)':c>-5?'rgba(220,38,38,.5)':'rgb(220,38,38)'}
 // squarified treemap: items [{w,...}] into rect → [{x,y,w,h,item}]
 function squarify(items,x,y,w,h){const out=[];const tot=items.reduce((a,b)=>a+b.w,0);if(!tot||w<=0||h<=0)return out;
  const scale=w*h/tot;let rest=items.map(i=>({...i,a:i.w*scale})).filter(i=>i.a>0);
@@ -73,12 +77,18 @@ function draw(){const el=document.getElementById('map');el.innerHTML='';if(!D)re
  let secs=view==='all'?D.sectors:[...D.sectors,...D.watch].filter(s=>s.group===view);
  if(view!=='all'&&secs.length){tiles(el,secs[0].members,0,0,W,H);return}
  const items=secs.map(s=>({...s,w:size==='eq'?s.n:s.members.reduce((a,m)=>a+wOf(m),0)}));
- for(const r of squarify(items.sort((a,b)=>b.w-a.w),0,0,W,H)){const s=r.item;const box=document.createElement('div');box.className='sec';
+ for(const r of squarify(items.sort((a,b)=>b.w-a.w),0,0,W,H)){const s=r.item;const box=document.createElement('div');box.className='sec'+((window.__picks||[]).includes(s.group)?' pick':'');
   Object.assign(box.style,{left:r.x+'px',top:r.y+'px',width:r.w+'px',height:r.h+'px'});
-  const hd=document.createElement('div');hd.className='sh';hd.innerHTML=`${esc(s.group)} <b class="${s.chg_w>0?'p':'m'}">${sg(s.chg_w)}${s.chg_w}%</b>`;
+  const hd=document.createElement('div');hd.className='sh';hd.innerHTML=`${(window.__picks||[]).includes(s.group)?'🎯 ':''}${esc(s.group)} <b class="${s.chg_w>0?'p':'m'}">${sg(s.chg_w)}${s.chg_w}%</b>`;
   hd.onclick=()=>setView(s.group);box.appendChild(hd);tiles(box,s.members,0,16,r.w,Math.max(0,r.h-16));el.appendChild(box)}}
 function setView(v){view=v;document.querySelectorAll('#views button').forEach(b=>b.classList.toggle('on',b.dataset.v===v));draw();window.scrollTo(0,0)}
 function render(){
+ const W=D.weather||{},P=(W.picks||[]).map(p=>p.group);
+ document.getElementById('wx').innerHTML=`<span class="lab">🌦️ 오늘 태세 <b>${esc(W.stock||'-')}</b>${W.override?' → 대장 해제':''} · 🎯 진입 분야</span>`+
+  ((W.picks||[]).length?W.picks.map(p=>`<span class="chip" data-g="${esc(p.group)}">${esc(p.state.split(' ')[0])} ${esc(p.group)} ${p.score>0?'+':''}${p.score}${p.leader?' · '+esc(p.leader):''}</span>`).join('')
+   :'<span class="lab">(점수 +1 이상 분야 없음)</span>')+'<span class="lab small">아침 분야 날씨 상위 3 · 관찰용(봇 매수엔 아직 미연결)</span>';
+ document.querySelectorAll('#wx .chip').forEach(c=>c.onclick=()=>setView(c.dataset.g));
+ window.__picks=P;
  document.getElementById('sub').textContent=D.at+' 기준 · 한투 관심그룹 '+(D.sectors.length)+'개 분야';
  document.getElementById('idx').innerHTML=D.index.map(i=>`<div>${esc(i.name)}<b class="${i.chg>0?'p':'m'}">${i.price?.toLocaleString()}</b><span class="${i.chg>0?'p':'m'}">${sg(i.chg)}${i.chg}%</span></div>`).join('');
  const b=D.breadth;document.getElementById('br').innerHTML=`분야 종목 ${b.n}개 · <span class="p">상승 ${b.up}%</span> · 보합 ${b.flat}% · <span class="m">하락 ${b.down}%</span>`;

@@ -40,6 +40,24 @@ class Heatmap(unittest.TestCase):
         self.assertEqual(len(out), 250)
         self.assertEqual(calls, [100, 100, 50])
 
+    def test_weather_picks_top3_positive(self):
+        import types
+        fake = types.SimpleNamespace(weather=lambda day: [("화장품", 4, "🟢 공격", [], "에이피알"), ("로봇", 1, "🟡 보통", [], "로보티즈"),
+                                                          ("반도체", 1, "🟡 보통", [], "주성"), ("조선", 1, "🟡 보통", [], "x"),
+                                                          ("우주", -1, "🟠 방어", [], "스피어")])
+        old = sys.modules.get("sector_weather")
+        sys.modules["sector_weather"] = fake
+        H._wx_cache.update(day=None, data=None)
+        try:
+            w = H.weather_picks("2099-01-01")
+        finally:
+            if old is not None:
+                sys.modules["sector_weather"] = old
+            else:
+                sys.modules.pop("sector_weather", None)
+            H._wx_cache.update(day=None, data=None)
+        self.assertEqual([p["group"] for p in w["picks"]], ["화장품", "로봇", "반도체"])   # 점수 ≥1, 최대 3
+
 
 if __name__ == "__main__":
     unittest.main()

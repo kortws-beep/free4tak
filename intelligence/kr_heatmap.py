@@ -147,6 +147,35 @@ def summarize(groups: dict, q: dict) -> dict:
                         "down": round(sum(c < 0 for c in uniq.values()) / n * 100)}}
 
 
+_wx_cache = {"day": None, "data": None}
+PICK_MAX = 3
+
+
+def weather_picks(day: str = None) -> dict:
+    """키키 날씨(봇에 건 오늘 태세·대장 해제 여부) + 아침 분야 날씨 상위(점수 ≥1, 최대 3개) — 하루 한 번 계산.
+    ★ 11-24 대장: '날씨 해제 때 진입 가는 관심종목 분야 표시(3개 이내)'. 분야 날씨는 아직 봇 매수에 연결 안 됨(관찰용)."""
+    day = day or datetime.date.today().isoformat()
+    if _wx_cache["day"] == day and _wx_cache["data"] is not None:
+        return _wx_cache["data"]
+    out = {"stock": "", "override": False, "picks": []}
+    try:
+        import sector_weather
+        out["picks"] = [{"group": g, "score": sc, "state": st, "leader": ld or ""}
+                        for g, sc, st, _it, ld in sector_weather.weather(day) if sc >= 1][:PICK_MAX]
+    except Exception as e:
+        print(f"⚠️ [섹터맵] 분야 날씨 실패: {e}")
+    try:
+        from common_utils import read_state
+        st = read_state(os.path.join(_BASE, "sbot_state.json"), default={}) or {}
+        w = st.get("weather") or {}
+        if w.get("date") == day:
+            out["stock"], out["override"] = w.get("label", ""), bool(w.get("override"))
+    except Exception:
+        pass
+    _wx_cache.update(day=day, data=out)
+    return out
+
+
 def build(force: bool = False) -> dict:
     now = time.time()
     if not force and _build_cache["data"] and now - _build_cache["t"] < QUOTE_TTL:
@@ -155,6 +184,7 @@ def build(force: bool = False) -> dict:
     codes = sorted({c for v in groups.values() for c, _ in v})
     data = summarize(groups, quotes(codes))
     data["index"] = index_snapshot()
+    data["weather"] = weather_picks()
     data["at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     _build_cache.update(t=now, data=data)
     return data
