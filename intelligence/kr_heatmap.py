@@ -45,7 +45,10 @@ S7_CODES = {"005930": "삼성전자", "000660": "SK하이닉스", "402340": "SK�
 #   대장이 지정한 대장주는 어느 분야에 있든 그 분야에서 가장 큰 칸과 같은 크기 이상 + 👑. 이름으로 지정(여기만 고치면 됨).
 #   대장 11-25 정리(intelligence/robot_map.py에도): 이름 → 대장 칸(카드에 표시)
 LEADERS = {"레인보우로보틱스": "삼성향 대장", "로보티즈": "감속기·액추에이터 종합부품 대장",
-           "현대오토에버": "현대차향 대장(보스턴다이내믹스 유통·AS 통합 컨트롤러)", "원익홀딩스": "로봇손 대장(자회사)"}
+           "현대오토에버": "현대차향 대장(보스턴다이내믹스 유통·AS 통합 컨트롤러)", "원익홀딩스": "로봇손 대장(자회사)",
+           "로보스타": "LG향 대장(흑자 몇 안 되는 로봇주)"}
+# 대장은 아니지만 어디향인지 꼬리표(카드·툴팁에만, 칸 크기는 그대로) — 대장 11-25
+TAGS = {"삼현": "테슬라향(옵티머스)", "한국피아이엠": "테슬라향(옵티머스)", "한라캐스트": "테슬라향(옵티머스)"}
 
 _quote_cache = {"t": 0, "data": {}}
 _build_cache = {"t": 0, "data": None}
@@ -135,7 +138,7 @@ def summarize(groups: dict, q: dict) -> dict:
             if not x or x.get("chg") is None or not x.get("price"):
                 continue
             nm = name or x["name"]
-            mem.append({"code": code, "name": nm, "chg": round(x["chg"], 2), "price": x.get("price"), "leader": LEADERS.get(nm, ""),
+            mem.append({"code": code, "name": nm, "chg": round(x["chg"], 2), "price": x.get("price"), "leader": LEADERS.get(nm, ""), "tag": TAGS.get(nm, ""),
                         "cap": x.get("cap") or 0, "value": x.get("value") or 0})
         mem.sort(key=lambda m: -m["cap"])
         return mem

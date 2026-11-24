@@ -76,7 +76,7 @@ function tiles(el,mem,x,y,w,h){const mx=Math.max(...mem.map(wOf));   // ★ 11-2
  for(const r of squarify(mem.map(m=>({...m,w:m.leader?Math.max(wOf(m),mx):wOf(m)})).sort((a,b)=>b.w-a.w),x,y,w,h)){
   const m=r.item,fs=Math.max(9,Math.min(16,Math.sqrt(r.w*r.h)/6));const t=document.createElement('div');t.className='tile';
   Object.assign(t.style,{left:r.x+'px',top:r.y+'px',width:r.w+'px',height:r.h+'px',background:color(m.chg),fontSize:fs+'px'});
-  t.title=`${m.leader?'👑 '+m.leader+' · ':''}${m.name} ${sg(m.chg)}${m.chg}% · 시총 ${(m.cap/1e12).toFixed(2)}조 · 거래대금 ${Math.round(m.value/1e8)}억`;
+  t.title=`${m.leader?'👑 '+m.leader+' · ':''}${m.tag?'🔗 '+m.tag+' · ':''}${m.name} ${sg(m.chg)}${m.chg}% · 시총 ${(m.cap/1e12).toFixed(2)}조 · 거래대금 ${Math.round(m.value/1e8)}억`;
   if(r.w>34&&r.h>22)t.innerHTML=`<div class="n">${m.leader?'👑':''}${esc(m.name)}</div>`+(r.h>34?`<div>${sg(m.chg)}${m.chg.toFixed(2)}%</div>`:'');
   el.appendChild(t)}}
 function draw(){const el=document.getElementById('map');el.innerHTML='';if(!D)return;
@@ -104,10 +104,12 @@ function popHtml(s){const n=s.n||s.members.length,up=s.up,dn=s.down,fl=s.flat??(
  <div class="small">${n}종목 중 <span class="p">${up}개 상승</span> · ${fl}개 보합 · <span class="m">${dn}개 하락</span> · 단순평균 ${sg(s.chg)}${s.chg}%</div>
  ${usHtml(s.group)}
  <div style="margin:10px 0 4px;font-weight:600">시가총액 상위 ${top.length}</div>`+
- top.map((m,i)=>`<div class="row"><div><span class="rk">${i+1}</span><span class="nm">${m.leader?'👑':''}${esc(m.name)}</span>${m.leader?`<span class="me" style="background:#713f12;color:#fde68a">${esc(m.leader)}</span>`:''}${m.code===best.code?'<span class="me">오늘 최강</span>':''}
+ top.map((m,i)=>`<div class="row"><div><span class="rk">${i+1}</span><span class="nm">${m.leader?'👑':''}${esc(m.name)}</span>${m.leader?`<span class="me" style="background:#713f12;color:#fde68a">${esc(m.leader)}</span>`:''}${m.tag?`<span class="me" style="background:#1e3a5f;color:#bae6fd">${esc(m.tag)}</span>`:''}${m.code===best.code?'<span class="me">오늘 최강</span>':''}
   <div class="small" style="margin-left:16px">${esc(m.code)} · 시총 ${won(m.cap)} · 거래 ${won(m.value)}</div></div>
   <div style="text-align:right">${m.price?Math.round(m.price).toLocaleString():''}<div class="${m.chg>0?'p':(m.chg<0?'m':'')}">${sg(m.chg)}${m.chg.toFixed(2)}%</div></div></div>`).join('')+
- (best&&!top.find(m=>m.code===best.code)?`<div class="small" style="margin-top:6px">오늘 최강: ${esc(best.name)} ${sg(best.chg)}${best.chg}%</div>`:'')}
+ (best&&!top.find(m=>m.code===best.code)?`<div class="small" style="margin-top:6px">오늘 최강: ${esc(best.name)} ${sg(best.chg)}${best.chg}%</div>`:'')+
+ (()=>{const ex=s.members.filter(m=>(m.leader||m.tag)&&!top.find(t=>t.code===m.code));   // ★ 11-25 상위 5 밖 대장·꼬리표 종목도
+  return ex.length?`<div class="small" style="margin-top:6px">${ex.map(m=>`${m.leader?'👑':'🔗'}${esc(m.name)}(${esc(m.leader||m.tag)}) <span class="${m.chg>0?'p':'m'}">${sg(m.chg)}${m.chg}%</span>`).join(' · ')}</div>`:''})()}
 function usHtml(g){const U=(D.us&&D.us.groups||{})[g];if(!U||!U.pairs||!U.pairs.length)return '';
  return `<div style="margin-top:8px;padding:6px 8px;background:#0f1117;border-radius:8px"><div class="small">🇺🇸 밤사이 미국 짝꿍 (${esc(D.us.date)})${U.reliable?'':' · 참고용(2년 검증상 잘 안 맞는 분야)'}</div>
  <div>${U.mark||''} 평균 <b class="${U.avg>0?'p':'m'}">${sg(U.avg)}${U.avg}%</b> · `+U.pairs.map(([t,p])=>`${esc(t)} <span class="${p>0?'p':'m'}">${sg(p)}${p}%</span>`).join(' · ')+`</div></div>`}
