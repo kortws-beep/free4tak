@@ -41,6 +41,10 @@ S7_NAME = "S7 대형주"
 S7_CODES = {"005930": "삼성전자", "000660": "SK하이닉스", "402340": "SK스퀘어", "005935": "삼성전자우",
             "009150": "삼성전기", "032830": "삼성생명", "028260": "삼성물산", "005380": "현대차"}
 
+# ★ 11-25 대장 "로봇 대장주는 레인보우로보틱스·로보티즈 — 얘네가 커야 해(원익홀딩스가 너무 큼)":
+#   대장이 지정한 대장주는 어느 분야에 있든 그 분야에서 가장 큰 칸과 같은 크기 이상 + 👑. 이름으로 지정(여기만 고치면 됨).
+LEADERS = {"레인보우로보틱스", "로보티즈"}
+
 _quote_cache = {"t": 0, "data": {}}
 _build_cache = {"t": 0, "data": None}
 
@@ -128,7 +132,8 @@ def summarize(groups: dict, q: dict) -> dict:
             x = q.get(code)
             if not x or x.get("chg") is None or not x.get("price"):
                 continue
-            mem.append({"code": code, "name": name or x["name"], "chg": round(x["chg"], 2), "price": x.get("price"),
+            nm = name or x["name"]
+            mem.append({"code": code, "name": nm, "chg": round(x["chg"], 2), "price": x.get("price"), "leader": nm in LEADERS,
                         "cap": x.get("cap") or 0, "value": x.get("value") or 0})
         mem.sort(key=lambda m: -m["cap"])
         return mem
