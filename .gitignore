@@ -34,3 +34,4 @@ docs/reference/semi_map_part14.txt
 # SQLite WAL 부속 파일(11-13 WAL 전환)
 *.db-wal
 *.db-shm
+intelligence/kr_heatmap_groups.json

@@ -131,6 +131,7 @@ INVENTORY = [
             ("/feed 키키·리나·산야 메시지 모아보기", "2026-10-20"),
             ("/bots 이 화면 — 기능 지도 + 변경 이력", "2026-10-22"),
             ("/bots 🏁 엔진 대항전 — 봇별 '산 곳·판 이유'마다 손익 줄 세우기(오늘·이번 주·이번 달)", "2026-10-24"),
+            ("/map 🗺️ 우리 섹터맵 — 한투 관심그룹(대장 분야) 히트맵, 칸=거래대금·시총·균등, 색=등락, new·SUB·isee5 따로", "2026-11-24"),
         ]),
         ("🗄️ 쌓는 데이터", [
             ("일봉 20:10 · 투자자 20:30 · FDR 시세/지수 20:40 · 섹터 DB 16:30 · 쏠림 지수 30분", ""),
@@ -207,7 +208,7 @@ def engines_html() -> str:
             .replace("try{tab(+localStorage.getItem('bots_tab')||1)}catch(e){}", "tab(3);"))
 
 
-NAV = """<nav class="nav"><a href="lina" data-p="lina">📋 리나</a><a href="feed" data-p="feed">🗂️ 메시지</a><a href="bots" data-p="bots">🤖 봇 기능</a><a href="engines" data-p="engines">🏁 대항전</a><a href="weather" data-p="weather">🌦️ 날씨</a></nav>
+NAV = """<nav class="nav"><a href="lina" data-p="lina">📋 리나</a><a href="feed" data-p="feed">🗂️ 메시지</a><a href="bots" data-p="bots">🤖 봇 기능</a><a href="engines" data-p="engines">🏁 대항전</a><a href="weather" data-p="weather">🌦️ 날씨</a><a href="map" data-p="map">🗺️ 맵</a></nav>
 <style>.nav{display:flex;gap:6px;margin:0 0 10px;position:sticky;top:0;background:var(--bg);padding:8px 0;z-index:5}
 .nav a{flex:1;text-align:center;padding:8px 2px;white-space:nowrap;border-radius:10px;border:1px solid var(--bd,#2a2d3a);color:var(--sub,#94a3b8);
 text-decoration:none;font-size:13px;background:var(--card,#1a1d27)}.nav a.on{color:var(--tx,#e2e8f0);border-color:var(--tx,#e2e8f0);font-weight:700}</style>

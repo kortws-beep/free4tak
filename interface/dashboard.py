@@ -512,6 +512,20 @@ def api_weather():
     return jsonify(weather_view.build())
 
 
+@app.route("/map")
+def map_page():
+    """우리 섹터맵 — 한투 관심그룹 히트맵(2026-11-24)"""
+    import heatmap_view
+    import bot_overview
+    return heatmap_view.HTML.replace("<body>", "<body>" + bot_overview.NAV, 1)
+
+
+@app.route("/api/map")
+def api_map():
+    import kr_heatmap
+    return jsonify(kr_heatmap.build())
+
+
 @app.route("/api/feed")
 def api_feed():
     import discord_feed
