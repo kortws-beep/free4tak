@@ -77,6 +77,9 @@ function draw(){const el=document.getElementById('map');el.innerHTML='';if(!D)re
  let secs=view==='all'?D.sectors:[...D.sectors,...D.watch].filter(s=>s.group===view);
  if(view!=='all'&&secs.length){tiles(el,secs[0].members,0,0,W,H);return}
  const items=secs.map(s=>({...s,w:size==='eq'?s.n:s.members.reduce((a,m)=>a+wOf(m),0)}));
+ // ★ 11-24 대장 "너무 커": 한 분야(S7 대형주 등)가 지도의 20%를 넘지 않게 — 넘치는 칸은 20%로 깎음
+ {const tot=items.reduce((a,b)=>a+b.w,0),cap=tot*0.2;const big=items.filter(i=>i.w>cap);
+  if(big.length){const rest=tot-big.reduce((a,b)=>a+b.w,0);const lim=rest*0.2/(1-0.2*big.length||1);big.forEach(i=>i.w=Math.max(lim,0)||i.w)}}
  for(const r of squarify(items.sort((a,b)=>b.w-a.w),0,0,W,H)){const s=r.item;const box=document.createElement('div');box.className='sec'+((window.__picks||[]).includes(s.group)?' pick':'');
   Object.assign(box.style,{left:r.x+'px',top:r.y+'px',width:r.w+'px',height:r.h+'px'});
   const hd=document.createElement('div');hd.className='sh';hd.innerHTML=`${(window.__picks||[]).includes(s.group)?'🎯 ':''}${esc(s.group)} <b class="${s.chg_w>0?'p':'m'}">${sg(s.chg_w)}${s.chg_w}%</b>`;

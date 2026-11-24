@@ -58,6 +58,19 @@ class Heatmap(unittest.TestCase):
             H._wx_cache.update(day=None, data=None)
         self.assertEqual([p["group"] for p in w["picks"]], ["화장품", "로봇", "반도체"])   # 점수 ≥1, 최대 3
 
+    def test_s7_group_and_sync_with_sbot(self):
+        g = H.with_s7({"반도체_후공정테스트": [("005930", "삼성전자"), ("095340", "ISC")], "new": [("005930", "삼성전자")],
+                       "반도체_MLCC": [("009150", "삼성전기")]})
+        self.assertEqual(g["반도체_후공정테스트"], [("095340", "ISC")])     # 삼성전자 빠짐
+        self.assertNotIn("반도체_MLCC", g)                                   # S7만 있던 분야는 사라짐
+        self.assertEqual(g["new"], [("005930", "삼성전자")])                  # 분야 아닌 관심그룹은 그대로
+        self.assertEqual(len(g[H.S7_NAME]), 8)
+        import ast
+        src = open(os.path.join(_ROOT, "bots", "sbot.py"), encoding="utf-8").read()
+        node = next(n for n in ast.walk(ast.parse(src)) if isinstance(n, ast.Assign)
+                    and any(getattr(t, "id", "") == "MEGA_CAP_CODES" for t in n.targets))
+        self.assertEqual(set(ast.literal_eval(node.value)), set(H.S7_CODES))   # sbot S7 목록과 같아야 함
+
 
 if __name__ == "__main__":
     unittest.main()

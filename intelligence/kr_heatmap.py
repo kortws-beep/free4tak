@@ -35,6 +35,12 @@ INDEX = "https://m.stock.naver.com/api/index/{}/basic"
 UA = {"User-Agent": "Mozilla/5.0"}
 NOT_SECTOR = {"isee5", "sub", "new", "끼", "v알림", "신규", "신규추천", "서브", "고정"}
 
+# ★ 11-24 대장 "삼성전자 칸이 너무 커 — 그 자리에 S7을": sbot 대형주(S7) 8종목을 한 분야로 묶고 다른 분야에선 뺌.
+#   목록은 bots/sbot.py MEGA_CAP_CODES와 같아야 함(tests/test_kr_heatmap.py가 대조).
+S7_NAME = "S7 대형주"
+S7_CODES = {"005930": "삼성전자", "000660": "SK하이닉스", "402340": "SK스퀘어", "005935": "삼성전자우",
+            "009150": "삼성전기", "032830": "삼성생명", "028260": "삼성물산", "005380": "현대차"}
+
 _quote_cache = {"t": 0, "data": {}}
 _build_cache = {"t": 0, "data": None}
 
@@ -176,11 +182,21 @@ def weather_picks(day: str = None) -> dict:
     return out
 
 
+def with_s7(groups: dict) -> dict:
+    """S7 8종목을 한 분야로, 다른 분야(분야 아닌 new·SUB 등 관심그룹은 그대로)에선 뺌."""
+    out = {S7_NAME: list(S7_CODES.items())}
+    for g, stocks in groups.items():
+        keep = stocks if g.strip().lower() in NOT_SECTOR else [(c, n) for c, n in stocks if c not in S7_CODES]
+        if keep:
+            out[g] = keep
+    return out
+
+
 def build(force: bool = False) -> dict:
     now = time.time()
     if not force and _build_cache["data"] and now - _build_cache["t"] < QUOTE_TTL:
         return _build_cache["data"]
-    groups = load_groups()
+    groups = with_s7(load_groups())
     codes = sorted({c for v in groups.values() for c, _ in v})
     data = summarize(groups, quotes(codes))
     data["index"] = index_snapshot()
