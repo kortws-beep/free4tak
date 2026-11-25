@@ -68,12 +68,19 @@ def daily(ticker: str, rng: str = "10d", get=None) -> list:
     get = get or (lambda url: requests.get(url, headers=UA, timeout=8).json())
     try:
         r = get(CHART.format(ticker, rng))["chart"]["result"][0]
-        off = int((r.get("meta") or {}).get("gmtoffset", -18000))
+        meta = r.get("meta") or {}
+        off = int(meta.get("gmtoffset", -18000))
+        day = lambda ts: datetime.datetime.fromtimestamp(ts + off, datetime.timezone.utc).strftime("%Y-%m-%d")
+        tss, cls = r.get("timestamp") or [], r["indicators"]["quote"][0].get("close") or []
         out = []
-        for ts, c in zip(r.get("timestamp") or [], r["indicators"]["quote"][0].get("close") or []):
+        for i, (ts, c) in enumerate(zip(tss, cls)):
+            # ★ 11-25 폰에서 '그저께' 숫자로 보임 — 야후가 장 끝난 뒤 한동안 마지막 날 일봉 종가를 비워 둠(None)
+            #   → 그날이 regularMarketTime 날짜와 같으면 regularMarketPrice(정규장 종가)로 채움(안 그러면 하루 전 등락이 나옴)
+            if c is None and i == len(tss) - 1 and meta.get("regularMarketPrice") and meta.get("regularMarketTime") \
+                    and day(meta["regularMarketTime"]) == day(ts):
+                c = meta["regularMarketPrice"]
             if c is not None:
-                d = datetime.datetime.fromtimestamp(ts + off, datetime.timezone.utc).strftime("%Y-%m-%d")
-                out.append((d, float(c)))
+                out.append((day(ts), float(c)))
         return out
     except Exception as e:
         print(f"⚠️ [미국짝꿍] {ticker} 조회 실패: {e}")

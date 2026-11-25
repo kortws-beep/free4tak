@@ -39,6 +39,15 @@ class Pairs(unittest.TestCase):
         self.assertEqual(g["mark"], "🔻")
         self.assertTrue(g["reliable"])
 
+    def test_daily_fills_missing_last_close(self):
+        c = chart([100.0, None])
+        r = c["chart"]["result"][0]
+        r["meta"]["regularMarketPrice"] = 90.0
+        r["meta"]["regularMarketTime"] = r["timestamp"][-1] + 3600     # 같은 날 장 마감 시각
+        rows = U.daily("X", get=lambda url: c)
+        self.assertEqual([p for _, p in rows], [100.0, 90.0])
+        self.assertAlmostEqual(U.last_move(rows)[1], -10.0)
+
     def test_pairs_groups_exist_in_reliable(self):
         self.assertTrue(U.RELIABLE <= set(U.PAIRS))
 
