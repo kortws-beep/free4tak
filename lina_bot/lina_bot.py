@@ -3458,6 +3458,17 @@ async def on_message(message):
                 await send_safe_message(message.channel, f"❌ 고무공 후보 계산 오류: {e}")
         return
 
+    if message.content.strip() == "!반도체":
+        # ★ 11-26 대장 — 김태성 전략: 급락장 반도체 소부장 -50%↓ & 올해 영업이익 증가 → 추가매수 검토(intelligence/semi_pick.py)
+        async with message.channel.typing():
+            try:
+                import semi_pick
+                rows = await asyncio.to_thread(semi_pick.candidates)
+                await send_safe_message(message.channel, semi_pick.format_rows(rows, semi_pick.holdings_view(rows)))
+            except Exception as e:
+                await send_safe_message(message.channel, f"❌ 반도체 선별 계산 오류: {e}")
+        return
+
     if message.content.startswith("!단타"):
         async with message.channel.typing():
             try:
