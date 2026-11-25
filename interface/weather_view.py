@@ -88,7 +88,7 @@ HTML = """<!DOCTYPE html>
 <h1>🌦️ 자금시장 날씨판</h1><div class="sub" id="sub">불러오는 중…</div>
 <div class="big"><div class="card">주식 봇 태세<b id="stock">-</b></div><div class="card">코인 봇 태세<b id="coin">-</b></div></div>
 <div class="card"><h2>🗼 키키 관제 — 봇에 실제로 건 오늘 태세</h2><div id="bots"></div>
- <div class="small">🔴쉼=신규매수 정지(매도·손절 계속) · 🟠방어=daybot 음봉·이벤트 엔진만/sbot 1슬롯/cbot BTC 오를 때만 · 🟡🟢=자유 · 키키 <b>!날씨해제</b>로 오늘 하루 풀기</div></div>
+ <div class="small">🔴쉼=신규매수 정지(매도·손절 계속) · 🟠방어=daybot 음봉·이벤트 엔진만/sbot 1슬롯/cbot BTC 오를 때만 · 🟡🟢=자유 · 키키 <b>!날씨해제</b>로 오늘 하루 풀기(<b>주식</b>·<b>코인</b> 따로도)</div></div>
 <div id="news"></div>
 <div id="layers"></div>
 <div class="card"><h2>🗺️ 분야 날씨 (관심그룹, 어제까지 기록)</h2><table id="sec"></table>

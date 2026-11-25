@@ -31,7 +31,7 @@ AI 비서입니다. 명령어로 봇을 조종하고, 평일 자동 브리핑을
     !전체상태      모든 봇 현황
     !전체재시작    kiki 제외 전체 재시작
     !날씨          자금시장 날씨판(🟢공격·🟡보통·🟠방어·🔴쉼) — 매일 07:10 키키가 봇 태세 설정
-    !날씨해제      오늘 하루 날씨판 제어 풀기(보통) — 날씨판이 건 정지만 해제
+    !날씨해제      오늘 하루 날씨판 제어 풀기(보통) — 날씨판이 건 정지만 해제. `!날씨해제 주식` / `!날씨해제 코인`으로 따로
     !테마          당일 강세 업종/테마
     !뉴스          오늘 테마별 뉴스 감성 리포트
     !관심HTS       키움 HTS 관심그룹 즉시 동기화
@@ -624,6 +624,8 @@ class AIAssistant:
 "전체 다 재시작해줘" → CMD:!전체재시작
 "날씨판/시장 날씨 보여줘" → CMD:!날씨
 "오늘 날씨판 제어 풀어줘/날씨 해제" → CMD:!날씨해제
+"주식만 날씨 해제" → CMD:!날씨해제 주식
+"코인만 날씨 해제" → CMD:!날씨해제 코인
 
 [설정]
 "점수 X로/기준 X점" → CMD:!점수기준 X
@@ -919,12 +921,17 @@ async def execute_command(ctx, cmd: str):
         import weather_board
         b = await asyncio.to_thread(weather_board.board)
         await send_long(ctx, weather_board.format_board(b))
-    elif cmd == "!날씨해제":                 # ★ 11-17 대장이 오늘 하루 날씨판 제어를 풂(보통으로) — 날씨판이 건 정지만 해제
-        import weather_board
+    elif (cmd.split() or [""])[0] == "!날씨해제":      # ★ 11-17 대장이 오늘 하루 날씨판 제어를 풂(보통으로) — 날씨판이 건 정지만 해제
+        import weather_board                 # ★ 11-25 `!날씨해제 주식` / `!날씨해제 코인`으로 따로(없으면 전체)
         import weather_control
-        b = await asyncio.to_thread(weather_board.board)
-        acts = await asyncio.to_thread(weather_control.apply, b, "보통")
-        await send_long(ctx, "🔓 오늘 날씨판 제어 해제(보통)\n" + weather_control.format_actions(acts))
+        what = cmd.split()[1] if len(cmd.split()) > 1 else "전체"
+        bots = weather_control.RELEASE_WORDS.get(what)
+        if bots is None:
+            await ctx.send("❌ 사용법: `!날씨해제` (전체) · `!날씨해제 주식` (sbot·daybot) · `!날씨해제 코인` (cbot)")
+        else:
+            b = await asyncio.to_thread(weather_board.board)
+            acts = await asyncio.to_thread(weather_control.apply, b, "보통", bots)
+            await send_long(ctx, f"🔓 오늘 날씨판 제어 해제({what} · 보통)\n" + weather_control.format_actions(acts))
     elif cmd == "!전체상태":
         await cmd_all_status(ctx)
     elif cmd in ("!전체재시작", "!재시작전체", "!all재시작"):
@@ -1030,7 +1037,7 @@ async def money_weather_collector():
                     await send_long(ch, news_weather.format_news(nw))
                     await send_long(ch, weather_board.format_board(b) + "\n" + weather_ai.format_review(rv, 1) + "\n\n"
                                     + weather_control.format_actions(acts)
-                                    + "\n(오늘 날씨판 해제: `!날씨해제` · 다시 보기: `!날씨` · 대시보드 🌦️ 날씨 탭)")
+                                    + "\n(오늘 날씨판 해제: `!날씨해제` · 주식만 `!날씨해제 주식` · 코인만 `!날씨해제 코인` · 다시 보기: `!날씨` · 대시보드 🌦️ 날씨 탭)")
                 # ★ 11-17 3단계: 분야(관심그룹) 날씨 — 관찰·기록만(검증 쌓일 때까지 봇 진입엔 안 씀)
                 import sector_weather
                 sec = await asyncio.to_thread(sector_weather.weather, done_day)

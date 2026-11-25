@@ -50,6 +50,16 @@ class WeatherControlTest(unittest.TestCase):
         self.assertFalse(self.st("cbot")["paused"])
         self.assertTrue(self.st("cbot")["weather"]["override"])
 
+    def test_override_stock_only_keeps_coin_paused(self):
+        """★ 11-25 `!날씨해제 주식` — sbot·daybot만 풀고 cbot은 쉼 그대로(코인만도 반대로)."""
+        wc.apply(board("🔴 쉼", "🔴 쉼"))
+        wc.apply(board("🔴 쉼", "🔴 쉼"), override="보통", bots=wc.RELEASE_WORDS["주식"])
+        self.assertFalse(self.st("sbot")["paused"])
+        self.assertFalse(self.st("daybot")["paused"])
+        self.assertTrue(self.st("cbot")["paused"])
+        wc.apply(board("🔴 쉼", "🔴 쉼"), override="보통", bots=wc.RELEASE_WORDS["코인"])
+        self.assertFalse(self.st("cbot")["paused"])
+
     def test_stale_weather_ignored(self):
         wc.apply(board("🟠 방어", "🟠 방어"))
         self.assertEqual(wc.today_weather(self.st("sbot"), "2026-11-18"), "")

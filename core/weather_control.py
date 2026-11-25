@@ -12,7 +12,7 @@ weather_control.py — 자금시장 날씨판 → 봇 실제 제어 (2026-11-17,
 안전 원칙:
   · 대장이 직접 건 일시중단(!정지 등)이나 손실한도 멈춤은 절대 안 건드림 — 날씨판이 건 멈춤(pause_reason='weather_rest')만 풀고 건다.
   · 날씨 기록은 그날 날짜가 붙어 있어 하루만 유효(키키가 못 돌면 다음 날 자동으로 '날씨 없음' = 봇 자유).
-  · 대장이 `!날씨해제` 하면 그날은 보통으로 바꾸고 날씨판 멈춤을 풂.
+  · 대장이 `!날씨해제` 하면 그날은 보통으로 바꾸고 날씨판 멈춤을 풂. `!날씨해제 주식`(sbot·daybot만) / `!날씨해제 코인`(cbot만) — 11-25
 """
 import datetime
 import os
@@ -48,12 +48,19 @@ def action_for(bot: str, word: str) -> str:
     return a.get(bot, "") if isinstance(a, dict) else a
 
 
-def apply(board: dict, override: str = None) -> list:
-    """날씨판 → 각 봇 상태 파일. → [(봇, 날씨, 한 행동 문구)]. override='보통'이면 대장 해제."""
+STOCK_BOTS, COIN_BOTS = ("sbot", "daybot"), ("cbot",)
+RELEASE_WORDS = {"주식": STOCK_BOTS, "코인": COIN_BOTS, "전체": STOCK_BOTS + COIN_BOTS}
+
+
+def apply(board: dict, override: str = None, bots=None) -> list:
+    """날씨판 → 각 봇 상태 파일. → [(봇, 날씨, 한 행동 문구)]. override='보통'이면 대장 해제.
+    ★ 11-25 대장 "코인과 주식의 날씨해제를 따로": bots로 대상 봇만(None이면 전부)."""
     from common_utils import read_state, update_state
     day = board.get("date") or datetime.date.today().isoformat()
     out = []
     for bot, fname in STATE_FILES.items():
+        if bots and bot not in bots:
+            continue
         path = os.path.join(_BASE, fname)
         st = read_state(path, default={}) or {}
         layer = BOT_LAYER[bot]
