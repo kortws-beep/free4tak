@@ -110,3 +110,6 @@ done
 
 # 5) ★ 11-14 클라우드 이중 백업(구글 드라이브, 암호화) — 설정 전이면 조용히 건너뜀
 "$(dirname "$0")/offsite_upload.sh" "$DEST" || true
+
+# 6) ★ 11-25 외장 SSD(라벨 SSD0) 세 번째 사본 — 안 꽂혀 있으면 조용히 건너뜀
+"$(dirname "$0")/usb_copy.sh" "$DEST" || true
