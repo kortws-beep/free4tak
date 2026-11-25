@@ -517,13 +517,18 @@ def map_page():
     """우리 섹터맵 — 한투 관심그룹 히트맵(2026-11-24)"""
     import heatmap_view
     import bot_overview
-    return heatmap_view.HTML.replace("<body>", "<body>" + bot_overview.NAV, 1)
+    from flask import make_response
+    r = make_response(heatmap_view.HTML.replace("<body>", "<body>" + bot_overview.NAV, 1))
+    r.headers["Cache-Control"] = "no-store"
+    return r
 
 
 @app.route("/api/map")
 def api_map():
     import kr_heatmap
-    return jsonify(kr_heatmap.build())
+    r = jsonify(kr_heatmap.build())
+    r.headers["Cache-Control"] = "no-store"          # ★ 11-25 폰 브라우저가 어제 데이터를 붙잡던 문제
+    return r
 
 
 @app.route("/api/feed")

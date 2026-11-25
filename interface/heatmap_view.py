@@ -147,7 +147,9 @@ function render(){
  document.querySelectorAll('tr.click').forEach(r=>r.onclick=()=>setView(r.dataset.g));
  draw()}
 document.querySelectorAll('[data-s]').forEach(x=>x.onclick=()=>{size=x.dataset.s;document.querySelectorAll('[data-s]').forEach(y=>y.classList.toggle('on',y===x));draw()});
-function load(){fetch('api/map').then(r=>r.json()).then(d=>{D=d;render()}).catch(e=>{document.getElementById('sub').textContent='불러오기 실패: '+e})}
-load();setInterval(load,30000);let rt;
+function load(){fetch('api/map?t='+Date.now(),{cache:'no-store'}).then(r=>r.json()).then(d=>{D=d;render()}).catch(e=>{document.getElementById('sub').textContent='불러오기 실패: '+e})}
+load();setInterval(load,30000);
+// ★ 11-25 폰에서 어제 날짜로 보임 — 백그라운드 탭은 새로고침이 멈추고 예전 응답을 씀 → 화면 다시 보면 즉시 새로 받기 + 캐시 금지
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)load()});window.addEventListener('pageshow',load);let rt;
 window.addEventListener('resize',()=>{clearTimeout(rt);rt=setTimeout(draw,150)});   // 창·폰 회전 때 다시 그림
 </script></body></html>"""
