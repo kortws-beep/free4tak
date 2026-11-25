@@ -990,8 +990,20 @@ MONEY_WEATHER_HHMM = "0710"
 MIDDAY_CHECK_HHMM = "1150"      # ★ 11-17 대장 2차 점검(미국 야간선물 반영) — 기록·표시만
 
 
+_MW_DONE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "intelligence", "money_weather_done.txt")
+
+
+def _mw_done_read() -> str:
+    try:
+        with open(_MW_DONE, encoding="utf-8") as f:
+            return f.read().strip()
+    except OSError:
+        return ""
+
+
 async def money_weather_collector():
-    done_day = ""
+    # ★ 11-25 재부팅·재시작 때 07:10 아침 날씨판이 다시 돌아(채널에 또 보내고 대장 해제를 덮어씀) — 한 날짜는 한 번만, 파일에 기억
+    done_day = _mw_done_read()
     mid_day = ""
     while True:
         try:
@@ -1016,6 +1028,11 @@ async def money_weather_collector():
                 import money_weather
                 n = await asyncio.to_thread(money_weather.collect)
                 done_day = now.date().isoformat()
+                try:
+                    with open(_MW_DONE, "w", encoding="utf-8") as f:
+                        f.write(done_day)
+                except OSError:
+                    pass
                 print(f"🌦️ [자금날씨] 글로벌 지표 {n}줄 갱신")
                 # ★ 11-17 대장 "뉴스도 반영" — 1차 뉴스 층(전일 12:00~07:00)을 먼저 판단해 날씨판에 넣음
                 import news_weather

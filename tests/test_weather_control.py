@@ -60,6 +60,14 @@ class WeatherControlTest(unittest.TestCase):
         wc.apply(board("🔴 쉼", "🔴 쉼"), override="보통", bots=wc.RELEASE_WORDS["코인"])
         self.assertFalse(self.st("cbot")["paused"])
 
+    def test_recompute_same_day_keeps_override(self):
+        """★ 11-25 재부팅 뒤 07:10 계산이 다시 돌아도 대장 해제는 유지."""
+        wc.apply(board("🔴 쉼", "🔴 쉼"))
+        wc.apply(board("🔴 쉼", "🔴 쉼"), override="보통")
+        wc.apply(board("🔴 쉼", "🔴 쉼"))                      # 재시작으로 다시 계산
+        self.assertFalse(self.st("sbot")["paused"])
+        self.assertTrue(self.st("sbot")["weather"]["override"])
+
     def test_stale_weather_ignored(self):
         wc.apply(board("🟠 방어", "🟠 방어"))
         self.assertEqual(wc.today_weather(self.st("sbot"), "2026-11-18"), "")

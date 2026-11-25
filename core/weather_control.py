@@ -68,6 +68,12 @@ def apply(board: dict, override: str = None, bots=None) -> list:
         word = override or _word(label)
         if not word:
             continue
+        prev = st.get("weather") or {}
+        if not override and prev.get("date") == day and prev.get("override"):
+            # ★ 11-25 재부팅·키키 재시작 때 07:10 계산이 다시 돌면서 대장이 오늘 푼 해제(override)를 덮어써 봇이 다시 쉼에 걸렸음
+            #   → 같은 날 대장 해제는 유지(내일 07:10에 새로 판단)
+            out.append((bot, prev.get("state", "보통"), "오늘 대장 해제 유지(다시 계산해도 안 덮어씀)"))
+            continue
         kw = {"weather": {"date": day, "state": word, "score": score, "label": label, "override": bool(override)}}
         did = action_for(bot, word)
         manual_pause = st.get("paused") and st.get("pause_reason") != PAUSE_REASON

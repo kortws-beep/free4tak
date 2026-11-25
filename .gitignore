@@ -35,3 +35,4 @@ docs/reference/semi_map_part14.txt
 *.db-wal
 *.db-shm
 intelligence/kr_heatmap_groups.json
+intelligence/money_weather_done.txt
