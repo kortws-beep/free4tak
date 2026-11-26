@@ -262,7 +262,10 @@ def build(force: bool = False) -> dict:
     on_map = {m["code"] for s_ in data["sectors"] + data["watch"] for m in s_["members"]}
     data["mine"] = {c: {**v, "name": v["name"] or (q.get(c) or {}).get("name", c), "chg": (q.get(c) or {}).get("chg"),
                         "price": (q.get(c) or {}).get("price"), "on_map": c in on_map} for c, v in mine.items()}
-    sh = [{"code": c, "name": n, "chg": (q.get(c) or {}).get("chg")} for c, n in SHIELD.items()]
+    # ★ 11-26 대장이 '방패_' 관심그룹 4개를 만듦 → 방패 줄은 그 그룹들(분야 평균, 시총 가중). 없으면 검증된 3종목
+    shg = [x for x in data["sectors"] if x["group"].startswith("방패_") and x.get("chg_w") is not None]
+    sh = ([{"code": "", "name": x["group"].replace("방패_", ""), "chg": x["chg_w"]} for x in shg] if shg else
+          [{"code": c, "name": n, "chg": (q.get(c) or {}).get("chg")} for c, n in SHIELD.items()])
     ai = [x["chg_w"] for x in data["sectors"] if x["group"] in AI_GROUPS and x.get("chg_w") is not None]
     data["shield"] = {"items": sh, "avg": round(sum(x["chg"] for x in sh if x["chg"] is not None) / max(1, sum(x["chg"] is not None for x in sh)), 2),
                       "ai": round(sum(ai) / len(ai), 2) if ai else None}
