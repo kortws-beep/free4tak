@@ -79,9 +79,13 @@ function squarify(items,x,y,w,h){const out=[];const tot=items.reduce((a,b)=>a+b.
  return out}
 // ★ 11-25 거래대금이 거의 없을 때(프리장 초반·장 시작 전)는 시총으로 대신 — 칸이 다 같은 크기가 되는 것 방지
 let valueOK=true;
-const wOf=m=>size==='cap'||(size==='value'&&!valueOK)?(m.cap||1):size==='eq'?1:(m.value||1);
+// ★ 11-26 대장 "전광판이 산만 — 대장주·시총 큰 종목은 1~2포인트 낮추고 나머지는 살짝 키우기": 크기를 0.6제곱으로 눌러 고르게
+//   (예: 100배 차이 → 약 16배). 대장주(👑)도 분야 최대 칸의 80%까지만 키움
+const SHRINK=0.6;
+const wRaw=m=>size==='cap'||(size==='value'&&!valueOK)?(m.cap||1):size==='eq'?1:(m.value||1);
+const wOf=m=>size==='eq'?1:Math.pow(Math.max(wRaw(m),1),SHRINK);
 function tiles(el,mem,x,y,w,h){const mx=Math.max(...mem.map(wOf));   // ★ 11-25 대장 지정 대장주(👑)는 그 분야 가장 큰 칸 이상
- for(const r of squarify(mem.map(m=>({...m,w:m.leader?Math.max(wOf(m),mx):wOf(m)})).sort((a,b)=>b.w-a.w),x,y,w,h)){
+ for(const r of squarify(mem.map(m=>({...m,w:m.leader?Math.max(wOf(m),mx*0.8):wOf(m)})).sort((a,b)=>b.w-a.w),x,y,w,h)){
   const big=document.body.classList.contains('tv');const m=r.item,fs=Math.max(big?11:9,Math.min(big?24:16,Math.sqrt(r.w*r.h)/(big?5:6)));const t=document.createElement('div');
   const my=(D.mine||{})[m.code];t.className='tile'+(my?' mine':'');
   Object.assign(t.style,{left:r.x+'px',top:r.y+'px',width:r.w+'px',height:r.h+'px',background:color(m.chg),fontSize:fs+'px'});
