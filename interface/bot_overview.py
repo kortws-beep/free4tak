@@ -215,7 +215,16 @@ NAV = """<nav class="nav"><a href="lina" data-p="lina">📋 리나</a><a href="f
 <style>.nav{display:flex;gap:6px;margin:0 0 10px;position:sticky;top:0;background:var(--bg);padding:8px 0;z-index:5}
 .nav a{flex:1;text-align:center;padding:8px 2px;white-space:nowrap;border-radius:10px;border:1px solid var(--bd,#2a2d3a);color:var(--sub,#94a3b8);
 text-decoration:none;font-size:13px;background:var(--card,#1a1d27)}.nav a.on{color:var(--tx,#e2e8f0);border-color:var(--tx,#e2e8f0);font-weight:700}</style>
-<script>document.querySelectorAll('.nav a').forEach(a=>{if(location.pathname.endsWith('/'+a.dataset.p))a.classList.add('on')})</script>"""
+<script>document.querySelectorAll('.nav a').forEach(a=>{if(location.pathname.endsWith('/'+a.dataset.p))a.classList.add('on')});
+// ★ 11-26 대장 "맵에서 n 누르면 다음 화면으로" — n 다음 · p 이전 · 1~7 바로 가기. 한글 입력 상태여도 되게 키 자리(e.code)로 봄,
+//   입력칸(리나 PIN 등)에서 칠 땐 꺼짐. 큰 화면 모드(?tv=1)는 넘어가도 유지
+if(!window.__navKeys){window.__navKeys=1;document.addEventListener('keydown',e=>{
+ if(e.ctrlKey||e.metaKey||e.altKey)return;const t=e.target;if(t&&(/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)||t.isContentEditable))return;
+ const L=[...document.querySelectorAll('.nav a')];if(!L.length)return;let i=L.findIndex(a=>a.classList.contains('on'));if(i<0)i=0;
+ let j=null;if(e.code==='KeyN')j=(i+1)%L.length;else if(e.code==='KeyP')j=(i-1+L.length)%L.length;
+ else{const m=/^(Digit|Numpad)([1-9])$/.exec(e.code);if(m&&+m[2]<=L.length)j=+m[2]-1}
+ if(j==null||j===i)return;e.preventDefault();
+ const tv=new URLSearchParams(location.search).has('tv')||document.body.classList.contains('tv');location.href=L[j].getAttribute('href')+(tv?'?tv=1':'')})}</script>"""
 
 HTML = """<!DOCTYPE html>
 <html lang="ko"><head>

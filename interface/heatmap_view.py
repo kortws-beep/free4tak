@@ -94,7 +94,7 @@ function tiles(el,mem,x,y,w,h){const mx=Math.max(...mem.map(wOf));   // ★ 11-2
   el.appendChild(t)}}
 const TV=new URLSearchParams(location.search).has('tv');if(TV)document.body.classList.add('tv');
 // ★ 11-26 27인치 전광판 '큰 화면 모드' — 주소 끝에 ?tv=1 (메뉴·지수판·순위표 숨김, 지도가 화면 아래까지, 글씨 크게) · 키보드 t로 켜고 끄기
-document.addEventListener('keydown',e=>{if(e.key==='t'&&!e.ctrlKey&&!e.metaKey&&!/input|textarea/i.test(e.target.tagName)){document.body.classList.toggle('tv');draw()}});
+document.addEventListener('keydown',e=>{if(e.code==='KeyT'&&!e.ctrlKey&&!e.metaKey&&!e.altKey&&!/input|textarea/i.test(e.target.tagName)){document.body.classList.toggle('tv');draw()}});   // 한글 입력 상태(ㅅ)여도 되게 키 자리로
 function draw(){const el=document.getElementById('map');el.innerHTML='';if(!D)return;
  {const all=D.sectors.flatMap(s=>s.members);valueOK=all.filter(m=>m.value>0).length>=all.length*0.5}
  el.style.height=(document.body.classList.contains('tv')?Math.max(420,window.innerHeight-el.getBoundingClientRect().top-8):Math.max(420,Math.round(window.innerHeight*0.68)))+'px';const W=el.clientWidth,H=el.clientHeight;
