@@ -1,4 +1,5 @@
 """우리 섹터맵(kr_heatmap) — 네이버 시세 해석·분야 합계(시총 가중)·분야 아닌 그룹 분리."""
+import json
 import os
 import sys
 import unittest
@@ -82,6 +83,26 @@ class Heatmap(unittest.TestCase):
         node = next(n for n in ast.walk(ast.parse(src)) if isinstance(n, ast.Assign)
                     and any(getattr(t, "id", "") == "MEGA_CAP_CODES" for t in n.targets))
         self.assertEqual(set(ast.literal_eval(node.value)), set(H.S7_CODES))   # sbot S7 목록과 같아야 함
+
+    def test_my_holdings_merges_sources(self):
+        d = tempfile.mkdtemp()
+        old = (H.LINA_WATCH, H._BASE)
+        with open(os.path.join(d, "w.json"), "w") as f:
+            json.dump({"000150": {"name": "두산", "entry_price": 556000, "account": "kiwoom"},
+                       "161890@s": {"name": "한국콜마", "entry_price": 134600, "account": "swing"}}, f)
+        with open(os.path.join(d, "sbot_state.json"), "w") as f:
+            json.dump({"peak_tracker": {"086450": {}, "161890": {}}}, f)
+        with open(os.path.join(d, "daybot_state.json"), "w") as f:
+            json.dump({"positions": {"272110": {}}}, f)
+        H.LINA_WATCH, H._BASE = os.path.join(d, "w.json"), d
+        try:
+            m = H.my_holdings()
+        finally:
+            H.LINA_WATCH, H._BASE = old
+        self.assertEqual(m["000150"]["where"], ["K"])
+        self.assertEqual(m["161890"]["where"], ["S", "sbot"])
+        self.assertEqual(m["161890"]["avg"], 134600)
+        self.assertEqual(m["272110"]["where"], ["daybot"])
 
 
 if __name__ == "__main__":

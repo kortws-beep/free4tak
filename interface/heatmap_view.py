@@ -27,6 +27,10 @@ HTML = """<!DOCTYPE html>
   border-radius:8px;padding:3px 8px;cursor:pointer}.wx .lab{color:var(--sub)}.sec.pick{outline:2px solid #facc15;outline-offset:-2px;z-index:1}
  .tile{position:absolute;border:1px solid rgba(15,17,23,.85);display:flex;flex-direction:column;align-items:center;justify-content:center;
   text-align:center;overflow:hidden;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.6);line-height:1.15}
+ body.tv .nav,body.tv .idx,body.tv .bar,body.tv table,body.tv .small.foot,body.tv h1{display:none}
+ body.tv{padding:4px 8px}body.tv .sub{font-size:14px}body.tv .wx,body.tv .mine-row{font-size:15px}
+ .tile.mine{box-shadow:inset 0 0 0 3px #facc15}.mine-row{font-size:12px;margin:2px 0 6px;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+ .mine-row .c{background:var(--card);border:1px solid #facc15;border-radius:8px;padding:2px 7px}
  .tile .n{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;padding:0 2px}
  .legend{display:flex;flex-wrap:wrap;align-items:center;gap:4px;font-size:11px;color:var(--sub);margin:6px 0}.legend .sw{width:26px;height:10px;display:inline-block;border-radius:2px}
  table{width:100%;border-collapse:collapse;font-size:13px;margin-top:10px}td,th{padding:6px 4px;border-bottom:1px solid var(--bd);text-align:left}
@@ -41,6 +45,8 @@ HTML = """<!DOCTYPE html>
 </style></head><body>
 <h1>🗺️ 우리 섹터맵</h1><div class="sub" id="sub">불러오는 중…</div>
 <div class="wx" id="wx"></div>
+<div class="mine-row" id="shield"></div>
+<div class="mine-row" id="mine"></div>
 <div class="idx" id="idx"></div>
 <div class="bar" id="views"></div>
 <div class="bar"><span class="small" style="align-self:center">칸 크기</span>
@@ -51,7 +57,7 @@ HTML = """<!DOCTYPE html>
  <span class="sw" style="background:#38bdf8"></span>~+5<span class="sw" style="background:#22c55e"></span>+5%↑</div>
 <div class="sub" id="br"></div>
 <table id="tbl"></table>
-<div class="small" style="margin-top:8px">분야 = 대장 한투 관심그룹 · 등락은 시총 가중(괄호 안 단순 평균) · 시세 네이버(30초) · 그룹 구성 30분마다 다시 읽음</div>
+<div class="small foot" style="margin-top:8px">분야 = 대장 한투 관심그룹 · 등락은 시총 가중(괄호 안 단순 평균) · 시세 네이버(30초) · 그룹 구성 30분마다 다시 읽음</div>
 <script>
 let D=null,view='all',size='value';
 const esc=s=>String(s??'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
@@ -76,14 +82,18 @@ let valueOK=true;
 const wOf=m=>size==='cap'||(size==='value'&&!valueOK)?(m.cap||1):size==='eq'?1:(m.value||1);
 function tiles(el,mem,x,y,w,h){const mx=Math.max(...mem.map(wOf));   // ★ 11-25 대장 지정 대장주(👑)는 그 분야 가장 큰 칸 이상
  for(const r of squarify(mem.map(m=>({...m,w:m.leader?Math.max(wOf(m),mx):wOf(m)})).sort((a,b)=>b.w-a.w),x,y,w,h)){
-  const m=r.item,fs=Math.max(9,Math.min(16,Math.sqrt(r.w*r.h)/6));const t=document.createElement('div');t.className='tile';
+  const big=document.body.classList.contains('tv');const m=r.item,fs=Math.max(big?11:9,Math.min(big?24:16,Math.sqrt(r.w*r.h)/(big?5:6)));const t=document.createElement('div');
+  const my=(D.mine||{})[m.code];t.className='tile'+(my?' mine':'');
   Object.assign(t.style,{left:r.x+'px',top:r.y+'px',width:r.w+'px',height:r.h+'px',background:color(m.chg),fontSize:fs+'px'});
-  t.title=`${m.leader?'👑 '+m.leader+' · ':''}${m.tag?'🔗 '+m.tag+' · ':''}${m.name} ${sg(m.chg)}${m.chg}% · 시총 ${(m.cap/1e12).toFixed(2)}조 · 거래대금 ${Math.round(m.value/1e8)}억`;
-  if(r.w>34&&r.h>22)t.innerHTML=`<div class="n">${m.leader?'👑':''}${esc(m.name)}</div>`+(r.h>34?`<div>${sg(m.chg)}${m.chg.toFixed(2)}%</div>`:'');
+  t.title=`${my?'🟡 내 종목('+my.where.join('·')+(my.avg?` 평단 ${Math.round(my.avg).toLocaleString()} → ${sg(m.price/my.avg*100-100)}${(m.price/my.avg*100-100).toFixed(1)}%`:'')+') · ':''}${m.leader?'👑 '+m.leader+' · ':''}${m.tag?'🔗 '+m.tag+' · ':''}${m.name} ${sg(m.chg)}${m.chg}% · 시총 ${(m.cap/1e12).toFixed(2)}조 · 거래대금 ${Math.round(m.value/1e8)}억`;
+  if(r.w>34&&r.h>22)t.innerHTML=`<div class="n">${my?'🟡':''}${m.leader?'👑':''}${esc(m.name)}</div>`+(r.h>34?`<div>${sg(m.chg)}${m.chg.toFixed(2)}%</div>`:'');
   el.appendChild(t)}}
+const TV=new URLSearchParams(location.search).has('tv');if(TV)document.body.classList.add('tv');
+// ★ 11-26 27인치 전광판 '큰 화면 모드' — 주소 끝에 ?tv=1 (메뉴·지수판·순위표 숨김, 지도가 화면 아래까지, 글씨 크게) · 키보드 t로 켜고 끄기
+document.addEventListener('keydown',e=>{if(e.key==='t'&&!e.ctrlKey&&!e.metaKey&&!/input|textarea/i.test(e.target.tagName)){document.body.classList.toggle('tv');draw()}});
 function draw(){const el=document.getElementById('map');el.innerHTML='';if(!D)return;
  {const all=D.sectors.flatMap(s=>s.members);valueOK=all.filter(m=>m.value>0).length>=all.length*0.5}
- el.style.height=Math.max(420,Math.round(window.innerHeight*0.68))+'px';const W=el.clientWidth,H=el.clientHeight;
+ el.style.height=(document.body.classList.contains('tv')?Math.max(420,window.innerHeight-el.getBoundingClientRect().top-8):Math.max(420,Math.round(window.innerHeight*0.68)))+'px';const W=el.clientWidth,H=el.clientHeight;
  let secs=view==='all'?D.sectors:[...D.sectors,...D.watch].filter(s=>s.group===view);
  if(view!=='all'&&secs.length){tiles(el,secs[0].members,0,0,W,H);return}
  const items=secs.map(s=>({...s,w:size==='eq'?s.n:s.members.reduce((a,m)=>a+wOf(m),0)}));
@@ -107,7 +117,7 @@ function popHtml(s){const n=s.n||s.members.length,up=s.up,dn=s.down,fl=s.flat??(
  <div class="small">${n}종목 중 <span class="p">${up}개 상승</span> · ${fl}개 보합 · <span class="m">${dn}개 하락</span> · 단순평균 ${sg(s.chg)}${s.chg}%</div>
  ${usHtml(s.group)}
  <div style="margin:10px 0 4px;font-weight:600">시가총액 상위 ${top.length}</div>`+
- top.map((m,i)=>`<div class="row"><div><span class="rk">${i+1}</span><span class="nm">${m.leader?'👑':''}${esc(m.name)}</span>${m.leader?`<span class="me" style="background:#713f12;color:#fde68a">${esc(m.leader)}</span>`:''}${m.tag?`<span class="me" style="background:#1e3a5f;color:#bae6fd">${esc(m.tag)}</span>`:''}${m.code===best.code?'<span class="me">오늘 최강</span>':''}
+ top.map((m,i)=>`<div class="row"><div><span class="rk">${i+1}</span><span class="nm">${(D.mine||{})[m.code]?'🟡':''}${m.leader?'👑':''}${esc(m.name)}</span>${m.leader?`<span class="me" style="background:#713f12;color:#fde68a">${esc(m.leader)}</span>`:''}${m.tag?`<span class="me" style="background:#1e3a5f;color:#bae6fd">${esc(m.tag)}</span>`:''}${m.code===best.code?'<span class="me">오늘 최강</span>':''}
   <div class="small" style="margin-left:16px">${esc(m.code)} · 시총 ${won(m.cap)} · 거래 ${won(m.value)}</div></div>
   <div style="text-align:right">${m.price?Math.round(m.price).toLocaleString():''}<div class="${m.chg>0?'p':(m.chg<0?'m':'')}">${sg(m.chg)}${m.chg.toFixed(2)}%</div></div></div>`).join('')+
  (best&&!top.find(m=>m.code===best.code)?`<div class="small" style="margin-top:6px">오늘 최강: ${esc(best.name)} ${sg(best.chg)}${best.chg}%</div>`:'')+
@@ -122,7 +132,18 @@ function showPop(s,x,y){pop.innerHTML=popHtml(s);pop.style.display='block';const
 function hidePop(){pop.style.display='none'}
 document.addEventListener('click',e=>{if(!e.target.closest('.sec'))hidePop()});
 function setView(v){hidePop();view=v;document.querySelectorAll('#views button').forEach(b=>b.classList.toggle('on',b.dataset.v===v));draw();window.scrollTo(0,0)}
-function render(){
+function renderMine(){const M=Object.entries(D.mine||{});const el=document.getElementById('mine');
+ if(!M.length){el.innerHTML='';return}
+ // ★ 11-26 대장 — 전광판에서 내 종목 한눈에(🟡 = 리나 등록 K·D·S + sbot·daybot 보유, 평단은 리나 등록 기준)
+ el.innerHTML='<span class="small">🟡 내 종목</span>'+M.sort((a,b)=>(b[1].chg??-99)-(a[1].chg??-99)).map(([c,v])=>{
+  const pl=v.avg&&v.price?(v.price/v.avg*100-100):null;
+  return `<span class="c" title="${esc(v.where.join('·'))}${v.on_map?'':' · 지도 밖(관심그룹에 없음)'}">${esc(v.name)} <b class="${(v.chg||0)>0?'p':'m'}">${v.chg!=null?sg(v.chg)+v.chg.toFixed(1)+'%':'-'}</b>`+
+   (pl!=null?` <span class="small">평단 ${sg(pl)}${pl.toFixed(1)}%</span>`:'')+(v.on_map?'':' <span class="small">·밖</span>')+'</span>'}).join('')}
+function renderShield(){const S=D.shield;const el=document.getElementById('shield');if(!S){el.innerHTML='';return}
+ // ★ 11-26 검증된 방패 3종(KT&G·LGU+·KT) vs AI 분야 평균 — AI가 빠지는데 방패가 버티면 헤지가 일하는 중
+ el.innerHTML=`<span class="small">🛡️ 방패</span>`+S.items.map(x=>`<span class="c" style="border-color:#38bdf8">${esc(x.name)} <b class="${(x.chg||0)>0?'p':'m'}">${x.chg!=null?sg(x.chg)+x.chg.toFixed(1)+'%':'-'}</b></span>`).join('')+
+  `<span class="small">평균 <b class="${S.avg>0?'p':'m'}">${sg(S.avg)}${S.avg}%</b> vs 🤖 AI 분야 <b class="${(S.ai||0)>0?'p':'m'}">${S.ai!=null?sg(S.ai)+S.ai+'%':'-'}</b></span>`}
+function render(){renderShield();renderMine();
  const W=D.weather||{},P=(W.picks||[]).map(p=>p.group);
  document.getElementById('wx').innerHTML=`<span class="lab">🌦️ 오늘 태세 <b>${esc(W.stock||'-')}</b>${W.override?' → 대장 해제':''} · 🎯 진입 분야</span>`+
   ((W.picks||[]).length?W.picks.map(p=>`<span class="chip" data-g="${esc(p.group)}">${esc(p.state.split(' ')[0])} ${esc(p.group)} ${p.score>0?'+':''}${p.score}${p.leader?' · '+esc(p.leader):''}</span>`).join('')

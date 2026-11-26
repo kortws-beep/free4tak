@@ -212,13 +212,60 @@ def with_s7(groups: dict) -> dict:
     return out
 
 
+LINA_WATCH = os.path.join(_BASE, "lina_bot", "manual_watch_state.json")
+# ★ 11-26 검증(backtest/refuge_validate.py): AI 급락·시장 급락 둘 다 강했던 방어 3종 — 전광판에서 'AI 빠질 때 방패가 버티나' 실시간으로
+SHIELD = {"033780": "KT&G", "032640": "LG유플러스", "030200": "KT"}
+AI_GROUPS = ["반도체_HBM패키징", "반도체_기판PCB", "반도체_전공정장비", "반도체_소재부품", "반도체_후공정테스트", "반도체_MLCC",
+             "반도체_유리기판", "S7 대형주", "전력_변압기", "전력_전선케이블", "신재생_ESS", "통신",
+             "로봇_휴머노이드", "로봇_피지컬AI자동화", "로봇_주관심"]
+
+
+def my_holdings() -> dict:
+    """★ 11-26 대장 '지도에 내 종목' — {code: {"name", "where": [계좌/봇], "avg": 평단(리나 등록만)}}.
+    리나 등록(K=키움·D=데이봇 계좌·S=스윙 계좌) + sbot 장부(peak_tracker) + daybot 보유. 읽기만."""
+    out = {}
+
+    def add(code, where, name="", avg=None):
+        o = out.setdefault(code, {"name": name, "where": [], "avg": None})
+        if where not in o["where"]:
+            o["where"].append(where)
+        o["name"] = o["name"] or name
+        if avg and not o["avg"]:
+            o["avg"] = float(avg)
+    try:
+        with open(LINA_WATCH, encoding="utf-8") as f:
+            for k, v in (json.load(f) or {}).items():
+                code = k.split("@")[0]
+                acct = {"kiwoom": "K", "daybot": "D", "swing": "S"}.get(v.get("account") or "kiwoom", "K")
+                add(code, acct, v.get("name") or "", v.get("entry_price"))
+    except (OSError, ValueError):
+        pass
+    for fn, tag, key in (("sbot_state.json", "sbot", "peak_tracker"), ("daybot_state.json", "daybot", "positions")):
+        try:
+            with open(os.path.join(_BASE, fn), encoding="utf-8") as f:
+                for code in ((json.load(f) or {}).get(key) or {}):
+                    add(code, tag)
+        except (OSError, ValueError):
+            pass
+    return out
+
+
 def build(force: bool = False) -> dict:
     now = time.time()
     if not force and _build_cache["data"] and now - _build_cache["t"] < QUOTE_TTL:
         return _build_cache["data"]
     groups = with_s7(load_groups())
-    codes = sorted({c for v in groups.values() for c, _ in v})
-    data = summarize(groups, quotes(codes))
+    mine = my_holdings()
+    codes = sorted({c for v in groups.values() for c, _ in v} | set(mine) | set(SHIELD))
+    q = quotes(codes)
+    data = summarize(groups, q)
+    on_map = {m["code"] for s_ in data["sectors"] + data["watch"] for m in s_["members"]}
+    data["mine"] = {c: {**v, "name": v["name"] or (q.get(c) or {}).get("name", c), "chg": (q.get(c) or {}).get("chg"),
+                        "price": (q.get(c) or {}).get("price"), "on_map": c in on_map} for c, v in mine.items()}
+    sh = [{"code": c, "name": n, "chg": (q.get(c) or {}).get("chg")} for c, n in SHIELD.items()]
+    ai = [x["chg_w"] for x in data["sectors"] if x["group"] in AI_GROUPS and x.get("chg_w") is not None]
+    data["shield"] = {"items": sh, "avg": round(sum(x["chg"] for x in sh if x["chg"] is not None) / max(1, sum(x["chg"] is not None for x in sh)), 2),
+                      "ai": round(sum(ai) / len(ai), 2) if ai else None}
     data["pre"] = sum(1 for x in _quote_cache["data"].values() if x.get("session") == "PRE")   # 프리장 시세로 그린 종목 수
     data["index"] = index_snapshot()
     data["weather"] = weather_picks()
