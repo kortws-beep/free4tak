@@ -97,16 +97,14 @@ def load() -> dict:
 
 
 def brief(d: dict) -> str:
-    """리나 DM 짧은 알림 — 각 3개."""
-    L = [f"🎯 **오늘의 후보** {d.get('at', '')} — 자세히는 대시보드 🎯 후보 탭"]
-    r = d.get("rubber") or []
-    L.append("🏀 고무공: " + (", ".join(f"{x['name']}({x['dd1m']:.0f}%)" for x in r[:3]) if r else "없음"))
-    g = (d.get("semi") or {}).get("good") or []
-    L.append("🔬 반도체: " + (", ".join(f"{x['name']}({x['dd']:.0f}%)" for x in g[:3]) if g else "없음"))
+    """리나 DM — ★ 11-26 대장 "DM 너무 많이 와, 있음/없음만": 한 줄. 자세한 건 대시보드 🎯 후보 탭.
+    방패 '있음' = 방패 분야 중 AI 분야 평균보다 강한 곳이 있음(헤지가 일하는 중)."""
+    yn = lambda n: f"있음({n})" if n else "없음"
     s = d.get("shield") or {}
-    if s.get("groups"):
-        L.append(f"🛡️ 방패: 평균 {s['avg']:+.2f}% vs AI {s['ai']:+.2f}% · " + ", ".join(f"{x['group']} {x['chg_w']:+.1f}%" for x in s["groups"][:3]))
-    return "\n".join(L)
+    ai = s.get("ai")
+    strong = sum(1 for g in s.get("groups") or [] if ai is not None and g.get("chg_w") is not None and g["chg_w"] > ai)
+    return (f"🎯 오늘의 후보 {d.get('at', '')} — 고무공: {yn(len(d.get('rubber') or []))} · "
+            f"반도체: {yn(len((d.get('semi') or {}).get('good') or []))} · 방패: {yn(strong)} (대시보드 🎯 후보)")
 
 
 if __name__ == "__main__":

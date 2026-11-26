@@ -29,9 +29,10 @@ class MorningPicks(unittest.TestCase):
         d = {"at": "09:10", "rubber": [{"name": "디아이", "dd1m": -49}], "semi": {"good": [{"name": "두산", "dd": -76}]},
              "shield": M.shield(DATA)}
         b = M.brief(d)
-        self.assertIn("디아이", b)
-        self.assertIn("두산", b)
-        self.assertIn("방패", b)
+        self.assertIn("고무공: 있음(1)", b)
+        self.assertIn("반도체: 있음(1)", b)
+        self.assertIn("방패: 있음(2)", b)          # 두 방패 분야 모두 AI(-3.1%)보다 강함
+        self.assertIn("고무공: 없음", M.brief({"rubber": [], "semi": {}, "shield": {}}))
 
 
 if __name__ == "__main__":
