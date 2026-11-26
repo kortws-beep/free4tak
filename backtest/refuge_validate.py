@@ -254,5 +254,44 @@ def main():
                 show(rule, rets, cds, uds, str(ch))
 
 
+DEFENSE = {"SK텔레콤": "통신", "KT": "통신", "LG유플러스": "통신", "한국전력": "한전", "KT&G": "KT&G", "신세계": "신세계"}
+
+
+def market_split():
+    """★ 11-26 대장 가설: '통신서비스·한전·KT&G·신세계 같은 방어주는 AI만 무너질 때보다 코스피·코스닥 전체가 무너질 때 더 맞다'.
+    날을 셋으로 나눔(전 종목 단순 평균 = 시장): A 시장 급락(-2.5%↓) / B AI만 급락(AI -3%↓ & 시장 -1.5%보다 위) / C 평범한 날."""
+    groups = load_groups()
+    rows, dates = daily_all()
+    mv = moves(rows)
+    gd = group_days(groups, mv, dates)
+    mkt = {}
+    for d in dates:
+        v = [m[d][1] for m in mv.values() if d in m and abs(m[d][1]) < 31]
+        if len(v) > 500:
+            mkt[d] = st.mean(v)
+    ai = {d: st.mean(gd[g][d][1] for g in AI if d in gd.get(g, {})) for d in mkt if sum(1 for g in AI if d in gd.get(g, {})) >= 8}
+    A = [d for d in ai if mkt[d] <= -2.5]
+    B = [d for d in ai if ai[d] <= CRASH and mkt[d] > -1.5]
+    C = [d for d in ai if d not in A and d not in B]
+    print(f"\n=== ④ 방어주 가설 — A 시장 전체 급락 {len(A)}일 (시장 {st.mean(mkt[d] for d in A):+.2f}%, AI {st.mean(ai[d] for d in A):+.2f}%) · "
+          f"B AI만 급락 {len(B)}일 (시장 {st.mean(mkt[d] for d in B):+.2f}%, AI {st.mean(ai[d] for d in B):+.2f}%) ===")
+    print(f"{'종목/분야':14s} {'A 시장급락':>10s} {'시장대비':>8s} {'+날%':>5s} | {'B AI만급락':>10s} {'시장대비':>8s} {'+날%':>5s} | {'평소':>6s}")
+    def line(name, f):
+        def agg(ds):
+            v = [(f(d), mkt[d]) for d in ds if f(d) is not None]
+            if not v:
+                return "         -        -     -"
+            return f"{st.mean(x for x, _ in v):+10.2f} {st.mean(x - m for x, m in v):+8.2f} {sum(x > 0 for x, _ in v) / len(v) * 100:5.0f}"
+        cv = [f(d) for d in C if f(d) is not None]
+        print(f"{name:14s} {agg(A)} | {agg(B)} | {st.mean(cv) if cv else 0:+6.2f}")
+    for n in DEFENSE:
+        line(n, lambda d, n=n: mv.get(n, {}).get(d, (None, None))[1])
+    line("방어 바구니", lambda d: st.mean([mv[n][d][1] for n in DEFENSE if d in mv.get(n, {})] or [None]) if any(d in mv.get(n, {}) for n in DEFENSE) else None)
+    for g in ("통신서비스", "식음료", "화장품", "유통", "보험", "교육"):
+        line(g, lambda d, g=g: gd.get(g, {}).get(d, (None, None))[1])
+    line("AI 그룹", lambda d: ai.get(d))
+
+
 if __name__ == "__main__":
     main()
+    market_split()
