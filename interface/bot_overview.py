@@ -105,6 +105,7 @@ INVENTORY = [
             ("단타000(1분) · 주도주검색식3(3분) · 090930타점(1분, 키움과 맞출 때까지 기록만·알림 꺼짐)", "2026-10-22"),
             ("한투 관심그룹 섹터 감시 🚩(3분) · 09:35 시장 쏠림 브리핑", ""),
             ("🎢 널뛰기장(국면<35%) 코스피 -3%↓ 날 '최저점 통과'·'종가가 최저점(애프터장)' 매수 후보 알림 · `!널뛰기` · `… 널` 등록은 다음 날 15:10 정리", "2026-11-20"),
+            ("🎯 09:10 오늘의 후보 — 고무공·반도체·방패를 한 번에 계산해 대시보드 🎯 후보 탭 + DM 짧게, `!방패`로 지금 방패 분야", "2026-11-26"),
             ("🔬 `!반도체` 반도체 소부장 선별(김태성 전략) — 6개월 고점 -50%↓ & 올해 영업이익 증가 = 추가매수 검토, 이익 감소는 교체 후보, 내 보유 판정", "2026-11-26"),
         ]),
         ("📊 장 마감 뒤", [
@@ -210,7 +211,7 @@ def engines_html() -> str:
             .replace("try{tab(+localStorage.getItem('bots_tab')||1)}catch(e){}", "tab(3);"))
 
 
-NAV = """<nav class="nav"><a href="lina" data-p="lina">📋 리나</a><a href="feed" data-p="feed">🗂️ 메시지</a><a href="bots" data-p="bots">🤖 봇 기능</a><a href="engines" data-p="engines">🏁 대항전</a><a href="weather" data-p="weather">🌦️ 날씨</a><a href="map" data-p="map">🗺️ 맵</a></nav>
+NAV = """<nav class="nav"><a href="lina" data-p="lina">📋 리나</a><a href="feed" data-p="feed">🗂️ 메시지</a><a href="bots" data-p="bots">🤖 봇 기능</a><a href="engines" data-p="engines">🏁 대항전</a><a href="weather" data-p="weather">🌦️ 날씨</a><a href="map" data-p="map">🗺️ 맵</a><a href="picks" data-p="picks">🎯 후보</a></nav>
 <style>.nav{display:flex;gap:6px;margin:0 0 10px;position:sticky;top:0;background:var(--bg);padding:8px 0;z-index:5}
 .nav a{flex:1;text-align:center;padding:8px 2px;white-space:nowrap;border-radius:10px;border:1px solid var(--bd,#2a2d3a);color:var(--sub,#94a3b8);
 text-decoration:none;font-size:13px;background:var(--card,#1a1d27)}.nav a.on{color:var(--tx,#e2e8f0);border-color:var(--tx,#e2e8f0);font-weight:700}</style>

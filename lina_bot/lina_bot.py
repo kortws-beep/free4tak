@@ -2479,6 +2479,39 @@ async def before_capitulation_alert_loop():
 _nul_state = {}
 
 
+# ★ 11-26 대장 "!고무공·!반도체·!방패 오늘 종목을 대시보드 한 세션으로 아침 9시 10분쯤 — 바쁘면 잊어먹고 지나갈 수 있거든"
+#   거래일 09:10(특별일은 밀림)에 한 번 계산·저장(intelligence/morning_picks.json) → 대시보드 🎯 후보 탭 + DM 짧게
+_picks_state = {"date": ""}
+
+
+@tasks.loop(minutes=1)
+async def morning_picks_loop():
+    if not _is_trading_day():
+        return
+    today = datetime.date.today().isoformat()
+    if _picks_state["date"] == today:
+        return
+    try:
+        import market_hours
+        import morning_picks
+        if datetime.datetime.now(KST).strftime("%H%M") < market_hours.shifted(morning_picks.RUN_HHMM):
+            return
+        if morning_picks.load().get("date") == today:         # 재시작해도 하루 한 번
+            _picks_state["date"] = today
+            return
+        _picks_state["date"] = today
+        d = await asyncio.to_thread(morning_picks.run)
+        channel = await client.fetch_channel(REPORT_CHANNEL_ID)
+        await send_safe_message(channel, morning_picks.brief(d))
+    except Exception as e:
+        print(f"⚠️ [오늘의 후보] 오류: {e}")
+
+
+@morning_picks_loop.before_loop
+async def before_morning_picks_loop():
+    await client.wait_until_ready()
+
+
 @tasks.loop(minutes=1)
 async def neolttwigi_loop():
     if not _is_trading_day():
@@ -3191,6 +3224,8 @@ async def on_ready():
     try:
         if not capitulation_alert_loop.is_running():
             capitulation_alert_loop.start()
+        if not morning_picks_loop.is_running():
+            morning_picks_loop.start()       # ★ 11-26 09:10 오늘의 후보(고무공·반도체·방패)
         if not neolttwigi_loop.is_running():
             neolttwigi_loop.start()          # ★ 11-20 널뛰기장 매수 후보 알림
         print(f"✅ [시스템] 투매일 반등 섹터 알림 ({CAP_ALERT_HHMM[:2]}:{CAP_ALERT_HHMM[2:]}, 아침 {CAP_REMIND_HHMM[:2]}:{CAP_REMIND_HHMM[2:]}) 가동 성공!")
@@ -3456,6 +3491,17 @@ async def on_message(message):
                 await send_safe_message(message.channel, rubber_ball.format_rows(rows))
             except Exception as e:
                 await send_safe_message(message.channel, f"❌ 고무공 후보 계산 오류: {e}")
+        return
+
+    if message.content.strip() == "!방패":
+        # ★ 11-26 대장 관심그룹 '방패_' 분야 지금 등락 vs AI 분야(intelligence/morning_picks.py)
+        async with message.channel.typing():
+            try:
+                import morning_picks
+                s_ = await asyncio.to_thread(morning_picks.shield)
+                await send_safe_message(message.channel, morning_picks.format_shield(s_))
+            except Exception as e:
+                await send_safe_message(message.channel, f"❌ 방패 계산 오류: {e}")
         return
 
     if message.content.strip() == "!반도체":

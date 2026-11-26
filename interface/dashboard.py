@@ -531,6 +531,25 @@ def api_map():
     return r
 
 
+@app.route("/picks")
+def picks_page():
+    """오늘의 후보 — 고무공·반도체·방패, 리나 09:10 계산(2026-11-26)"""
+    import picks_view
+    import bot_overview
+    from flask import make_response
+    r = make_response(picks_view.HTML.replace("<body>", "<body>" + bot_overview.NAV, 1))
+    r.headers["Cache-Control"] = "no-store"
+    return r
+
+
+@app.route("/api/picks")
+def api_picks():
+    import morning_picks
+    r = jsonify(morning_picks.load())
+    r.headers["Cache-Control"] = "no-store"
+    return r
+
+
 @app.route("/api/feed")
 def api_feed():
     import discord_feed
