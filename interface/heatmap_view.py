@@ -104,7 +104,13 @@ function draw(){const el=document.getElementById('map');el.innerHTML='';if(!D)re
  // ★ 11-24 대장 "너무 커": 한 분야(S7 대형주 등)가 지도의 20%를 넘지 않게 — 넘치는 칸은 20%로 깎음
  {const tot=items.reduce((a,b)=>a+b.w,0),cap=tot*0.2;const big=items.filter(i=>i.w>cap);
   if(big.length){const rest=tot-big.reduce((a,b)=>a+b.w,0);const lim=rest*0.2/(1-0.2*big.length||1);big.forEach(i=>i.w=Math.max(lim,0)||i.w)}}
- for(const r of squarify(items.sort((a,b)=>b.w-a.w),0,0,W,H)){const s=r.item;const box=document.createElement('div');box.className='sec'+((window.__picks||[]).includes(s.group)?' pick':'');
+ // ★ 11-26 대장 "화면 가운데를 기준으로 왼쪽 반도체 등 AI 관련, 오른쪽 그 외(딱 반이 아니어도)": 무게 비율대로 가르되 30~70% 안에서
+ const AIG=new Set(D.ai_groups||[]),L=items.filter(i=>AIG.has(i.group)),R=items.filter(i=>!AIG.has(i.group));
+ const sw=a=>a.reduce((x,y)=>x+y.w,0),tot=sw(items)||1;
+ let LW=L.length&&R.length?Math.round(W*Math.min(0.7,Math.max(0.3,sw(L)/tot))):(L.length?W:0);
+ const layout=[...squarify(L.sort((a,b)=>b.w-a.w),0,0,LW,H),...squarify(R.sort((a,b)=>b.w-a.w),LW+(LW&&R.length?3:0),0,W-LW-(LW&&R.length?3:0),H)];
+ if(LW&&R.length){const dv=document.createElement('div');Object.assign(dv.style,{position:'absolute',left:LW+'px',top:0,width:'3px',height:H+'px',background:'#facc15',opacity:.5});el.appendChild(dv)}
+ for(const r of layout){const s=r.item;const box=document.createElement('div');box.className='sec'+((window.__picks||[]).includes(s.group)?' pick':'');
   Object.assign(box.style,{left:r.x+'px',top:r.y+'px',width:r.w+'px',height:r.h+'px'});
   const hd=document.createElement('div');hd.className='sh';const U=(D.us&&D.us.groups||{})[s.group];const um=U&&U.mark?(U.reliable?U.mark:`<span style="opacity:.45">${U.mark}</span>`):'';
   hd.innerHTML=`${(window.__picks||[]).includes(s.group)?'🎯 ':''}${um}${esc(s.group)} <b class="${s.chg_w>0?'p':'m'}">${sg(s.chg_w)}${s.chg_w}%</b>`;

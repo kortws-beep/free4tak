@@ -266,6 +266,7 @@ def build(force: bool = False) -> dict:
     ai = [x["chg_w"] for x in data["sectors"] if x["group"] in AI_GROUPS and x.get("chg_w") is not None]
     data["shield"] = {"items": sh, "avg": round(sum(x["chg"] for x in sh if x["chg"] is not None) / max(1, sum(x["chg"] is not None for x in sh)), 2),
                       "ai": round(sum(ai) / len(ai), 2) if ai else None}
+    data["ai_groups"] = AI_GROUPS
     data["pre"] = sum(1 for x in _quote_cache["data"].values() if x.get("session") == "PRE")   # 프리장 시세로 그린 종목 수
     data["index"] = index_snapshot()
     data["weather"] = weather_picks()
