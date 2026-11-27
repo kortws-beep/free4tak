@@ -33,7 +33,7 @@
 | `sbot_trade_history.db` · trades | sbot 매매(5-18~) | `core/sbot_db.py` | buy_tag·grade(슬롯 출처), '수동' = 대장이 직접 산 걸 봇이 넘겨받은 것 | 🔒 |
 | `sbot_trade_history.db` · candidate_log | **sbot 후보(11-14~)** | `sbot._run_analysis`·`_get_unified_candidates` | grade(출처 슬롯), mode = scored(풀 전체 점수) · buy(매수 판단) · observe(슬롯이 찼을 때 30분마다 관찰) | 🔒 |
 | `daybot_trade_history.db` · trades / candidate_log | daybot 매매(9-30~), 후보(10-06~, 호가·시세 원본 포함) | `core/daybot_db.py` | buy_tag, source_tier, skip_reason | 🔒 |
-| `cbot_trade_history.db` · trades / dip_trades | 코인 매매, 눌림목 주머니 | cbot | — | 🔒 |
+| `cbot_trade_history.db` · trades / dip_trades / candidate_log | 코인 매매, 눌림목 주머니, **후보(11-28~)** — 기술 조건 통과해 AI 점수 받은 코인 전부(가격·AI 원점수·최종·임계치·공포탐욕·BTC·펀딩·RSI·거래량·결정) | cbot | decision = buy·buy_fail·ai_low·avoid·no_cash | 🔒 |
 | `lina_bot/three_month_leader_log.db` · manual_watch_log | 리나등록(대장 수동 종목) 익절·해제 이벤트 | lina_bot | event | 🔒 |
 | 상태 파일 `*_state.json` | 봇의 현재 상태(보유·일시정지·명령 IPC) | 각 봇(`common_utils` 잠금) | — | 운영용, 기록 아님 |
 

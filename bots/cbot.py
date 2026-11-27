@@ -542,10 +542,30 @@ class CBot:
             """)
             conn.execute("CREATE INDEX IF NOT EXISTS idx_cbot_market ON trades(market, sell_time)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_cbot_sell   ON trades(sell_time)")
+            # ★ 11-28 주말 숙제 2번 — 후보 기록(기술 조건 통과해 AI 점수까지 받은 코인 전부 + 결정). AI 캐시는 코인당 최신 1줄뿐이라
+            #   '안 산 후보'의 그 뒤 성적을 못 봤음 → 2주 쌓이면 AI 70+·탐욕 55+ 필터를 후보 풀 전체로 검증(매매 동작은 안 바뀜)
+            conn.execute("""CREATE TABLE IF NOT EXISTS candidate_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, market TEXT, price REAL, ai_raw INTEGER, bt_bonus REAL,
+                ai_final REAL, threshold INTEGER, fear_greed INTEGER, btc_rate REAL, btc_24h REAL, funding REAL,
+                market_status TEXT, rsi REAL, vol_ratio REAL, decision TEXT)""")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_cbot_cand ON candidate_log(market, ts)")
             conn.commit(); conn.close()
             print(f"✅ 매매이력 DB ({TRADE_HIST_DB})")
         except Exception as e:
             print(f"❌ DB 오류: {e}")
+
+    def _log_candidate(self, market: str, ind: dict, ai_raw, bt_bonus, ai_final, threshold, decision: str):
+        """후보 1줄 기록(실패해도 매매엔 영향 없음)."""
+        try:
+            conn = _db_connect(TRADE_HIST_DB)
+            conn.execute("INSERT INTO candidate_log (ts, market, price, ai_raw, bt_bonus, ai_final, threshold, fear_greed, btc_rate,"
+                         " btc_24h, funding, market_status, rsi, vol_ratio, decision) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                         (datetime.datetime.now().isoformat(timespec="seconds"), market, (ind or {}).get("current"), ai_raw, bt_bonus,
+                          ai_final, threshold, self.fear_greed, self.btc_rate, self.btc_24h, self.btc_funding,
+                          self.market_status, (ind or {}).get("rsi"), (ind or {}).get("vol_ratio"), decision))
+            conn.commit(); conn.close()
+        except Exception as e:
+            print(f"⚠️ 후보 기록 실패(매매 영향 없음): {e}")
 
     def _init_ai_db(self):
         try:
@@ -3038,6 +3058,7 @@ class CBot:
                         #   보너스로 구제되지 않도록 여기서 먼저 차단.
                         if ai_score <= AI_SCORE_AVOID_MAX:
                             print(f"  ❌ {market} — AI 회피 신호({ai_score}점, 원본기준) | {ai_reason}")
+                            self._log_candidate(market, ind, ai_score, 0, ai_score, ai_threshold, "avoid")
                             continue
 
                         # 💡 [백테스터 연동 보너스] -------------------------------------
@@ -3069,6 +3090,7 @@ class CBot:
                         # ★ 동적 임계치 (이제 보너스가 합산된 점수로 비교합니다)
                         if ai_score < ai_threshold:
                             print(f"  ❌ AI점수 부족({ai_score}점 < {ai_threshold})")
+                            self._log_candidate(market, ind, ai_result["score"], bt_bonus, ai_score, ai_threshold, "ai_low")
                             continue
 
                         # ★ 마지막 슬롯(포지션 MAX_POSITIONS번째)이면 잔액만큼만 매수
@@ -3076,12 +3098,16 @@ class CBot:
                         _buy_amt, _skip, _stop = self._plan_buy_amount(market, krw_cbot, _is_last_slot)
                         if not _buy_amt:
                             print(f"  ⏭️ {market} — {_skip}, 매수 안 함")
+                            self._log_candidate(market, ind, ai_result["score"], bt_bonus, ai_score, ai_threshold, "no_cash")
                             if _stop:
                                 break
                             continue
                         print(f"🚀 매수 시도 {market} | {ai_score}점 | "
                               f"{_buy_amt:,}원" + (" (마지막슬롯·잔액매수)" if _is_last_slot else ""))
-                        if self.buy(market, _buy_amt):
+                        _bought = self.buy(market, _buy_amt)
+                        self._log_candidate(market, ind, ai_result["score"], bt_bonus, ai_score, ai_threshold,
+                                            "buy" if _bought else "buy_fail")
+                        if _bought:
                             buy_price = ind.get("current", 0)
                             est_qty   = _buy_amt / buy_price if buy_price else 0
                             # ★ peak_tracker 즉시 초기화

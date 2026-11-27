@@ -23,6 +23,7 @@ CATALOG = [
     ("daybot_trade_history.db", "trades", "buy_time", 30, "daybot 매매"),
     ("daybot_trade_history.db", "candidate_log", "ts", 5, "daybot 후보"),
     ("cbot_trade_history.db", "trades", "buy_time", 10, "cbot 매매"),
+    ("cbot_trade_history.db", "candidate_log", "ts", 3, "cbot 후보(11-28~, AI 점수 받은 코인 전부)"),
     # ── 리나 관찰·시장 ──
     ("lina_bot/three_month_leader_log.db", "leader_obs", "date", 5, "주도주검색식3 파이썬판 통과/탈락"),
     ("lina_bot/three_month_leader_log.db", "danta_obs", "date", 5, "단타000 파이썬판"),
