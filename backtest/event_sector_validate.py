@@ -9,7 +9,7 @@ event_sector_validate.py — 연례 이벤트 전후 섹터 초과수익 검증 
   · 이벤트 날짜 = intelligence/event_calendar.py. 한국 시간 기준 첫 거래일로 맞춤(미국 행사는 다음 한국장 반응).
   · 통과 기준(표시 ★): 표본 6번↑, 같은 방향 70%↑, 평균 1%p↑ — 그래도 해마다 1번이라 '참고 패턴'이지 규칙 아님.
 일봉 캐시: backtest/data/etf_daily.db (없으면 네이버 siseJson에서 받음).
-실행: venv/bin/python backtest/event_sector_validate.py [--refresh] [--event 블랙프라이데이]
+실행: venv/bin/python backtest/event_sector_validate.py [--refresh] [--event 블랙프라이데이] [--runup]
 """
 import argparse
 import ast
@@ -87,15 +87,72 @@ def windows(series: list, bench: dict, date: datetime.date, ev: str):
     return ex(i - PRE - 1, i - 1), ex(i - 1, i), ex(i, i + POST)
 
 
+# ★ 11-28 대장 "이벤트 근접하면 셀온 — 2주~최대 1달 전에 사서 수익 나는지 봐야": 이벤트별 '관련 섹터'만 짝지어
+#   b거래일 전 매수 → s거래일 전 매도(셀온 전) 초과수익. 같은 짝을 가짜 날짜(±35~150일 7일 간격)로도 돌려
+#   '가짜보다 좋은 비율'(높을수록 운 아님). ★ = 표본 6↑·평균 +1%p↑·오른 해 70%↑·가짜보다 좋은 비율 90%↑, ✖ = 반대로 확실히 나쁨.
+PAIRS = {"CES": ["반도체", "IT", "로봇(22~)", "소프트웨어"], "GTC": ["반도체", "IT", "로봇(22~)"],
+         "JPM헬스케어": ["바이오", "헬스케어"], "AACR": ["바이오", "헬스케어"], "ASCO": ["바이오", "헬스케어"],
+         "ESMO": ["바이오", "헬스케어"],
+         "블랙프라이데이": ["화장품", "경기소비재", "영원무역", "한국콜마", "아모레퍼시픽"],
+         "광군절": ["화장품", "아모레퍼시픽", "한국콜마", "경기소비재"], "618": ["화장품", "아모레퍼시픽", "한국콜마"],
+         "지스타": ["게임", "엔씨소프트"], "설연휴": ["여행레저", "운송"], "추석연휴": ["여행레저", "운송"],
+         "연말배당": ["은행", "보험", "증권", "KT&G", "KT", "LG유플러스"], "실적시즌": ["반도체", "IT"]}
+HOLDS = ((20, 3), (15, 3), (10, 1))
+SHIFTS = [x for x in range(-150, 151, 7) if abs(x) >= 35]
+
+
+def run_up(data, bench, code, dates, b, s, ev):
+    ser = data.get(code) or []
+    ds = [d for d, _ in ser]
+    px = dict(ser)
+    out = []
+    for d in dates:
+        i = bisect.bisect_left(ds, d.isoformat())
+        if ev == "연말배당":
+            i -= 1
+        if i - b < 0 or i >= len(ds):
+            continue
+        a, z = ds[i - b], ds[i - s]
+        if a in bench and z in bench:
+            out.append((px[z] / px[a] - 1) * 100 - (bench[z] / bench[a] - 1) * 100)
+    return out
+
+
+def runup_table(data, bench, evs, today):
+    code_of = {v: k for k, v in SECTORS.items()}
+    print(f"\n=== 이벤트 전 미리 사기(b일 전 매수 → s일 전 매도) — KODEX200 대비 %p ===")
+    print(f"{'이벤트':8s} {'섹터':10s} {'매수→매도':10s} {'n':>2s} {'평균':>6s} {'오른해':>5s} | 가짜보다 좋은 비율")
+    res = []
+    for ev, secs in PAIRS.items():
+        dates = [d for d in evs.get(ev, []) if d < today - datetime.timedelta(days=10)]
+        for sec in secs:
+            for b, s in HOLDS:
+                v = run_up(data, bench, code_of[sec], dates, b, s, ev)
+                if len(v) < 4:
+                    continue
+                m, hit = st.mean(v), sum(x > 0 for x in v) / len(v) * 100
+                fake = [st.mean(f) for f in (run_up(data, bench, code_of[sec], [d + datetime.timedelta(days=k) for d in dates], b, s, ev)
+                                             for k in SHIFTS) if len(f) >= 4]
+                pct = sum(m > f for f in fake) / len(fake) * 100 if fake else float("nan")
+                flag = "★" if len(v) >= 6 and m >= 1 and hit >= 70 and pct >= 90 else ("✖" if m <= -1 and pct <= 10 else "")
+                res.append((ev, sec, b, s, len(v), m, hit, pct, flag))
+                print(f"{ev:8s} {sec:10s} {f'{b}일전→{s}일전':10s} {len(v):2d} {m:+6.2f} {hit:4.0f}% | {pct:4.0f}% {flag}")
+    return res
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--refresh", action="store_true")
     ap.add_argument("--event")
+    ap.add_argument("--runup", action="store_true", help="이벤트 전 미리 사기(2주~1달 전 매수→셀온 전 매도)만")
     a = ap.parse_args()
     data = load(a.refresh)
     bench = dict(data[BENCH])
     evs = event_calendar.events(2015, datetime.date.today().year)
     today = datetime.date.today()
+    if a.runup:
+        runup_table(data, bench, evs, today)
+        return
     hits = []
     for ev, dates in evs.items():
         if a.event and ev != a.event:
