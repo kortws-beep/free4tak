@@ -80,6 +80,8 @@
 | `intelligence/feature_news.db` · news | [특징주] 뉴스(시각 포함) | 리나 30분마다 | 🔒(검색 노출이 바뀜) |
 | `intelligence/hk_consensus.db` · reports | 한경 컨센서스 리포트(목표가·의견) | 리나 30분마다 | 🔁 |
 | `intelligence/news_sentiment.db` + 루트 `news_YYYYMMDD.csv` | 키워드 뉴스·감성 분석 | cron 07:50 `news_crawler.py` | 🔒 |
+| `intelligence/event_hub_state.json` | event_hub가 이미 읽은 세이브티커 PDF·MTN 날짜(중복 방지) | event_hub | — | 🔁 |
+| `backtest/data/etf_daily.db` · daily | 섹터 ETF·방패 개별주·관심그룹 종목 10년 종가(네이버) — 이벤트 검증용 캐시 | `backtest/event_sector_validate.py`·`event_stock_check.py` | code | 🔁 |
 | `intelligence/mtn_morning.db` + `logs/mtn_morning/*.txt` | MTN 아침 방송 받아쓰기(원문)와 요약, 이벤트 섹터 | cron 05:54 `mtn_morning_brief.py`(Whisper GPU) | 🔒 |
 | `intelligence/youtube_picks.db` · youtube_picks / telegram_buzz + `logs/youtube_live/` | 유튜브 라이브 종목 추출과 받아쓰기 원문(60일 보관), 방송 텔레그램 코너 | `youtube-live` 서비스 | 🔒. 출처 칸은 channel, video_id |
 | `intelligence/ai_momentum_picks.db` | AI 모멘텀 스캐너 픽(08:55·오후)과 7·14일 판정 | lina | 🔒 |
@@ -108,7 +110,7 @@
 | 표 | 내용 | 쓰는 곳 / 언제 | 출처 칸 | 보존 |
 |---|---|---|---|---|
 | global_daily | 해외 지표 일봉 14종: 나스닥·S&P·SOX·VIX·미국 10년/3개월 금리·달러 인덱스·원달러·금·WTI·구리·비트코인·닛케이·대만. 2021-11부터 백필 | 키키 매일 07:10(최근 10일 덮어써 임시값 확정), `money_weather.py --backfill` | provider | 🔁 |
-| events | 시장 흔드는 일정(실적·IPO·FOMC·금통위·전쟁…) — **출처 없으면 저장 안 됨** | `money_weather.add_event`(사람·누리가 넣음), FOMC·금통위는 macro_calendar에서 옮김 | source | 🔁 |
+| events | 시장 흔드는 일정(실적·IPO·FOMC·금통위·전쟁…) — **출처 없으면 저장 안 됨**. ★ 11-28 칸 추가: recurrence(yearly·quarterly·monthly·weekly·oneoff=돌발)·sectors·origin(규칙·세이브티커·MTN·매크로 일정)·detail(실제/예상/이전 등) → 대시보드 📅 달력 | `money_weather.add_event`(사람·누리), `intelligence/event_hub.py`(리나 30분마다: 세이브티커 ~/다운로드 PDF [경제지표]·MTN 받아쓰기 AI 추출·event_calendar 규칙), FOMC·금통위는 macro_calendar | source | 🔁 |
 
 ---
 

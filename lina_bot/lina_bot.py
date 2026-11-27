@@ -2515,6 +2515,35 @@ async def before_morning_picks_loop():
     await client.wait_until_ready()
 
 
+_event_hub_state = {"last": 0.0, "seed_day": ""}
+
+
+@tasks.loop(minutes=5)
+async def event_hub_loop():
+    """★ 11-28 대장 '이벤트 수집' — 30분마다 세이브티커 새 PDF·아직 안 뽑은 MTN 받아쓰기(아침 방송 끝나면 그날 것)를
+    이벤트 표(money_weather.db events)에 넣음 → 대시보드 📅 달력. 규칙 달력은 하루 한 번 채움. 알림 없음(조용히)."""
+    import time as _t
+    now = datetime.datetime.now(KST)
+    if not ("06" <= now.strftime("%H") <= "23") or _t.time() - _event_hub_state["last"] < 1800:
+        return
+    _event_hub_state["last"] = _t.time()
+    try:
+        import event_hub
+        today = now.strftime("%Y-%m-%d")
+        if _event_hub_state["seed_day"] != today:
+            await asyncio.to_thread(event_hub.seed_rules)
+            _event_hub_state["seed_day"] = today
+        msg = await asyncio.to_thread(event_hub.run_daily)
+        print(f"📅 [이벤트 허브] {msg}")
+    except Exception as e:
+        print(f"⚠️ [이벤트 허브] 오류: {e}")
+
+
+@event_hub_loop.before_loop
+async def before_event_hub_loop():
+    await client.wait_until_ready()
+
+
 @tasks.loop(minutes=1)
 async def neolttwigi_loop():
     if not _is_trading_day():
@@ -3231,6 +3260,8 @@ async def on_ready():
             morning_picks_loop.start()       # ★ 11-26 09:10 오늘의 후보(고무공·반도체·방패)
         if not neolttwigi_loop.is_running():
             neolttwigi_loop.start()          # ★ 11-20 널뛰기장 매수 후보 알림
+        if not event_hub_loop.is_running():
+            event_hub_loop.start()           # ★ 11-28 이벤트 수집(세이브티커·MTN) → 📅 달력
         print(f"✅ [시스템] 투매일 반등 섹터 알림 ({CAP_ALERT_HHMM[:2]}:{CAP_ALERT_HHMM[2:]}, 아침 {CAP_REMIND_HHMM[:2]}:{CAP_REMIND_HHMM[2:]}) 가동 성공!")
     except Exception as e: print(f"⚠️ [에러] 투매일 알림: {e}")
 

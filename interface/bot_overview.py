@@ -107,6 +107,7 @@ INVENTORY = [
             ("🎢 널뛰기장(국면<35%) 코스피 -3%↓ 날 '최저점 통과'·'종가가 최저점(애프터장)' 매수 후보 알림 · `!널뛰기` · `… 널` 등록은 다음 날 15:10 정리", "2026-11-20"),
             ("⚠️ 리나 손절선 알림 — 등록 종목이 손절선(새 등록은 평단 -15%) 닿으면 하루 한 번 DM, 자동 매도 아님 · `손절 종목 가격|-N%|끔`", "2026-11-27"),
             ("🎯 09:10 오늘의 후보 — 고무공·반도체·방패를 한 번에 계산해 대시보드 🎯 후보 탭 + DM 짧게, `!방패`로 지금 방패 분야", "2026-11-26"),
+            ("📅 이벤트 수집(30분마다, 조용히) — 세이브티커 PDF [경제지표]·MTN 아침 받아쓰기(AI가 방송 문장만, 원문 출처)·규칙 달력 → 이벤트 표(주기: 매년·분기·월·주·돌발)", "2026-11-28"),
             ("🔬 `!반도체` 반도체 소부장 선별(김태성 전략) — 6개월 고점 -50%↓ & 올해 영업이익 증가 = 추가매수 검토, 이익 감소는 교체 후보, 내 보유 판정", "2026-11-26"),
         ]),
         ("📊 장 마감 뒤", [
@@ -136,6 +137,7 @@ INVENTORY = [
             ("/bots 🏁 엔진 대항전 — 봇별 '산 곳·판 이유'마다 손익 줄 세우기(오늘·이번 주·이번 달)", "2026-10-24"),
             ("/map 🗺️ 우리 섹터맵 — 한투 관심그룹(대장 분야) 히트맵, 칸=거래대금·시총·균등, 색=등락, new·SUB·isee5 따로", "2026-11-24"),
             ("/map 🇺🇸 미국 짝꿍 — 분야별 미국 대표 2~3개 밤사이 등락 ⭐(+2%↑)/🔻(-2%↓), 2년 검증상 잘 맞는 8개 분야만 진하게", "2026-11-25"),
+            ("/calendar 📅 이벤트 달력 — 1년치 이벤트(색=주기) + 🎯 미리 사기 창(✅ CES 반도체·IT·지스타 게임 · ❌ 블프 화장품·배당락 통신 등, 섹터 ETF 10년 검증) · 앞으로 30일", "2026-11-28"),
         ]),
         ("🗄️ 쌓는 데이터", [
             ("일봉 20:10 · 투자자 20:30 · FDR 시세/지수 20:40 · 섹터 DB 16:30 · 쏠림 지수 30분", ""),
@@ -212,12 +214,12 @@ def engines_html() -> str:
             .replace("try{tab(+localStorage.getItem('bots_tab')||1)}catch(e){}", "tab(3);"))
 
 
-NAV = """<nav class="nav"><a href="lina" data-p="lina">📋 리나</a><a href="feed" data-p="feed">🗂️ 메시지</a><a href="bots" data-p="bots">🤖 봇 기능</a><a href="engines" data-p="engines">🏁 대항전</a><a href="weather" data-p="weather">🌦️ 날씨</a><a href="map" data-p="map">🗺️ 맵</a><a href="picks" data-p="picks">🎯 후보</a></nav>
-<style>.nav{display:flex;gap:6px;margin:0 0 10px;position:sticky;top:0;background:var(--bg);padding:8px 0;z-index:5}
-.nav a{flex:1;text-align:center;padding:8px 2px;white-space:nowrap;border-radius:10px;border:1px solid var(--bd,#2a2d3a);color:var(--sub,#94a3b8);
+NAV = """<nav class="nav"><a href="lina" data-p="lina">📋 리나</a><a href="feed" data-p="feed">🗂️ 메시지</a><a href="bots" data-p="bots">🤖 봇 기능</a><a href="engines" data-p="engines">🏁 대항전</a><a href="weather" data-p="weather">🌦️ 날씨</a><a href="map" data-p="map">🗺️ 맵</a><a href="picks" data-p="picks">🎯 후보</a><a href="calendar" data-p="calendar">📅 달력</a></nav>
+<style>.nav{display:flex;gap:6px;margin:0 0 10px;position:sticky;top:0;background:var(--bg);padding:8px 0;z-index:5;overflow-x:auto;scrollbar-width:none}.nav::-webkit-scrollbar{display:none}
+.nav a{flex:1 0 auto;text-align:center;padding:8px 2px;white-space:nowrap;border-radius:10px;border:1px solid var(--bd,#2a2d3a);color:var(--sub,#94a3b8);
 text-decoration:none;font-size:13px;background:var(--card,#1a1d27)}.nav a.on{color:var(--tx,#e2e8f0);border-color:var(--tx,#e2e8f0);font-weight:700}</style>
 <script>document.querySelectorAll('.nav a').forEach(a=>{if(location.pathname.endsWith('/'+a.dataset.p))a.classList.add('on')});
-// ★ 11-26 대장 "맵에서 n 누르면 다음 화면으로" — n 다음 · p 이전 · 1~7 바로 가기. 한글 입력 상태여도 되게 키 자리(e.code)로 봄,
+// ★ 11-26 대장 "맵에서 n 누르면 다음 화면으로" — n 다음 · p 이전 · 1~8 바로 가기(11-28 📅 달력 추가). 한글 입력 상태여도 되게 키 자리(e.code)로 봄,
 //   입력칸(리나 PIN 등)에서 칠 땐 꺼짐. 큰 화면 모드(?tv=1)는 넘어가도 유지
 if(!window.__navKeys){window.__navKeys=1;document.addEventListener('keydown',e=>{
  if(e.ctrlKey||e.metaKey||e.altKey)return;const t=e.target;if(t&&(/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)||t.isContentEditable))return;

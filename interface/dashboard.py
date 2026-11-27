@@ -550,6 +550,25 @@ def api_picks():
     return r
 
 
+@app.route("/calendar")
+def calendar_page():
+    """이벤트 달력 — 1년치 이벤트 + 미리 사기 창(2026-11-28)"""
+    import calendar_view
+    import bot_overview
+    from flask import make_response
+    r = make_response(calendar_view.HTML.replace("<body>", "<body>" + bot_overview.NAV, 1))
+    r.headers["Cache-Control"] = "no-store"
+    return r
+
+
+@app.route("/api/calendar")
+def api_calendar():
+    import event_hub
+    r = jsonify(event_hub.calendar_data())
+    r.headers["Cache-Control"] = "no-store"
+    return r
+
+
 @app.route("/api/feed")
 def api_feed():
     import discord_feed
