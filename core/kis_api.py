@@ -947,6 +947,7 @@ class KisAPI:
     #   애프터장 15:30~20:00 = 프리장과 같이 NXT 지정가(대장 11-04) · 정규장 = KRX(신TR 거부 시 구TR로 한 번 더).
     PRE_START, PRE_END = "0800", "0850"
     AFTER_START, AFTER_END = "1530", "2000"
+    KRX_AFTER_ORD_DVSN = "41"  # KRX 애프터마켓 지정가(11-27 실거래 체결 확인, 00은 거부)
     KRX_AFTER_START = "1600"   # ★ 11-27 NXT 없는 종목 매도만 KRX 애프터장(16~20시)으로 — 15:40~16:00 장후 종가매매는 안 씀
     NEW_TR = {"buy": "TTTC0012U", "sell": "TTTC0011U", "cancel": "TTTC0013U"}
     OLD_TR = {"buy": "TTTC0802U", "sell": "TTTC0801U", "cancel": "TTTC0803U"}
@@ -1152,9 +1153,10 @@ class KisAPI:
             nx = self._nxt_price(code)
             if nx <= 0 and now_t >= self.KRX_AFTER_START:
                 # ★ 11-27 대장 "지정가로 내면 돼"(케이엔제이 — NXT 없는 종목을 대장이 HTS 애프터장 지정가로 팖):
-                #   16:00~20:00 KRX 애프터장(09-14 개편, 실시간 매칭)으로 지정가(현재가 -3호가). 첫 실거래로 검증 대기.
+                #   16:00~20:00 KRX 애프터장(09-14 개편, 실시간 매칭)으로 지정가(현재가 -3호가).
+                #   실거래 검증 11-27 18:17 케이엔제이 1주: 00은 "애프터 지정가만 가능" 거부 → 41 체결.
                 excg = "KRX"
-                ord_dvsn = self.AFTERHOURS_ORD_DVSN
+                ord_dvsn = self.KRX_AFTER_ORD_DVSN
                 order_price = price if price > 0 else self._fake_market_price(code, "sell")
                 if order_price <= 0:
                     print(f"⚠️ KRX 애프터장 매도가 산정 실패(시세조회 불가): {code}"); return False

@@ -55,7 +55,7 @@ class Route(unittest.TestCase):
         a = self._api("1700", nx=0)
         self.assertTrue(a.sell("272110", 7, price=0))
         tr, body = a.sent[0]
-        self.assertEqual((tr, body["EXCG_ID_DVSN_CD"], body["ORD_DVSN"], body["ORD_UNPR"]), ("TTTC0011U", "KRX", "00", "22850"))
+        self.assertEqual((tr, body["EXCG_ID_DVSN_CD"], body["ORD_DVSN"], body["ORD_UNPR"]), ("TTTC0011U", "KRX", "41", "22850"))
         a = self._api("1545", nx=0)
         self.assertFalse(a.sell("272110", 7)); self.assertEqual(a.sent, [])
         a = self._api("0825", nx=0)
