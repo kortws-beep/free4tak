@@ -7,7 +7,8 @@ sbot_candidate_review.py — sbot 후보 전체의 '그 뒤' 성적 + 주도 테
 그리고 대장 질문(11-24 동국제약 — 로봇·반도체 급등일에 유튜브 소스로 제약주): 후보가 나온 그 시각에
 그 종목이 '그 시각 상위 10개 테마'(theme_open_obs, 15분마다) 안에 있었나 → 주도 테마 안/밖 성적 비교.
 산 뒤 정보는 안 씀(테마 순위는 후보 시각 이전 마지막 기록, 수익은 후보 가격 기준).
-  · 진입가 = 후보 기록 가격 · d0 = 그날 종가, d1/d3/d5 = 1·3·5거래일 뒤 종가 · hit5 = 5거래일 안에 고가가 +5% 찍었나
+  · 진입가 = 후보 기록 가격 · d0 = 그날 종가, d1/d3/d5/d10 = 1·3·5·10거래일 뒤 종가 · hit5 = 5거래일 안에 고가 +5%,
+    hit10 = 10거래일 안에 고가 +10%(★ 11-28 대장 "횡보·상승장에선 유튜브 소스가 바로 또는 1~2주 뒤 오름" — 늦게 오르는 것도 잡으려고)
   · 같은 날 같은 종목은 1건(매수 판단 buy > 관찰 observe > 점수 scored 순으로 대표)
 실행: venv/bin/python backtest/sbot_candidate_review.py [--top 10]
 """
@@ -86,7 +87,9 @@ def fwd(rows, date, price):
     i = ds.index(date)
     g = lambda k: (rows[i + k][1] / price - 1) * 100 if i + k < len(rows) else None
     hi = max(r[2] for r in rows[i:i + 6])
-    return dict(d0=g(0), d1=g(1), d3=g(3), d5=g(5), hit5=hi >= price * 1.05, days=len(rows) - i - 1)
+    hi10 = max(r[2] for r in rows[i:i + 11])
+    return dict(d0=g(0), d1=g(1), d3=g(3), d5=g(5), d10=g(10), hit5=hi >= price * 1.05,
+                hit10=hi10 >= price * 1.10, days=len(rows) - i - 1)
 
 
 def summ(xs, k):
@@ -98,12 +101,13 @@ def summ(xs, k):
 
 def table(title, groups):
     print(f"\n=== {title} ===")
-    print(f"{'구분':22s} {'건수':>4s} | {'당일종가':>16s} | {'1일뒤':>16s} | {'3일뒤':>16s} | {'5일뒤':>16s} | +5%찍음")
+    print(f"{'구분':22s} {'건수':>4s} | {'당일종가':>16s} | {'1일뒤':>16s} | {'3일뒤':>16s} | {'5일뒤':>16s} | {'10일뒤':>16s} | +5%찍음 | 10일내+10%")
     for name, xs in groups:
         if not xs:
             continue
         h = sum(x["hit5"] for x in xs) / len(xs) * 100
-        print(f"{name:22s} {len(xs):4d} | {summ(xs, 'd0')} | {summ(xs, 'd1')} | {summ(xs, 'd3')} | {summ(xs, 'd5')} | {h:4.0f}%")
+        h10 = sum(x["hit10"] for x in xs) / len(xs) * 100
+        print(f"{name:22s} {len(xs):4d} | {summ(xs, 'd0')} | {summ(xs, 'd1')} | {summ(xs, 'd3')} | {summ(xs, 'd5')} | {summ(xs, 'd10')} | {h:6.0f}% | {h10:6.0f}%")
 
 
 def main():
