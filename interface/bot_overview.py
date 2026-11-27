@@ -221,13 +221,23 @@ text-decoration:none;font-size:13px;background:var(--card,#1a1d27)}.nav a.on{col
 <script>document.querySelectorAll('.nav a').forEach(a=>{if(location.pathname.endsWith('/'+a.dataset.p))a.classList.add('on')});
 // ★ 11-26 대장 "맵에서 n 누르면 다음 화면으로" — n 다음 · p 이전 · 1~8 바로 가기(11-28 📅 달력 추가). 한글 입력 상태여도 되게 키 자리(e.code)로 봄,
 //   입력칸(리나 PIN 등)에서 칠 땐 꺼짐. 큰 화면 모드(?tv=1)는 넘어가도 유지
-if(!window.__navKeys){window.__navKeys=1;document.addEventListener('keydown',e=>{
+// ★ 11-28 대장 "노트북 덮어 두고 마우스로" — 오른쪽 아래 ◀ ▶ 버튼(평소 흐리게, 마우스 올리면 진하게, 큰 화면 모드에서도 보임)
+if(!window.__navKeys){window.__navKeys=1;
+ const go=d=>{const L=[...document.querySelectorAll('.nav a')];if(!L.length)return;let i=L.findIndex(a=>a.classList.contains('on'));if(i<0)i=0;
+  const j=typeof d==='string'?+d:(i+d+L.length)%L.length;if(j===i||j<0||j>=L.length)return;
+  const tv=new URLSearchParams(location.search).has('tv')||document.body.classList.contains('tv');location.href=L[j].getAttribute('href')+(tv?'?tv=1':'')};
+ document.addEventListener('keydown',e=>{
  if(e.ctrlKey||e.metaKey||e.altKey)return;const t=e.target;if(t&&(/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)||t.isContentEditable))return;
- const L=[...document.querySelectorAll('.nav a')];if(!L.length)return;let i=L.findIndex(a=>a.classList.contains('on'));if(i<0)i=0;
- let j=null;if(e.code==='KeyN')j=(i+1)%L.length;else if(e.code==='KeyP')j=(i-1+L.length)%L.length;
- else{const m=/^(Digit|Numpad)([1-9])$/.exec(e.code);if(m&&+m[2]<=L.length)j=+m[2]-1}
- if(j==null||j===i)return;e.preventDefault();
- const tv=new URLSearchParams(location.search).has('tv')||document.body.classList.contains('tv');location.href=L[j].getAttribute('href')+(tv?'?tv=1':'')})}</script>"""
+ let j=null;if(e.code==='KeyN')j=1;else if(e.code==='KeyP')j=-1;
+ else{const m=/^(Digit|Numpad)([1-9])$/.exec(e.code);if(m)j=String(+m[2]-1)}
+ if(j==null)return;e.preventDefault();go(j)});
+ const f=document.createElement('div');f.className='navfloat';
+ f.innerHTML='<button type="button" title="이전 화면 (p)">◀</button><button type="button" title="다음 화면 (n)">▶</button>';
+ const [b1,b2]=f.querySelectorAll('button');b1.onclick=()=>go(-1);b2.onclick=()=>go(1);
+ const add=()=>document.body.appendChild(f);document.body?add():document.addEventListener('DOMContentLoaded',add)}</script>
+<style>.navfloat{position:fixed;right:14px;bottom:14px;display:flex;gap:8px;z-index:50;opacity:.35;transition:opacity .2s}
+.navfloat:hover{opacity:1}.navfloat button{width:52px;height:52px;border-radius:50%;border:1px solid var(--bd,#2a2d3a);
+background:var(--card,#1a1d27);color:var(--tx,#e2e8f0);font-size:22px;cursor:pointer}</style>"""
 
 HTML = """<!DOCTYPE html>
 <html lang="ko"><head>
