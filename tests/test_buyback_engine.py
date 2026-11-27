@@ -104,6 +104,16 @@ class Engine(unittest.TestCase):
             daybot.now_hhmm = lambda: "1511"; b._check_all_positions_for_exit(); self.assertIn("자사주기한정리", b.sold[0])
             b.sold = []; b._get_current_price = lambda c: 8900
             daybot.now_hhmm = lambda: "1000"; b._check_all_positions_for_exit(); self.assertIn("자사주손절", b.sold[0])
+            # ★ 11-27 +5% 넘으면 일반 규칙: 30% 익절 + 트레일링, 그 뒤엔 5일 기한 정리 없음
+            b.sold = []; b.partial = []
+            b._do_partial_sell = lambda code, rate, cur: (b.partial.append(rate), b.positions[code].update(partial_done=True))
+            b.positions = {"X": {"entry_price": 10000, "qty": 10, "buy_tag": B.TAG, "held_trading_days": 4}}
+            b._get_current_price = lambda c: 10600
+            daybot.now_hhmm = lambda: "1000"; b._check_all_positions_for_exit()
+            self.assertEqual(len(b.partial), 1); self.assertEqual(b.positions["X"]["peak_price"], 10600)
+            daybot.now_hhmm = lambda: "1511"; b._check_all_positions_for_exit(); self.assertEqual(b.sold, [])  # 기한 정리 안 함
+            b._get_current_price = lambda c: 10350                                                             # 고점 -2.4%
+            b._check_all_positions_for_exit(); self.assertIn("트레일링청산", b.sold[0])
         finally:
             daybot.now_hhmm = old
 

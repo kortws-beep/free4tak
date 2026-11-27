@@ -694,12 +694,18 @@ class DayBot:
                 self._check_dip_exit(code, pos, entry, rate, current)
                 continue
             # ★ 11-07 자사주 엔진 — 손절 -10%, 산 날 포함 5거래일째 15:10 이후 정리(백테스트 5일 종가)
-            if pos.get("buy_tag") == buyback_signal.TAG:
+            # ★ 11-27 대장 "6%대 수익 중인데 그냥 두면 안 되지 — 일반 엔진처럼 1차 익절하고 트레일링":
+            #   +5%(TAKE_PROFIT_PCT) 찍으면 아래 일반 규칙으로 넘김 = 30% 익절 + 고점 -2% 트레일링(최소 +1% 보장),
+            #   트레일링 들어간 뒤엔 5일 기한 없음(일반 엔진과 같이 수익 나는 건 날짜로 안 끊음).
+            if pos.get("buy_tag") == buyback_signal.TAG and pos.get("peak_price") is None:
                 if rate <= -buyback_signal.STOP_PCT:
                     self._do_sell(code, pos["qty"], f"자사주손절({rate:.2f}%)", current)
-                elif pos.get("held_trading_days", 0) >= buyback_signal.HOLD_DAYS - 1 and now_hhmm() >= "1510":
+                    continue
+                if pos.get("held_trading_days", 0) >= buyback_signal.HOLD_DAYS - 1 and now_hhmm() >= "1510":
                     self._do_sell(code, pos["qty"], f"자사주기한정리({buyback_signal.HOLD_DAYS}거래일, {rate:+.2f}%)", current)
-                continue
+                    continue
+                if rate < TAKE_PROFIT_PCT:
+                    continue
 
             if pos.get("peak_price") is not None:
                 if current > pos["peak_price"]:
