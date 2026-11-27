@@ -158,6 +158,15 @@ class DaybotOrderFlow(unittest.TestCase):
         b.api.real = {"005930": {"qty": 6, "entry_price": 10000}}
         b._reconcile_with_account()
         self.assertEqual(b.positions["005930"]["qty"], 6)
+        self.assertFalse(b.positions["005930"].get("partial_done"))      # +5% 전 수동 일부매도 — 1차 익절은 그대로 남김
+
+    def test_manual_partial_in_trailing_counts_as_first_tp(self):
+        # ★ 11-27 케이엔제이 — 대장이 트레일링 중 직접 일부 팔면 봇은 1차 익절 다시 안 함
+        b = mk(); b.positions["005930"] = dict(pos(q=24), peak_price=11000)
+        b.api.real = {"005930": {"qty": 17, "entry_price": 10000}}
+        b._reconcile_with_account()
+        self.assertEqual(b.positions["005930"]["qty"], 17)
+        self.assertTrue(b.positions["005930"]["partial_done"])
 
     def test_empty_balance_glitch_ignored(self):
         b = mk(); b.positions["005930"] = pos(); b.api.real = {}

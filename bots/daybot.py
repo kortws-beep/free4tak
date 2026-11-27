@@ -1274,6 +1274,10 @@ class DayBot:
                     with self._positions_lock:
                         if code in self.positions:
                             self.positions[code]["qty"] = real_qty
+                            # ★ 11-27 대장이 +5% 넘은(트레일링 중) 종목을 직접 일부 팔면 = 1차 익절 대신 한 것 → 봇이 또 30% 안 팖
+                            #   (케이엔제이: 대장 애프터장 지정가로 7주, 봇은 NXT 없는 종목이라 월요일 09:00에 또 팔 뻔)
+                            if self.positions[code].get("peak_price") is not None:
+                                self.positions[code]["partial_done"] = True
                     print(f"🔍 [daybot] 수동 일부매도 감지: {code} {old_qty}→{real_qty}주")
                 elif (real_qty > old_qty and code not in self._pending_orders
                       and code not in self._sell_verify and code not in self._cancel_reconcile
