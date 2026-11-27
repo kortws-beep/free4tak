@@ -223,7 +223,7 @@ AFTER_SELL_START, AFTER_SELL_END = "1530", "2000"
 
 def sell_closed(hhmm: str) -> bool:
     """지금 매도 주문을 보류할 시간인가 — 15:20~15:30 동시호가(시장가 거부), 08:50~09:00·20:00~08:00 주문 안 받음.
-    (1차익절 30%는 정규장에서만 — 그대로)"""
+    (★ 11-27부터 1차익절 30%도 프리장·애프터장에서 나감)"""
     return (REGULAR_SELL_END_TIME <= hhmm < AFTER_SELL_START) or hhmm >= AFTER_SELL_END or hhmm < "0800" \
         or "0850" <= hhmm < "0900"
 # ★ 2026-10-02 대장 지정 — 당일 EOD 강제청산 폐지, 대신 "트레일링
@@ -1003,16 +1003,24 @@ class DayBot:
         if part < 1 or qty - part < 1 or code in self._partial_verify:
             pos["partial_done"] = True
             return False
-        if now_hhmm() < "0900" or now_hhmm() >= REGULAR_SELL_END_TIME:
-            return False                       # 정규장에서만 — 1차익절은 실패해도 다시 안 해서(partial_done) NXT 없는 종목이 놓침
+        hh = now_hhmm()
+        if sell_closed(hh):
+            return False
         fail = self._sell_fail.get(code)
         if fail and time.time() < fail["until"]:
             return False
-        pos["partial_done"] = True
+        # ★ 11-27 대장 "프리장에서도 매도 되잖아" — 프리장·애프터장(NXT 지정가)도 1차 익절. 그 시간 실패(NXT 없는 종목 등)는
+        #   partial_done 안 걸고 SELL_FAIL_RETRY_SEC 뒤 다시(정규장 열리면 시장가로 나감). 정규장 실패만 '건너뛰고 전량 트레일링'.
+        ext = hh < "0900" or hh >= AFTER_SELL_START
         reason = f"{label}({rate:+.2f}%)"
-        if not self.api.sell(code, part, price=0):
+        if not self.api.sell(code, part, price=int(price) if hh < "0900" else 0):
+            if ext:
+                self._sell_fail[code] = {"count": 0, "until": time.time() + SELL_FAIL_RETRY_SEC}
+                return False
+            pos["partial_done"] = True
             print(f"⚠️ [daybot] {label} 주문 실패 {code} — 건너뛰고 전량 트레일링")
             return False
+        pos["partial_done"] = True
         with self._positions_lock:
             pos["qty"] = qty - part
         self._partial_verify[code] = {"ts": time.time(), "qty": part, "price": price, "reason": reason,

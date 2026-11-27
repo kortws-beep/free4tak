@@ -286,6 +286,27 @@ class DaybotFirstTakeProfit(unittest.TestCase):
         self._hit(b, 10500)
         self.assertEqual(b.api.sells, [("005930", 3, 0)])
 
+    def test_partial_in_premarket_and_after(self):
+        # ★ 11-27 프리장은 NXT 지정가(현재가 넘김), 애프터장은 price=0(kis_api가 체결보장가 합성)
+        daybot.now_hhmm = lambda: "0810"
+        b = mk(); b.positions["005930"] = pos(q=10)
+        self._hit(b, 10500)
+        self.assertEqual(b.api.sells, [("005930", 3, 10500)])
+        daybot.now_hhmm = lambda: "1800"
+        b = mk(); b.positions["005930"] = pos(q=10)
+        self._hit(b, 10500)
+        self.assertEqual(b.api.sells, [("005930", 3, 0)])
+
+    def test_partial_ext_fail_retries(self):
+        daybot.now_hhmm = lambda: "0810"
+        b = mk(); b.positions["005930"] = pos(q=10); b.api.sell_ok = False
+        self._hit(b, 10500)
+        self.assertFalse(b.positions["005930"].get("partial_done"))      # NXT 없는 종목 — 다시 시도 대기
+        b._sell_fail.clear(); b.api.sell_ok = True
+        daybot.now_hhmm = lambda: "0901"
+        self._hit(b, 10500)
+        self.assertEqual(b.api.sells[-1], ("005930", 3, 0))
+
     def test_partial_then_full_trailing_sell(self):
         b = mk(); b.positions["005930"] = pos(q=10)
         self._hit(b, 10500)                                   # +5%: 3주 매도
