@@ -50,6 +50,17 @@ class Route(unittest.TestCase):
         a = self._api("0855")
         self.assertFalse(a.sell("011200", 1)); self.assertEqual(a.sent, [])
 
+    def test_after_krx_for_non_nxt(self):
+        # ★ 11-27 NXT 없는 종목 — 16:00~20:00은 KRX 애프터장 지정가(현재가 -3호가), 15:30~16:00·프리장은 보류
+        a = self._api("1700", nx=0)
+        self.assertTrue(a.sell("272110", 7, price=0))
+        tr, body = a.sent[0]
+        self.assertEqual((tr, body["EXCG_ID_DVSN_CD"], body["ORD_DVSN"], body["ORD_UNPR"]), ("TTTC0011U", "KRX", "00", "22850"))
+        a = self._api("1545", nx=0)
+        self.assertFalse(a.sell("272110", 7)); self.assertEqual(a.sent, [])
+        a = self._api("0825", nx=0)
+        self.assertFalse(a.sell("272110", 7)); self.assertEqual(a.sent, [])
+
     def test_regular_fallback_old_tr(self):
         a = self._api("1000")
         self.assertTrue(a.sell("011200", 3))
