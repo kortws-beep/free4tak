@@ -153,7 +153,9 @@ def regime_turn_msg(watches: dict, date: str, breadth: float, prices: dict, resu
             + "\n   (알림만 — 주문은 안 나가. 다 팔면 `해제 종목명 D`)")
 
 
-NUL_CUT = "1510"          # ★ 11-20 널뛰기장 등록 종목 정리 시각(다음 거래일부터)
+NUL_CUT = "1510"
+          # ★ 11-20 널뛰기장 등록 종목 정리 시각(다음 거래일부터)
+STOP_ALERT_PCT = -15.0   # ★ 11-27 대장 손절선 기본값(평단 대비) — 새 등록 종목에 알림선으로 자동 설정
 
 
 def nul_cut() -> str:
@@ -183,6 +185,17 @@ def handle(code: str, w: dict, price: float, hhmm: str, md: str, kiwoom=None) ->
     if not in_session(hhmm):
         return out
     name = w.get("name", code)
+    # ★ 11-27 대장 "티엘비 -15%에 판다 했는데 근처까지 갔다 다시 올라옴 — 이무기 생산 안 하려면 알림 필요":
+    #   손절선(stop_alert, 원)을 처음 닿거나 깨면 하루 한 번 알림만(자동 매도 X, 판단은 대장)
+    sa = w.get("stop_alert")
+    today = datetime.date.today().isoformat()
+    if sa and price <= sa and w.get("stop_alert_day") != today:
+        w["stop_alert_day"] = today
+        out["changed"] = True
+        ep = w.get("entry_price")
+        out["msgs"].append(f"⚠️ [리나등록] {name}({code}) **손절선 {sa:,.0f}원 도달** — 지금 {price:,.0f}원"
+                           + (f"(평단 대비 {(price / ep - 1) * 100:+.1f}%)" if ep else "")
+                           + " · 자동 매도 아님, 판단은 대장 🐍🚧")
     before = (w.get("peak_price"), w.get("stage"))
     act = step(w, price)
     out["changed"] = before != (w.get("peak_price"), w.get("stage"))

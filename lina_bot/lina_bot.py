@@ -472,6 +472,8 @@ async def _register_manual_watch(channel, code: str, buy_price: float = None,
                 entry["nul"] = True       # ★ 11-20 널뛰기장 — 다음 거래일부터 15:10 남은 물량 전부 정리(manual_autosell)
             if src:
                 entry["src"] = src        # ★ 11-20 어느 명령(!널뛰기/!고무공)으로 샀는지 — 엔진별 성적 비교용
+            # ★ 11-27 대장 손절선 알림(이무기 방지) — 새 등록은 평단 -15%에 알림선 자동(자동 매도 X). 바꾸기: `손절 종목 가격|-N%`
+            entry["stop_alert"] = round(buy_price * (1 + autosell.STOP_ALERT_PCT / 100))
             watches, _ = _mutate_manual_watches(lambda w: w.__setitem__(key, entry))   # ★ 11-13 잠금 아래서
             _log_manual_watch("register", code, watches[key])
             # ★ 2026-10-14 대장 — 등록 종목은 리나가 직접 익절(lina_bot/manual_autosell.py)
@@ -485,7 +487,7 @@ async def _register_manual_watch(channel, code: str, buy_price: float = None,
                     f"⚡ {name}({code}) **단타** 등록 [{acct}] — 평단가 {buy_price:,.0f}원 · "
                     + (f"{qty}주\n" if qty else "⚠️ 수량 미입력 — 실제 매도 모드에서도 주문 안 나가(알림만)\n") +
                     f"   +{autosell.SCALP_TP:g}%({tp_px:,.0f}원) 찍으면 30% 익절 → 나머지 {autosell.trail_desc(watches[key])} [{md}]\n"
-                    f"   손절은 대장이 직접. 해제는 `해제 {name} {ACCT_LETTER.get(account, 'D')}`"
+                    f"   손절은 대장이 직접 — ⚠️ 손절선 알림 {entry['stop_alert']:,.0f}원({autosell.STOP_ALERT_PCT:+.0f}%, 알림만). 해제는 `해제 {name} {ACCT_LETTER.get(account, 'D')}`"
                     + ("\n   (스윙 계좌 종목은 sbot이 손 안 대고 리나가 관리)" if account == "swing" else ""))
                 return
             await send_safe_message(
@@ -494,7 +496,8 @@ async def _register_manual_watch(channel, code: str, buy_price: float = None,
                 + (f" · {qty}주" if qty else " · ⚠️ 수량 미입력 — 실제 매도 모드에서도 주문 안 나가(알림만)") + "\n"
                 f"   +{autosell.START_PCT:.0f}% 찍으면 추적 → 고점 -{autosell.TRAIL1_PCT:.0f}%면 전량 매도, "
                 f"+{autosell.TP1_PCT:.0f}%에 30% 익절 → 이후 고점 -{autosell.TRAIL2_PCT:.0f}%면 나머지 매도 [{md}]\n"
-                f"   손절은 대장이 직접. 현재 등록: {len(watches)}종목(`등록현황`) — 해제는 `해제 {name} {ACCT_LETTER.get(account, 'K')}`"
+                f"   손절은 대장이 직접 — ⚠️ 손절선 알림 {entry['stop_alert']:,.0f}원({autosell.STOP_ALERT_PCT:+.0f}%, 알림만 · 바꾸기 `손절 {name} 가격`). "
+                f"현재 등록: {len(watches)}종목(`등록현황`) — 해제는 `해제 {name} {ACCT_LETTER.get(account, 'K')}`"
                 + (f"\n   🎢 **널뛰기장** — 다음 거래일 {autosell.nul_cut()[:2]}:{autosell.nul_cut()[2:]}에 남은 물량 손익 상관없이 전부 정리(오버나잇 금지). "
                    f"프리장에서 무너지면 대장이 직접 최소 손절" if nul else "")
             )
@@ -3714,6 +3717,40 @@ async def on_message(message):
     #   먹히고 일반 AI채팅으로 새 — 대장이 실제로 이 표현을 썼다가
     #   "데이터가 없어서 답변 못 해"만 받고 등록해제가 전혀 안 된 걸
     #   발견(원익홀딩스/030530 둘 다 재현).
+    if message.content.startswith("손절 "):
+        # ★ 11-27 대장 손절선 알림 — `손절 종목 [가격|-N%|끔] [K|D|S]` (가격 없으면 -15%). 자동 매도 아님, 닿으면 하루 한 번 알림
+        parts = message.content.split()
+        code, arg, parts = _resolve_stock_tokens(parts)
+        if not code:
+            await send_safe_message(message.channel, "사용법: `손절 종목 [가격|-15%|끔] [K|D|S]` — 리나 등록 종목에 손절선 알림(자동 매도 아님)")
+            return
+        acct, toks = _split_account(parts[2:])
+        keys = [_wkey(code, acct)] if acct else [_wkey(code, a) for a in ("kiwoom", "daybot", "swing")]
+        val = toks[0] if toks else "-15%"
+        out = []
+
+        def _set(w):
+            for k in keys:
+                e = w.get(k)
+                if not e:
+                    continue
+                if val in ("끔", "off", "해제"):
+                    e.pop("stop_alert", None)
+                    out.append(f"{e.get('name', code)}[{ACCT_LETTER.get(e.get('account', 'kiwoom'), 'K')}] 손절선 알림 끔")
+                    continue
+                try:
+                    line = (e["entry_price"] * (1 + float(val.rstrip("%")) / 100)) if val.endswith("%") else float(val.replace(",", ""))
+                except (ValueError, KeyError, TypeError):
+                    continue
+                e["stop_alert"] = round(line)
+                e.pop("stop_alert_day", None)
+                out.append(f"{e.get('name', code)}[{ACCT_LETTER.get(e.get('account', 'kiwoom'), 'K')}] 손절선 알림 {round(line):,}원"
+                           + (f"(평단 {e['entry_price']:,.0f} 대비 {(line / e['entry_price'] - 1) * 100:+.1f}%)" if e.get("entry_price") else ""))
+        _mutate_manual_watches(_set)
+        await send_safe_message(message.channel, ("⚠️ " + " · ".join(out) + " — 닿으면 하루 한 번 알림(자동 매도 아님)") if out
+                                else f"❌ '{arg}' 리나 등록이 없거나 값을 못 읽었어 (`손절 종목 35450` 또는 `손절 종목 -15%`)")
+        return
+
     if (message.content.startswith("!리나등록해제") or message.content.startswith("해제 ")
             or message.content.startswith("등록해제")):
         parts = message.content.split()
