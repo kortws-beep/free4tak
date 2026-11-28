@@ -64,7 +64,7 @@ def _conn():
     import money_weather
     c = money_weather._conn()
     cols = {r[1] for r in c.execute("PRAGMA table_info(events)")}
-    for col in ("recurrence", "sectors", "origin", "detail"):
+    for col in ("recurrence", "sectors", "origin", "detail", "stars", "reaction"):
         if col not in cols:
             c.execute(f"ALTER TABLE events ADD COLUMN {col} TEXT DEFAULT ''")
     c.commit()
@@ -285,6 +285,115 @@ def _back(d: datetime.date, n: int) -> datetime.date:
     return cur
 
 
+# ── 영향 별표(사후 측정) ─────────────────────────────────
+# ★ 11-28 대장 "계속 수집하면서 증시(섹터) 영향도에 따라 별표를 주자 — 지금은 수집 단계, 연결 섹터·종목 표시는 나중에"
+#   이벤트 날(한국장 첫 거래일 D)과 다음 날(D+1) 중 더 크게 움직인 날 기준:
+#   관련 섹터(이벤트 sectors 글자 → 대장 관심그룹) 평균 - 시장 평균(전 종목) 초과폭, 섹터 없으면 시장 자체 움직임.
+#   ★★★ 3%p↑ · ★★ 1.5%p↑ · ★ 0.7%p↑ · ☆ 그 아래. D+1 데이터가 생기면 확정(그 전엔 매일 다시 잼).
+SECTOR_GROUPS = [(r"반도체|HBM|메모리|AI ?반도체|D램|낸드", "반도체_"), (r"로봇|휴머노이드", "로봇_"),
+                 (r"바이오|제약|헬스|신약|비만", "바이오_"), (r"2차전지|배터리|전고체|리튬", "2차전지_"), (r"ESS|신재생|태양광", "신재생_ESS"),
+                 (r"화장품|뷰티|K-?뷰티", "화장품"), (r"미용|의료기기", "미용의료기기"), (r"원전|원자력|SMR", "원전_"),
+                 (r"전력|변압기|전선|AI ?인프라|데이터센터", "전력_"), (r"조선|해운", "조선"), (r"방산|국방", "방산"), (r"우주|위성", "우주"),
+                 (r"철강", "철강"), (r"엔터|콘텐츠|K-?팝", "엔터"), (r"여행|항공|면세|카지노", "여행레저"),
+                 (r"가상자산|코인|비트코인|블록체인", "코인"), (r"보안", "보안"), (r"통신|광통신|5G", "통신"),
+                 (r"유통|소비|의류", "방패_유통패션"), (r"금융|은행|증권|보험", "방패_보험금융"), (r"식음료|음식료|식품", "방패_식음료")]
+KR_DB = os.path.join(_BASE, "lina_bot", "kr_theme_finance.db")
+
+
+def _groups_for(sectors: str) -> list:
+    import kr_heatmap
+    try:
+        with open(kr_heatmap.GROUP_CACHE, encoding="utf-8") as f:
+            g = json.load(f)["groups"]
+    except (OSError, ValueError):
+        return []
+    out = []
+    for pat, pre in SECTOR_GROUPS:
+        if re.search(pat, sectors or ""):
+            out += [n for n in g if n.startswith(pre) and n not in out]
+    return [(n, [nm for _, nm in g[n]]) for n in out]
+
+
+def _day_moves(c, dates: list) -> dict:
+    """{date: {종목: 등락%}} — 그날과 바로 전 거래일 종가로."""
+    all_d = [d for (d,) in c.execute("SELECT DISTINCT date FROM kr_stock_daily_data ORDER BY date")]
+    out = {}
+    for d in dates:
+        if d not in all_d or all_d.index(d) == 0:
+            continue
+        prev = all_d[all_d.index(d) - 1]
+        px = {}
+        for n, dd, cl in c.execute("SELECT stock_name, date, close_price FROM kr_stock_daily_data WHERE date IN (?,?)", (prev, d)):
+            if cl:
+                px.setdefault(n, {})[dd] = float(cl)
+        out[d] = {n: (v[d] / v[prev] - 1) * 100 for n, v in px.items() if prev in v and d in v and v[prev] > 0
+                  and abs(v[d] / v[prev] - 1) < 0.31}
+    return out
+
+
+def _stars(z: float) -> int:
+    return 3 if z >= 2.5 else 2 if z >= 1.8 else 1 if z >= 1.2 else 0
+
+
+def score_impacts(days_back: int = 45, today: datetime.date = None) -> int:
+    """지난 이벤트에 영향 별표(stars)·반응(reaction) 채움. 반환: 확정한 개수.
+    ★ 11-28 1차(시장 크게 움직인 날 이벤트가 전부 ★★★ — 요즘 하루 ±4%라 원인 구분 불가) → 기준 바꿈:
+      · 섹터 연결된 이벤트만 별표 — 관련 관심그룹의 '시장 대비 초과폭'이 그 그룹 최근 20거래일 평소 출렁임(표준편차)의 몇 배인지
+        ★★★ 2.5배↑ · ★★ 1.8배↑ · ★ 1.2배↑ · ☆ 그 아래(평소 수준). 여러 그룹이면 가장 크게 튄 그룹.
+      · 섹터 없으면 별표 없이 '그날 시장 ±%'만(원인 못 가림).
+      · 반응한 날 = 한국장 마감(15:30) 뒤 발표면 다음 거래일, 아니면 그날(그날이 휴장이면 다음 거래일) — 둘 중 큰 날 고르기는 부풀림이라 안 함."""
+    import statistics as st
+    today = today or datetime.date.today()
+    c = _conn()
+    rows = c.execute("SELECT id, date, time_kst, title, sectors FROM events WHERE date BETWEEN ? AND ? "
+                     "AND (reaction IS NULL OR reaction='' OR reaction LIKE '(잠정)%')",
+                     ((today - datetime.timedelta(days=days_back)).isoformat(), (today - datetime.timedelta(days=1)).isoformat())).fetchall()
+    if not rows:
+        c.close()
+        return 0
+    k = sqlite3.connect(f"file:{KR_DB}?mode=ro", uri=True)
+    tdays = [d for (d,) in k.execute("SELECT DISTINCT date FROM kr_stock_daily_data WHERE date >= ? ORDER BY date",
+                                     ((today - datetime.timedelta(days=days_back + 45)).isoformat(),))]
+    mv = _day_moves(k, tdays)
+    k.close()
+    mkt = {d: st.mean(m.values()) for d, m in mv.items() if len(m) > 500}
+    ex_cache = {}
+
+    def gex(gname, names, d):
+        key = (gname, d)
+        if key not in ex_cache:
+            m = mv.get(d) or {}
+            v = [m[n] for n in names if n in m]
+            ex_cache[key] = (st.mean(v) - mkt[d]) if len(v) >= 2 and d in mkt else None
+        return ex_cache[key]
+    done = 0
+    for rid, d, tm, title, sectors in rows:
+        after = bool(tm) and tm >= "15:30"
+        i = next((j for j, x in enumerate(tdays) if (x > d if after else x >= d)), None)
+        if i is None or tdays[i] not in mkt:
+            continue
+        rd = tdays[i]
+        gs = _groups_for(sectors or "")
+        best = None
+        for gname, names in gs:
+            ex = gex(gname, names, rd)
+            hist = [x for x in (gex(gname, names, h) for h in tdays[max(0, i - 20):i]) if x is not None]
+            if ex is None or len(hist) < 10:
+                continue
+            sd = st.pstdev(hist) or 1.0
+            z = abs(ex) / sd
+            if best is None or z > best[0]:
+                best = (z, f"{gname} {ex:+.1f}%p(평소의 {z:.1f}배) · {rd[5:]} 시장 {mkt[rd]:+.1f}%")
+        if best:
+            stars, react = str(_stars(best[0])), best[1]
+        else:
+            stars, react = "", f"섹터 연결 없음 · {rd[5:]} 시장 {mkt[rd]:+.1f}%"
+        c.execute("UPDATE events SET stars=?, reaction=? WHERE id=?", (stars, react, rid))
+        done += 1
+    c.commit()
+    c.close()
+    return done
+
 # ── 비슷한 이벤트 묶기(화면용 — 원본은 그대로) ─────────────────
 # ★ 11-28 대장 "앞으로 30일 정리가 필요" — MTN이 며칠 동안 같은 일정을 이름만 바꿔 반복 언급(젠슨황 청문회 6~7줄, 사이버먼데이 2줄)
 STOP = {"美", "미국", "한국", "발표", "예정", "관련", "시행", "행사", "개막", "결정", "공개", "지수", "및", "등", "첫", "본격", "기대"}
@@ -339,7 +448,10 @@ def cluster(events: list, days: int = 3) -> list:
         title = re.sub(r"\s*\(.*?\)", "", rep["title"]).strip() if len(ms) > 1 else rep["title"]   # 묶음 이름엔 (비공개) 같은 꼬리 빼기
         out.append({"title": title or rep["title"], "start": min(m["date"] for m in ms), "end": max(m["date"] for m in ms),
                     "n": len(ms), "kind": rep.get("kind"), "recurrence": rep.get("recurrence"), "impact": rep.get("impact"),
-                    "sectors": "·".join(secs[:4]), "members": [m["title"] for m in ms]})
+                    "sectors": "·".join(secs[:4]), "members": [m["title"] for m in ms],
+                    "stars": max((int(m["stars"]) for m in ms if str(m.get("stars") or "").isdigit()), default=None),
+                    "reaction": next((m["reaction"] for m in sorted(ms, key=lambda m: -int(m["stars"]) if str(m.get("stars") or "").isdigit() else 1)
+                                      if m.get("reaction")), "")})
     return sorted(out, key=lambda g: (g["start"], -g["n"]))
 
 
@@ -356,11 +468,11 @@ def calendar_data(start: str = None, end: str = None) -> dict:
     end = end or (today + datetime.timedelta(days=366)).isoformat()
     c = _conn()
     try:
-        rows = c.execute("SELECT date, time_kst, kind, title, impact, source, recurrence, sectors, origin, detail FROM events "
+        rows = c.execute("SELECT date, time_kst, kind, title, impact, source, recurrence, sectors, origin, detail, stars, reaction FROM events "
                          "WHERE date BETWEEN ? AND ? ORDER BY date, time_kst", (start, end)).fetchall()
     finally:
         c.close()
-    keys = ("date", "time", "kind", "title", "impact", "source", "recurrence", "sectors", "origin", "detail")
+    keys = ("date", "time", "kind", "title", "impact", "source", "recurrence", "sectors", "origin", "detail", "stars", "reaction")
     evs = [dict(zip(keys, r)) for r in rows]
     by_day = {}
     for e in evs:
@@ -379,7 +491,12 @@ def run_daily(ask=None) -> str:
             m += ingest_mtn(d, ask=ask)
         except Exception as e:
             print(f"⚠️ MTN 이벤트 추출 실패 {d}: {e}")
-    return f"세이브티커 {a}건 · MTN {m}건"
+    try:
+        sc = score_impacts()
+    except Exception as e:
+        print(f"⚠️ 영향 별표 실패: {e}")
+        sc = 0
+    return f"세이브티커 {a}건 · MTN {m}건 · 별표 확정 {sc}건"
 
 
 if __name__ == "__main__":

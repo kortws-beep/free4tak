@@ -37,7 +37,7 @@ HTML = """<!DOCTYPE html>
 </div>
 <div class="card">
  <div class="mhead"><button id="prev">◀</button><b id="mtitle"></b><button id="nextm">▶</button></div>
- <div class="legend small"><span class="yearly">● 매년</span><span class="quarterly">● 매분기</span><span class="monthly">● 매월</span><span class="weekly">● 매주</span><span class="oneoff">● 돌발</span><span style="color:var(--g)">▁ 미리 사기 창</span></div>
+ <div class="legend small"><span style="color:var(--y)">★ 지난 이벤트 섹터 반응(평소 출렁임의 1.2·1.8·2.5배↑)</span> <span class="yearly">● 매년</span><span class="quarterly">● 매분기</span><span class="monthly">● 매월</span><span class="weekly">● 매주</span><span class="oneoff">● 돌발</span><span style="color:var(--g)">▁ 미리 사기 창</span></div>
  <div class="cal" id="cal"></div>
 </div>
 <div class="card" id="detail" style="margin-top:10px"><h2 id="dtitle">날짜를 누르면 그날 이벤트</h2><div id="dlist"></div></div>
@@ -45,7 +45,7 @@ HTML = """<!DOCTYPE html>
 <script>
 const esc=s=>String(s??'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 const V={ok:['✅','ok','검증 통과'],maybe:['🟡','maybe','참고(몇 해 쏠림)'],avoid:['❌','avoid','피할 것']};
-const md=s=>s.slice(5).replace('-','/');let D=null,cur=null,sel=null;
+const md=s=>s.slice(5).replace('-','/');const ST=n=>(n==null||n==='')?'':(+n>0?`<span style="color:var(--y)">${'★'.repeat(+n)}</span> `:'<span class="small">☆</span> ');let D=null,cur=null,sel=null;
 const byDay={};
 function inWin(d){return (D.windows||[]).filter(w=>w.verdict==='ok'&&d>=w.buy&&d<=w.sell)}
 function render(){
@@ -57,7 +57,7 @@ function render(){
   const evs=byDay[k]||[];const gs=(D.day_groups||{})[k]||[];const cls=['day'];if(d.getMonth()!==m)cls.push('out');if(k===D.today)cls.push('today');if(k===sel)cls.push('sel');if(inWin(k).length)cls.push('win');
   const top=gs.filter(e=>e.impact==='높음'||e.recurrence==='yearly'||e.recurrence==='oneoff'||e.recurrence==='quarterly').slice(0,3);
   h+=`<div class="${cls.join(' ')}" data-k="${k}"><div class="dn">${d.getDate()}</div>`+
-   top.map(e=>`<div class="ev ${e.recurrence||''}" title="${esc(e.members.join(' / '))}">${esc(e.title)}${e.n>1?` <span class="small">×${e.n}</span>`:''}</div>`).join('')+
+   top.map(e=>`<div class="ev ${e.recurrence||''}" title="${esc(e.members.join(' / '))}${e.reaction?' — '+esc(e.reaction):''}">${e.stars>0?ST(e.stars):''}${esc(e.title)}${e.n>1?` <span class="small">×${e.n}</span>`:''}</div>`).join('')+
    (gs.length>top.length?`<div class="small">+${gs.length-top.length}</div>`:'')+
    `<div class="dots">${gs.slice(0,5).map(e=>`<span class="${e.recurrence||''}">●</span>`).join('')}</div></div>`}
  const cal=document.getElementById('cal');cal.innerHTML=h;
@@ -67,8 +67,8 @@ function detail(k){
  const evs=byDay[k]||[];const w=(D.windows||[]).filter(w=>k>=w.buy&&k<=w.sell);
  document.getElementById('dtitle').textContent=`${k} 이벤트 ${evs.length}건`;
  document.getElementById('dlist').innerHTML=w.map(x=>`<div class="row ${V[x.verdict][1]}">${V[x.verdict][0]} ${esc(x.event)} ${md(x.date)} — ${esc(x.sector)} ${x.verdict==='avoid'?'피하는 기간':'미리 사기 창'} 안 (${md(x.buy)}~${md(x.sell)})</div>`).join('')+
-  (evs.sort((a,b)=>(a.title>b.title)-(a.title<b.title)).map(e=>`<div class="row"><b class="${e.recurrence||''}">${esc(e.title)}</b> <span class="small">${esc(e.time||'')} · ${esc(D.rec_names[e.recurrence]||'주기 미정')} · ${esc(e.kind)}${e.sectors?' · '+esc(e.sectors):''}</span>
-   ${e.detail?`<div class="small">${esc(e.detail)}</div>`:''}<div class="small">출처: ${esc(e.source)}</div></div>`).join('')||'<div class="small">이벤트 없음</div>');
+  (evs.sort((a,b)=>((+b.stars||0)-(+a.stars||0))||((a.title>b.title)-(a.title<b.title))).map(e=>`<div class="row">${ST(e.stars)}<b class="${e.recurrence||''}">${esc(e.title)}</b> <span class="small">${esc(e.time||'')} · ${esc(D.rec_names[e.recurrence]||'주기 미정')} · ${esc(e.kind)}${e.sectors?' · '+esc(e.sectors):''}</span>
+   ${e.detail?`<div class="small">${esc(e.detail)}</div>`:''}${e.reaction?`<div class="small">📊 그날 반응: ${esc(e.reaction)} <i>(원인이 아닐 수도 — 같은 날 다른 일과 겹침)</i></div>`:''}<div class="small">출처: ${esc(e.source)}</div></div>`).join('')||'<div class="small">이벤트 없음</div>');
 }
 fetch('api/calendar?t='+Date.now(),{cache:'no-store'}).then(r=>r.json()).then(d=>{D=d;
  (d.events||[]).forEach(e=>(byDay[e.date]=byDay[e.date]||[]).push(e));

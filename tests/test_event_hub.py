@@ -83,5 +83,9 @@ class Hub(unittest.TestCase):
         self.assertIn("젠슨", jh["title"])
 
 
+    def test_stars_scale(self):
+        self.assertEqual([event_hub._stars(z) for z in (0.5, 1.2, 1.9, 2.6)], [0, 1, 2, 3])
+
+
 if __name__ == "__main__":
     unittest.main()
