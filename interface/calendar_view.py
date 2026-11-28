@@ -54,11 +54,12 @@ function render(){
  let h=['일','월','화','수','목','금','토'].map(x=>`<div class="dow">${x}</div>`).join('');
  for(let i=0;i<42;i++){const d=new Date(start);d.setDate(start.getDate()+i);
   const k=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-  const evs=byDay[k]||[];const cls=['day'];if(d.getMonth()!==m)cls.push('out');if(k===D.today)cls.push('today');if(k===sel)cls.push('sel');if(inWin(k).length)cls.push('win');
-  const top=evs.filter(e=>e.impact==='높음'||e.recurrence==='yearly'||e.recurrence==='oneoff'||e.recurrence==='quarterly').slice(0,3);
+  const evs=byDay[k]||[];const gs=(D.day_groups||{})[k]||[];const cls=['day'];if(d.getMonth()!==m)cls.push('out');if(k===D.today)cls.push('today');if(k===sel)cls.push('sel');if(inWin(k).length)cls.push('win');
+  const top=gs.filter(e=>e.impact==='높음'||e.recurrence==='yearly'||e.recurrence==='oneoff'||e.recurrence==='quarterly').slice(0,3);
   h+=`<div class="${cls.join(' ')}" data-k="${k}"><div class="dn">${d.getDate()}</div>`+
-   top.map(e=>`<div class="ev ${e.recurrence||''}">${esc(e.title)}</div>`).join('')+(evs.length>top.length?`<div class="small">+${evs.length-top.length}</div>`:'')+
-   `<div class="dots">${evs.slice(0,5).map(e=>`<span class="${e.recurrence||''}">●</span>`).join('')}</div></div>`}
+   top.map(e=>`<div class="ev ${e.recurrence||''}" title="${esc(e.members.join(' / '))}">${esc(e.title)}${e.n>1?` <span class="small">×${e.n}</span>`:''}</div>`).join('')+
+   (gs.length>top.length?`<div class="small">+${gs.length-top.length}</div>`:'')+
+   `<div class="dots">${gs.slice(0,5).map(e=>`<span class="${e.recurrence||''}">●</span>`).join('')}</div></div>`}
  const cal=document.getElementById('cal');cal.innerHTML=h;
  cal.querySelectorAll('.day').forEach(el=>el.onclick=()=>{sel=el.dataset.k;render();detail(sel)});
 }
@@ -66,7 +67,7 @@ function detail(k){
  const evs=byDay[k]||[];const w=(D.windows||[]).filter(w=>k>=w.buy&&k<=w.sell);
  document.getElementById('dtitle').textContent=`${k} 이벤트 ${evs.length}건`;
  document.getElementById('dlist').innerHTML=w.map(x=>`<div class="row ${V[x.verdict][1]}">${V[x.verdict][0]} ${esc(x.event)} ${md(x.date)} — ${esc(x.sector)} ${x.verdict==='avoid'?'피하는 기간':'미리 사기 창'} 안 (${md(x.buy)}~${md(x.sell)})</div>`).join('')+
-  (evs.map(e=>`<div class="row"><b class="${e.recurrence||''}">${esc(e.title)}</b> <span class="small">${esc(e.time||'')} · ${esc(D.rec_names[e.recurrence]||'주기 미정')} · ${esc(e.kind)}${e.sectors?' · '+esc(e.sectors):''}</span>
+  (evs.sort((a,b)=>(a.title>b.title)-(a.title<b.title)).map(e=>`<div class="row"><b class="${e.recurrence||''}">${esc(e.title)}</b> <span class="small">${esc(e.time||'')} · ${esc(D.rec_names[e.recurrence]||'주기 미정')} · ${esc(e.kind)}${e.sectors?' · '+esc(e.sectors):''}</span>
    ${e.detail?`<div class="small">${esc(e.detail)}</div>`:''}<div class="small">출처: ${esc(e.source)}</div></div>`).join('')||'<div class="small">이벤트 없음</div>');
 }
 fetch('api/calendar?t='+Date.now(),{cache:'no-store'}).then(r=>r.json()).then(d=>{D=d;
@@ -77,8 +78,8 @@ fetch('api/calendar?t='+Date.now(),{cache:'no-store'}).then(r=>r.json()).then(d=
   return `<div class="row ${V[w.verdict][1]} ${on?'now':''}"><span>${V[w.verdict][0]} <b>${esc(w.event)}</b> ${md(w.date)} · ${esc(w.sector)}</span>
   <span class="small">${w.verdict==='avoid'?'피하기':'사기'} ${md(w.buy)} → ${w.verdict==='avoid'?'':'팔기 '}${md(w.sell)}${on?' · <b>지금 창 안</b>':''}</span></div><div class="small">${esc(w.why)}</div>`}).join('')||'<div class="small">다가오는 창 없음</div>';
  const end=new Date(Date.parse(now)+30*864e5).toISOString().slice(0,10);
- const nx=(d.events||[]).filter(e=>e.date>=now&&e.date<=end&&(e.impact==='높음'||['yearly','quarterly','oneoff'].includes(e.recurrence)));
- document.getElementById('next').innerHTML=nx.slice(0,25).map(e=>`<div class="row"><span>${md(e.date)} <b class="${e.recurrence||''}">${esc(e.title)}</b></span><span class="small">${esc(d.rec_names[e.recurrence]||'')}${e.sectors?' · '+esc(e.sectors):''}</span></div>`).join('')||'<div class="small">없음</div>';
+ const nx=d.upcoming||[];   // ★ 11-28 대장 "정리 필요" — 같은 일(이름만 다른 MTN 반복 언급)은 한 줄로, 기간·언급 횟수 표시
+ document.getElementById('next').innerHTML=nx.slice(0,25).map(g=>`<div class="row" title="${esc(g.members.join(' / '))}"><span>${md(g.start)}${g.end!==g.start?'~'+md(g.end):''} <b class="${g.recurrence||''}">${esc(g.title)}</b>${g.n>1?` <span class="small">언급 ${g.n}회</span>`:''}</span><span class="small">${esc(d.rec_names[g.recurrence]||'')}${g.sectors?' · '+esc(g.sectors):''}</span></div>`).join('')||'<div class="small">없음</div>';
  cur=new Date(Date.parse(now));cur.setDate(1);sel=now;render();detail(now);
  document.getElementById('prev').onclick=()=>{cur.setMonth(cur.getMonth()-1);render()};
  document.getElementById('nextm').onclick=()=>{cur.setMonth(cur.getMonth()+1);render()};

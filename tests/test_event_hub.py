@@ -70,5 +70,18 @@ class Hub(unittest.TestCase):
         self.assertEqual((w["date"], w["buy"], w["sell"], w["verdict"]), ("2027-01-05", "2026-12-03", "2026-12-29", "ok"))
 
 
+    def test_cluster_same_events(self):
+        E = lambda d, t, o="MTN": {"date": d, "title": t, "origin": o, "sectors": "반도체", "recurrence": "oneoff", "impact": "중간", "kind": "돌발"}
+        ev = [E("2026-11-30", "美 사이버먼데이"), E("2026-11-30", "미국 사이버먼데이"),
+              E("2026-12-01", "美 하원 젠슨황 비공개 조사"), E("2026-12-01", "젠슨 황 美 상하원 청문회"),
+              E("2026-12-01", "젠슨황 하원 청문회"), E("2026-12-03", "美 상원은행위원회 젠슨황 청문회"),
+              E("2026-12-01", "엔비디아 GTC 행사 개막"), E("2026-12-09", "젠슨황 하원 청문회")]   # 6일 뒤는 다른 묶음
+        g = event_hub.cluster(ev)
+        self.assertEqual([x["n"] for x in g], [2, 4, 1, 1])
+        jh = g[1]
+        self.assertEqual((jh["start"], jh["end"]), ("2026-12-01", "2026-12-03"))
+        self.assertIn("젠슨", jh["title"])
+
+
 if __name__ == "__main__":
     unittest.main()

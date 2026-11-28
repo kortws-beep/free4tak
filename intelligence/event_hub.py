@@ -285,6 +285,71 @@ def _back(d: datetime.date, n: int) -> datetime.date:
     return cur
 
 
+# ── 비슷한 이벤트 묶기(화면용 — 원본은 그대로) ─────────────────
+# ★ 11-28 대장 "앞으로 30일 정리가 필요" — MTN이 며칠 동안 같은 일정을 이름만 바꿔 반복 언급(젠슨황 청문회 6~7줄, 사이버먼데이 2줄)
+STOP = {"美", "미국", "한국", "발표", "예정", "관련", "시행", "행사", "개막", "결정", "공개", "지수", "및", "등", "첫", "본격", "기대"}
+ORIGIN_RANK = {"매크로 일정": 0, "규칙": 1, "세이브티커": 2, "MTN": 3}
+
+
+def _tokens(title: str) -> set:
+    t = title.replace("미국", "美").replace("젠슨 황", "젠슨황").replace("·", " ").replace("(", " ").replace(")", " ")
+    return {w for w in re.split(r"[\s,/]+", t) if len(w) >= 2 and w not in STOP}
+
+
+def _same(a: dict, b: dict) -> bool:
+    import difflib
+    na, nb = re.sub(r"[\s美]", "", a["title"].replace("미국", "")), re.sub(r"[\s美]", "", b["title"].replace("미국", ""))
+    if na == nb or difflib.SequenceMatcher(None, na, nb).ratio() >= 0.6:
+        return True
+    return len(_tokens(a["title"]) & _tokens(b["title"])) >= 2
+
+
+def cluster(events: list, days: int = 3) -> list:
+    """날짜 days일 안 + 이름 비슷 → 한 묶음(서로 이어지면 다 같은 묶음, 순서 무관).
+    [{title(가장 많이 겹치는 이름), start, end, n, recurrence, sectors, kind, members}] 날짜순."""
+    ev = sorted(events, key=lambda x: (x["date"], ORIGIN_RANK.get(x.get("origin"), 9)))
+    par = list(range(len(ev)))
+
+    def find(i):
+        while par[i] != i:
+            par[i] = par[par[i]]
+            i = par[i]
+        return i
+    dd = [datetime.date.fromisoformat(e["date"]) for e in ev]
+    for i in range(len(ev)):
+        for j in range(i + 1, len(ev)):
+            if (dd[j] - dd[i]).days > days:
+                break
+            if _same(ev[i], ev[j]):
+                par[find(j)] = find(i)
+    groups = {}
+    for i, e in enumerate(ev):
+        groups.setdefault(find(i), []).append(e)
+    out = []
+    for ms in groups.values():
+        tk = [_tokens(m["title"]) for m in ms]
+        best = max(range(len(ms)), key=lambda k: (sum(len(tk[k] & tk[o]) for o in range(len(ms)) if o != k),
+                                                  -ORIGIN_RANK.get(ms[k].get("origin"), 9), -len(ms[k]["title"])))
+        rep = ms[best]
+        secs = []
+        for m in ms:
+            for x in re.split(r"[,·]", m.get("sectors") or ""):
+                if x.strip() and x.strip() not in secs:
+                    secs.append(x.strip())
+        title = re.sub(r"\s*\(.*?\)", "", rep["title"]).strip() if len(ms) > 1 else rep["title"]   # 묶음 이름엔 (비공개) 같은 꼬리 빼기
+        out.append({"title": title or rep["title"], "start": min(m["date"] for m in ms), "end": max(m["date"] for m in ms),
+                    "n": len(ms), "kind": rep.get("kind"), "recurrence": rep.get("recurrence"), "impact": rep.get("impact"),
+                    "sectors": "·".join(secs[:4]), "members": [m["title"] for m in ms]})
+    return sorted(out, key=lambda g: (g["start"], -g["n"]))
+
+
+def upcoming_grouped(events: list, today: str, days: int = 30) -> list:
+    end = (datetime.date.fromisoformat(today) + datetime.timedelta(days=days)).isoformat()
+    pick = [e for e in events if today <= e["date"] <= end
+            and (e.get("impact") == "높음" or e.get("recurrence") in ("yearly", "quarterly", "oneoff"))]
+    return cluster(pick)
+
+
 def calendar_data(start: str = None, end: str = None) -> dict:
     today = datetime.date.today()
     start = start or (today - datetime.timedelta(days=60)).isoformat()
@@ -296,8 +361,13 @@ def calendar_data(start: str = None, end: str = None) -> dict:
     finally:
         c.close()
     keys = ("date", "time", "kind", "title", "impact", "source", "recurrence", "sectors", "origin", "detail")
-    return {"today": today.isoformat(), "start": start, "end": end, "events": [dict(zip(keys, r)) for r in rows],
-            "windows": windows(today), "rec_names": REC}
+    evs = [dict(zip(keys, r)) for r in rows]
+    by_day = {}
+    for e in evs:
+        by_day.setdefault(e["date"], []).append(e)
+    day_groups = {d: cluster(v, days=0) for d, v in by_day.items()}      # 달력 칸: 같은 날 같은 일은 한 줄
+    return {"today": today.isoformat(), "start": start, "end": end, "events": evs, "day_groups": day_groups,
+            "upcoming": upcoming_grouped(evs, today.isoformat()), "windows": windows(today), "rec_names": REC}
 
 
 def run_daily(ask=None) -> str:
